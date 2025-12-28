@@ -1,0 +1,26 @@
+image:
+  repository: rustfs/rustfs
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 9000
+  consolePort: 9001
+  consoleEnabled: true
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClassName: ""
+
+resources: {}
+
+auth:
+  accessKey: zeus
+  secretKey: zeus
+
+command: []
+args: []
+
+extraEnv: []

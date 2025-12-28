@@ -10,5 +10,18 @@ postgres:
     enabled: true
     size: 10Gi
 
+rustfs:
+  service:
+    type: ClusterIP
+    port: 9000
+    consolePort: 9001
+    consoleEnabled: true
+  auth:
+    accessKey: zeus
+    secretKey: zeus
+  persistence:
+    enabled: true
+    size: 10Gi
+
 global:
   hostNetwork: false

@@ -1,0 +1,24 @@
+{
+  "build": {
+    "beforeBuildCommand": "",
+    "beforeDevCommand": "",
+    "devPath": "../src",
+    "distDir": "../src"
+  },
+  "package": {
+    "productName": "Zeus",
+    "version": "0.1.0"
+  },
+  "tauri": {
+    "windows": [
+      {
+        "title": "Zeus",
+        "width": 1024,
+        "height": 720
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'"
+    }
+  }
+}

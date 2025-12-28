@@ -2,10 +2,13 @@ APP_NAME := zeus
 HELM_CHART := deploy/helm/charts
 HELM_NAMESPACE ?= zeus
 
-.PHONY: run-backend install uninstall debug-postgres install-debug
+.PHONY: run-backend run-frontend install uninstall debug-postgres install-debug
 
 run-backend:
 	go run ./cmd/zeus
+
+run-frontend:
+	cd frontend && cargo tauri dev
 
 install:
 	helm dependency build $(HELM_CHART)

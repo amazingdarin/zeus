@@ -11,11 +11,10 @@ import (
 
 	"zeus/internal/api"
 	"zeus/internal/config"
+	"zeus/internal/repository/objectstorage"
 	"zeus/internal/repository/postgres"
 	documentsvc "zeus/internal/service/document"
 )
-
-const defaultAddr = ":8080"
 
 type stubDocumentService struct{}
 
@@ -24,12 +23,15 @@ func (s stubDocumentService) UploadDocument(ctx context.Context, req documentsvc
 }
 
 func main() {
-	addr := getenv("ZEUS_HTTP_ADDR", defaultAddr)
 	configPath := getenv("ZEUS_CONFIG_PATH", "config.yaml")
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
+	}
+	addr := cfg.Server.Addr
+	if addr == "" {
+		log.Fatal("server addr is required")
 	}
 	connMaxLifetime, err := cfg.Postgres.ConnMaxLifetimeDuration()
 	if err != nil {
@@ -51,6 +53,18 @@ func main() {
 		log.Fatalf("init postgres: %v", err)
 	}
 	_ = db
+
+	_, err = objectstorage.NewS3Client(context.Background(), objectstorage.Config{
+		Endpoint:     cfg.ObjectStorage.Endpoint,
+		Region:       cfg.ObjectStorage.Region,
+		AccessKey:    cfg.ObjectStorage.AccessKey,
+		SecretKey:    cfg.ObjectStorage.SecretKey,
+		UsePathStyle: cfg.ObjectStorage.UsePathStyle,
+		Insecure:     cfg.ObjectStorage.Insecure,
+	})
+	if err != nil {
+		log.Fatalf("init object storage: %v", err)
+	}
 
 	handler := api.NewDocumentHandler(stubDocumentService{})
 

@@ -8,7 +8,13 @@ import (
 )
 
 type Config struct {
-	Postgres PostgresConfig `mapstructure:"postgres"`
+	Server        ServerConfig        `mapstructure:"server"`
+	Postgres      PostgresConfig      `mapstructure:"postgres"`
+	ObjectStorage ObjectStorageConfig `mapstructure:"object_storage"`
+}
+
+type ServerConfig struct {
+	Addr string `mapstructure:"addr"`
 }
 
 type PostgresConfig struct {
@@ -29,6 +35,16 @@ func (p PostgresConfig) ConnMaxLifetimeDuration() (time.Duration, error) {
 		return 0, nil
 	}
 	return time.ParseDuration(p.ConnMaxLifetime)
+}
+
+type ObjectStorageConfig struct {
+	Endpoint     string `mapstructure:"endpoint"`
+	Region       string `mapstructure:"region"`
+	AccessKey    string `mapstructure:"access_key"`
+	SecretKey    string `mapstructure:"secret_key"`
+	Bucket       string `mapstructure:"bucket"`
+	UsePathStyle bool   `mapstructure:"use_path_style"`
+	Insecure     bool   `mapstructure:"insecure"`
 }
 
 func Load(path string) (*Config, error) {

@@ -1,3 +1,6 @@
+server:
+  addr: ":8080"
+
 postgres:
   host: localhost
   port: 5432
@@ -9,3 +12,12 @@ postgres:
   max_open_conns: 10
   max_idle_conns: 5
   conn_max_lifetime: 30m
+
+object_storage:
+  endpoint: http://localhost:9000
+  region: us-east-1
+  access_key: zeus
+  secret_key: zeus
+  bucket: zeus-docs
+  use_path_style: true
+  insecure: true
