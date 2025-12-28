@@ -1,0 +1,11 @@
+postgres:
+  host: localhost
+  port: 5432
+  user: zeus
+  password: zeus
+  database: zeus
+  ssl_mode: disable
+  time_zone: UTC
+  max_open_conns: 10
+  max_idle_conns: 5
+  conn_max_lifetime: 30m

@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
 	"net/http"
 	"os"
 	"time"
 
+	log "github.com/sirupsen/logrus"
+
 	"zeus/internal/api"
+	"zeus/internal/config"
+	"zeus/internal/repository/postgres"
 	documentsvc "zeus/internal/service/document"
 )
 
@@ -22,6 +25,32 @@ func (s stubDocumentService) UploadDocument(ctx context.Context, req documentsvc
 
 func main() {
 	addr := getenv("ZEUS_HTTP_ADDR", defaultAddr)
+	configPath := getenv("ZEUS_CONFIG_PATH", "config.yaml")
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		log.Fatalf("load config: %v", err)
+	}
+	connMaxLifetime, err := cfg.Postgres.ConnMaxLifetimeDuration()
+	if err != nil {
+		log.Fatalf("parse conn_max_lifetime: %v", err)
+	}
+	db, err := postgres.NewGormDB(postgres.Config{
+		Host:            cfg.Postgres.Host,
+		Port:            cfg.Postgres.Port,
+		User:            cfg.Postgres.User,
+		Password:        cfg.Postgres.Password,
+		Database:        cfg.Postgres.Database,
+		SSLMode:         cfg.Postgres.SSLMode,
+		TimeZone:        cfg.Postgres.TimeZone,
+		MaxOpenConns:    cfg.Postgres.MaxOpenConns,
+		MaxIdleConns:    cfg.Postgres.MaxIdleConns,
+		ConnMaxLifetime: connMaxLifetime,
+	})
+	if err != nil {
+		log.Fatalf("init postgres: %v", err)
+	}
+	_ = db
 
 	handler := api.NewDocumentHandler(stubDocumentService{})
 
