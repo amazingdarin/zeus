@@ -1,37 +1,35 @@
 import { Link } from "react-router-dom";
 
-const navItems = [
-  { label: "Knowledge Base", to: "/" },
-  { label: "Uploads" },
-  { label: "Classification" },
-  { label: "Modules" },
-  { label: "Audit Log" },
-];
+type SidebarItem = {
+  label: string;
+  to?: string;
+};
 
-function Sidebar() {
+type SidebarProps = {
+  items: SidebarItem[];
+  activeIndex?: number;
+};
+
+function Sidebar({ items, activeIndex = 0 }: SidebarProps) {
   return (
     <aside className="sidebar">
       <div className="sidebar-title">Workspace</div>
       <nav className="sidebar-nav">
-        {navItems.map((item, index) => {
+        {items.map((item, index) => {
+          const className = `sidebar-link${
+            index === activeIndex ? " active" : ""
+          }`;
+
           if (item.to) {
             return (
-              <Link
-                key={item.label}
-                className={`sidebar-link${index === 0 ? " active" : ""}`}
-                to={item.to}
-              >
+              <Link key={item.label} className={className} to={item.to}>
                 {item.label}
               </Link>
             );
           }
 
           return (
-            <button
-              key={item.label}
-              className={`sidebar-link${index === 0 ? " active" : ""}`}
-              type="button"
-            >
+            <button key={item.label} className={className} type="button">
               {item.label}
             </button>
           );
