@@ -133,4 +133,8 @@ Zeus 是一个规格驱动系统。
 当前阶段只允许实现「文档上传与自动整理」。
 严禁生成 Spec、RAG 或 ModuleSnapshot。
 
+Zeus 使用 OpenAPI 3.1 作为统一 API DDL，
+通过代码生成的方式生成 Gin Handler 接口、前端 SDK 与接口文档，
+确保 API 契约、实现与文档的一致性，并为 AI 编码与自动化提供稳定基础。
+
 详细工程规范请参阅 PROJECT_GUIDE.md。

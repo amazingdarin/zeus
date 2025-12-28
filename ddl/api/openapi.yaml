@@ -1,0 +1,251 @@
+openapi: 3.1.0
+info:
+  title: Zeus API
+  description: |
+    Zeus backend API.
+
+    This API currently supports document import and raw document management.
+    It is spec-first and code-generated. Do NOT add business logic here.
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Upload
+    description: Document upload and batch management
+  - name: RawDocuments
+    description: Raw document browsing
+
+paths:
+
+  /api/uploads:
+    post:
+      tags: [Upload]
+      summary: Create a new upload batch
+      description: |
+        Create a new upload batch.
+        A batch represents one import operation (file or folder).
+      operationId: createUploadBatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUploadBatchRequest"
+      responses:
+        "201":
+          description: Upload batch created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateUploadBatchResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /api/uploads/{batch_id}/files:
+    post:
+      tags: [Upload]
+      summary: Upload a file to an upload batch
+      description: |
+        Upload a single file into a batch.
+
+        When uploading a folder, the client must send files one by one
+        and include the relative_path field to preserve directory structure.
+      operationId: uploadFileToBatch
+      parameters:
+        - name: batch_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/UploadFileRequest"
+      responses:
+        "201":
+          description: File uploaded successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadFileResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+  /api/raw-documents:
+    get:
+      tags: [RawDocuments]
+      summary: List raw documents
+      description: |
+        List raw documents imported into the system.
+        Can be filtered by batch_id.
+      operationId: listRawDocuments
+      parameters:
+        - name: batch_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Raw document list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListRawDocumentsResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+
+components:
+
+  responses:
+    ErrorResponse:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+
+    # =========================
+    # Upload
+    # =========================
+
+    CreateUploadBatchRequest:
+      type: object
+      required: [source, mode]
+      properties:
+        source:
+          type: string
+          description: Client source (e.g. tauri)
+          example: tauri
+        mode:
+          type: string
+          enum: [file, folder]
+          description: Import mode
+
+    CreateUploadBatchResponse:
+      type: object
+      required: [batch_id]
+      properties:
+        batch_id:
+          type: string
+          description: Upload batch identifier
+          example: batch-20251228-001
+
+    UploadFileRequest:
+      type: object
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+          description: File content
+        relative_path:
+          type: string
+          description: |
+            Relative path inside the imported folder.
+            Must be provided when importing folders.
+          example: "docs/auth/login.md"
+        doc_title:
+          type: string
+          description: Optional document title override
+
+    UploadFileResponse:
+      type: object
+      required: [doc_id, stored_uri]
+      properties:
+        doc_id:
+          type: string
+          description: Generated document identifier
+          example: DOC-0001
+        stored_uri:
+          type: string
+          description: Storage URI of the uploaded file
+          example: s3://zeus-raw-docs/batch-20251228-001/login.md
+
+    # =========================
+    # Raw Documents
+    # =========================
+
+    RawDocument:
+      type: object
+      required:
+        - doc_id
+        - title
+        - original_path
+        - doc_category
+        - candidate_module
+        - confidence
+        - created_at
+      properties:
+        doc_id:
+          type: string
+          example: DOC-0001
+        title:
+          type: string
+          example: 登录模块需求
+        original_path:
+          type: string
+          example: 产品需求/登录模块.docx
+        doc_category:
+          type: string
+          description: Document category inferred by system
+          example: requirement
+        candidate_module:
+          type: string
+          description: Candidate module inferred by system
+          example: AUTH
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          example: 0.72
+        created_at:
+          type: string
+          format: date-time
+
+    ListRawDocumentsResponse:
+      type: object
+      required: [documents, total]
+      properties:
+        documents:
+          type: array
+          items:
+            $ref: "#/components/schemas/RawDocument"
+        total:
+          type: integer
+          example: 1
+
+    # =========================
+    # Error
+    # =========================
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: INVALID_REQUEST
+        message:
+          type: string
+          example: Invalid request payload
