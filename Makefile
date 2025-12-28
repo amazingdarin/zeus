@@ -8,7 +8,7 @@ run-backend:
 	go run ./cmd/zeus
 
 run-frontend:
-	cd frontend && cargo tauri dev
+	cd frontend && npm run tauri dev
 
 install:
 	helm dependency build $(HELM_CHART)
