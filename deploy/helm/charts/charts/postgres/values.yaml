@@ -1,0 +1,20 @@
+image:
+  repository: postgres
+  tag: "15"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 5432
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClassName: ""
+
+resources: {}
+
+postgres:
+  database: zeus
+  user: zeus
+  password: zeus

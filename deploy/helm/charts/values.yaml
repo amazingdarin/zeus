@@ -1,0 +1,8 @@
+postgres:
+  postgres:
+    database: zeus
+    user: zeus
+    password: zeus
+  persistence:
+    enabled: true
+    size: 10Gi
