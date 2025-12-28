@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schema/RequirementSpec.schema.json",
+  "title": "RequirementSpec",
+  "description": "Requirement as executable specification delta",
+  "type": "object",
+  "required": ["requirementId", "title", "iteration", "acceptanceCriteria"],
+  "properties": {
+    "requirementId": {
+      "type": "string",
+      "pattern": "^REQ-[0-9]{4}-[A-Z0-9_-]+$"
+    },
+    "title": { "type": "string" },
+    "iteration": { "type": "string" },
+    "type": {
+      "type": "string",
+      "enum": ["feature", "bugfix", "refactor", "tech"]
+    },
+    "priority": {
+      "type": "string",
+      "enum": ["P0", "P1", "P2", "P3"]
+    },
+
+    "description": { "type": "string" },
+
+    "acceptanceCriteria": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Acceptance"
+      }
+    },
+
+    "affectedPages": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "affectedApis": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "affectedData": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+
+    "risk": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+
+  "$defs": {
+    "Acceptance": {
+      "type": "object",
+      "required": ["given", "when", "then"],
+      "properties": {
+        "given": { "type": "string" },
+        "when": { "type": "string" },
+        "then": { "type": "string" }
+      }
+    }
+  }
+}

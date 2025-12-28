@@ -1,0 +1,250 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schema/PageSpec.schema.json",
+  "title": "PageSpec",
+  "description": "Vision-first, capability-extensible UI Page Specification",
+  "type": "object",
+  "required": ["pageId", "name", "route", "actors", "components", "states"],
+  "properties": {
+    "pageId": {
+      "type": "string",
+      "pattern": "^PAGE_[A-Z0-9_]+$"
+    },
+    "name": {
+      "type": "string"
+    },
+    "route": {
+      "type": "string",
+      "description": "Logical route or entry identifier (URL, deeplink, window name)"
+    },
+    "module": {
+      "type": "string"
+    },
+    "actors": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "permissions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+
+    "layout": {
+      "type": "string",
+      "enum": ["single-column", "two-column", "dashboard", "modal", "custom"]
+    },
+
+    "capabilityHints": {
+      "type": "object",
+      "description": "Optional capability hints for this page",
+      "properties": {
+        "vision": { "type": "boolean", "default": true },
+        "dom": { "type": "boolean" },
+        "accessibility": { "type": "boolean" },
+        "network": { "type": "boolean" },
+        "console": { "type": "boolean" }
+      }
+    },
+
+    "components": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/UIComponent" }
+    },
+
+    "states": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/PageState" }
+    },
+
+    "events": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/PageEvent" }
+    },
+
+    "navigation": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/NavigationRule" }
+    },
+
+    "apiBindings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ApiBinding" }
+    },
+
+    "relatedRequirements": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+
+    "remarks": {
+      "type": "string"
+    }
+  },
+
+  "$defs": {
+    "UIComponent": {
+      "type": "object",
+      "required": ["id", "semantic", "type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Logical component identifier"
+        },
+        "type": {
+          "type": "string",
+          "description": "Component category (input, button, list, dialog, etc.)"
+        },
+        "semantic": {
+          "type": "string",
+          "description": "Human-understandable semantic meaning (used by vision agent)"
+        },
+
+        "visualHints": {
+          "$ref": "#/$defs/VisualHints"
+        },
+
+        "domHints": {
+          "$ref": "#/$defs/DomHints"
+        },
+
+        "accessibilityHints": {
+          "$ref": "#/$defs/AccessibilityHints"
+        },
+
+        "bind": {
+          "type": "string",
+          "description": "Bound data or state key"
+        },
+
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ComponentAction" }
+        }
+      }
+    },
+
+    "VisualHints": {
+      "type": "object",
+      "description": "Hints for vision-based UI agents",
+      "properties": {
+        "text": { "type": "string" },
+        "icon": { "type": "string" },
+        "color": { "type": "string" },
+        "relativePosition": {
+          "type": "string",
+          "description": "e.g. top-right, below username field"
+        },
+        "exampleScreenshot": {
+          "type": "string",
+          "description": "Optional reference image path or URL"
+        }
+      }
+    },
+
+    "DomHints": {
+      "type": "object",
+      "description": "Optional DOM hints for web-specific agents",
+      "properties": {
+        "selector": { "type": "string" },
+        "xpath": { "type": "string" },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+
+    "AccessibilityHints": {
+      "type": "object",
+      "properties": {
+        "role": { "type": "string" },
+        "label": { "type": "string" }
+      }
+    },
+
+    "ComponentAction": {
+      "type": "object",
+      "required": ["actionId", "intent"],
+      "properties": {
+        "actionId": { "type": "string" },
+        "intent": {
+          "type": "string",
+          "description": "What the user intends to do"
+        },
+        "preferredCapabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["dom", "accessibility", "vision"]
+          }
+        },
+        "fallbackCapabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["vision"]
+          }
+        },
+        "apiId": {
+          "type": "string",
+          "description": "Optional ApiSpec reference"
+        },
+        "targetState": {
+          "type": "string"
+        },
+        "targetPage": {
+          "type": "string"
+        }
+      }
+    },
+
+    "PageState": {
+      "type": "object",
+      "required": ["state", "description"],
+      "properties": {
+        "state": { "type": "string" },
+        "description": { "type": "string" },
+        "visualIndicators": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Texts or visual clues indicating this state"
+        }
+      }
+    },
+
+    "PageEvent": {
+      "type": "object",
+      "required": ["eventId", "trigger"],
+      "properties": {
+        "eventId": { "type": "string" },
+        "trigger": {
+          "type": "string",
+          "enum": ["onLoad", "onClick", "onSubmit", "onChange", "onError"]
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ComponentAction" }
+        }
+      }
+    },
+
+    "NavigationRule": {
+      "type": "object",
+      "required": ["fromState", "toPage"],
+      "properties": {
+        "fromState": { "type": "string" },
+        "toPage": { "type": "string" },
+        "condition": { "type": "string" }
+      }
+    },
+
+    "ApiBinding": {
+      "type": "object",
+      "required": ["apiId"],
+      "properties": {
+        "apiId": { "type": "string" },
+        "purpose": { "type": "string" }
+      }
+    }
+  }
+}

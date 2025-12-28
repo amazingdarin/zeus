@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schema/DataSpec.schema.json",
+  "title": "DataSpec",
+  "description": "Data model specification",
+  "type": "object",
+  "required": ["entity", "fields"],
+  "properties": {
+    "entity": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Za-z0-9]+$"
+    },
+    "table": { "type": "string" },
+    "description": { "type": "string" },
+
+    "fields": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DataField"
+      }
+    },
+
+    "indexes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "unique": { "type": "boolean" }
+        }
+      }
+    }
+  },
+
+  "$defs": {
+    "DataField": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "nullable": { "type": "boolean", "default": true },
+        "primaryKey": { "type": "boolean" },
+        "unique": { "type": "boolean" },
+        "description": { "type": "string" }
+      }
+    }
+  }
+}

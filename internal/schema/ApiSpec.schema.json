@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schema/ApiSpec.schema.json",
+  "title": "ApiSpec",
+  "description": "Executable API contract specification",
+  "type": "object",
+  "required": ["apiId", "method", "path", "module"],
+  "properties": {
+    "apiId": {
+      "type": "string",
+      "pattern": "^API_[A-Z0-9_]+$"
+    },
+    "name": { "type": "string" },
+    "module": { "type": "string" },
+    "method": {
+      "type": "string",
+      "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+    },
+    "path": { "type": "string" },
+    "description": { "type": "string" },
+
+    "request": {
+      "type": "object",
+      "properties": {
+        "headers": { "type": "object" },
+        "query": { "type": "object" },
+        "body": { "type": "object" }
+      }
+    },
+
+    "response": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "description": "HTTP status code mapped response"
+      }
+    },
+
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      }
+    },
+
+    "tracing": {
+      "type": "object",
+      "properties": {
+        "spanName": { "type": "string" },
+        "attributes": { "type": "object" }
+      }
+    },
+
+    "relatedData": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

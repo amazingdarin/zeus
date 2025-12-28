@@ -1,0 +1,251 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schema/SystemSpec.schema.json",
+  "title": "SystemSpec",
+  "description": "Executable system specification used as the single source of truth for RAG-driven development",
+  "type": "object",
+  "required": [
+    "systemId",
+    "name",
+    "version",
+    "overview",
+    "modules",
+    "pages",
+    "dataModels",
+    "apis"
+  ],
+  "properties": {
+    "systemId": {
+      "type": "string",
+      "description": "Unique identifier of the system",
+      "pattern": "^[A-Z][A-Z0-9_]+$"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human readable system name"
+    },
+    "version": {
+      "type": "string",
+      "description": "Semantic version of the system specification (e.g. v1.1.0)",
+      "pattern": "^v\\d+\\.\\d+\\.\\d+$"
+    },
+    "overview": {
+      "type": "object",
+      "required": ["goal", "scope"],
+      "properties": {
+        "goal": {
+          "type": "string",
+          "description": "Overall goal of the system"
+        },
+        "scope": {
+          "type": "string",
+          "description": "What the system covers"
+        },
+        "outOfScope": {
+          "type": "string",
+          "description": "Explicitly excluded capabilities"
+        }
+      }
+    },
+    "modules": {
+      "type": "array",
+      "description": "System modules",
+      "items": {
+        "$ref": "#/$defs/ModuleSpec"
+      }
+    },
+    "pages": {
+      "type": "array",
+      "description": "UI pages specifications",
+      "items": {
+        "$ref": "#/$defs/PageSpec"
+      }
+    },
+    "dataModels": {
+      "type": "array",
+      "description": "Data structure definitions",
+      "items": {
+        "$ref": "#/$defs/DataSpec"
+      }
+    },
+    "apis": {
+      "type": "array",
+      "description": "API contract definitions",
+      "items": {
+        "$ref": "#/$defs/ApiSpec"
+      }
+    },
+    "flows": {
+      "type": "array",
+      "description": "Business flows or state machines",
+      "items": {
+        "$ref": "#/$defs/FlowSpec"
+      }
+    },
+    "nonFunctional": {
+      "$ref": "#/$defs/NonFunctionalSpec"
+    },
+    "changelog": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ChangeLogItem"
+      }
+    }
+  },
+
+  "$defs": {
+    "ModuleSpec": {
+      "type": "object",
+      "required": ["moduleId", "name", "responsibility"],
+      "properties": {
+        "moduleId": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]+$"
+        },
+        "name": {
+          "type": "string"
+        },
+        "responsibility": {
+          "type": "string"
+        },
+        "dependencies": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "PageSpec": {
+      "type": "object",
+      "required": ["pageId", "name", "route"],
+      "properties": {
+        "pageId": {
+          "type": "string",
+          "pattern": "^PAGE_[A-Z0-9_]+$"
+        },
+        "name": {
+          "type": "string"
+        },
+        "route": {
+          "type": "string"
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UIComponent"
+          }
+        },
+        "apiBindings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "Referenced ApiSpec apiId"
+          }
+        }
+      }
+    },
+
+    "UIComponent": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "required": { "type": "boolean" }
+      }
+    },
+
+    "DataSpec": {
+      "type": "object",
+      "required": ["entity", "fields"],
+      "properties": {
+        "entity": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z0-9]+$"
+        },
+        "table": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DataField"
+          }
+        }
+      }
+    },
+
+    "DataField": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "primaryKey": { "type": "boolean" },
+        "unique": { "type": "boolean" }
+      }
+    },
+
+    "ApiSpec": {
+      "type": "object",
+      "required": ["apiId", "method", "path"],
+      "properties": {
+        "apiId": {
+          "type": "string",
+          "pattern": "^API_[A-Z0-9_]+$"
+        },
+        "method": {
+          "type": "string",
+          "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"]
+        },
+        "path": {
+          "type": "string"
+        },
+        "request": {
+          "type": "object"
+        },
+        "response": {
+          "type": "object"
+        },
+        "tracing": {
+          "type": "object",
+          "properties": {
+            "spanName": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "FlowSpec": {
+      "type": "object",
+      "required": ["flowId", "description"],
+      "properties": {
+        "flowId": { "type": "string" },
+        "description": { "type": "string" },
+        "steps": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "NonFunctionalSpec": {
+      "type": "object",
+      "properties": {
+        "performance": { "type": "string" },
+        "security": { "type": "string" },
+        "availability": { "type": "string" }
+      }
+    },
+
+    "ChangeLogItem": {
+      "type": "object",
+      "required": ["version", "date", "summary"],
+      "properties": {
+        "version": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "summary": { "type": "string" }
+      }
+    }
+  }
+}

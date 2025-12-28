@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schema/ModuleSnapshot.schema.json",
+  "title": "ModuleSnapshot",
+  "description": "Aggregated, versioned knowledge snapshot for a system module",
+  "type": "object",
+  "required": [
+    "moduleId",
+    "moduleName",
+    "systemVersion",
+    "summary",
+    "facts",
+    "relations",
+    "quality"
+  ],
+  "properties": {
+    "moduleId": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]+$",
+      "description": "Module identifier (same as ModuleSpec.moduleId)"
+    },
+
+    "moduleName": {
+      "type": "string",
+      "description": "Human readable module name"
+    },
+
+    "systemVersion": {
+      "type": "string",
+      "pattern": "^v\\d+\\.\\d+\\.\\d+$",
+      "description": "SystemSpec version this snapshot is built from"
+    },
+
+    "summary": {
+      "$ref": "#/$defs/ModuleSummary"
+    },
+
+    "facts": {
+      "$ref": "#/$defs/ModuleFacts"
+    },
+
+    "relations": {
+      "$ref": "#/$defs/ModuleRelations"
+    },
+
+    "quality": {
+      "$ref": "#/$defs/KnowledgeQuality"
+    },
+
+    "sources": {
+      "type": "array",
+      "description": "Original sources contributing to this snapshot",
+      "items": {
+        "$ref": "#/$defs/SourceRef"
+      }
+    },
+
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+
+  "$defs": {
+    "ModuleSummary": {
+      "type": "object",
+      "required": ["responsibility"],
+      "description": "Optimized, human-readable description layer",
+      "properties": {
+        "responsibility": {
+          "type": "string",
+          "description": "Canonical description of module responsibility"
+        },
+        "keyCapabilities": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "constraints": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+
+    "ModuleFacts": {
+      "type": "object",
+      "description": "Hard facts derived from specs (never rewritten)",
+      "properties": {
+        "pages": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "apis": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "dataModels": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "flows": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "ModuleRelations": {
+      "type": "object",
+      "description": "Relationships with other modules",
+      "properties": {
+        "dependsOn": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "dependedBy": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "KnowledgeQuality": {
+      "type": "object",
+      "description": "Knowledge health indicators",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["healthy", "needs-review", "conflict", "stale"]
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KnowledgeIssue"
+          }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Confidence score of the aggregated knowledge"
+        }
+      }
+    },
+
+    "KnowledgeIssue": {
+      "type": "object",
+      "required": ["type", "description"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["duplicate", "conflict", "stale", "incomplete"]
+        },
+        "description": {
+          "type": "string"
+        },
+        "relatedSources": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "SourceRef": {
+      "type": "object",
+      "required": ["sourceId", "type"],
+      "properties": {
+        "sourceId": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["SystemSpec", "PageSpec", "ApiSpec", "DataSpec", "Requirement", "ExternalDoc"]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    }
+  }
+}
