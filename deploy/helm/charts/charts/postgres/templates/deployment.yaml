@@ -16,6 +16,9 @@ spec:
         app.kubernetes.io/name: {{ include "postgres.name" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      {{- if .Values.global.hostNetwork }}
+      hostNetwork: true
+      {{- end }}
       containers:
         - name: postgres
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"

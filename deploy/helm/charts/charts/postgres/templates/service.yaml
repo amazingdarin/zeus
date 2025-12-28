@@ -11,6 +11,9 @@ spec:
       targetPort: postgres
       protocol: TCP
       name: postgres
+      {{- if and (eq .Values.service.type "NodePort") .Values.service.nodePort }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}
   selector:
     app.kubernetes.io/name: {{ include "postgres.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}

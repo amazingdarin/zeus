@@ -1,4 +1,7 @@
 postgres:
+  service:
+    type: ClusterIP
+    port: 5432
   postgres:
     database: zeus
     user: zeus
@@ -6,3 +9,6 @@ postgres:
   persistence:
     enabled: true
     size: 10Gi
+
+global:
+  hostNetwork: false
