@@ -18,12 +18,20 @@ func DocumentFromDomain(doc *domain.Document) (*model.Document, *model.StorageOb
 	if err != nil {
 		return nil, nil, err
 	}
+	parentID := ""
+	if doc.Parent != nil {
+		parentID = doc.Parent.ID
+	}
 	return &model.Document{
 		ID:              doc.ID,
+		ProjectID:       doc.ProjectID,
 		Type:            string(doc.Type),
 		Title:           doc.Title,
 		Description:     doc.Description,
 		Status:          string(doc.Status),
+		Path:            doc.Path,
+		Order:           doc.Order,
+		ParentID:        parentID,
 		StorageObjectID: storage.ID,
 		CreatedAt:       doc.CreatedAt,
 		UpdatedAt:       doc.UpdatedAt,
@@ -43,13 +51,21 @@ func DocumentToDomain(doc *model.Document, storage *model.StorageObject) (*domai
 		}
 		storageDomain = mapped
 	}
+	var parent *domain.Document
+	if doc.ParentID != "" {
+		parent = &domain.Document{ID: doc.ParentID}
+	}
 
 	return &domain.Document{
 		ID:            doc.ID,
+		ProjectID:     doc.ProjectID,
 		Type:          domain.DocumentType(doc.Type),
 		Title:         doc.Title,
 		Description:   doc.Description,
 		Status:        domain.DocumentStatus(doc.Status),
+		Path:          doc.Path,
+		Order:         doc.Order,
+		Parent:        parent,
 		StorageObject: storageDomain,
 		CreatedAt:     doc.CreatedAt,
 		UpdatedAt:     doc.UpdatedAt,

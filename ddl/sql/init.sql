@@ -23,20 +23,14 @@ CREATE TABLE storage_object
 CREATE TABLE document
 (
     id                 TEXT PRIMARY KEY,
-    document_id TEXT NOT NULL,
+    project_id TEXT NOT NULL DEFAULT '',
+    type TEXT NOT NULL,
     title             TEXT,
+    description TEXT,
     status            TEXT NOT NULL,
-    storage_object_id TEXT NOT NULL,
-    created_at        TIMESTAMPTZ DEFAULT now(),
-    updated_at        TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE raw_document
-(
-    id                 TEXT PRIMARY KEY,
-    document_id TEXT NOT NULL,
-    title             TEXT,
-    status            TEXT NOT NULL,
+    path TEXT NOT NULL,
+    "order" INT NOT NULL DEFAULT 0,
+    parent_id TEXT NOT NULL DEFAULT '',
     storage_object_id TEXT NOT NULL,
     created_at        TIMESTAMPTZ DEFAULT now(),
     updated_at        TIMESTAMPTZ DEFAULT now()

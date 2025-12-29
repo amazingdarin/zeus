@@ -109,6 +109,12 @@ func (r *DocumentRepository) List(
 }
 
 func applyDocumentFilters(query *gorm.DB, filter repository.DocumentFilter) *gorm.DB {
+	if filter.ProjectID != "" {
+		query = query.Where("project_id = ?", filter.ProjectID)
+	}
+	if filter.ParentID != "" {
+		query = query.Where("parent_id = ?", filter.ParentID)
+	}
 	if filter.Type != "" {
 		query = query.Where("type = ?", string(filter.Type))
 	}

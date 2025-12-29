@@ -20,12 +20,17 @@ const (
 )
 
 type Document struct {
-	ID string
+	ID        string
+	ProjectID string
 
-	Type          DocumentType   // 文档类型
-	Title         string         // 标题
-	Description   string         // 副标题
-	Status        DocumentStatus // 生命周期
+	Type        DocumentType   // 文档类型
+	Title       string         // 标题
+	Description string         // 副标题
+	Status      DocumentStatus // 生命周期
+
+	Path          string         // 层级目录
+	Order         int            // 同级排序
+	Parent        *Document      // 父级文档
 	StorageObject *StorageObject // 存储信息
 
 	CreatedAt time.Time
