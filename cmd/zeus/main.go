@@ -2,25 +2,14 @@ package main
 
 import (
 	"context"
-	"errors"
-	"net/http"
 	"os"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 
-	"zeus/internal/api"
 	"zeus/internal/config"
-	"zeus/internal/repository/objectstorage"
+	"zeus/internal/infra/s3"
 	"zeus/internal/repository/postgres"
-	documentsvc "zeus/internal/service/document"
 )
-
-type stubDocumentService struct{}
-
-func (s stubDocumentService) UploadDocument(ctx context.Context, req documentsvc.UploadRequest) (*documentsvc.UploadResponse, error) {
-	return nil, errors.New("document service not implemented")
-}
 
 func main() {
 	configPath := getenv("ZEUS_CONFIG_PATH", "config.yaml")
@@ -54,7 +43,7 @@ func main() {
 	}
 	_ = db
 
-	_, err = objectstorage.NewS3Client(context.Background(), objectstorage.Config{
+	_, err = s3.NewS3Client(context.Background(), s3.Config{
 		Endpoint:     cfg.ObjectStorage.Endpoint,
 		Region:       cfg.ObjectStorage.Region,
 		AccessKey:    cfg.ObjectStorage.AccessKey,
@@ -64,25 +53,6 @@ func main() {
 	})
 	if err != nil {
 		log.Fatalf("init object storage: %v", err)
-	}
-
-	handler := api.NewDocumentHandler(stubDocumentService{})
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/documents/upload", handler.UploadDocument)
-
-	server := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
-
-	log.Printf("zeus listening on %s", addr)
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatalf("server error: %v", err)
 	}
 }
 

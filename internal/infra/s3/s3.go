@@ -1,4 +1,4 @@
-package objectstorage
+package s3
 
 import (
 	"context"
