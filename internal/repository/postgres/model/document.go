@@ -13,6 +13,8 @@ type Document struct {
 	StorageObjectID string    `gorm:"column:storage_object_id;not null"`
 	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt       time.Time `gorm:"column:created_at;autoUpdateTime"`
+
+	StorageObject *StorageObject `gorm:"foreignKey:StorageObjectID;references:ID"`
 }
 
 func (Document) TableName() string {

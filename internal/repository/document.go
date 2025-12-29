@@ -7,8 +7,9 @@ import (
 )
 
 type DocumentFilter struct {
-	Type   domain.DocumentType
-	Status domain.DocumentStatus
+	Type                 domain.DocumentType
+	Status               domain.DocumentStatus
+	PreloadStorageObject bool // 是否预加载存储
 }
 
 type DocumentRepository interface {

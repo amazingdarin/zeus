@@ -1,4 +1,4 @@
-package raw_document
+package document
 
 import (
 	"context"
