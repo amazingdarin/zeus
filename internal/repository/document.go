@@ -7,6 +7,7 @@ import (
 )
 
 type DocumentFilter struct {
+	ID                   string
 	ProjectID            string
 	ParentID             string
 	Type                 domain.DocumentType

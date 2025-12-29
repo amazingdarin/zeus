@@ -7,28 +7,43 @@ import (
 	"zeus/internal/domain"
 )
 
-type CreateFromUploadInput struct {
-	// ========= 来源信息（Source） =========
-	// 上传批次（用于 UI / UX / 追踪）
-	UploadBatchID string
-	// 原始来源路径（文件夹内相对路径、或文件名）
-	OriginalPath string
-
-	// ========= 文件内容 =========
-	// 文件内容流（必须是流式）
-	Reader io.Reader
-	// 文件大小（字节）
+type FilePayload struct {
+	Reader    io.Reader
 	SizeBytes int64
-	// MIME 类型
-	MimeType string
+	MimeType  string
 
-	// ========= 存储策略 =========
-	// 存储命名空间（raw-documents / dataset / asset）
-	StorageNamespace string
-	// 由领域决定的 object key（不由 ingestion 自己生成）
-	StorageObjectKey string
+	OriginalPath string
+	SourceType   domain.SourceType
+	SourceRef    string
 }
 
 type DocumentService interface {
-	CreateFromUpload(ctx context.Context, input CreateFromUploadInput) (*domain.Document, error)
+
+	// CreateRaw 创建原始文档
+	CreateRaw(
+		ctx context.Context,
+		doc *domain.Document,
+		file FilePayload,
+	) (*domain.Document, error)
+
+	// Create 创建普通文档（manual / derived）
+	Create(
+		ctx context.Context,
+		doc *domain.Document,
+		content string,
+	) (*domain.Document, error)
+
+	// 查询
+	Get(ctx context.Context, id string) (*domain.Document, error)
+	ListByParent(ctx context.Context, parentID *string) ([]*domain.Document, error)
+	GetSubtree(ctx context.Context, rootID string) ([]*domain.Document, error)
+	SimplifiedTree(ctx context.Context, projectID string) ([]*domain.Document, error)
+
+	// 结构操作
+	Move(ctx context.Context, id string, newParentID *string) error
+	Reorder(ctx context.Context, id string, newOrder int) error
+
+	// 生命周期
+	UpdateContent(ctx context.Context, id string, content string) error
+	Archive(ctx context.Context, id string) error
 }

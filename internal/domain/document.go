@@ -30,8 +30,10 @@ type Document struct {
 
 	Path          string         // 层级目录
 	Order         int            // 同级排序
-	Parent        *Document      // 父级文档
 	StorageObject *StorageObject // 存储信息
+
+	Parent   *Document   // 父级文档
+	Children []*Document // 子文档
 
 	CreatedAt time.Time
 	UpdatedAt time.Time

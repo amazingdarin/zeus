@@ -8,19 +8,13 @@ import (
 
 func RegisterRoutes(
 	r *gin.Engine,
-	uploadSvc service.UploadService,
+	storageObjectSvc service.StorageObjectService,
 	documentSvc service.DocumentService,
 ) {
-	uploadHandler := NewUploadHandler(uploadSvc)
-	documentHandler := NewDocumentHandler(documentSvc)
+	storageObjectHandler := NewStorageObjectHandler(storageObjectSvc)
 
 	api := r.Group("/api")
 
-	// Upload
-	api.POST("/uploads", uploadHandler.CreateUploadBatch)
-	api.POST("/uploads/:batch_id/files", uploadHandler.UploadFile)
-
-	// Raw documents
-	api.GET("/raw-documents", documentHandler.ListRawDocuments)
-	api.GET("/raw-documents/:doc_id", documentHandler.GetRawDocument)
+	// StorageObject
+	api.POST("/storage-objects", storageObjectHandler.Create)
 }
