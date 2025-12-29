@@ -1,12 +1,47 @@
-CREATE TABLE raw_document (
-  id            BIGSERIAL PRIMARY KEY,
-  doc_id        TEXT UNIQUE NOT NULL,
-  source_type   TEXT,              -- pdf / word / confluence / markdown
-  source_uri    TEXT,              -- S3 / URL
-  title         TEXT,
-  metadata      JSONB,
-  created_at    TIMESTAMPTZ DEFAULT now()
+CREATE TABLE storage_object
+(
+    id                     TEXT PRIMARY KEY,
+    -- source info
+    source_type            TEXT NOT NULL,
+    source_upload_batch_id TEXT,
+    source_url             TEXT,
+    source_imported_from   TEXT,
+    -- storage info
+    storage_type           TEXT NOT NULL,
+    s3_bucket              TEXT,
+    s3_key                 TEXT,
+    local_base_path        TEXT,
+    local_file_path        TEXT,
+    -- file metadata
+    size_bytes             BIGINT,
+    mime_type              TEXT,
+    checksum               TEXT,
+    created_at             TIMESTAMPTZ DEFAULT now(),
+    updated_at             TIMESTAMPTZ DEFAULT now()
 );
+
+CREATE TABLE document
+(
+    id                 TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    title             TEXT,
+    status            TEXT NOT NULL,
+    storage_object_id TEXT NOT NULL,
+    created_at        TIMESTAMPTZ DEFAULT now(),
+    updated_at        TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE raw_document
+(
+    id                 TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    title             TEXT,
+    status            TEXT NOT NULL,
+    storage_object_id TEXT NOT NULL,
+    created_at        TIMESTAMPTZ DEFAULT now(),
+    updated_at        TIMESTAMPTZ DEFAULT now()
+);
+
 
 CREATE TABLE spec_version (
   id            BIGSERIAL PRIMARY KEY,

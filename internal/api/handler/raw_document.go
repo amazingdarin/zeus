@@ -9,17 +9,17 @@ import (
 	"zeus/internal/service"
 )
 
-type RawDocumentHandler struct {
-	svc service.RawDocumentService
+type DocumentHandler struct {
+	svc service.DocumentService
 }
 
-func NewRawDocumentHandler(svc service.RawDocumentService) *RawDocumentHandler {
-	return &RawDocumentHandler{svc: svc}
+func NewDocumentHandler(svc service.DocumentService) *DocumentHandler {
+	return &DocumentHandler{svc: svc}
 }
 
 // ListRawDocuments
 // @route GET /api/raw-documents
-func (h *RawDocumentHandler) ListRawDocuments(c *gin.Context) {
+func (h *DocumentHandler) ListRawDocuments(c *gin.Context) {
 	var req types.ListRawDocumentsRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		c.JSON(http.StatusBadRequest, types.ErrorResponse{
@@ -29,29 +29,29 @@ func (h *RawDocumentHandler) ListRawDocuments(c *gin.Context) {
 		return
 	}
 
-	docs, total, err := h.svc.List(
-		c.Request.Context(),
-		req.BatchID,
-		req.Limit,
-		req.Offset,
-	)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-			Code:    "LIST_FAILED",
-			Message: err.Error(),
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, types.ListRawDocumentsResponse{
-		Data:  docs,
-		Total: total,
-	})
+	//docs, total, err := h.svc.List(
+	//	c.Request.Context(),
+	//	req.BatchID,
+	//	req.Limit,
+	//	req.Offset,
+	//)
+	//if err != nil {
+	//	c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+	//		Code:    "LIST_FAILED",
+	//		Message: err.Error(),
+	//	})
+	//	return
+	//}
+	//
+	//c.JSON(http.StatusOK, types.ListRawDocumentsResponse{
+	//	Data:  docs,
+	//	Total: total,
+	//})
 }
 
 // GetRawDocument
 // @route GET /api/raw-documents/:doc_id
-func (h *RawDocumentHandler) GetRawDocument(c *gin.Context) {
+func (h *DocumentHandler) GetRawDocument(c *gin.Context) {
 	docID := c.Param("doc_id")
 	if docID == "" {
 		c.JSON(http.StatusBadRequest, types.ErrorResponse{
@@ -61,16 +61,16 @@ func (h *RawDocumentHandler) GetRawDocument(c *gin.Context) {
 		return
 	}
 
-	doc, err := h.svc.Get(c.Request.Context(), docID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, types.ErrorResponse{
-			Code:    "NOT_FOUND",
-			Message: err.Error(),
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, types.GetRawDocumentResponse{
-		Data: *doc,
-	})
+	//doc, err := h.svc.Get(c.Request.Context(), docID)
+	//if err != nil {
+	//	c.JSON(http.StatusNotFound, types.ErrorResponse{
+	//		Code:    "NOT_FOUND",
+	//		Message: err.Error(),
+	//	})
+	//	return
+	//}
+	//
+	//c.JSON(http.StatusOK, types.GetRawDocumentResponse{
+	//	Data: *doc,
+	//})
 }

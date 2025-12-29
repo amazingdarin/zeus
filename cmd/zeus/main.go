@@ -4,11 +4,16 @@ import (
 	"context"
 	"os"
 
+	"zeus/internal/infra/client/s3"
+
+	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
+	"zeus/internal/api/handler"
 	"zeus/internal/config"
-	"zeus/internal/infra/s3"
 	"zeus/internal/repository/postgres"
+	repos3 "zeus/internal/repository/s3"
+	svcupload "zeus/internal/service/upload"
 )
 
 func main() {
@@ -43,7 +48,7 @@ func main() {
 	}
 	_ = db
 
-	_, err = s3.NewS3Client(context.Background(), s3.Config{
+	s3Client, err := s3.NewS3Client(context.Background(), s3.Config{
 		Endpoint:     cfg.ObjectStorage.Endpoint,
 		Region:       cfg.ObjectStorage.Region,
 		AccessKey:    cfg.ObjectStorage.AccessKey,
@@ -53,6 +58,16 @@ func main() {
 	})
 	if err != nil {
 		log.Fatalf("init object storage: %v", err)
+	}
+
+	rawDocumentFileRepo, _ := repos3.NewFileRepository(s3Client, "zeus")
+	uploadSvc, _ := svcupload.NewService(rawDocumentFileRepo)
+
+	router := gin.Default()
+	handler.RegisterRoutes(router, uploadSvc, nil)
+
+	if err = router.Run(addr); err != nil {
+		log.Fatalf("start server: %v", err)
 	}
 }
 
