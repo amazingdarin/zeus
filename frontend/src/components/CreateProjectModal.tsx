@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import type { Project } from "../context/ProjectContext";
+import { buildApiUrl } from "../config/api";
 
 type CreateProjectModalProps = {
   onClose: () => void;
@@ -18,7 +19,7 @@ function CreateProjectModal({ onClose, onCreated }: CreateProjectModalProps) {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/projects", {
+      const response = await fetch(buildApiUrl("/api/projects"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

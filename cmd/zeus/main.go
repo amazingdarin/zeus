@@ -73,6 +73,7 @@ func main() {
 	}
 
 	router := gin.Default()
+	router.Use(handler.CORSMiddleware())
 	handler.RegisterRoutes(router, storageObjectSvc, nil, projectSvc)
 
 	if err = router.Run(addr); err != nil {

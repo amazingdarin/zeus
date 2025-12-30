@@ -11,6 +11,8 @@ import {
   type SetStateAction,
 } from "react";
 
+import { buildApiUrl } from "../config/api";
+
 export type Project = {
   id: string;
   key: string;
@@ -53,7 +55,7 @@ function ProjectProvider({ children }: ProjectProviderProps) {
   const reloadProjects = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/projects");
+      const response = await fetch(buildApiUrl("/api/projects"));
       if (!response.ok) {
         throw new Error("Failed to load projects");
       }
