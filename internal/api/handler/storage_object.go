@@ -50,7 +50,7 @@ func (h *StorageObjectHandler) Create(c *gin.Context) {
 
 	so := &domain.StorageObject{
 		Source: domain.SourceInfo{
-			Type:          domain.SourceType(req.SourceType),
+			Type:          domain.StorageObjectSourceType(req.SourceType),
 			UploadBatchID: req.SourceUploadBatchID,
 			URL:           req.SourceURL,
 			ImportedFrom:  req.SourceImportedFrom,

@@ -37,7 +37,7 @@ func StorageObjectToDomain(obj *model.StorageObject) *domain.StorageObject {
 		ID:        obj.ID,
 		ProjectID: obj.ProjectID,
 		Source: domain.SourceInfo{
-			Type:          domain.SourceType(obj.SourceType),
+			Type:          domain.StorageObjectSourceType(obj.SourceType),
 			UploadBatchID: obj.SourceUploadBatchID,
 			URL:           obj.SourceURL,
 			ImportedFrom:  obj.SourceImportedFrom,

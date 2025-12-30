@@ -23,54 +23,53 @@ func main() {
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
-	addr := cfg.Server.Addr
+	config.AppConfig = cfg
+	addr := config.AppConfig.Server.Addr
 	if addr == "" {
 		log.Fatal("server addr is required")
 	}
-	connMaxLifetime, err := cfg.Postgres.ConnMaxLifetimeDuration()
+	connMaxLifetime, err := config.AppConfig.Postgres.ConnMaxLifetimeDuration()
 	if err != nil {
 		log.Fatalf("parse conn_max_lifetime: %v", err)
 	}
 	db, err := postgres.NewGormDB(postgres.Config{
-		Host:            cfg.Postgres.Host,
-		Port:            cfg.Postgres.Port,
-		User:            cfg.Postgres.User,
-		Password:        cfg.Postgres.Password,
-		Database:        cfg.Postgres.Database,
-		SSLMode:         cfg.Postgres.SSLMode,
-		TimeZone:        cfg.Postgres.TimeZone,
-		MaxOpenConns:    cfg.Postgres.MaxOpenConns,
-		MaxIdleConns:    cfg.Postgres.MaxIdleConns,
+		Host:            config.AppConfig.Postgres.Host,
+		Port:            config.AppConfig.Postgres.Port,
+		User:            config.AppConfig.Postgres.User,
+		Password:        config.AppConfig.Postgres.Password,
+		Database:        config.AppConfig.Postgres.Database,
+		SSLMode:         config.AppConfig.Postgres.SSLMode,
+		TimeZone:        config.AppConfig.Postgres.TimeZone,
+		MaxOpenConns:    config.AppConfig.Postgres.MaxOpenConns,
+		MaxIdleConns:    config.AppConfig.Postgres.MaxIdleConns,
 		ConnMaxLifetime: connMaxLifetime,
 	})
 	if err != nil {
 		log.Fatalf("init postgres: %v", err)
 	}
 	projectRepo := postgres.NewProjectRepository(db)
-	projectSvc := svcproject.NewService(projectRepo)
+	documentRepo := postgres.NewDocumentRepository(db)
 
 	s3Client, err := clients3.NewS3Client(context.Background(), clients3.Config{
-		Endpoint:     cfg.ObjectStorage.Endpoint,
-		Region:       cfg.ObjectStorage.Region,
-		AccessKey:    cfg.ObjectStorage.AccessKey,
-		SecretKey:    cfg.ObjectStorage.SecretKey,
-		UsePathStyle: cfg.ObjectStorage.UsePathStyle,
-		Insecure:     cfg.ObjectStorage.Insecure,
+		Endpoint:     config.AppConfig.ObjectStorage.Endpoint,
+		Region:       config.AppConfig.ObjectStorage.Region,
+		AccessKey:    config.AppConfig.ObjectStorage.AccessKey,
+		SecretKey:    config.AppConfig.ObjectStorage.SecretKey,
+		UsePathStyle: config.AppConfig.ObjectStorage.UsePathStyle,
+		Insecure:     config.AppConfig.ObjectStorage.Insecure,
 	})
 	if err != nil {
 		log.Fatalf("init object storage: %v", err)
 	}
 
-	s3Ingestion := ingestions3.NewS3FileIngestion(s3Client, "zeus", "/test")
+	s3Ingestion := ingestions3.NewS3FileIngestion(s3Client, "zeus", "")
 
 	storageObjectRepo, err := postgres.NewStorageObjectRepository(db)
 	if err != nil {
 		log.Fatalf("init storage object repository: %v", err)
 	}
-	storageObjectSvc, err := svcstorageobject.NewService(s3Ingestion, storageObjectRepo)
-	if err != nil {
-		log.Fatalf("init storage object service: %v", err)
-	}
+	storageObjectSvc := svcstorageobject.NewService(s3Ingestion, storageObjectRepo)
+	projectSvc := svcproject.NewService(projectRepo, documentRepo, s3Ingestion, storageObjectSvc)
 
 	router := gin.Default()
 	router.Use(handler.CORSMiddleware())

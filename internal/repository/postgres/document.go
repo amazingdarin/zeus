@@ -17,11 +17,8 @@ type DocumentRepository struct {
 	db *gorm.DB
 }
 
-func NewDocumentRepository(db *gorm.DB) (*DocumentRepository, error) {
-	if db == nil {
-		return nil, fmt.Errorf("db is nil")
-	}
-	return &DocumentRepository{db: db}, nil
+func NewDocumentRepository(db *gorm.DB) *DocumentRepository {
+	return &DocumentRepository{db: db}
 }
 
 func (r *DocumentRepository) Insert(ctx context.Context, doc *domain.Document) error {

@@ -3,6 +3,7 @@ package s3
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"zeus/internal/infra/ingestion"
 
@@ -61,6 +62,43 @@ func (s *S3FileIngestion) Store(
 		Bucket: s.bucket,
 		Key:    key,
 		Size:   input.Size,
+		ETag:   aws.ToString(out.ETag),
+	}, nil
+}
+
+func (s *S3FileIngestion) CreateDirectory(
+	ctx context.Context,
+	input ingestion.DirectoryInput,
+) (*ingestion.StoredObject, error) {
+	key := strings.TrimSpace(input.Path)
+	if key == "" {
+		return nil, fmt.Errorf("path is required")
+	}
+	if !strings.HasSuffix(key, "/") {
+		key += "/"
+	}
+	if s.prefix != "" {
+		key = fmt.Sprintf("%s/%s", s.prefix, key)
+	}
+	if input.Namespace != "" {
+		key = fmt.Sprintf("%s/%s", input.Namespace, key)
+	}
+
+	putInput := &s3.PutObjectInput{
+		Bucket:      aws.String(s.bucket),
+		Key:         aws.String(key),
+		Body:        strings.NewReader(""),
+		ContentType: aws.String("application/x-directory"),
+	}
+	out, err := s.client.PutObject(ctx, putInput)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ingestion.StoredObject{
+		Bucket: s.bucket,
+		Key:    key,
+		Size:   0,
 		ETag:   aws.ToString(out.ETag),
 	}, nil
 }

@@ -18,24 +18,16 @@ import (
 type Service struct {
 	ingestion ingestion.FileIngestionService
 	repo      repository.StorageObjectRepository
-	now       func() time.Time
 }
 
 func NewService(
 	ingestionSvc ingestion.FileIngestionService,
 	repo repository.StorageObjectRepository,
-) (*Service, error) {
-	if ingestionSvc == nil {
-		return nil, fmt.Errorf("ingestion service is required")
-	}
-	if repo == nil {
-		return nil, fmt.Errorf("storage object repository is required")
-	}
+) *Service {
 	return &Service{
 		ingestion: ingestionSvc,
 		repo:      repo,
-		now:       time.Now,
-	}, nil
+	}
 }
 
 func (s *Service) Create(ctx context.Context, so *domain.StorageObject, payload service.StoragePayload) error {
@@ -92,12 +84,7 @@ func (s *Service) Create(ctx context.Context, so *domain.StorageObject, payload 
 	}
 
 	now := time.Now()
-	if s.now != nil {
-		now = s.now()
-	}
-	if so.CreatedAt.IsZero() {
-		so.CreatedAt = now
-	}
+	so.CreatedAt = now
 	so.UpdatedAt = now
 
 	if err := s.repo.Insert(ctx, so); err != nil {

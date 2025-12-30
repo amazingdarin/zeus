@@ -11,16 +11,17 @@ const (
 	StorageTypeLocal StorageType = "local"
 )
 
-type SourceType string
+type StorageObjectSourceType string
 
 const (
-	SourceTypeUpload SourceType = "upload"
-	SourceTypeURL    SourceType = "url"
-	SourceTypeImport SourceType = "import"
+	StorageObjectSourceTypeSystem StorageObjectSourceType = "system"
+	StorageObjectSourceTypeUpload StorageObjectSourceType = "upload"
+	StorageObjectSourceTypeURL    StorageObjectSourceType = "url"
+	StorageObjectSourceTypeImport StorageObjectSourceType = "import"
 )
 
 type SourceInfo struct {
-	Type SourceType
+	Type StorageObjectSourceType
 	// Upload
 	UploadBatchID string
 	// URL

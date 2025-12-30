@@ -13,6 +13,8 @@ type Config struct {
 	ObjectStorage ObjectStorageConfig `mapstructure:"object_storage"`
 }
 
+var AppConfig *Config
+
 type ServerConfig struct {
 	Addr string `mapstructure:"addr"`
 }

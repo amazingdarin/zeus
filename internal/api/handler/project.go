@@ -35,6 +35,7 @@ func (h *ProjectHandler) CreateProject(c *gin.Context) {
 		Key:         req.Key,
 		Name:        req.Name,
 		Description: req.Description,
+		Status:      domain.ProjectStatusActive,
 	}
 
 	if err := h.svc.Create(c.Request.Context(), project); err != nil {

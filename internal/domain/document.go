@@ -7,9 +7,11 @@ import (
 type DocumentType string
 
 const (
-	DocumentTypeRaw     DocumentType = "raw"     // 原始文件
-	DocumentTypeManual  DocumentType = "manual"  // 人工录入
-	DocumentTypeDerived DocumentType = "derived" // 系统生成
+	DocumentTypeOverview    DocumentType = "overview"    // 项目概览
+	DocumentTypeModule      DocumentType = "module"      // 功能模块
+	DocumentTypeApi         DocumentType = "api"         // API文档
+	DocumentTypeOrigin      DocumentType = "origin"      // 原始文档
+	DocumentTypeRequirement DocumentType = "requirement" // 需求文档
 )
 
 type DocumentStatus string

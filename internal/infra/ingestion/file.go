@@ -16,6 +16,11 @@ type FileIngestionService interface {
 		ctx context.Context,
 		input StoreInput,
 	) (*StoredObject, error)
+
+	CreateDirectory(
+		ctx context.Context,
+		input DirectoryInput,
+	) (*StoredObject, error)
 }
 
 type StoreInput struct {
@@ -31,6 +36,14 @@ type StoreInput struct {
 	// 可选元信息
 	Size        int64
 	ContentType string
+}
+
+type DirectoryInput struct {
+	// Namespace 用于逻辑隔离（document / dataset / model / asset）
+	Namespace string
+
+	// Path 由上层决定（可以是 batch_id/path 等）
+	Path string
 }
 
 type StoredObject struct {

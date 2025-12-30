@@ -13,7 +13,7 @@ type FilePayload struct {
 	MimeType  string
 
 	OriginalPath string
-	SourceType   domain.SourceType
+	SourceType   domain.StorageObjectSourceType
 	SourceRef    string
 }
 
