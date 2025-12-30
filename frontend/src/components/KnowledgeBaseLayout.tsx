@@ -1,22 +1,15 @@
 import type { ReactNode } from "react";
 
-import KnowledgeBaseSideNav from "./KnowledgeBaseSideNav";
-
 type KnowledgeBaseLayoutProps = {
-  activeNavId: string;
-  onSelectNav: (id: string) => void;
+  sideNav: ReactNode;
   children: ReactNode;
 };
 
-function KnowledgeBaseLayout({
-  activeNavId,
-  onSelectNav,
-  children,
-}: KnowledgeBaseLayoutProps) {
+function KnowledgeBaseLayout({ sideNav, children }: KnowledgeBaseLayoutProps) {
   return (
     <div className="content-inner">
       <div className="kb-layout">
-        <KnowledgeBaseSideNav activeId={activeNavId} onSelect={onSelectNav} />
+        {sideNav}
         <section className="kb-main">{children}</section>
       </div>
     </div>

@@ -345,6 +345,69 @@ body {
   color: var(--ink);
 }
 
+.kb-doc-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kb-doc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kb-doc-item {
+  flex: 1;
+  text-align: left;
+  border: 1px solid transparent;
+  background: rgba(31, 35, 40, 0.04);
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.kb-doc-item:hover {
+  border-color: rgba(31, 35, 40, 0.2);
+}
+
+.kb-doc-item.active {
+  background: rgba(31, 35, 40, 0.12);
+  border-color: rgba(31, 35, 40, 0.3);
+  color: var(--ink);
+}
+
+.kb-doc-toggle {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: rgba(31, 35, 40, 0.08);
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.kb-doc-toggle:hover {
+  border-color: rgba(31, 35, 40, 0.2);
+}
+
+.kb-doc-children {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kb-doc-empty,
+.kb-doc-loading {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 6px 10px;
+}
+
 .kb-main {
   display: flex;
   flex-direction: column;
