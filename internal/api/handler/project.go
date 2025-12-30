@@ -146,6 +146,7 @@ func (h *ProjectHandler) ListProjectDocuments(c *gin.Context) {
 			Path:            doc.Path,
 			Order:           doc.Order,
 			ParentID:        parentID,
+			HasChild:        doc.HasChild,
 			StorageObjectID: storageObjectID,
 			CreatedAt:       doc.CreatedAt.Format(time.RFC3339),
 			UpdatedAt:       doc.UpdatedAt.Format(time.RFC3339),

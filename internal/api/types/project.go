@@ -43,6 +43,7 @@ type ProjectDocumentDTO struct {
 	Path            string `json:"path"`
 	Order           int    `json:"order"`
 	ParentID        string `json:"parent_id"`
+	HasChild        bool   `json:"has_child"`
 	StorageObjectID string `json:"storage_object_id"`
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`

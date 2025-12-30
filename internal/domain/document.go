@@ -36,6 +36,7 @@ type Document struct {
 
 	Parent   *Document   // 父级文档
 	Children []*Document // 子文档
+	HasChild bool        // 是否包含子文档
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
