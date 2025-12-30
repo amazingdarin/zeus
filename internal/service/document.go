@@ -18,14 +18,6 @@ type FilePayload struct {
 }
 
 type DocumentService interface {
-
-	// CreateRaw 创建原始文档
-	CreateRaw(
-		ctx context.Context,
-		doc *domain.Document,
-		file FilePayload,
-	) (*domain.Document, error)
-
 	// Create 创建普通文档（manual / derived）
 	Create(
 		ctx context.Context,

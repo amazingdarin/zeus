@@ -17,7 +17,7 @@ type ProjectRepository struct {
 	db *gorm.DB
 }
 
-func NewProjectRepository(db *gorm.DB) *ProjectRepository{
+func NewProjectRepository(db *gorm.DB) *ProjectRepository {
 	return &ProjectRepository{db: db}
 }
 
@@ -49,6 +49,20 @@ func (r *ProjectRepository) FindByID(ctx context.Context, id string) (*domain.Pr
 	}
 	if err != nil {
 		return nil, fmt.Errorf("find storage object: %w", err)
+	}
+	return mapper.ProjectToDomain(&modelObj), nil
+}
+
+func (r *ProjectRepository) FindByKey(ctx context.Context, key string) (*domain.Project, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("repository not initialized")
+	}
+	if key == "" {
+		return nil, fmt.Errorf("key is required")
+	}
+	var modelObj model.Project
+	if err := r.db.WithContext(ctx).First(&modelObj, "key = ?", key).Error; err != nil {
+		return nil, fmt.Errorf("find project: %w", err)
 	}
 	return mapper.ProjectToDomain(&modelObj), nil
 }

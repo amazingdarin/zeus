@@ -12,6 +12,7 @@ import (
 	clients3 "zeus/internal/infra/client/s3"
 	ingestions3 "zeus/internal/infra/ingestion/s3"
 	"zeus/internal/repository/postgres"
+	svcdocument "zeus/internal/service/document"
 	svcproject "zeus/internal/service/project"
 	svcstorageobject "zeus/internal/service/storage_object"
 )
@@ -69,11 +70,15 @@ func main() {
 		log.Fatalf("init storage object repository: %v", err)
 	}
 	storageObjectSvc := svcstorageobject.NewService(s3Ingestion, storageObjectRepo)
-	projectSvc := svcproject.NewService(projectRepo, documentRepo, s3Ingestion, storageObjectSvc)
+	documentSvc, err := svcdocument.NewService(s3Ingestion, documentRepo)
+	if err != nil {
+		log.Fatalf("init document service: %v", err)
+	}
+	projectSvc := svcproject.NewService(projectRepo, documentRepo, s3Ingestion, storageObjectSvc, documentSvc)
 
 	router := gin.Default()
 	router.Use(handler.CORSMiddleware())
-	handler.RegisterRoutes(router, storageObjectSvc, nil, projectSvc)
+	handler.RegisterRoutes(router, storageObjectSvc, documentSvc, projectSvc)
 
 	if err = router.Run(addr); err != nil {
 		log.Fatalf("start server: %v", err)

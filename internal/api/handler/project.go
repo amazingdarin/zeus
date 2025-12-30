@@ -92,3 +92,69 @@ func (h *ProjectHandler) ListProjects(c *gin.Context) {
 		Data:    items,
 	})
 }
+
+// ListProjectDocuments
+// @route GET /api/projects/:project_key/documents
+func (h *ProjectHandler) ListProjectDocuments(c *gin.Context) {
+	projectKey := c.Param("project_key")
+	if projectKey == "" {
+		c.JSON(http.StatusBadRequest, types.ListProjectDocumentsResponse{
+			Code:    "MISSING_PROJECT_KEY",
+			Message: "project_key is required",
+		})
+		return
+	}
+
+	var req types.ListProjectDocumentsRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, types.ListProjectDocumentsResponse{
+			Code:    "INVALID_QUERY",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	documents, err := h.svc.ListDocuments(c.Request.Context(), projectKey, req.ParentID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ListProjectDocumentsResponse{
+			Code:    "LIST_DOCUMENT_FAILED",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	items := make([]*types.ProjectDocumentDTO, 0, len(documents))
+	for _, doc := range documents {
+		if doc == nil {
+			continue
+		}
+		parentID := ""
+		if doc.Parent != nil {
+			parentID = doc.Parent.ID
+		}
+		storageObjectID := ""
+		if doc.StorageObject != nil {
+			storageObjectID = doc.StorageObject.ID
+		}
+		items = append(items, &types.ProjectDocumentDTO{
+			ID:              doc.ID,
+			ProjectID:       doc.ProjectID,
+			Type:            string(doc.Type),
+			Title:           doc.Title,
+			Description:     doc.Description,
+			Status:          string(doc.Status),
+			Path:            doc.Path,
+			Order:           doc.Order,
+			ParentID:        parentID,
+			StorageObjectID: storageObjectID,
+			CreatedAt:       doc.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:       doc.UpdatedAt.Format(time.RFC3339),
+		})
+	}
+
+	c.JSON(http.StatusOK, types.ListProjectDocumentsResponse{
+		Code:    "OK",
+		Message: "success",
+		Data:    items,
+	})
+}

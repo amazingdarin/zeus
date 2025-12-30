@@ -32,3 +32,28 @@ type ListProjectResponse struct {
 	Message string        `json:"message"`
 	Data    []*ProjectDTO `json:"data"`
 }
+
+type ProjectDocumentDTO struct {
+	ID              string `json:"id"`
+	ProjectID       string `json:"project_id"`
+	Type            string `json:"type"`
+	Title           string `json:"title"`
+	Description     string `json:"description,omitempty"`
+	Status          string `json:"status"`
+	Path            string `json:"path"`
+	Order           int    `json:"order"`
+	ParentID        string `json:"parent_id"`
+	StorageObjectID string `json:"storage_object_id"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
+}
+
+type ListProjectDocumentsRequest struct {
+	ParentID string `form:"parent_id"`
+}
+
+type ListProjectDocumentsResponse struct {
+	Code    string                `json:"code"`
+	Message string                `json:"message"`
+	Data    []*ProjectDocumentDTO `json:"data"`
+}

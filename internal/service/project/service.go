@@ -22,6 +22,7 @@ import (
 type Service struct {
 	projectRepo  repository.ProjectRepository
 	documentRepo repository.DocumentRepository
+	documentSvc  service.DocumentService
 
 	ingestion ingestion.FileIngestionService
 
@@ -32,12 +33,14 @@ func NewService(
 	projectRepo repository.ProjectRepository,
 	documentRepo repository.DocumentRepository,
 	ingestion ingestion.FileIngestionService,
-	storageObjectSvc service.StorageObjectService) *Service {
+	storageObjectSvc service.StorageObjectService,
+	documentSvc service.DocumentService) *Service {
 	return &Service{
 		projectRepo:      projectRepo,
 		documentRepo:     documentRepo,
 		ingestion:        ingestion,
 		storageObjectSvc: storageObjectSvc,
+		documentSvc:      documentSvc,
 	}
 }
 
@@ -73,6 +76,51 @@ func (s *Service) List(ctx context.Context) ([]*domain.Project, error) {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
 	return projects, nil
+}
+
+func (s *Service) GetByKey(ctx context.Context, key string) (*domain.Project, error) {
+	if s.projectRepo == nil {
+		return nil, fmt.Errorf("project repository is required")
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil, fmt.Errorf("project key is required")
+	}
+	project, err := s.projectRepo.FindByKey(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("find project: %w", err)
+	}
+	return project, nil
+}
+
+func (s *Service) ListDocuments(
+	ctx context.Context,
+	projectKey string,
+	parentID string,
+) ([]*domain.Document, error) {
+	if s.documentSvc == nil {
+		return nil, fmt.Errorf("document service is required")
+	}
+	project, err := s.GetByKey(ctx, projectKey)
+	if err != nil {
+		return nil, err
+	}
+	parentID = strings.TrimSpace(parentID)
+	docs, err := s.documentSvc.ListByParent(ctx, parentID)
+	if err != nil {
+		return nil, fmt.Errorf("list documents: %w", err)
+	}
+	filtered := make([]*domain.Document, 0, len(docs))
+	for _, doc := range docs {
+		if doc == nil {
+			continue
+		}
+		if doc.ProjectID != project.ID {
+			continue
+		}
+		filtered = append(filtered, doc)
+	}
+	return filtered, nil
 }
 
 func (s *Service) initProject(ctx context.Context, project *domain.Project) error {

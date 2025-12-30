@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"zeus/internal/domain"
 	"zeus/internal/infra/ingestion"
 	"zeus/internal/repository"
@@ -38,100 +36,6 @@ func NewService(
 		repo:      repo,
 		now:       time.Now,
 	}, nil
-}
-
-func (s *Service) CreateRaw(
-	ctx context.Context,
-	doc *domain.Document,
-	file service.FilePayload,
-) (*domain.Document, error) {
-	if s == nil || s.ingestion == nil || s.repo == nil {
-		return nil, fmt.Errorf("document service not initialized")
-	}
-	if doc == nil {
-		return nil, fmt.Errorf("document is required")
-	}
-	if file.Reader == nil {
-		return nil, fmt.Errorf("file reader is required")
-	}
-	if file.SizeBytes < 0 {
-		return nil, fmt.Errorf("size_bytes must be >= 0")
-	}
-
-	sourceInfo, sourceRef, err := buildSourceInfo(file)
-	if err != nil {
-		return nil, err
-	}
-
-	docID := strings.TrimSpace(doc.ID)
-	if docID == "" {
-		docID = uuid.NewString()
-	}
-	objectKey, err := buildObjectKey(file.OriginalPath, docID, sourceInfo.Type, sourceRef)
-	if err != nil {
-		return nil, err
-	}
-
-	stored, err := s.ingestion.Store(ctx, ingestion.StoreInput{
-		Namespace:   rawDocumentNamespace,
-		ObjectKey:   objectKey,
-		Reader:      file.Reader,
-		Size:        file.SizeBytes,
-		ContentType: strings.TrimSpace(file.MimeType),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("store raw document: %w", err)
-	}
-
-	now := time.Now()
-	if s.now != nil {
-		now = s.now()
-	}
-	storageID := ""
-	if doc.StorageObject != nil {
-		storageID = strings.TrimSpace(doc.StorageObject.ID)
-	}
-	if storageID == "" {
-		storageID = uuid.NewString()
-	}
-	storage := &domain.StorageObject{
-		ID: storageID,
-		Source: domain.SourceInfo{
-			Type:          sourceInfo.Type,
-			UploadBatchID: sourceInfo.UploadBatchID,
-			URL:           sourceInfo.URL,
-			ImportedFrom:  sourceInfo.ImportedFrom,
-		},
-		Storage: domain.StorageInfo{
-			Type:   domain.StorageTypeS3,
-			Bucket: stored.Bucket,
-			Key:    stored.Key,
-		},
-		SizeBytes: stored.Size,
-		MimeType:  strings.TrimSpace(file.MimeType),
-		Checksum:  stored.ETag,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-
-	doc.ID = docID
-	doc.Type = domain.DocumentTypeRaw
-	if doc.Status == "" {
-		doc.Status = domain.DocumentStatusActive
-	}
-	if doc.Title == "" {
-		doc.Title = documentTitle(file.OriginalPath, stored.Key)
-	}
-	if doc.CreatedAt.IsZero() {
-		doc.CreatedAt = now
-	}
-	doc.UpdatedAt = now
-	doc.StorageObject = storage
-
-	if err := s.repo.Insert(ctx, doc); err != nil {
-		return nil, fmt.Errorf("insert document: %w", err)
-	}
-	return doc, nil
 }
 
 func (s *Service) Create(
@@ -313,70 +217,6 @@ func (s *Service) Archive(ctx context.Context, id string) error {
 		return fmt.Errorf("save document: %w", err)
 	}
 	return nil
-}
-
-func buildSourceInfo(payload service.FilePayload) (domain.SourceInfo, string, error) {
-	sourceType, err := normalizeSourceType(payload.SourceType)
-	if err != nil {
-		return domain.SourceInfo{}, "", err
-	}
-	ref := strings.TrimSpace(payload.SourceRef)
-	info := domain.SourceInfo{Type: sourceType}
-	switch sourceType {
-	case domain.SourceTypeUpload:
-		info.UploadBatchID = ref
-	case domain.SourceTypeURL:
-		if ref == "" {
-			return domain.SourceInfo{}, "", fmt.Errorf("source_ref is required for url source")
-		}
-		info.URL = ref
-	case domain.SourceTypeImport:
-		info.ImportedFrom = ref
-	}
-	return info, ref, nil
-}
-
-func normalizeSourceType(value domain.SourceType) (domain.SourceType, error) {
-	if value == "" {
-		return domain.SourceTypeUpload, nil
-	}
-	switch value {
-	case domain.SourceTypeUpload, domain.SourceTypeURL, domain.SourceTypeImport:
-		return value, nil
-	default:
-		return "", fmt.Errorf("invalid source_type: %s", value)
-	}
-}
-
-func buildObjectKey(
-	originalPath string,
-	fallback string,
-	sourceType domain.SourceType,
-	sourceRef string,
-) (string, error) {
-	key, err := cleanObjectKey(originalPath)
-	if err != nil {
-		return "", err
-	}
-	if key == "" {
-		key, err = cleanObjectKey(fallback)
-		if err != nil {
-			return "", err
-		}
-	}
-	if key == "" {
-		return "", fmt.Errorf("object key is required")
-	}
-	if sourceType == domain.SourceTypeUpload && strings.TrimSpace(sourceRef) != "" {
-		prefix, err := cleanObjectKey(sourceRef)
-		if err != nil {
-			return "", err
-		}
-		if prefix != "" {
-			key = path.Join(prefix, key)
-		}
-	}
-	return key, nil
 }
 
 func cleanObjectKey(value string) (string, error) {

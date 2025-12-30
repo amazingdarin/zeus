@@ -23,4 +23,5 @@ func RegisterRoutes(
 	// Project
 	api.POST("/projects", projectHandler.CreateProject)
 	api.GET("/projects", projectHandler.ListProjects)
+	api.GET("/projects/:project_key/documents", projectHandler.ListProjectDocuments)
 }
