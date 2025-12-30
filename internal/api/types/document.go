@@ -2,6 +2,14 @@ package types
 
 import "time"
 
+type CreateDocumentRequest struct {
+	ProjectID       string `json:"project_id" form:"project_id" binding:"required"`
+	Title           string `json:"title" form:"title" binding:"required"`
+	Description     string `json:"description" form:"description"`
+	ParentID        string `json:"parent_id" form:"parent_id" binding:"required"`
+	StorageObjectID string `json:"storage_object_id" form:"storage_object_id" binding:"required"`
+}
+
 // RawDocumentDTO API 返回用文档结构
 type RawDocumentDTO struct {
 	ID           string    `json:"id"`

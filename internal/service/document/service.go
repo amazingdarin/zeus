@@ -155,34 +155,36 @@ func (s *Service) Get(ctx context.Context, id string) (*domain.Document, error) 
 	if id == "" {
 		return nil, fmt.Errorf("id is required")
 	}
-	docs, _, err := s.repo.List(ctx, repository.DocumentFilter{
-		ID:                   id,
-		PreloadStorageObject: true,
-	}, 1, 0)
+	doc, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get document: %w", err)
 	}
-	if len(docs) == 0 {
+	if doc == nil {
 		return nil, fmt.Errorf("document not found")
 	}
-	return &docs[0], nil
+	return doc, nil
 }
 
-func (s *Service) ListByParent(ctx context.Context, parentID *string) ([]*domain.Document, error) {
+func (s *Service) GetProjectRootID(ctx context.Context, projectID string) (string, error) {
+	// TODO
+	if s == nil || s.repo == nil {
+		return "", fmt.Errorf("document service not initialized")
+	}
+	return "", nil
+}
+
+func (s *Service) ListByParent(ctx context.Context, parentID string) ([]*domain.Document, error) {
 	if s == nil || s.repo == nil {
 		return nil, fmt.Errorf("document service not initialized")
 	}
 	filter := repository.DocumentFilter{}
-	if parentID == nil {
-		filter.ParentID = ""
-	} else {
-		filter.ParentID = strings.TrimSpace(*parentID)
-	}
-	docs, _, err := s.repo.List(ctx, filter, 0, 0)
+	option := repository.DocumentOption{}
+	filter.ParentID = strings.TrimSpace(parentID)
+	docs, _, err := s.repo.List(ctx, filter, option)
 	if err != nil {
 		return nil, fmt.Errorf("list documents: %w", err)
 	}
-	return toDocumentPointers(docs), nil
+	return docs, nil
 }
 
 func (s *Service) GetSubtree(ctx context.Context, rootID string) ([]*domain.Document, error) {
@@ -201,17 +203,16 @@ func (s *Service) GetSubtree(ctx context.Context, rootID string) ([]*domain.Docu
 		return []*domain.Document{root}, nil
 	}
 
-	docs, _, err := s.repo.List(ctx, repository.DocumentFilter{
-		ProjectID: root.ProjectID,
-	}, 0, 0)
+	filter := repository.DocumentFilter{ProjectID: root.ProjectID}
+	option := repository.DocumentOption{}
+	docs, _, err := s.repo.List(ctx, filter, option)
 	if err != nil {
 		return nil, fmt.Errorf("list documents: %w", err)
 	}
 
 	byID := make(map[string]*domain.Document, len(docs))
 	children := make(map[string][]*domain.Document)
-	for i := range docs {
-		doc := &docs[i]
+	for _, doc := range docs {
 		byID[doc.ID] = doc
 		parent := ""
 		if doc.Parent != nil {
@@ -243,23 +244,6 @@ func (s *Service) GetSubtree(ctx context.Context, rootID string) ([]*domain.Docu
 	}
 
 	return result, nil
-}
-
-func (s *Service) SimplifiedTree(ctx context.Context, projectID string) ([]*domain.Document, error) {
-	if s == nil || s.repo == nil {
-		return nil, fmt.Errorf("document service not initialized")
-	}
-	projectID = strings.TrimSpace(projectID)
-	if projectID == "" {
-		return nil, fmt.Errorf("project_id is required")
-	}
-	docs, _, err := s.repo.List(ctx, repository.DocumentFilter{
-		ProjectID: projectID,
-	}, 0, 0)
-	if err != nil {
-		return nil, fmt.Errorf("list documents: %w", err)
-	}
-	return toDocumentPointers(docs), nil
 }
 
 func (s *Service) Move(ctx context.Context, id string, newParentID *string) error {
@@ -430,14 +414,6 @@ func normalizePath(value string) string {
 		return ""
 	}
 	return cleaned
-}
-
-func toDocumentPointers(docs []domain.Document) []*domain.Document {
-	items := make([]*domain.Document, 0, len(docs))
-	for i := range docs {
-		items = append(items, &docs[i])
-	}
-	return items
 }
 
 var _ service.DocumentService = (*Service)(nil)

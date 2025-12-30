@@ -1,26 +1,18 @@
 package mapper
 
 import (
-	"fmt"
-
 	"zeus/internal/domain"
 	"zeus/internal/repository/postgres/model"
 )
 
-func DocumentFromDomain(doc *domain.Document) (*model.Document, *model.StorageObject, error) {
-	if doc == nil {
-		return nil, nil, fmt.Errorf("document is nil")
-	}
-	if doc.StorageObject == nil {
-		return nil, nil, fmt.Errorf("storage object is required")
-	}
-	storage, err := StorageObjectFromDomain(doc.StorageObject)
-	if err != nil {
-		return nil, nil, err
-	}
+func DocumentFromDomain(doc *domain.Document) *model.Document {
 	parentID := ""
+	storageObjectID := ""
 	if doc.Parent != nil {
 		parentID = doc.Parent.ID
+	}
+	if doc.StorageObject != nil {
+		storageObjectID = doc.StorageObject.ID
 	}
 	return &model.Document{
 		ID:              doc.ID,
@@ -32,23 +24,22 @@ func DocumentFromDomain(doc *domain.Document) (*model.Document, *model.StorageOb
 		Path:            doc.Path,
 		Order:           doc.Order,
 		ParentID:        parentID,
-		StorageObjectID: storage.ID,
+		StorageObjectID: storageObjectID,
 		CreatedAt:       doc.CreatedAt,
 		UpdatedAt:       doc.UpdatedAt,
-	}, storage, nil
+
+		StorageObject: StorageObjectFromDomain(doc.StorageObject),
+	}
 }
 
-func DocumentToDomain(doc *model.Document, storage *model.StorageObject) (*domain.Document, error) {
+func DocumentToDomain(doc *model.Document, storage *model.StorageObject) *domain.Document {
 	if doc == nil {
-		return nil, fmt.Errorf("document model is nil")
+		return nil
 	}
 
 	var storageDomain *domain.StorageObject
 	if storage != nil {
-		mapped, err := StorageObjectToDomain(storage)
-		if err != nil {
-			return nil, err
-		}
+		mapped := StorageObjectToDomain(storage)
 		storageDomain = mapped
 	}
 	var parent *domain.Document
@@ -69,5 +60,5 @@ func DocumentToDomain(doc *model.Document, storage *model.StorageObject) (*domai
 		StorageObject: storageDomain,
 		CreatedAt:     doc.CreatedAt,
 		UpdatedAt:     doc.UpdatedAt,
-	}, nil
+	}
 }

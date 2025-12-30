@@ -19,7 +19,7 @@ type FileIngestionService interface {
 }
 
 type StoreInput struct {
-	// Namespace 用于逻辑隔离（raw-documents / dataset / model / asset）
+	// Namespace 用于逻辑隔离（document / dataset / model / asset）
 	Namespace string
 
 	// ObjectKey 由上层决定（可以是 batch_id/path 等）

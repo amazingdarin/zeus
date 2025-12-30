@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -27,51 +28,50 @@ func (r *DocumentRepository) Insert(ctx context.Context, doc *domain.Document) e
 	if r == nil || r.db == nil {
 		return fmt.Errorf("repository not initialized")
 	}
-	docModel, storageModel, err := mapper.DocumentFromDomain(doc)
-	if err != nil {
-		return err
+	docModel := mapper.DocumentFromDomain(doc)
+	if err := r.db.WithContext(ctx).Create(docModel).Error; err != nil {
+		return fmt.Errorf("insert document: %w", err)
 	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(storageModel).Error; err != nil {
-			return fmt.Errorf("insert storage object: %w", err)
-		}
-		if err := tx.Create(docModel).Error; err != nil {
-			return fmt.Errorf("insert document: %w", err)
-		}
-		return nil
-	})
+	return nil
 }
 
 func (r *DocumentRepository) Save(ctx context.Context, doc *domain.Document) error {
 	if r == nil || r.db == nil {
 		return fmt.Errorf("repository not initialized")
 	}
-	docModel, storageModel, err := mapper.DocumentFromDomain(doc)
-	if err != nil {
-		return err
+	docModel := mapper.DocumentFromDomain(doc)
+	if err := r.db.WithContext(ctx).Save(docModel).Error; err != nil {
+		return fmt.Errorf("save document: %w", err)
 	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(storageModel).Error; err != nil {
-			return fmt.Errorf("save storage object: %w", err)
-		}
-		if err := tx.Save(docModel).Error; err != nil {
-			return fmt.Errorf("save document: %w", err)
-		}
-		return nil
-	})
+	return nil
+}
+
+func (r *DocumentRepository) FindByID(ctx context.Context, id string) (*domain.Document, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("repository not initialized")
+	}
+	var doc *domain.Document
+	err := r.db.WithContext(ctx).Model(&model.Document{}).Preload("StorageObject").Where("id = ?", id).First(&doc).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get document: %w", err)
+	}
+	return doc, nil
 }
 
 func (r *DocumentRepository) List(
 	ctx context.Context,
 	filter repository.DocumentFilter,
-	limit, offset int,
-) ([]domain.Document, int, error) {
+	option repository.DocumentOption,
+) ([]*domain.Document, int, error) {
 	if r == nil || r.db == nil {
 		return nil, 0, fmt.Errorf("repository not initialized")
 	}
 
 	query := r.db.WithContext(ctx).Model(&model.Document{})
-	if filter.PreloadStorageObject {
+	if option.PreloadStorageObject {
 		query = query.Preload("StorageObject")
 	}
 	query = applyDocumentFilters(query, filter)
@@ -81,11 +81,11 @@ func (r *DocumentRepository) List(
 		return nil, 0, fmt.Errorf("count documents: %w", err)
 	}
 
-	if limit > 0 {
-		query = query.Limit(limit)
+	if option.Limit > 0 {
+		query = query.Limit(option.Limit)
 	}
-	if offset > 0 {
-		query = query.Offset(offset)
+	if option.Offset > 0 {
+		query = query.Offset(option.Offset)
 	}
 
 	var docModels []model.Document
@@ -93,25 +93,19 @@ func (r *DocumentRepository) List(
 		return nil, 0, fmt.Errorf("list documents: %w", err)
 	}
 	if len(docModels) == 0 {
-		return []domain.Document{}, int(total), nil
+		return []*domain.Document{}, int(total), nil
 	}
 
-	documents := make([]domain.Document, 0, len(docModels))
+	documents := make([]*domain.Document, 0, len(docModels))
 	for i := range docModels {
-		doc, err := mapper.DocumentToDomain(&docModels[i], docModels[i].StorageObject)
-		if err != nil {
-			return nil, 0, fmt.Errorf("map document: %w", err)
-		}
-		documents = append(documents, *doc)
+		doc := mapper.DocumentToDomain(&docModels[i], docModels[i].StorageObject)
+		documents = append(documents, doc)
 	}
 
 	return documents, int(total), nil
 }
 
 func applyDocumentFilters(query *gorm.DB, filter repository.DocumentFilter) *gorm.DB {
-	if filter.ID != "" {
-		query = query.Where("id = ?", filter.ID)
-	}
 	if filter.ProjectID != "" {
 		query = query.Where("project_id = ?", filter.ProjectID)
 	}

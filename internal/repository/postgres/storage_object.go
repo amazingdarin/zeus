@@ -27,10 +27,7 @@ func (r *StorageObjectRepository) Insert(ctx context.Context, obj *domain.Storag
 	if r == nil || r.db == nil {
 		return fmt.Errorf("repository not initialized")
 	}
-	modelObj, err := mapper.StorageObjectFromDomain(obj)
-	if err != nil {
-		return err
-	}
+	modelObj := mapper.StorageObjectFromDomain(obj)
 	if err := r.db.WithContext(ctx).Create(modelObj).Error; err != nil {
 		return fmt.Errorf("insert storage object: %w", err)
 	}
@@ -48,10 +45,7 @@ func (r *StorageObjectRepository) FindByID(ctx context.Context, id string) (*dom
 	if err := r.db.WithContext(ctx).First(&modelObj, "id = ?", id).Error; err != nil {
 		return nil, fmt.Errorf("find storage object: %w", err)
 	}
-	obj, err := mapper.StorageObjectToDomain(&modelObj)
-	if err != nil {
-		return nil, err
-	}
+	obj := mapper.StorageObjectToDomain(&modelObj)
 	return obj, nil
 }
 

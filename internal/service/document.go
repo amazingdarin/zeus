@@ -33,11 +33,12 @@ type DocumentService interface {
 		content string,
 	) (*domain.Document, error)
 
-	// 查询
+	// Get 根据ID查询文档
 	Get(ctx context.Context, id string) (*domain.Document, error)
-	ListByParent(ctx context.Context, parentID *string) ([]*domain.Document, error)
+	// GetProjectRootID 根据ProjectID查询RootDocumentID
+	GetProjectRootID(ctx context.Context, projectID string) (string, error)
+	ListByParent(ctx context.Context, parentID string) ([]*domain.Document, error)
 	GetSubtree(ctx context.Context, rootID string) ([]*domain.Document, error)
-	SimplifiedTree(ctx context.Context, projectID string) ([]*domain.Document, error)
 
 	// 结构操作
 	Move(ctx context.Context, id string, newParentID *string) error

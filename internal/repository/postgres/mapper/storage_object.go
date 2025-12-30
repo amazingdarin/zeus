@@ -1,15 +1,13 @@
 package mapper
 
 import (
-	"fmt"
-
 	"zeus/internal/domain"
 	"zeus/internal/repository/postgres/model"
 )
 
-func StorageObjectFromDomain(obj *domain.StorageObject) (*model.StorageObject, error) {
+func StorageObjectFromDomain(obj *domain.StorageObject) *model.StorageObject {
 	if obj == nil {
-		return nil, fmt.Errorf("storage object is nil")
+		return nil
 	}
 	return &model.StorageObject{
 		ID:                  obj.ID,
@@ -27,12 +25,12 @@ func StorageObjectFromDomain(obj *domain.StorageObject) (*model.StorageObject, e
 		Checksum:            obj.Checksum,
 		CreatedAt:           obj.CreatedAt,
 		UpdatedAt:           obj.UpdatedAt,
-	}, nil
+	}
 }
 
-func StorageObjectToDomain(obj *model.StorageObject) (*domain.StorageObject, error) {
+func StorageObjectToDomain(obj *model.StorageObject) *domain.StorageObject {
 	if obj == nil {
-		return nil, fmt.Errorf("storage object model is nil")
+		return nil
 	}
 	return &domain.StorageObject{
 		ID: obj.ID,
@@ -54,5 +52,5 @@ func StorageObjectToDomain(obj *model.StorageObject) (*domain.StorageObject, err
 		Checksum:  obj.Checksum,
 		CreatedAt: obj.CreatedAt,
 		UpdatedAt: obj.UpdatedAt,
-	}, nil
+	}
 }
