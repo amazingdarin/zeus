@@ -1,6 +1,17 @@
+CREATE TABLE project (
+                          id TEXT PRIMARY KEY,
+                          key TEXT NOT NULL UNIQUE,
+                          name TEXT NOT NULL,
+                          description TEXT,
+                          status TEXT NOT NULL,
+                          created_at             TIMESTAMPTZ DEFAULT now(),
+                          updated_at             TIMESTAMPTZ DEFAULT now()
+);
+
 CREATE TABLE storage_object
 (
     id                     TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL DEFAULT '',
     -- source info
     source_type            TEXT NOT NULL,
     source_upload_batch_id TEXT,

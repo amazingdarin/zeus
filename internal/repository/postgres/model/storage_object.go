@@ -3,7 +3,8 @@ package model
 import "time"
 
 type StorageObject struct {
-	ID string `gorm:"column:id;primaryKey"`
+	ID        string `gorm:"column:id;primaryKey"`
+	ProjectID string `gorm:"column:project_id;not null"`
 
 	SourceType          string `gorm:"column:source_type;not null"`
 	SourceUploadBatchID string `gorm:"column:source_upload_batch_id"`

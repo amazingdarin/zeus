@@ -42,7 +42,8 @@ type StorageInfo struct {
 }
 
 type StorageObject struct {
-	ID string
+	ID        string
+	ProjectID string
 
 	Source  SourceInfo
 	Storage StorageInfo
