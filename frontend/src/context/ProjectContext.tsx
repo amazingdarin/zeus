@@ -45,8 +45,10 @@ function ProjectProvider({ children }: ProjectProviderProps) {
   const [currentProjectKey, setCurrentProjectKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const mountedRef = useRef(true);
+  const initialLoadRef = useRef(false);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
@@ -101,6 +103,10 @@ function ProjectProvider({ children }: ProjectProviderProps) {
   }, []);
 
   useEffect(() => {
+    if (initialLoadRef.current) {
+      return;
+    }
+    initialLoadRef.current = true;
     reloadProjects();
   }, [reloadProjects]);
 
