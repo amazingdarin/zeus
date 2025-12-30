@@ -32,14 +32,14 @@ func DocumentFromDomain(doc *domain.Document) *model.Document {
 	}
 }
 
-func DocumentToDomain(doc *model.Document, storage *model.StorageObject) *domain.Document {
+func DocumentToDomain(doc *model.Document) *domain.Document {
 	if doc == nil {
 		return nil
 	}
 
 	var storageDomain *domain.StorageObject
-	if storage != nil {
-		mapped := StorageObjectToDomain(storage)
+	if doc.StorageObject != nil {
+		mapped := StorageObjectToDomain(doc.StorageObject)
 		storageDomain = mapped
 	}
 	var parent *domain.Document

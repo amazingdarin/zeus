@@ -50,15 +50,19 @@ func (r *DocumentRepository) FindByID(ctx context.Context, id string) (*domain.D
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("repository not initialized")
 	}
-	var doc *domain.Document
-	err := r.db.WithContext(ctx).Model(&model.Document{}).Preload("StorageObject").Where("id = ?", id).First(&doc).Error
+	if id == "" {
+		return nil, fmt.Errorf("id is required")
+	}
+	var modelObj model.Document
+	err := r.db.WithContext(ctx).Model(&model.Document{}).Preload("StorageObject").First(&modelObj, "id = ?", id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get document: %w", err)
+		return nil, fmt.Errorf("find document: %w", err)
 	}
-	return doc, nil
+	obj := mapper.DocumentToDomain(&modelObj)
+	return obj, nil
 }
 
 func (r *DocumentRepository) List(
@@ -98,7 +102,7 @@ func (r *DocumentRepository) List(
 
 	documents := make([]*domain.Document, 0, len(docModels))
 	for i := range docModels {
-		doc := mapper.DocumentToDomain(&docModels[i], docModels[i].StorageObject)
+		doc := mapper.DocumentToDomain(&docModels[i])
 		documents = append(documents, doc)
 	}
 

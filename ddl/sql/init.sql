@@ -1,17 +1,18 @@
-CREATE TABLE project (
-                          id TEXT PRIMARY KEY,
-                          key TEXT NOT NULL UNIQUE,
-                          name TEXT NOT NULL,
-                          description TEXT,
-                          status TEXT NOT NULL,
-                          created_at             TIMESTAMPTZ DEFAULT now(),
-                          updated_at             TIMESTAMPTZ DEFAULT now()
+CREATE TABLE project
+(
+    id          TEXT PRIMARY KEY,
+    key         TEXT NOT NULL UNIQUE,
+    name        TEXT NOT NULL,
+    description TEXT,
+    status      TEXT NOT NULL,
+    created_at  TIMESTAMPTZ DEFAULT now(),
+    updated_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE storage_object
 (
     id                     TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL DEFAULT '',
+    project_id             TEXT NOT NULL DEFAULT '',
     -- source info
     source_type            TEXT NOT NULL,
     source_upload_batch_id TEXT,
@@ -27,35 +28,39 @@ CREATE TABLE storage_object
     size_bytes             BIGINT,
     mime_type              TEXT,
     checksum               TEXT,
-    created_at             TIMESTAMPTZ DEFAULT now(),
-    updated_at             TIMESTAMPTZ DEFAULT now()
+    created_at             TIMESTAMPTZ   DEFAULT now(),
+    updated_at             TIMESTAMPTZ   DEFAULT now()
 );
+
 
 CREATE TABLE document
 (
-    id                 TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL DEFAULT '',
-    type TEXT NOT NULL,
+    id                TEXT PRIMARY KEY,
+    project_id        TEXT NOT NULL DEFAULT '',
+    type              TEXT NOT NULL,
     title             TEXT,
-    description TEXT,
+    description       TEXT,
     status            TEXT NOT NULL,
-    path TEXT NOT NULL,
-    "order" INT NOT NULL DEFAULT 0,
-    parent_id TEXT NOT NULL DEFAULT '',
+    path              TEXT NOT NULL,
+    "order"           INT  NOT NULL DEFAULT 0,
+    parent_id         TEXT NOT NULL DEFAULT '',
     storage_object_id TEXT NOT NULL,
-    created_at        TIMESTAMPTZ DEFAULT now(),
-    updated_at        TIMESTAMPTZ DEFAULT now()
+    created_at        TIMESTAMPTZ   DEFAULT now(),
+    updated_at        TIMESTAMPTZ   DEFAULT now()
 );
 
 
-CREATE TABLE spec_version (
-  id            BIGSERIAL PRIMARY KEY,
-  system_id     TEXT NOT NULL,
-  version       TEXT NOT NULL,      -- v1.1.0
-  is_current    BOOLEAN DEFAULT false,
-  created_at    TIMESTAMPTZ DEFAULT now(),
-  UNIQUE (system_id, version)
+
+CREATE TABLE spec_version
+(
+    id         BIGSERIAL PRIMARY KEY,
+    system_id  TEXT NOT NULL,
+    version    TEXT NOT NULL, -- v1.1.0
+    is_current BOOLEAN     DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (system_id, version)
 );
+
 
 CREATE TABLE system_spec (
   id              BIGSERIAL PRIMARY KEY,

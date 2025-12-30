@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -42,7 +43,11 @@ func (r *StorageObjectRepository) FindByID(ctx context.Context, id string) (*dom
 		return nil, fmt.Errorf("id is required")
 	}
 	var modelObj model.StorageObject
-	if err := r.db.WithContext(ctx).First(&modelObj, "id = ?", id).Error; err != nil {
+	err := r.db.WithContext(ctx).First(&modelObj, "id = ?", id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
 		return nil, fmt.Errorf("find storage object: %w", err)
 	}
 	obj := mapper.StorageObjectToDomain(&modelObj)
