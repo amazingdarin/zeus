@@ -421,6 +421,125 @@ body {
   gap: 16px;
 }
 
+.kb-header-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.kb-menu-button {
+  width: 44px;
+  height: 40px;
+  border-radius: 14px;
+  font-size: 18px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  border: 1px solid transparent;
+  background: rgba(31, 35, 40, 0.08);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.kb-menu-button:hover {
+  border-color: rgba(31, 35, 40, 0.2);
+}
+
+.kb-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  z-index: 6;
+}
+
+.kb-menu-item {
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  padding: 8px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.kb-menu-item:hover {
+  border-color: rgba(31, 35, 40, 0.2);
+  background: rgba(31, 35, 40, 0.06);
+}
+
+.kb-import-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.kb-import-tab {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink);
+  padding: 8px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.kb-import-tab.active {
+  border-color: rgba(31, 35, 40, 0.3);
+  background: rgba(31, 35, 40, 0.08);
+}
+
+.kb-import-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(31, 35, 40, 0.04);
+  min-height: 180px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.kb-import-visual {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: rgba(31, 35, 40, 0.08);
+}
+
+.kb-import-icon {
+  width: 36px;
+  height: 36px;
+  color: var(--ink);
+}
+
+.kb-import-title {
+  font-weight: 600;
+}
+
+.kb-import-note {
+  font-size: 13px;
+  color: var(--muted);
+}
+
 .kb-breadcrumb {
   font-size: 16px;
   font-weight: 600;
