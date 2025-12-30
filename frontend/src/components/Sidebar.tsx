@@ -1,5 +1,7 @@
 import { Link } from "react-router-dom";
 
+import ProjectSelector from "./ProjectSelector";
+
 type SidebarItem = {
   label: string;
   to?: string;
@@ -13,6 +15,7 @@ type SidebarProps = {
 function Sidebar({ items, activeIndex = 0 }: SidebarProps) {
   return (
     <aside className="sidebar">
+      <ProjectSelector />
       <div className="sidebar-title">Workspace</div>
       <nav className="sidebar-nav">
         {items.map((item, index) => {

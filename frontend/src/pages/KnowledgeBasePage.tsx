@@ -1,11 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import KnowledgeBaseHeader from "../components/KnowledgeBaseHeader";
 import KnowledgeBaseLayout from "../components/KnowledgeBaseLayout";
 import RawDocumentListPage from "./RawDocumentListPage";
+import { useProjectContext } from "../context/ProjectContext";
 
 function KnowledgeBasePage() {
   const [activeNavId, setActiveNavId] = useState("overview");
+  const { currentProject } = useProjectContext();
+
+  useEffect(() => {
+    if (!currentProject) {
+      return;
+    }
+    console.log("knowledge_base_reload", currentProject.key);
+  }, [currentProject]);
 
   return (
     <KnowledgeBaseLayout
