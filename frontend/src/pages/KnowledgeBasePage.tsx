@@ -153,6 +153,20 @@ function KnowledgeBasePage() {
       ),
     [rootDocuments],
   );
+  const documentIndex = useMemo(() => {
+    const index: Record<string, KnowledgeBaseDocument> = {};
+    rootDocuments.forEach((doc) => {
+      index[doc.id] = doc;
+    });
+    Object.values(childrenByParent).forEach((docs) => {
+      docs.forEach((doc) => {
+        index[doc.id] = doc;
+      });
+    });
+    return index;
+  }, [rootDocuments, childrenByParent]);
+  const activeDocument = activeDocumentId ? documentIndex[activeDocumentId] ?? null : null;
+  const allowChildActions = activeDocument?.type !== "overview";
 
   return (
     <KnowledgeBaseLayout
@@ -171,7 +185,7 @@ function KnowledgeBasePage() {
         />
       }
     >
-      <KnowledgeBaseHeader />
+      <KnowledgeBaseHeader allowChildActions={allowChildActions} />
       <p className="content-subtitle">
         Select a document from the left navigation to view its details.
       </p>
