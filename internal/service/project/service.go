@@ -138,7 +138,7 @@ func (s *Service) hasChild(ctx context.Context, projectID string, parentID strin
 	}
 	_, total, err := s.documentRepo.List(ctx, repository.DocumentFilter{
 		ProjectID: projectID,
-		ParentID:  parentID,
+		ParentID:  &parentID,
 	}, repository.DocumentOption{Limit: 1})
 	if err != nil {
 		return false, fmt.Errorf("list child documents: %w", err)

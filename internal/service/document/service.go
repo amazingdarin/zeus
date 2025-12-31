@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"zeus/internal/domain"
 	"zeus/internal/infra/ingestion"
 	"zeus/internal/repository"
@@ -45,10 +47,61 @@ func (s *Service) Create(
 ) (*domain.Document, error) {
 	_ = ctx
 	_ = content
+	if s == nil || s.repo == nil {
+		return nil, fmt.Errorf("document service not initialized")
+	}
 	if doc == nil {
 		return nil, fmt.Errorf("document is required")
 	}
-	return nil, fmt.Errorf("create manual/derived document is not supported in current phase")
+	doc.ProjectID = strings.TrimSpace(doc.ProjectID)
+	if doc.ProjectID == "" {
+		return nil, fmt.Errorf("project id is required")
+	}
+	if strings.TrimSpace(doc.Title) == "" {
+		return nil, fmt.Errorf("title is required")
+	}
+	storageID := ""
+	if doc.StorageObject != nil {
+		storageID = strings.TrimSpace(doc.StorageObject.ID)
+	}
+	if storageID == "" {
+		return nil, fmt.Errorf("storage object id is required")
+	}
+	if strings.TrimSpace(doc.ID) == "" {
+		doc.ID = uuid.NewString()
+	}
+	if doc.Type == "" {
+		doc.Type = domain.DocumentTypeOrigin
+	}
+	if doc.Status == "" {
+		doc.Status = domain.DocumentStatusActive
+	}
+	if strings.TrimSpace(doc.Path) == "" {
+		doc.Path = path.Join("/", "doc", doc.ID)
+	}
+	if doc.Parent != nil {
+		parentID := strings.TrimSpace(doc.Parent.ID)
+		if parentID == "" {
+			doc.Parent = nil
+		} else {
+			doc.Parent = &domain.Document{ID: parentID}
+		}
+	}
+	doc.StorageObject = &domain.StorageObject{ID: storageID}
+
+	now := time.Now()
+	if s.now != nil {
+		now = s.now()
+	}
+	if doc.CreatedAt.IsZero() {
+		doc.CreatedAt = now
+	}
+	doc.UpdatedAt = now
+
+	if err := s.repo.Insert(ctx, doc); err != nil {
+		return nil, fmt.Errorf("insert document: %w", err)
+	}
+	return doc, nil
 }
 
 func (s *Service) Get(ctx context.Context, id string) (*domain.Document, error) {
@@ -83,7 +136,8 @@ func (s *Service) ListByParent(ctx context.Context, parentID string) ([]*domain.
 	}
 	filter := repository.DocumentFilter{}
 	option := repository.DocumentOption{}
-	filter.ParentID = strings.TrimSpace(parentID)
+	parentID = strings.TrimSpace(parentID)
+	filter.ParentID = &parentID
 	docs, _, err := s.repo.List(ctx, filter, option)
 	if err != nil {
 		return nil, fmt.Errorf("list documents: %w", err)

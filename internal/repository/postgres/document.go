@@ -26,7 +26,7 @@ func (r *DocumentRepository) Insert(ctx context.Context, doc *domain.Document) e
 		return fmt.Errorf("repository not initialized")
 	}
 	docModel := mapper.DocumentFromDomain(doc)
-	if err := r.db.WithContext(ctx).Create(docModel).Error; err != nil {
+	if err := r.db.WithContext(ctx).Omit("StorageObject").Create(docModel).Error; err != nil {
 		return fmt.Errorf("insert document: %w", err)
 	}
 	return nil
@@ -37,7 +37,7 @@ func (r *DocumentRepository) Save(ctx context.Context, doc *domain.Document) err
 		return fmt.Errorf("repository not initialized")
 	}
 	docModel := mapper.DocumentFromDomain(doc)
-	if err := r.db.WithContext(ctx).Save(docModel).Error; err != nil {
+	if err := r.db.WithContext(ctx).Omit("StorageObject").Save(docModel).Error; err != nil {
 		return fmt.Errorf("save document: %w", err)
 	}
 	return nil
@@ -110,8 +110,8 @@ func applyDocumentFilters(query *gorm.DB, filter repository.DocumentFilter) *gor
 	if filter.ProjectID != "" {
 		query = query.Where("project_id = ?", filter.ProjectID)
 	}
-	if filter.ParentID != "" {
-		query = query.Where("parent_id = ?", filter.ParentID)
+	if filter.ParentID != nil {
+		query = query.Where("parent_id = ?", *filter.ParentID)
 	}
 	if filter.Type != "" {
 		query = query.Where("type = ?", string(filter.Type))

@@ -13,14 +13,44 @@ import (
 )
 
 type StorageObjectHandler struct {
-	svc service.StorageObjectService
+	svc        service.StorageObjectService
+	projectSvc service.ProjectService
 }
 
-func NewStorageObjectHandler(svc service.StorageObjectService) *StorageObjectHandler {
-	return &StorageObjectHandler{svc: svc}
+func NewStorageObjectHandler(
+	svc service.StorageObjectService,
+	projectSvc service.ProjectService,
+) *StorageObjectHandler {
+	return &StorageObjectHandler{svc: svc, projectSvc: projectSvc}
 }
 
+// Create
+// @route POST /api/projects/{project_key}/storage-objects
 func (h *StorageObjectHandler) Create(c *gin.Context) {
+	projectKey := strings.TrimSpace(c.Param("project_key"))
+	if projectKey == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{
+			Code:    "MISSING_PROJECT_KEY",
+			Message: "project_key is required",
+		})
+		return
+	}
+	if h.projectSvc == nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+			Code:    "PROJECT_SERVICE_NOT_READY",
+			Message: "project service is required",
+		})
+		return
+	}
+	project, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+			Code:    "LOAD_PROJECT_FAILED",
+			Message: err.Error(),
+		})
+		return
+	}
+
 	var req types.CreateStorageObjectRequest
 	if err := c.ShouldBind(&req); err != nil {
 		c.JSON(http.StatusBadRequest, types.ErrorResponse{
@@ -49,6 +79,7 @@ func (h *StorageObjectHandler) Create(c *gin.Context) {
 	defer file.Close()
 
 	so := &domain.StorageObject{
+		ProjectID: project.ID,
 		Source: domain.SourceInfo{
 			Type:          domain.StorageObjectSourceType(req.SourceType),
 			UploadBatchID: req.SourceUploadBatchID,
@@ -75,7 +106,7 @@ func (h *StorageObjectHandler) Create(c *gin.Context) {
 		Reader:    file,
 		SizeBytes: fileHeader.Size,
 		MimeType:  mimeType,
-		Namespace: req.Namespace,
+		Namespace: project.ID,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{

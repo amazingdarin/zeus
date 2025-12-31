@@ -8,7 +8,7 @@ import (
 
 type DocumentFilter struct {
 	ProjectID string
-	ParentID  string
+	ParentID  *string
 	Type      domain.DocumentType
 	Status    domain.DocumentStatus
 }

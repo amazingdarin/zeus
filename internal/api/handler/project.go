@@ -19,9 +19,9 @@ func NewProjectHandler(svc service.ProjectService) *ProjectHandler {
 	return &ProjectHandler{svc: svc}
 }
 
-// CreateProject
+// Create
 // @route POST /api/projects
-func (h *ProjectHandler) CreateProject(c *gin.Context) {
+func (h *ProjectHandler) Create(c *gin.Context) {
 	var req types.CreateProjectRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, types.CreateProjectResponse{
@@ -59,9 +59,9 @@ func (h *ProjectHandler) CreateProject(c *gin.Context) {
 	})
 }
 
-// ListProjects
+// List
 // @route GET /api/projects
-func (h *ProjectHandler) ListProjects(c *gin.Context) {
+func (h *ProjectHandler) List(c *gin.Context) {
 	projects, err := h.svc.List(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, types.ListProjectResponse{
@@ -87,73 +87,6 @@ func (h *ProjectHandler) ListProjects(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, types.ListProjectResponse{
-		Code:    "OK",
-		Message: "success",
-		Data:    items,
-	})
-}
-
-// ListProjectDocuments
-// @route GET /api/projects/:project_key/documents
-func (h *ProjectHandler) ListProjectDocuments(c *gin.Context) {
-	projectKey := c.Param("project_key")
-	if projectKey == "" {
-		c.JSON(http.StatusBadRequest, types.ListProjectDocumentsResponse{
-			Code:    "MISSING_PROJECT_KEY",
-			Message: "project_key is required",
-		})
-		return
-	}
-
-	var req types.ListProjectDocumentsRequest
-	if err := c.ShouldBindQuery(&req); err != nil {
-		c.JSON(http.StatusBadRequest, types.ListProjectDocumentsResponse{
-			Code:    "INVALID_QUERY",
-			Message: err.Error(),
-		})
-		return
-	}
-
-	documents, err := h.svc.ListDocuments(c.Request.Context(), projectKey, req.ParentID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, types.ListProjectDocumentsResponse{
-			Code:    "LIST_DOCUMENT_FAILED",
-			Message: err.Error(),
-		})
-		return
-	}
-
-	items := make([]*types.ProjectDocumentDTO, 0, len(documents))
-	for _, doc := range documents {
-		if doc == nil {
-			continue
-		}
-		parentID := ""
-		if doc.Parent != nil {
-			parentID = doc.Parent.ID
-		}
-		storageObjectID := ""
-		if doc.StorageObject != nil {
-			storageObjectID = doc.StorageObject.ID
-		}
-		items = append(items, &types.ProjectDocumentDTO{
-			ID:              doc.ID,
-			ProjectID:       doc.ProjectID,
-			Type:            string(doc.Type),
-			Title:           doc.Title,
-			Description:     doc.Description,
-			Status:          string(doc.Status),
-			Path:            doc.Path,
-			Order:           doc.Order,
-			ParentID:        parentID,
-			HasChild:        doc.HasChild,
-			StorageObjectID: storageObjectID,
-			CreatedAt:       doc.CreatedAt.Format(time.RFC3339),
-			UpdatedAt:       doc.UpdatedAt.Format(time.RFC3339),
-		})
-	}
-
-	c.JSON(http.StatusOK, types.ListProjectDocumentsResponse{
 		Code:    "OK",
 		Message: "success",
 		Data:    items,

@@ -12,16 +12,20 @@ func RegisterRoutes(
 	documentSvc service.DocumentService,
 	projectSvc service.ProjectService,
 ) {
-	storageObjectHandler := NewStorageObjectHandler(storageObjectSvc)
+	storageObjectHandler := NewStorageObjectHandler(storageObjectSvc, projectSvc)
 	projectHandler := NewProjectHandler(projectSvc)
+	documentHandler := NewDocumentHandler(projectSvc, documentSvc)
 
 	api := r.Group("/api")
 
 	// StorageObject
-	api.POST("/storage-objects", storageObjectHandler.Create)
+	api.POST("/projects/:project_key/storage-objects", storageObjectHandler.Create)
 
 	// Project
-	api.POST("/projects", projectHandler.CreateProject)
-	api.GET("/projects", projectHandler.ListProjects)
-	api.GET("/projects/:project_key/documents", projectHandler.ListProjectDocuments)
+	api.POST("/projects", projectHandler.Create)
+	api.GET("/projects", projectHandler.List)
+
+	// Document
+	api.GET("/projects/:project_key/documents", documentHandler.List)
+	api.POST("/projects/:project_key/documents", documentHandler.Create)
 }

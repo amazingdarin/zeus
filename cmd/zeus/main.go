@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 
+	"zeus/internal/api/middleware"
+
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
@@ -77,7 +79,7 @@ func main() {
 	projectSvc := svcproject.NewService(projectRepo, documentRepo, s3Ingestion, storageObjectSvc, documentSvc)
 
 	router := gin.Default()
-	router.Use(handler.CORSMiddleware())
+	router.Use(middleware.CORSMiddleware())
 	handler.RegisterRoutes(router, storageObjectSvc, documentSvc, projectSvc)
 
 	if err = router.Run(addr); err != nil {

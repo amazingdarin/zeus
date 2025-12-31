@@ -3,11 +3,17 @@ package types
 import "time"
 
 type CreateDocumentRequest struct {
-	ProjectID       string `json:"project_id" form:"project_id" binding:"required"`
+	ProjectID       string `json:"project_id" form:"project_id"`
 	Title           string `json:"title" form:"title" binding:"required"`
 	Description     string `json:"description" form:"description"`
 	ParentID        string `json:"parent_id" form:"parent_id" binding:"required"`
 	StorageObjectID string `json:"storage_object_id" form:"storage_object_id" binding:"required"`
+}
+
+type CreateDocumentResponse struct {
+	Code    string              `json:"code"`
+	Message string              `json:"message"`
+	Data    *ProjectDocumentDTO `json:"data,omitempty"`
 }
 
 // RawDocumentDTO API 返回用文档结构
