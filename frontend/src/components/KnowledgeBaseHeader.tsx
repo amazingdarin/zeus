@@ -86,65 +86,178 @@ function KnowledgeBaseHeader({
         console.log("import_file_missing_project");
         return;
       }
-      const objectKey = `doc/${Date.now()}_${file.name}`;
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("source_type", "upload");
-      formData.append("storage_type", "s3");
-      formData.append("object_key", objectKey);
-      if (file.type) {
-        formData.append("mime_type", file.type);
-      }
       try {
-        const response = await fetch(
-          buildApiUrl(`/api/projects/${encodeURIComponent(projectKey)}/storage-objects`),
-          {
-            method: "POST",
-            body: formData,
-          },
+        const uploadPrefix = `doc/${Date.now()}`;
+        const storageObjectID = await uploadStorageObject(
+          projectKey,
+          file,
+          `${uploadPrefix}/${file.name}`,
         );
-        if (!response.ok) {
-          throw new Error("upload failed");
-        }
-        const payload = await response.json();
-        const storageObjectID = String(payload?.id ?? "");
-        if (!storageObjectID) {
-          throw new Error("missing storage object id");
-        }
-        const createResponse = await fetch(
-          buildApiUrl(`/api/projects/${encodeURIComponent(projectKey)}/documents`),
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              title: file.name,
-              parent_id: parentDocumentId ?? "",
-              storage_object_id: storageObjectID,
-            }),
-          },
+        const documentPayload = await createDocumentRecord(
+          projectKey,
+          file.name,
+          parentDocumentId ?? "",
+          storageObjectID,
         );
-        if (!createResponse.ok) {
-          throw new Error("create document failed");
-        }
-        const documentPayload = await createResponse.json();
-        console.log("import_file_success", {
-          storageObject: payload,
-          document: documentPayload,
-        });
-        if (onImportSuccess) {
-          onImportSuccess(parentDocumentId);
-        }
+        console.log("import_file_success", documentPayload);
+        onImportSuccess?.(parentDocumentId);
       } catch (error) {
         console.log("import_file_error", error);
       }
     } else {
-      console.log("import_folder_not_supported");
+      if (!projectKey) {
+        console.log("import_folder_missing_project");
+        return;
+      }
+      if (selectedFiles.length === 0) {
+        console.log("import_folder_empty");
+        return;
+      }
+      try {
+        const uploadPrefix = `doc/${Date.now()}`;
+        const folderPaths = buildFolderPaths(selectedFiles);
+        const createdDocs = new Map<string, string>();
+        for (const folderPath of folderPaths) {
+          const parentPath = folderPath.split("/").slice(0, -1).join("/");
+          const parentID = parentPath
+            ? createdDocs.get(parentPath) ?? ""
+            : parentDocumentId ?? "";
+          const folderName = folderPath.split("/").slice(-1)[0] ?? "Folder";
+          const placeholderFile = new File([""], `${folderName}.dir`, {
+            type: "application/x-directory",
+          });
+          const storageObjectID = await uploadStorageObject(
+            projectKey,
+            placeholderFile,
+            `${uploadPrefix}/${folderPath}/.dir`,
+          );
+          const documentPayload = await createDocumentRecord(
+            projectKey,
+            folderName,
+            parentID,
+            storageObjectID,
+          );
+          const createdID = String(documentPayload?.data?.id ?? "");
+          if (createdID) {
+            createdDocs.set(folderPath, createdID);
+          }
+        }
+
+        const fileEntries = buildFileEntries(selectedFiles);
+        for (const entry of fileEntries) {
+          const parentID = entry.parentPath
+            ? createdDocs.get(entry.parentPath) ?? ""
+            : parentDocumentId ?? "";
+          const storageObjectID = await uploadStorageObject(
+            projectKey,
+            entry.file,
+            `${uploadPrefix}/${entry.relativePath}`,
+          );
+          await createDocumentRecord(
+            projectKey,
+            entry.file.name,
+            parentID,
+            storageObjectID,
+          );
+        }
+        console.log("import_folder_success", {
+          folders: folderPaths.length,
+          files: fileEntries.length,
+        });
+        onImportSuccess?.(parentDocumentId);
+      } catch (error) {
+        console.log("import_folder_error", error);
+      }
     }
     setSelectedFiles([]);
     setImportModalOpen(false);
   };
+
+  const uploadStorageObject = async (
+    key: string,
+    file: File,
+    objectKey: string,
+  ): Promise<string> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("source_type", "upload");
+    formData.append("storage_type", "s3");
+    formData.append("object_key", objectKey);
+    if (file.type) {
+      formData.append("mime_type", file.type);
+    }
+    const response = await fetch(
+      buildApiUrl(`/api/projects/${encodeURIComponent(key)}/storage-objects`),
+      {
+        method: "POST",
+        body: formData,
+      },
+    );
+    if (!response.ok) {
+      throw new Error("upload failed");
+    }
+    const payload = await response.json();
+    const storageObjectID = String(payload?.id ?? "");
+    if (!storageObjectID) {
+      throw new Error("missing storage object id");
+    }
+    return storageObjectID;
+  };
+
+  const createDocumentRecord = async (
+    key: string,
+    title: string,
+    parentID: string,
+    storageObjectID: string,
+  ) => {
+    const response = await fetch(
+      buildApiUrl(`/api/projects/${encodeURIComponent(key)}/documents`),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title,
+          parent_id: parentID,
+          storage_object_id: storageObjectID,
+        }),
+      },
+    );
+    if (!response.ok) {
+      throw new Error("create document failed");
+    }
+    return response.json();
+  };
+
+  const buildFolderPaths = (files: File[]) => {
+    const folders = new Set<string>();
+    files.forEach((file) => {
+      const rawPath =
+        (file as File & { webkitRelativePath?: string }).webkitRelativePath ?? file.name;
+      const normalizedPath = rawPath.replace(/\\/g, "/").replace(/^\/+/, "");
+      const parts = normalizedPath.split("/").filter(Boolean);
+      for (let i = 1; i < parts.length; i += 1) {
+        folders.add(parts.slice(0, i).join("/"));
+      }
+    });
+    return Array.from(folders).sort((a, b) => {
+      const depthDiff = a.split("/").length - b.split("/").length;
+      if (depthDiff !== 0) {
+        return depthDiff;
+      }
+      return a.localeCompare(b);
+    });
+  };
+
+  const buildFileEntries = (files: File[]) =>
+    files.map((file) => {
+      const rawPath =
+        (file as File & { webkitRelativePath?: string }).webkitRelativePath ?? file.name;
+      const normalizedPath = rawPath.replace(/\\/g, "/").replace(/^\/+/, "");
+      const parentPath = normalizedPath.split("/").slice(0, -1).join("/");
+      return { file, relativePath: normalizedPath, parentPath };
+    });
 
   const handleModeChange = (mode: "file" | "folder") => {
     setImportMode(mode);
