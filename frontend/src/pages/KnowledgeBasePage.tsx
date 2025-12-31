@@ -83,7 +83,7 @@ function KnowledgeBasePage() {
 
   const loadChildren = useCallback(
     async (projectKey: string, parentId: string) => {
-      if (childrenByParent[parentId] || loadingIds[parentId]) {
+      if (loadingIds[parentId]) {
         return;
       }
       setLoadingIds((prev) => ({ ...prev, [parentId]: true }));
@@ -103,8 +103,10 @@ function KnowledgeBasePage() {
         }
       }
     },
-    [childrenByParent, fetchDocuments, loadingIds],
+    [fetchDocuments, loadingIds],
   );
+
+  const refreshChildren = loadChildren;
 
   useEffect(() => {
     const projectKey = currentProject?.key ?? null;
@@ -122,15 +124,15 @@ function KnowledgeBasePage() {
   }, [currentProject?.key, loadRootDocuments]);
 
   const handleToggle = useCallback(
-    (doc: KnowledgeBaseDocument) => {
+    async (doc: KnowledgeBaseDocument) => {
       if (!currentProject?.key || !doc.hasChild) {
         return;
       }
       const nextExpanded = !expandedIds[doc.id];
-      setExpandedIds((prev) => ({ ...prev, [doc.id]: nextExpanded }));
       if (nextExpanded) {
-        loadChildren(currentProject.key, doc.id);
+        await loadChildren(currentProject.key, doc.id);
       }
+      setExpandedIds((prev) => ({ ...prev, [doc.id]: nextExpanded }));
     },
     [currentProject, expandedIds, loadChildren],
   );
@@ -167,6 +169,19 @@ function KnowledgeBasePage() {
   }, [rootDocuments, childrenByParent]);
   const activeDocument = activeDocumentId ? documentIndex[activeDocumentId] ?? null : null;
   const allowChildActions = activeDocument?.type !== "overview";
+  const handleImportSuccess = useCallback(
+    (parentId: string | null) => {
+      if (!currentProject?.key) {
+        return;
+      }
+      if (!parentId) {
+        loadRootDocuments(currentProject.key);
+        return;
+      }
+      refreshChildren(currentProject.key, parentId);
+    },
+    [currentProject?.key, loadRootDocuments, refreshChildren],
+  );
 
   return (
     <KnowledgeBaseLayout
@@ -185,7 +200,12 @@ function KnowledgeBasePage() {
         />
       }
     >
-      <KnowledgeBaseHeader allowChildActions={allowChildActions} />
+      <KnowledgeBaseHeader
+        allowChildActions={allowChildActions}
+        projectKey={currentProject?.key ?? null}
+        parentDocumentId={activeDocumentId}
+        onImportSuccess={handleImportSuccess}
+      />
       <p className="content-subtitle">
         Select a document from the left navigation to view its details.
       </p>

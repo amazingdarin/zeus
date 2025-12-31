@@ -47,7 +47,7 @@ function ProjectSelector() {
         <span className="project-selector-label">
           {activeProject ? activeProject.name : "Select a project"}
         </span>
-        <span className="project-selector-caret">v</span>
+        <span className="project-selector-caret">{open ? "v" : ">"}</span>
       </button>
       {open ? (
         <div className="project-selector-menu">

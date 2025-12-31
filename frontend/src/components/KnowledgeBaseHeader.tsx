@@ -1,14 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 
+import { buildApiUrl } from "../config/api";
+
 type KnowledgeBaseHeaderProps = {
   title?: string;
   allowChildActions?: boolean;
+  projectKey?: string | null;
+  parentDocumentId?: string | null;
+  onImportSuccess?: (parentId: string | null) => void;
 };
 
 function KnowledgeBaseHeader({
   title = "Knowledge Base",
   allowChildActions = true,
+  projectKey = null,
+  parentDocumentId = null,
+  onImportSuccess,
 }: KnowledgeBaseHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [newModalOpen, setNewModalOpen] = useState(false);
@@ -67,29 +75,74 @@ function KnowledgeBaseHeader({
     setSelectedFiles(files);
   };
 
-  const handleImportSubmit = () => {
+  const handleImportSubmit = async () => {
     if (importMode === "file") {
       const file = selectedFiles[0];
-      if (file) {
-        console.log("import_file", {
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          lastModified: file.lastModified,
-        });
-      } else {
+      if (!file) {
         console.log("import_file_empty");
+        return;
+      }
+      if (!projectKey) {
+        console.log("import_file_missing_project");
+        return;
+      }
+      const objectKey = `doc/${Date.now()}_${file.name}`;
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("source_type", "upload");
+      formData.append("storage_type", "s3");
+      formData.append("object_key", objectKey);
+      if (file.type) {
+        formData.append("mime_type", file.type);
+      }
+      try {
+        const response = await fetch(
+          buildApiUrl(`/api/projects/${encodeURIComponent(projectKey)}/storage-objects`),
+          {
+            method: "POST",
+            body: formData,
+          },
+        );
+        if (!response.ok) {
+          throw new Error("upload failed");
+        }
+        const payload = await response.json();
+        const storageObjectID = String(payload?.id ?? "");
+        if (!storageObjectID) {
+          throw new Error("missing storage object id");
+        }
+        const createResponse = await fetch(
+          buildApiUrl(`/api/projects/${encodeURIComponent(projectKey)}/documents`),
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              title: file.name,
+              parent_id: parentDocumentId ?? "",
+              storage_object_id: storageObjectID,
+            }),
+          },
+        );
+        if (!createResponse.ok) {
+          throw new Error("create document failed");
+        }
+        const documentPayload = await createResponse.json();
+        console.log("import_file_success", {
+          storageObject: payload,
+          document: documentPayload,
+        });
+        if (onImportSuccess) {
+          onImportSuccess(parentDocumentId);
+        }
+      } catch (error) {
+        console.log("import_file_error", error);
       }
     } else {
-      const payload = selectedFiles.map((file) => ({
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        lastModified: file.lastModified,
-        relativePath: (file as File & { webkitRelativePath?: string }).webkitRelativePath ?? "",
-      }));
-      console.log("import_folder", payload);
+      console.log("import_folder_not_supported");
     }
+    setSelectedFiles([]);
     setImportModalOpen(false);
   };
 

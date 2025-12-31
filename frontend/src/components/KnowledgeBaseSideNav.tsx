@@ -40,24 +40,31 @@ function KnowledgeBaseSideNav({
         const isLoading = Boolean(loadingIds[doc.id]);
         return (
           <div key={doc.id} className="kb-doc-node">
-            <div className="kb-doc-row" style={{ paddingLeft: `${depth * 14}px` }}>
-              <button
-                className={`kb-doc-item${activeId === doc.id ? " active" : ""}`}
-                type="button"
-                onClick={() => onSelect(doc.id)}
+            <div className="kb-doc-row">
+              <div
+                className={`kb-doc-control${activeId === doc.id ? " active" : ""}`}
+                style={{ paddingLeft: `${8 + depth * 14}px` }}
               >
-                {doc.title || "Untitled"}
-              </button>
-              {doc.hasChild ? (
+                {doc.hasChild ? (
+                  <button
+                    className="kb-doc-toggle"
+                    type="button"
+                    onClick={() => onToggle(doc)}
+                    aria-label={isExpanded ? "Collapse" : "Expand"}
+                  >
+                    {isExpanded ? "v" : ">"}
+                  </button>
+                ) : (
+                  <span className="kb-doc-dot" aria-hidden="true" />
+                )}
                 <button
-                  className="kb-doc-toggle"
+                  className="kb-doc-item"
                   type="button"
-                  onClick={() => onToggle(doc)}
-                  aria-label={isExpanded ? "Collapse" : "Expand"}
+                  onClick={() => onSelect(doc.id)}
                 >
-                  {isExpanded ? "−" : "+"}
+                  {doc.title || "Untitled"}
                 </button>
-              ) : null}
+              </div>
             </div>
             {isExpanded ? (
               <div className="kb-doc-children">
