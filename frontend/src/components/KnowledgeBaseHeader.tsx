@@ -23,6 +23,9 @@ function KnowledgeBaseHeader({
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importMode, setImportMode] = useState<"file" | "folder">("file");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadTotal, setUploadTotal] = useState(0);
+  const [uploadCompleted, setUploadCompleted] = useState(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -55,11 +58,17 @@ function KnowledgeBaseHeader({
     setNewModalOpen(false);
     setImportMode("file");
     setSelectedFiles([]);
+    setUploading(false);
+    setUploadTotal(0);
+    setUploadCompleted(0);
     setImportModalOpen(true);
   };
 
   const handleCloseImport = () => {
     setImportModalOpen(false);
+    setUploading(false);
+    setUploadTotal(0);
+    setUploadCompleted(0);
   };
 
   const handleFilePick = () => {
@@ -86,6 +95,9 @@ function KnowledgeBaseHeader({
         console.log("import_file_missing_project");
         return;
       }
+      setUploading(true);
+      setUploadTotal(1);
+      setUploadCompleted(0);
       try {
         const uploadPrefix = `doc/${Date.now()}`;
         const storageObjectID = await uploadStorageObject(
@@ -100,9 +112,14 @@ function KnowledgeBaseHeader({
           storageObjectID,
         );
         console.log("import_file_success", documentPayload);
+        setUploadCompleted(1);
         onImportSuccess?.(parentDocumentId);
       } catch (error) {
         console.log("import_file_error", error);
+      } finally {
+        setUploading(false);
+        setUploadTotal(0);
+        setUploadCompleted(0);
       }
     } else {
       if (!projectKey) {
@@ -116,6 +133,11 @@ function KnowledgeBaseHeader({
       try {
         const uploadPrefix = `doc/${Date.now()}`;
         const folderPaths = buildFolderPaths(selectedFiles);
+        const fileEntries = buildFileEntries(selectedFiles);
+        const totalItems = folderPaths.length + fileEntries.length;
+        setUploading(true);
+        setUploadTotal(totalItems);
+        setUploadCompleted(0);
         const createdDocs = new Map<string, string>();
         for (const folderPath of folderPaths) {
           const parentPath = folderPath.split("/").slice(0, -1).join("/");
@@ -141,9 +163,9 @@ function KnowledgeBaseHeader({
           if (createdID) {
             createdDocs.set(folderPath, createdID);
           }
+          setUploadCompleted((prev) => prev + 1);
         }
 
-        const fileEntries = buildFileEntries(selectedFiles);
         for (const entry of fileEntries) {
           const parentID = entry.parentPath
             ? createdDocs.get(entry.parentPath) ?? ""
@@ -159,6 +181,7 @@ function KnowledgeBaseHeader({
             parentID,
             storageObjectID,
           );
+          setUploadCompleted((prev) => prev + 1);
         }
         console.log("import_folder_success", {
           folders: folderPaths.length,
@@ -167,6 +190,10 @@ function KnowledgeBaseHeader({
         onImportSuccess?.(parentDocumentId);
       } catch (error) {
         console.log("import_folder_error", error);
+      } finally {
+        setUploading(false);
+        setUploadTotal(0);
+        setUploadCompleted(0);
       }
     }
     setSelectedFiles([]);
@@ -262,6 +289,9 @@ function KnowledgeBaseHeader({
   const handleModeChange = (mode: "file" | "folder") => {
     setImportMode(mode);
     setSelectedFiles([]);
+    setUploading(false);
+    setUploadTotal(0);
+    setUploadCompleted(0);
   };
 
   useEffect(() => {
@@ -277,8 +307,14 @@ function KnowledgeBaseHeader({
     if (!allowChildActions) {
       setNewModalOpen(false);
       setImportModalOpen(false);
+      setUploading(false);
+      setUploadTotal(0);
+      setUploadCompleted(0);
     }
   }, [allowChildActions]);
+
+  const uploadProgress =
+    uploadTotal > 0 ? Math.round((uploadCompleted / uploadTotal) * 100) : 0;
 
   return (
     <div className="kb-main-header">
@@ -437,8 +473,16 @@ function KnowledgeBaseHeader({
               <button className="btn ghost" type="button" onClick={handleCloseImport}>
                 Cancel
               </button>
-              <button className="btn primary" type="button" onClick={handleImportSubmit}>
-                Import
+              <button
+                className="btn primary"
+                type="button"
+                onClick={handleImportSubmit}
+                disabled={uploading}
+              >
+                {uploading ? <span className="kb-import-spinner" aria-hidden="true" /> : null}
+                {importMode === "folder" && uploading
+                  ? `Import ${uploadProgress}%`
+                  : "Import"}
               </button>
             </div>
           </div>

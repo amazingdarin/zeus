@@ -569,6 +569,23 @@ body {
   color: var(--muted);
 }
 
+.kb-import-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  border-top-color: #ffffff;
+  display: inline-block;
+  margin-right: 8px;
+  animation: kb-spin 0.8s linear infinite;
+}
+
+@keyframes kb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .kb-file-input {
   position: absolute;
   opacity: 0;
@@ -656,6 +673,9 @@ body {
   border-radius: 12px;
   font-weight: 600;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .btn.ghost {
