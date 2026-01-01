@@ -71,7 +71,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("init storage object repository: %v", err)
 	}
-	storageObjectSvc := svcstorageobject.NewService(s3Ingestion, storageObjectRepo)
+	storageObjectSvc := svcstorageobject.NewService(s3Ingestion, s3Client, storageObjectRepo)
 	documentSvc, err := svcdocument.NewService(s3Ingestion, documentRepo)
 	if err != nil {
 		log.Fatalf("init document service: %v", err)

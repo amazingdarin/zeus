@@ -27,3 +27,16 @@ type CreateStorageObjectResponse struct {
 	ID        string `json:"id"`
 	CreatedAt string `json:"created_at"`
 }
+
+type StorageObjectDownloadDTO struct {
+	Type      string `json:"type"`
+	URL       string `json:"url"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+type GetStorageObjectAccessResponse struct {
+	StorageObjectID string                   `json:"storage_object_id"`
+	MimeType        string                   `json:"mime_type"`
+	SizeBytes       int64                    `json:"size_bytes"`
+	Download        StorageObjectDownloadDTO `json:"download"`
+}

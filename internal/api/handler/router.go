@@ -20,6 +20,7 @@ func RegisterRoutes(
 
 	// StorageObject
 	api.POST("/projects/:project_key/storage-objects", storageObjectHandler.Create)
+	api.GET("/projects/:project_key/storage-objects/:storage_object_id", storageObjectHandler.GetAccess)
 
 	// Project
 	api.POST("/projects", projectHandler.Create)
