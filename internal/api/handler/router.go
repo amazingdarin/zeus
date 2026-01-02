@@ -29,4 +29,5 @@ func RegisterRoutes(
 	// Document
 	api.GET("/projects/:project_key/documents", documentHandler.List)
 	api.POST("/projects/:project_key/documents", documentHandler.Create)
+	api.GET("/projects/:project_key/documents/:document_id", documentHandler.Get)
 }

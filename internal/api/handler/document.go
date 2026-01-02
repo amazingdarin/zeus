@@ -156,7 +156,16 @@ func (h *DocumentHandler) List(c *gin.Context) {
 		return
 	}
 
-	documents, err := h.documentSvc.ListByParent(c.Request.Context(), req.ParentID)
+	project, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+			Code:    "LOAD_PROJECT_FAILED",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	documents, err := h.documentSvc.ListByParent(c.Request.Context(), project.ID, req.ParentID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, types.ListProjectDocumentsResponse{
 			Code:    "LIST_DOCUMENT_FAILED",
@@ -199,5 +208,88 @@ func (h *DocumentHandler) List(c *gin.Context) {
 		Code:    "OK",
 		Message: "success",
 		Data:    items,
+	})
+}
+
+// Get
+// @route GET /api/projects/:project_key/documents/:document_id
+func (h *DocumentHandler) Get(c *gin.Context) {
+	projectKey := strings.TrimSpace(c.Param("project_key"))
+	if projectKey == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{
+			Code:    "MISSING_PROJECT_KEY",
+			Message: "project_key is required",
+		})
+		return
+	}
+	documentID := strings.TrimSpace(c.Param("document_id"))
+	if documentID == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{
+			Code:    "MISSING_DOCUMENT_ID",
+			Message: "document_id is required",
+		})
+		return
+	}
+	if h.projectSvc == nil || h.documentSvc == nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+			Code:    "SERVICE_NOT_READY",
+			Message: "document service is required",
+		})
+		return
+	}
+	project, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+			Code:    "LOAD_PROJECT_FAILED",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	doc, err := h.documentSvc.Get(c.Request.Context(), documentID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+			Code:    "GET_DOCUMENT_FAILED",
+			Message: err.Error(),
+		})
+		return
+	}
+	if doc == nil || doc.ProjectID != project.ID {
+		c.JSON(http.StatusNotFound, types.ErrorResponse{
+			Code:    "DOCUMENT_NOT_FOUND",
+			Message: "document not found",
+		})
+		return
+	}
+
+	parentID := ""
+	if doc.Parent != nil {
+		parentID = doc.Parent.ID
+	}
+	storageObjectID := ""
+	if doc.StorageObject != nil {
+		storageObjectID = doc.StorageObject.ID
+	}
+
+	resp := &types.ProjectDocumentDTO{
+		ID:              doc.ID,
+		ProjectID:       doc.ProjectID,
+		Type:            string(doc.Type),
+		Title:           doc.Title,
+		Description:     doc.Description,
+		Status:          string(doc.Status),
+		Path:            doc.Path,
+		Order:           doc.Order,
+		ParentID:        parentID,
+		HasChild:        doc.HasChild,
+		StorageObjectID: storageObjectID,
+		CreatedAt:       doc.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:       doc.UpdatedAt.Format(time.RFC3339),
+	}
+
+	c.JSON(http.StatusOK, types.GetProjectDocumentResponse{
+		Code:    "OK",
+		Message: "success",
+		Data:    resp,
 	})
 }

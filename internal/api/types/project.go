@@ -58,3 +58,9 @@ type ListProjectDocumentsResponse struct {
 	Message string                `json:"message"`
 	Data    []*ProjectDocumentDTO `json:"data"`
 }
+
+type GetProjectDocumentResponse struct {
+	Code    string              `json:"code"`
+	Message string              `json:"message"`
+	Data    *ProjectDocumentDTO `json:"data,omitempty"`
+}

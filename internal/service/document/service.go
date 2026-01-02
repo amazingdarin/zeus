@@ -130,16 +130,16 @@ func (s *Service) GetProjectRootID(ctx context.Context, projectID string) (strin
 	return "", nil
 }
 
-func (s *Service) ListByParent(ctx context.Context, parentID string) ([]*domain.Document, error) {
+func (s *Service) ListByParent(ctx context.Context, projectID, parentID string) ([]*domain.Document, error) {
 	if s == nil || s.repo == nil {
 		return nil, fmt.Errorf("document service not initialized")
 	}
+	parentID = strings.TrimSpace(parentID)
 	filter := repository.DocumentFilter{
-		ParentID: &parentID,
+		ProjectID: projectID,
+		ParentID:  &parentID,
 	}
 	option := repository.DocumentOption{}
-	parentID = strings.TrimSpace(parentID)
-	filter.ParentID = &parentID
 	docs, _, err := s.repo.List(ctx, filter, option)
 	if err != nil {
 		return nil, fmt.Errorf("list documents: %w", err)

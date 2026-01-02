@@ -29,7 +29,7 @@ type DocumentService interface {
 	Get(ctx context.Context, id string) (*domain.Document, error)
 	// GetProjectRootID 根据ProjectID查询RootDocumentID
 	GetProjectRootID(ctx context.Context, projectID string) (string, error)
-	ListByParent(ctx context.Context, parentID string) ([]*domain.Document, error)
+	ListByParent(ctx context.Context, projectID, parentID string) ([]*domain.Document, error)
 	GetSubtree(ctx context.Context, rootID string) ([]*domain.Document, error)
 
 	// 结构操作
