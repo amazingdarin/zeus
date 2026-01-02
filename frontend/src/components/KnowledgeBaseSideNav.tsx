@@ -1,10 +1,12 @@
 export type KnowledgeBaseDocument = {
   id: string;
   title: string;
+  description: string;
   type: string;
   parentId: string;
   hasChild: boolean;
   order: number;
+  storageObjectId: string;
 };
 
 type KnowledgeBaseSideNavProps = {

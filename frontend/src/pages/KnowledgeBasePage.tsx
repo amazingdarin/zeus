@@ -5,6 +5,7 @@ import KnowledgeBaseLayout from "../components/KnowledgeBaseLayout";
 import KnowledgeBaseSideNav, {
   type KnowledgeBaseDocument,
 } from "../components/KnowledgeBaseSideNav";
+import DocumentViewer from "../components/DocumentViewer";
 import { buildApiUrl } from "../config/api";
 import { useProjectContext } from "../context/ProjectContext";
 
@@ -12,9 +13,11 @@ type DocumentResponse = {
   id?: string;
   type?: string;
   title?: string;
+  description?: string;
   parent_id?: string;
   has_child?: boolean;
   order?: number;
+  storage_object_id?: string;
 };
 
 function KnowledgeBasePage() {
@@ -35,10 +38,12 @@ function KnowledgeBasePage() {
     return {
       id: String(item.id ?? ""),
       title: String(item.title ?? ""),
+      description: String(item.description ?? ""),
       type: String(item.type ?? "").toLowerCase(),
       parentId: String(item.parent_id ?? ""),
       hasChild: Boolean(item.has_child),
       order: Number(item.order ?? 0),
+      storageObjectId: String(item.storage_object_id ?? ""),
     };
   }, []);
 
@@ -169,6 +174,7 @@ function KnowledgeBasePage() {
   }, [rootDocuments, childrenByParent]);
   const activeDocument = activeDocumentId ? documentIndex[activeDocumentId] ?? null : null;
   const allowChildActions = activeDocument?.type !== "overview";
+
   const handleImportSuccess = useCallback(
     (parentId: string | null) => {
       if (!currentProject?.key) {
@@ -206,18 +212,27 @@ function KnowledgeBasePage() {
         parentDocumentId={activeDocumentId}
         onImportSuccess={handleImportSuccess}
       />
-      <p className="content-subtitle">
-        Select a document from the left navigation to view its details.
-      </p>
-      <div className="content-panel">
-        <div>
-          <div className="panel-title">Document workspace</div>
-          <p>
-            {activeDocumentId
-              ? `Selected document id: ${activeDocumentId}`
-              : "Choose a document to start reviewing content."}
-          </p>
-        </div>
+      <div className="doc-viewer-page">
+        {activeDocument ? (
+          <>
+            <div className="doc-viewer-title">{activeDocument.title || "Untitled"}</div>
+            <div className="doc-viewer-description">
+              {activeDocument.description || "No description"}
+            </div>
+            {activeDocument.storageObjectId ? (
+              <DocumentViewer
+                projectKey={currentProject?.key ?? ""}
+                storageObjectId={activeDocument.storageObjectId}
+              />
+            ) : (
+              <div className="doc-viewer-state">No document available</div>
+            )}
+          </>
+        ) : (
+          <div className="doc-viewer-state">
+            Select a document from the left navigation to view its details.
+          </div>
+        )}
       </div>
     </KnowledgeBaseLayout>
   );

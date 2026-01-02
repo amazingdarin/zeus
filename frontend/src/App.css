@@ -578,6 +578,53 @@ body {
   height: 0;
 }
 
+.doc-viewer-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.doc-viewer-title {
+  font-family: var(--font-serif);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.doc-viewer-description {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.doc-viewer-state {
+  padding: 20px;
+  border-radius: 12px;
+  background: rgba(31, 35, 40, 0.04);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.doc-viewer-error {
+  padding: 20px;
+  border-radius: 12px;
+  background: rgba(190, 30, 45, 0.12);
+  color: #a50f1f;
+  border: 1px solid rgba(190, 30, 45, 0.25);
+  font-size: 14px;
+}
+
+.pdf-viewer {
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(31, 35, 40, 0.04);
+}
+
+.pdf-viewer canvas {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
 .kb-breadcrumb {
   font-size: 16px;
   font-weight: 600;
