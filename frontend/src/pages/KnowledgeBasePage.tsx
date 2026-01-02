@@ -207,6 +207,7 @@ function KnowledgeBasePage() {
       }
     >
       <KnowledgeBaseHeader
+        title={activeDocument?.title ?? ""}
         allowChildActions={allowChildActions}
         projectKey={currentProject?.key ?? null}
         parentDocumentId={activeDocumentId}
@@ -215,7 +216,6 @@ function KnowledgeBasePage() {
       <div className="doc-viewer-page">
         {activeDocument ? (
           <>
-            <div className="doc-viewer-title">{activeDocument.title || "Untitled"}</div>
             <div className="doc-viewer-description">
               {activeDocument.description || "No description"}
             </div>

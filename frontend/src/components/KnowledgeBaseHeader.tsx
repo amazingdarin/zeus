@@ -12,7 +12,7 @@ type KnowledgeBaseHeaderProps = {
 };
 
 function KnowledgeBaseHeader({
-  title = "Knowledge Base",
+  title = "",
   allowChildActions = true,
   projectKey = null,
   parentDocumentId = null,

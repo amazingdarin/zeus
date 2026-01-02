@@ -626,8 +626,9 @@ body {
 }
 
 .kb-breadcrumb {
-  font-size: 16px;
-  font-weight: 600;
+  font-family: var(--font-serif);
+  font-size: 24px;
+  font-weight: 700;
   color: var(--ink);
 }
 
