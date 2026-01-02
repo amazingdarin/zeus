@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import KnowledgeBaseHeader from "../components/KnowledgeBaseHeader";
 import KnowledgeBaseLayout from "../components/KnowledgeBaseLayout";
 import KnowledgeBaseSideNav, {
   type KnowledgeBaseDocument,
 } from "../components/KnowledgeBaseSideNav";
-import DocumentViewer from "../components/DocumentViewer";
+import DocumentPage from "./DocumentPage";
 import { buildApiUrl } from "../config/api";
 import { useProjectContext } from "../context/ProjectContext";
 
@@ -160,21 +159,6 @@ function KnowledgeBasePage() {
       ),
     [rootDocuments],
   );
-  const documentIndex = useMemo(() => {
-    const index: Record<string, KnowledgeBaseDocument> = {};
-    rootDocuments.forEach((doc) => {
-      index[doc.id] = doc;
-    });
-    Object.values(childrenByParent).forEach((docs) => {
-      docs.forEach((doc) => {
-        index[doc.id] = doc;
-      });
-    });
-    return index;
-  }, [rootDocuments, childrenByParent]);
-  const activeDocument = activeDocumentId ? documentIndex[activeDocumentId] ?? null : null;
-  const allowChildActions = activeDocument?.type !== "overview";
-
   const handleImportSuccess = useCallback(
     (parentId: string | null) => {
       if (!currentProject?.key) {
@@ -206,34 +190,11 @@ function KnowledgeBasePage() {
         />
       }
     >
-      <KnowledgeBaseHeader
-        title={activeDocument?.title ?? ""}
-        allowChildActions={allowChildActions}
-        projectKey={currentProject?.key ?? null}
-        parentDocumentId={activeDocumentId}
+      <DocumentPage
+        projectKey={currentProject?.key ?? ""}
+        documentId={activeDocumentId}
         onImportSuccess={handleImportSuccess}
       />
-      <div className="doc-viewer-page">
-        {activeDocument ? (
-          <>
-            <div className="doc-viewer-description">
-              {activeDocument.description || "No description"}
-            </div>
-            {activeDocument.storageObjectId ? (
-              <DocumentViewer
-                projectKey={currentProject?.key ?? ""}
-                storageObjectId={activeDocument.storageObjectId}
-              />
-            ) : (
-              <div className="doc-viewer-state">No document available</div>
-            )}
-          </>
-        ) : (
-          <div className="doc-viewer-state">
-            Select a document from the left navigation to view its details.
-          </div>
-        )}
-      </div>
     </KnowledgeBaseLayout>
   );
 }

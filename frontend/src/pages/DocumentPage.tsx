@@ -1,24 +1,52 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
+import { useParams } from "react-router-dom";
 
+import DocumentHeader from "../components/DocumentHeader";
+import DocumentViewer from "../components/DocumentViewer";
 import { buildApiUrl } from "../config/api";
 
-type KnowledgeBaseHeaderProps = {
-  title?: string;
-  allowChildActions?: boolean;
-  projectKey?: string | null;
-  parentDocumentId?: string | null;
+type DocumentData = {
+  id: string;
+  title: string;
+  description: string;
+  type: string;
+  storageObjectId: string;
+};
+
+type DocumentResponse = {
+  data?: {
+    id?: string;
+    title?: string;
+    description?: string;
+    type?: string;
+    storage_object_id?: string;
+  };
+};
+
+type DocumentPageProps = {
+  projectKey: string;
+  documentId: string | null;
   onImportSuccess?: (parentId: string | null) => void;
 };
 
-function KnowledgeBaseHeader({
-  title = "",
-  allowChildActions = true,
-  projectKey = null,
-  parentDocumentId = null,
-  onImportSuccess,
-}: KnowledgeBaseHeaderProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
+type FileEntry = {
+  file: File;
+  relativePath: string;
+  parentPath: string;
+};
+
+function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageProps) {
+  const params = useParams<{ projectKey?: string; documentId?: string }>();
+  const resolvedProjectKey = (params.projectKey || projectKey || "").trim();
+  const resolvedDocumentId = (params.documentId || documentId || "").trim();
+
+  const [document, setDocument] = useState<DocumentData | null>(null);
+  const [draftDocument, setDraftDocument] = useState<DocumentData | null>(null);
+  const [mode, setMode] = useState<"view" | "edit">("view");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const [newModalOpen, setNewModalOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importMode, setImportMode] = useState<"file" | "folder">("file");
@@ -26,36 +54,127 @@ function KnowledgeBaseHeader({
   const [uploading, setUploading] = useState(false);
   const [uploadTotal, setUploadTotal] = useState(0);
   const [uploadCompleted, setUploadCompleted] = useState(0);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
 
-  const handleToggle = () => {
-    setMenuOpen((prev) => !prev);
+  const activeDocument = useMemo(() => {
+    if (mode === "edit" && draftDocument) {
+      return draftDocument;
+    }
+    return document;
+  }, [document, draftDocument, mode]);
+
+  const allowChildActions = activeDocument ? activeDocument.type !== "overview" : false;
+
+  useEffect(() => {
+    if (!resolvedProjectKey || !resolvedDocumentId) {
+      setDocument(null);
+      setDraftDocument(null);
+      setMode("view");
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    const loadDocument = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await fetch(
+          buildApiUrl(
+            `/api/projects/${encodeURIComponent(resolvedProjectKey)}/documents/${encodeURIComponent(
+              resolvedDocumentId,
+            )}`,
+          ),
+          { signal: controller.signal },
+        );
+        if (!response.ok) {
+          throw new Error("failed to load document");
+        }
+        const payload = (await response.json()) as DocumentResponse;
+        const data = payload?.data ?? {};
+        const mapped: DocumentData = {
+          id: String(data.id ?? resolvedDocumentId),
+          title: String(data.title ?? ""),
+          description: String(data.description ?? ""),
+          type: String(data.type ?? ""),
+          storageObjectId: String(data.storage_object_id ?? ""),
+        };
+        setDocument(mapped);
+        setDraftDocument(null);
+        setMode("view");
+      } catch (err) {
+        if ((err as Error).name === "AbortError") {
+          return;
+        }
+        setError((err as Error).message || "failed to load document");
+        setDocument(null);
+        setDraftDocument(null);
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadDocument();
+    return () => controller.abort();
+  }, [resolvedDocumentId, resolvedProjectKey]);
+
+  const handleEdit = () => {
+    if (!document) {
+      return;
+    }
+    setDraftDocument({ ...document });
+    setMode("edit");
   };
 
-  const handleSelect = () => {
-    setMenuOpen(false);
+  const handleCancel = () => {
+    setDraftDocument(null);
+    setMode("view");
   };
 
-  const handleNew = () => {
+  const handleSave = async () => {
+    if (!draftDocument) {
+      return;
+    }
+    // TODO: call update document API when available.
+    setDocument(draftDocument);
+    setDraftDocument(null);
+    setMode("view");
+  };
+
+  const handleTitleChange = (value: string) => {
+    if (!draftDocument) {
+      return;
+    }
+    setDraftDocument({ ...draftDocument, title: value });
+  };
+
+  const handleDescriptionChange = (value: string) => {
+    if (!draftDocument) {
+      return;
+    }
+    setDraftDocument({ ...draftDocument, description: value });
+  };
+
+  const handleOpenNew = () => {
     if (!allowChildActions) {
       return;
     }
-    setMenuOpen(false);
-    setImportModalOpen(false);
     setNewModalOpen(true);
   };
 
-  const handleCloseModal = () => {
+  const handleCloseNew = () => {
     setNewModalOpen(false);
   };
 
-  const handleImport = () => {
+  const handleOpenImport = () => {
     if (!allowChildActions) {
       return;
     }
-    setMenuOpen(false);
-    setNewModalOpen(false);
     setImportMode("file");
     setSelectedFiles([]);
     setUploading(false);
@@ -82,122 +201,6 @@ function KnowledgeBaseHeader({
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files ? Array.from(event.target.files) : [];
     setSelectedFiles(files);
-  };
-
-  const handleImportSubmit = async () => {
-    if (importMode === "file") {
-      const file = selectedFiles[0];
-      if (!file) {
-        console.log("import_file_empty");
-        return;
-      }
-      if (!projectKey) {
-        console.log("import_file_missing_project");
-        return;
-      }
-      setUploading(true);
-      setUploadTotal(1);
-      setUploadCompleted(0);
-      try {
-        const uploadPrefix = `doc/${Date.now()}`;
-        const storageObjectID = await uploadStorageObject(
-          projectKey,
-          file,
-          `${uploadPrefix}/${file.name}`,
-        );
-        const documentPayload = await createDocumentRecord(
-          projectKey,
-          file.name,
-          parentDocumentId ?? "",
-          storageObjectID,
-        );
-        console.log("import_file_success", documentPayload);
-        setUploadCompleted(1);
-        onImportSuccess?.(parentDocumentId);
-      } catch (error) {
-        console.log("import_file_error", error);
-      } finally {
-        setUploading(false);
-        setUploadTotal(0);
-        setUploadCompleted(0);
-      }
-    } else {
-      if (!projectKey) {
-        console.log("import_folder_missing_project");
-        return;
-      }
-      if (selectedFiles.length === 0) {
-        console.log("import_folder_empty");
-        return;
-      }
-      try {
-        const uploadPrefix = `doc/${Date.now()}`;
-        const folderPaths = buildFolderPaths(selectedFiles);
-        const fileEntries = buildFileEntries(selectedFiles);
-        const totalItems = folderPaths.length + fileEntries.length;
-        setUploading(true);
-        setUploadTotal(totalItems);
-        setUploadCompleted(0);
-        const createdDocs = new Map<string, string>();
-        for (const folderPath of folderPaths) {
-          const parentPath = folderPath.split("/").slice(0, -1).join("/");
-          const parentID = parentPath
-            ? createdDocs.get(parentPath) ?? ""
-            : parentDocumentId ?? "";
-          const folderName = folderPath.split("/").slice(-1)[0] ?? "Folder";
-          const placeholderFile = new File([""], `${folderName}.dir`, {
-            type: "application/x-directory",
-          });
-          const storageObjectID = await uploadStorageObject(
-            projectKey,
-            placeholderFile,
-            `${uploadPrefix}/${folderPath}/.dir`,
-          );
-          const documentPayload = await createDocumentRecord(
-            projectKey,
-            folderName,
-            parentID,
-            storageObjectID,
-          );
-          const createdID = String(documentPayload?.data?.id ?? "");
-          if (createdID) {
-            createdDocs.set(folderPath, createdID);
-          }
-          setUploadCompleted((prev) => prev + 1);
-        }
-
-        for (const entry of fileEntries) {
-          const parentID = entry.parentPath
-            ? createdDocs.get(entry.parentPath) ?? ""
-            : parentDocumentId ?? "";
-          const storageObjectID = await uploadStorageObject(
-            projectKey,
-            entry.file,
-            `${uploadPrefix}/${entry.relativePath}`,
-          );
-          await createDocumentRecord(
-            projectKey,
-            entry.file.name,
-            parentID,
-            storageObjectID,
-          );
-          setUploadCompleted((prev) => prev + 1);
-        }
-        console.log("import_folder_success", {
-          folders: folderPaths.length,
-          files: fileEntries.length,
-        });
-        onImportSuccess?.(parentDocumentId);
-      } catch (error) {
-        console.log("import_folder_error", error);
-      } finally {
-        setUploading(false);
-        setUploadTotal(0);
-        setUploadCompleted(0);
-      }
-    }
-    setSelectedFiles([]);
-    setImportModalOpen(false);
   };
 
   const uploadStorageObject = async (
@@ -277,7 +280,7 @@ function KnowledgeBaseHeader({
     });
   };
 
-  const buildFileEntries = (files: File[]) =>
+  const buildFileEntries = (files: File[]): FileEntry[] =>
     files.map((file) => {
       const rawPath =
         (file as File & { webkitRelativePath?: string }).webkitRelativePath ?? file.name;
@@ -286,8 +289,122 @@ function KnowledgeBaseHeader({
       return { file, relativePath: normalizedPath, parentPath };
     });
 
-  const handleModeChange = (mode: "file" | "folder") => {
-    setImportMode(mode);
+  const handleImportSubmit = async () => {
+    if (!resolvedProjectKey) {
+      console.log("import_missing_project");
+      return;
+    }
+
+    if (importMode === "file") {
+      const file = selectedFiles[0];
+      if (!file) {
+        console.log("import_file_empty");
+        return;
+      }
+      setUploading(true);
+      setUploadTotal(1);
+      setUploadCompleted(0);
+      try {
+        const uploadPrefix = `doc/${Date.now()}`;
+        const storageObjectID = await uploadStorageObject(
+          resolvedProjectKey,
+          file,
+          `${uploadPrefix}/${file.name}`,
+        );
+        const documentPayload = await createDocumentRecord(
+          resolvedProjectKey,
+          file.name,
+          activeDocument?.id ?? "",
+          storageObjectID,
+        );
+        console.log("import_file_success", documentPayload);
+        setUploadCompleted(1);
+        onImportSuccess?.(activeDocument?.id ?? null);
+      } catch (err) {
+        console.log("import_file_error", err);
+      } finally {
+        setUploading(false);
+        setUploadTotal(0);
+        setUploadCompleted(0);
+      }
+    } else {
+      if (selectedFiles.length === 0) {
+        console.log("import_folder_empty");
+        return;
+      }
+      try {
+        const uploadPrefix = `doc/${Date.now()}`;
+        const folderPaths = buildFolderPaths(selectedFiles);
+        const fileEntries = buildFileEntries(selectedFiles);
+        const totalItems = folderPaths.length + fileEntries.length;
+        setUploading(true);
+        setUploadTotal(totalItems);
+        setUploadCompleted(0);
+        const createdDocs = new Map<string, string>();
+        for (const folderPath of folderPaths) {
+          const parentPath = folderPath.split("/").slice(0, -1).join("/");
+          const parentID = parentPath
+            ? createdDocs.get(parentPath) ?? ""
+            : activeDocument?.id ?? "";
+          const folderName = folderPath.split("/").slice(-1)[0] ?? "Folder";
+          const placeholderFile = new File([""], `${folderName}.dir`, {
+            type: "application/x-directory",
+          });
+          const storageObjectID = await uploadStorageObject(
+            resolvedProjectKey,
+            placeholderFile,
+            `${uploadPrefix}/${folderPath}/.dir`,
+          );
+          const documentPayload = await createDocumentRecord(
+            resolvedProjectKey,
+            folderName,
+            parentID,
+            storageObjectID,
+          );
+          const createdID = String(documentPayload?.data?.id ?? "");
+          if (createdID) {
+            createdDocs.set(folderPath, createdID);
+          }
+          setUploadCompleted((prev) => prev + 1);
+        }
+
+        for (const entry of fileEntries) {
+          const parentID = entry.parentPath
+            ? createdDocs.get(entry.parentPath) ?? ""
+            : activeDocument?.id ?? "";
+          const storageObjectID = await uploadStorageObject(
+            resolvedProjectKey,
+            entry.file,
+            `${uploadPrefix}/${entry.relativePath}`,
+          );
+          await createDocumentRecord(
+            resolvedProjectKey,
+            entry.file.name,
+            parentID,
+            storageObjectID,
+          );
+          setUploadCompleted((prev) => prev + 1);
+        }
+        console.log("import_folder_success", {
+          folders: folderPaths.length,
+          files: fileEntries.length,
+        });
+        onImportSuccess?.(activeDocument?.id ?? null);
+      } catch (err) {
+        console.log("import_folder_error", err);
+      } finally {
+        setUploading(false);
+        setUploadTotal(0);
+        setUploadCompleted(0);
+      }
+    }
+
+    setSelectedFiles([]);
+    setImportModalOpen(false);
+  };
+
+  const handleModeChange = (nextMode: "file" | "folder") => {
+    setImportMode(nextMode);
     setSelectedFiles([]);
     setUploading(false);
     setUploadTotal(0);
@@ -316,42 +433,67 @@ function KnowledgeBaseHeader({
   const uploadProgress =
     uploadTotal > 0 ? Math.round((uploadCompleted / uploadTotal) * 100) : 0;
 
+  if (!resolvedDocumentId) {
+    return (
+      <div className="doc-viewer-page">
+        <div className="doc-viewer-state">
+          Select a document from the left navigation to view its details.
+        </div>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="doc-viewer-page">
+        <div className="doc-viewer-state">Loading document...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="doc-viewer-page">
+        <div className="doc-viewer-error">{error}</div>
+      </div>
+    );
+  }
+
+  if (!activeDocument) {
+    return <div className="doc-viewer-page" />;
+  }
+
   return (
-    <div className="kb-main-header">
-      <div className="kb-breadcrumb">{title}</div>
-      <div className="kb-header-menu">
-        <button
-          className="kb-menu-button"
-          type="button"
-          aria-label="Open menu"
-          onClick={handleToggle}
-        >
-          ...
-        </button>
-        {menuOpen ? (
-          <div className="kb-menu" role="menu">
-            {allowChildActions ? (
-              <button className="kb-menu-item" type="button" onClick={handleNew}>
-                New
-              </button>
-            ) : null}
-            <button className="kb-menu-item" type="button" onClick={handleSelect}>
-              Edit
-            </button>
-            {allowChildActions ? (
-              <button className="kb-menu-item" type="button" onClick={handleImport}>
-                Import
-              </button>
-            ) : null}
-          </div>
-        ) : null}
+    <>
+      <DocumentHeader
+        title={activeDocument.title}
+        description={activeDocument.description}
+        mode={mode}
+        allowChildActions={allowChildActions}
+        onTitleChange={handleTitleChange}
+        onDescriptionChange={handleDescriptionChange}
+        onEdit={handleEdit}
+        onSave={handleSave}
+        onCancel={handleCancel}
+        onNew={handleOpenNew}
+        onImport={handleOpenImport}
+      />
+      <div className="doc-viewer-page">
+        {activeDocument.storageObjectId ? (
+          <DocumentViewer
+            projectKey={resolvedProjectKey}
+            storageObjectId={activeDocument.storageObjectId}
+          />
+        ) : (
+          <div className="doc-viewer-state">No document available</div>
+        )}
       </div>
       {newModalOpen ? (
         <div className="modal-overlay" role="dialog" aria-modal="true">
           <div className="modal-card">
             <div className="modal-header">
               <h2>New Document</h2>
-              <button className="modal-close" type="button" onClick={handleCloseModal}>
+              <button className="modal-close" type="button" onClick={handleCloseNew}>
                 Close
               </button>
             </div>
@@ -367,10 +509,10 @@ function KnowledgeBaseHeader({
               </label>
             </div>
             <div className="modal-actions">
-              <button className="btn ghost" type="button" onClick={handleCloseModal}>
+              <button className="btn ghost" type="button" onClick={handleCloseNew}>
                 Cancel
               </button>
-              <button className="btn primary" type="button" onClick={handleCloseModal}>
+              <button className="btn primary" type="button" onClick={handleCloseNew}>
                 Create
               </button>
             </div>
@@ -480,9 +622,7 @@ function KnowledgeBaseHeader({
                 disabled={uploading}
               >
                 {uploading ? <span className="kb-import-spinner" aria-hidden="true" /> : null}
-                {importMode === "folder" && uploading
-                  ? `Import ${uploadProgress}%`
-                  : "Import"}
+                {importMode === "folder" && uploading ? `Import ${uploadProgress}%` : "Import"}
               </button>
             </div>
           </div>
@@ -501,8 +641,8 @@ function KnowledgeBaseHeader({
         multiple
         onChange={handleFileChange}
       />
-    </div>
+    </>
   );
 }
 
-export default KnowledgeBaseHeader;
+export default DocumentPage;
