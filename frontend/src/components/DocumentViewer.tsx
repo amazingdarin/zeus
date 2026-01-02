@@ -24,6 +24,7 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
   }, [mimeType]);
 
   useEffect(() => {
+    console.log("document")
     setContentError(null);
     setContentUrl(null);
     if (objectUrlRef.current) {
