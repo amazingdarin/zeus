@@ -41,6 +41,8 @@ func DocumentToDomain(doc *model.Document) *domain.Document {
 	if doc.StorageObject != nil {
 		mapped := StorageObjectToDomain(doc.StorageObject)
 		storageDomain = mapped
+	} else if doc.StorageObjectID != "" {
+		storageDomain = &domain.StorageObject{ID: doc.StorageObjectID}
 	}
 	var parent *domain.Document
 	if doc.ParentID != "" {
