@@ -134,7 +134,9 @@ func (s *Service) ListByParent(ctx context.Context, parentID string) ([]*domain.
 	if s == nil || s.repo == nil {
 		return nil, fmt.Errorf("document service not initialized")
 	}
-	filter := repository.DocumentFilter{}
+	filter := repository.DocumentFilter{
+		ParentID: &parentID,
+	}
 	option := repository.DocumentOption{}
 	parentID = strings.TrimSpace(parentID)
 	filter.ParentID = &parentID
@@ -142,7 +144,20 @@ func (s *Service) ListByParent(ctx context.Context, parentID string) ([]*domain.
 	if err != nil {
 		return nil, fmt.Errorf("list documents: %w", err)
 	}
-	return docs, nil
+
+	filtered := make([]*domain.Document, 0, len(docs))
+	for _, doc := range docs {
+		if doc == nil {
+			continue
+		}
+		hasChild, err := s.hasChild(ctx, doc.ID)
+		if err != nil {
+			return nil, err
+		}
+		doc.HasChild = hasChild
+		filtered = append(filtered, doc)
+	}
+	return filtered, nil
 }
 
 func (s *Service) GetSubtree(ctx context.Context, rootID string) ([]*domain.Document, error) {
@@ -273,41 +288,18 @@ func (s *Service) Archive(ctx context.Context, id string) error {
 	return nil
 }
 
-func cleanObjectKey(value string) (string, error) {
-	if strings.TrimSpace(value) == "" {
-		return "", nil
+func (s *Service) hasChild(ctx context.Context, parentID string) (bool, error) {
+	parentID = strings.TrimSpace(parentID)
+	if parentID == "" {
+		return false, nil
 	}
-	normalized := strings.ReplaceAll(value, "\\", "/")
-	cleaned := path.Clean(normalized)
-	cleaned = strings.TrimPrefix(cleaned, "/")
-	if cleaned == "." {
-		return "", nil
+	_, total, err := s.repo.List(ctx,
+		repository.DocumentFilter{ParentID: &parentID},
+		repository.DocumentOption{Limit: 1})
+	if err != nil {
+		return false, fmt.Errorf("list child documents: %w", err)
 	}
-	if strings.HasPrefix(cleaned, "..") || strings.Contains(cleaned, "/..") {
-		return "", fmt.Errorf("object key must not contain ..")
-	}
-	return cleaned, nil
-}
-
-func documentTitle(originalPath, objectKey string) string {
-	originalPath = strings.TrimSpace(originalPath)
-	if originalPath != "" {
-		return path.Base(normalizePath(originalPath))
-	}
-	objectKey = strings.TrimSpace(objectKey)
-	if objectKey != "" {
-		return path.Base(normalizePath(objectKey))
-	}
-	return ""
-}
-
-func normalizePath(value string) string {
-	normalized := strings.ReplaceAll(value, "\\", "/")
-	cleaned := path.Clean(normalized)
-	if cleaned == "." {
-		return ""
-	}
-	return cleaned
+	return total > 0, nil
 }
 
 var _ service.DocumentService = (*Service)(nil)

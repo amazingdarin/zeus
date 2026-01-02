@@ -156,7 +156,7 @@ func (h *DocumentHandler) List(c *gin.Context) {
 		return
 	}
 
-	documents, err := h.projectSvc.ListDocuments(c.Request.Context(), projectKey, req.ParentID)
+	documents, err := h.documentSvc.ListByParent(c.Request.Context(), req.ParentID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, types.ListProjectDocumentsResponse{
 			Code:    "LIST_DOCUMENT_FAILED",

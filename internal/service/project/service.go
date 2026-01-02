@@ -93,59 +93,6 @@ func (s *Service) GetByKey(ctx context.Context, key string) (*domain.Project, er
 	return project, nil
 }
 
-func (s *Service) ListDocuments(
-	ctx context.Context,
-	projectKey string,
-	parentID string,
-) ([]*domain.Document, error) {
-	if s.documentSvc == nil {
-		return nil, fmt.Errorf("document service is required")
-	}
-	if s.documentRepo == nil {
-		return nil, fmt.Errorf("document repository is required")
-	}
-	project, err := s.GetByKey(ctx, projectKey)
-	if err != nil {
-		return nil, err
-	}
-	parentID = strings.TrimSpace(parentID)
-	docs, err := s.documentSvc.ListByParent(ctx, parentID)
-	if err != nil {
-		return nil, fmt.Errorf("list documents: %w", err)
-	}
-	filtered := make([]*domain.Document, 0, len(docs))
-	for _, doc := range docs {
-		if doc == nil {
-			continue
-		}
-		if doc.ProjectID != project.ID {
-			continue
-		}
-		hasChild, err := s.hasChild(ctx, project.ID, doc.ID)
-		if err != nil {
-			return nil, err
-		}
-		doc.HasChild = hasChild
-		filtered = append(filtered, doc)
-	}
-	return filtered, nil
-}
-
-func (s *Service) hasChild(ctx context.Context, projectID string, parentID string) (bool, error) {
-	parentID = strings.TrimSpace(parentID)
-	if parentID == "" {
-		return false, nil
-	}
-	_, total, err := s.documentRepo.List(ctx, repository.DocumentFilter{
-		ProjectID: projectID,
-		ParentID:  &parentID,
-	}, repository.DocumentOption{Limit: 1})
-	if err != nil {
-		return false, fmt.Errorf("list child documents: %w", err)
-	}
-	return total > 0, nil
-}
-
 func (s *Service) initProject(ctx context.Context, project *domain.Project) error {
 	if project == nil {
 		return fmt.Errorf("project is required")
