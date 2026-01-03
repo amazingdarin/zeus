@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 import DocumentHeader from "../components/DocumentHeader";
 import DocumentViewer from "../components/DocumentViewer";
@@ -40,6 +40,7 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
   const params = useParams<{ projectKey?: string; documentId?: string }>();
   const resolvedProjectKey = (params.projectKey || projectKey || "").trim();
   const resolvedDocumentId = (params.documentId || documentId || "").trim();
+  const navigate = useNavigate();
 
   const [document, setDocument] = useState<DocumentData | null>(null);
   const [draftDocument, setDraftDocument] = useState<DocumentData | null>(null);
@@ -47,7 +48,6 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [newModalOpen, setNewModalOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importMode, setImportMode] = useState<"file" | "folder">("file");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -164,11 +164,7 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
     if (!allowChildActions) {
       return;
     }
-    setNewModalOpen(true);
-  };
-
-  const handleCloseNew = () => {
-    setNewModalOpen(false);
+    navigate("/documents/new");
   };
 
   const handleOpenImport = () => {
@@ -422,7 +418,6 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
 
   useEffect(() => {
     if (!allowChildActions) {
-      setNewModalOpen(false);
       setImportModalOpen(false);
       setUploading(false);
       setUploadTotal(0);
@@ -488,37 +483,6 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
           <div className="doc-viewer-state">No document available</div>
         )}
       </div>
-      {newModalOpen ? (
-        <div className="modal-overlay" role="dialog" aria-modal="true">
-          <div className="modal-card">
-            <div className="modal-header">
-              <h2>New Document</h2>
-              <button className="modal-close" type="button" onClick={handleCloseNew}>
-                Close
-              </button>
-            </div>
-            <div className="modal-body">
-              <label className="modal-field" htmlFor="kb-new-doc-title">
-                <span>Title</span>
-                <input
-                  id="kb-new-doc-title"
-                  name="title"
-                  type="text"
-                  placeholder="Enter document title"
-                />
-              </label>
-            </div>
-            <div className="modal-actions">
-              <button className="btn ghost" type="button" onClick={handleCloseNew}>
-                Cancel
-              </button>
-              <button className="btn primary" type="button" onClick={handleCloseNew}>
-                Create
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
       {importModalOpen ? (
         <div className="modal-overlay" role="dialog" aria-modal="true">
           <div className="modal-card">

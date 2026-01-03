@@ -778,6 +778,135 @@ body {
   background: var(--accent-dark);
 }
 
+.new-doc-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.new-doc-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.new-doc-metadata {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.new-doc-title-input,
+.new-doc-description-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.rich-editor {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.rich-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(31, 35, 40, 0.04);
+}
+
+.rich-editor-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.rich-editor-btn:hover {
+  background: rgba(31, 35, 40, 0.08);
+}
+
+.rich-editor-btn.active {
+  border-color: rgba(31, 35, 40, 0.2);
+  background: rgba(31, 35, 40, 0.12);
+}
+
+.rich-editor-surface {
+  padding: 16px;
+  min-height: 280px;
+}
+
+.rich-editor-content {
+  outline: none;
+  font-family: var(--font-sans);
+  color: var(--ink);
+}
+
+.rich-editor-content h1 {
+  font-family: var(--font-serif);
+  font-size: 28px;
+  margin: 0 0 12px;
+}
+
+.rich-editor-content h2 {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  margin: 18px 0 10px;
+}
+
+.rich-editor-content h3 {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  margin: 16px 0 8px;
+}
+
+.rich-editor-content p {
+  margin: 0 0 12px;
+  line-height: 1.6;
+}
+
+.rich-editor-content blockquote {
+  margin: 12px 0;
+  padding: 8px 12px;
+  border-left: 3px solid rgba(31, 35, 40, 0.3);
+  background: rgba(31, 35, 40, 0.04);
+}
+
+.rich-editor-content pre {
+  margin: 12px 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(31, 35, 40, 0.08);
+  overflow-x: auto;
+  font-size: 13px;
+}
+
+.new-doc-json {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(31, 35, 40, 0.04);
+  padding: 16px;
+  font-size: 12px;
+  color: var(--ink);
+  overflow: auto;
+}
+
+.new-doc-json-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
 @media (max-width: 960px) {
   .app-body {
     grid-template-columns: 1fr;
