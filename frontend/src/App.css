@@ -654,6 +654,19 @@ body {
   border-radius: 8px;
 }
 
+.docx-viewer {
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(31, 35, 40, 0.04);
+  color: var(--ink);
+  overflow-x: auto;
+}
+
+.docx-content {
+  font-family: var(--font-sans);
+  color: var(--ink);
+}
+
 .kb-breadcrumb {
   font-family: var(--font-serif);
   font-size: 24px;

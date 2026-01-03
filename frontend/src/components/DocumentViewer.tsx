@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import DocxViewer from "./DocxViewer";
 import PdfViewer from "./PdfViewer";
 import UnsupportedViewer from "./UnsupportedViewer";
 import { useStorageObjectDownload } from "../hooks/useStorageObjectDownload";
@@ -15,6 +16,7 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
     storageObjectId,
   );
   const [contentUrl, setContentUrl] = useState<string | null>(null);
+  const [docxData, setDocxData] = useState<ArrayBuffer | null>(null);
   const [contentLoading, setContentLoading] = useState(false);
   const [contentError, setContentError] = useState<string | null>(null);
   const objectUrlRef = useRef<string | null>(null);
@@ -22,16 +24,21 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
   const normalizedType = useMemo(() => {
     return (mimeType ?? "").split(";")[0].trim().toLowerCase();
   }, [mimeType]);
+  const isPdf = normalizedType === "application/pdf";
+  const isDocx =
+    normalizedType ===
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
   useEffect(() => {
     setContentError(null);
     setContentUrl(null);
+    setDocxData(null);
     if (objectUrlRef.current) {
       URL.revokeObjectURL(objectUrlRef.current);
       objectUrlRef.current = null;
     }
 
-    if (!downloadUrl || normalizedType !== "application/pdf") {
+    if (!downloadUrl || (!isPdf && !isDocx)) {
       setContentLoading(false);
       return;
     }
@@ -44,13 +51,21 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
         if (!response.ok) {
           throw new Error("failed to load document content");
         }
-        const blob = await response.blob();
-        if (controller.signal.aborted) {
-          return;
+        if (isPdf) {
+          const blob = await response.blob();
+          if (controller.signal.aborted) {
+            return;
+          }
+          const objectUrl = URL.createObjectURL(blob);
+          objectUrlRef.current = objectUrl;
+          setContentUrl(objectUrl);
+        } else {
+          const data = await response.arrayBuffer();
+          if (controller.signal.aborted) {
+            return;
+          }
+          setDocxData(data);
         }
-        const objectUrl = URL.createObjectURL(blob);
-        objectUrlRef.current = objectUrl;
-        setContentUrl(objectUrl);
       } catch (err) {
         if ((err as Error).name === "AbortError") {
           return;
@@ -71,7 +86,7 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
         objectUrlRef.current = null;
       }
     };
-  }, [downloadUrl, normalizedType]);
+  }, [downloadUrl, isDocx, isPdf]);
 
   if (loading || contentLoading) {
     return <div className="doc-viewer-state">Loading document...</div>;
@@ -89,11 +104,23 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
     return <div className="doc-viewer-state">No document available</div>;
   }
 
-  if (normalizedType === "application/pdf") {
+  if (isPdf) {
     if (!contentUrl) {
       return <div className="doc-viewer-state">Preparing PDF...</div>;
     }
     return <PdfViewer url={contentUrl} />;
+  }
+
+  if (isDocx) {
+    if (!docxData) {
+      return <div className="doc-viewer-state">Preparing document...</div>;
+    }
+    return (
+      <DocxViewer
+        data={docxData}
+        onError={(message) => setContentError(message)}
+      />
+    );
   }
 
   return <UnsupportedViewer />;
