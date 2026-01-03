@@ -642,16 +642,21 @@ body {
   font-size: 14px;
 }
 
-.pdf-viewer {
-  padding: 12px;
+.text-viewer {
+  padding: 16px;
   border-radius: 12px;
   background: rgba(31, 35, 40, 0.04);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow: auto;
 }
 
-.pdf-viewer canvas {
-  max-width: 100%;
-  height: auto;
-  border-radius: 8px;
+.text-viewer pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-sans);
 }
 
 .office-viewer {
