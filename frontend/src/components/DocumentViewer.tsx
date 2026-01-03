@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import DocxViewer from "./DocxViewer";
+import OfficeViewer from "./OfficeViewer";
 import PdfViewer from "./PdfViewer";
 import UnsupportedViewer from "./UnsupportedViewer";
 import { useStorageObjectDownload } from "../hooks/useStorageObjectDownload";
@@ -16,7 +16,6 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
     storageObjectId,
   );
   const [contentUrl, setContentUrl] = useState<string | null>(null);
-  const [docxData, setDocxData] = useState<ArrayBuffer | null>(null);
   const [contentLoading, setContentLoading] = useState(false);
   const [contentError, setContentError] = useState<string | null>(null);
   const objectUrlRef = useRef<string | null>(null);
@@ -25,20 +24,30 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
     return (mimeType ?? "").split(";")[0].trim().toLowerCase();
   }, [mimeType]);
   const isPdf = normalizedType === "application/pdf";
-  const isDocx =
-    normalizedType ===
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const officeType = useMemo(() => {
+    switch (normalizedType) {
+      case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        return "docx";
+      case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        return "xlsx";
+      case "application/vnd.ms-excel":
+        return "xlsx";
+      case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+        return "pptx";
+      default:
+        return null;
+    }
+  }, [normalizedType]);
 
   useEffect(() => {
     setContentError(null);
     setContentUrl(null);
-    setDocxData(null);
     if (objectUrlRef.current) {
       URL.revokeObjectURL(objectUrlRef.current);
       objectUrlRef.current = null;
     }
 
-    if (!downloadUrl || (!isPdf && !isDocx)) {
+    if (!downloadUrl || !isPdf) {
       setContentLoading(false);
       return;
     }
@@ -51,21 +60,13 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
         if (!response.ok) {
           throw new Error("failed to load document content");
         }
-        if (isPdf) {
-          const blob = await response.blob();
-          if (controller.signal.aborted) {
-            return;
-          }
-          const objectUrl = URL.createObjectURL(blob);
-          objectUrlRef.current = objectUrl;
-          setContentUrl(objectUrl);
-        } else {
-          const data = await response.arrayBuffer();
-          if (controller.signal.aborted) {
-            return;
-          }
-          setDocxData(data);
+        const blob = await response.blob();
+        if (controller.signal.aborted) {
+          return;
         }
+        const objectUrl = URL.createObjectURL(blob);
+        objectUrlRef.current = objectUrl;
+        setContentUrl(objectUrl);
       } catch (err) {
         if ((err as Error).name === "AbortError") {
           return;
@@ -86,7 +87,7 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
         objectUrlRef.current = null;
       }
     };
-  }, [downloadUrl, isDocx, isPdf]);
+  }, [downloadUrl, isPdf]);
 
   if (loading || contentLoading) {
     return <div className="doc-viewer-state">Loading document...</div>;
@@ -111,14 +112,12 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
     return <PdfViewer url={contentUrl} />;
   }
 
-  if (isDocx) {
-    if (!docxData) {
-      return <div className="doc-viewer-state">Preparing document...</div>;
-    }
+  if (officeType) {
     return (
-      <DocxViewer
-        data={docxData}
-        onError={(message) => setContentError(message)}
+      <OfficeViewer
+        src={downloadUrl}
+        fileType={officeType}
+        onError={setContentError}
       />
     );
   }

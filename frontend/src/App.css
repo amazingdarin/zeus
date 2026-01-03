@@ -654,17 +654,20 @@ body {
   border-radius: 8px;
 }
 
-.docx-viewer {
+.office-viewer {
   padding: 12px;
   border-radius: 12px;
   background: rgba(31, 35, 40, 0.04);
   color: var(--ink);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   overflow-x: auto;
 }
 
-.docx-content {
-  font-family: var(--font-sans);
-  color: var(--ink);
+.office-viewer > * {
+  min-width: 100%;
+  box-sizing: border-box;
 }
 
 .kb-breadcrumb {
