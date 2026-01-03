@@ -135,6 +135,9 @@ const MAX_CONTROL_RATIO = 0.2;
 
 const extractTextContent = (buffer: ArrayBuffer): string | null => {
   const bytes = new Uint8Array(buffer);
+  if (bytes.length === 0) {
+    return "";
+  }
   const sample = bytes.subarray(0, MAX_TEXT_SAMPLE);
 
   let zeroCount = 0;
