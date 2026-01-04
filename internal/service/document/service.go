@@ -122,6 +122,51 @@ func (s *Service) Get(ctx context.Context, id string) (*domain.Document, error) 
 	return doc, nil
 }
 
+func (s *Service) Update(ctx context.Context, doc *domain.Document) (*domain.Document, error) {
+	if s == nil || s.repo == nil {
+		return nil, fmt.Errorf("document service not initialized")
+	}
+	if doc == nil {
+		return nil, fmt.Errorf("document is required")
+	}
+	id := strings.TrimSpace(doc.ID)
+	if id == "" {
+		return nil, fmt.Errorf("id is required")
+	}
+	existing, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get document: %w", err)
+	}
+	if existing == nil {
+		return nil, fmt.Errorf("document not found")
+	}
+
+	if title := strings.TrimSpace(doc.Title); title != "" {
+		existing.Title = title
+	}
+	existing.Description = strings.TrimSpace(doc.Description)
+
+	if doc.Parent != nil {
+		existing.Parent = &domain.Document{ID: doc.Parent.ID}
+	} else {
+		existing.Parent = nil
+	}
+	if doc.StorageObject != nil && doc.StorageObject.ID != "" {
+		existing.StorageObject = &domain.StorageObject{ID: doc.StorageObject.ID}
+	}
+
+	now := time.Now()
+	if s.now != nil {
+		now = s.now()
+	}
+	existing.UpdatedAt = now
+
+	if err := s.repo.Save(ctx, existing); err != nil {
+		return nil, fmt.Errorf("save document: %w", err)
+	}
+	return existing, nil
+}
+
 func (s *Service) GetProjectRootID(ctx context.Context, projectID string) (string, error) {
 	// TODO
 	if s == nil || s.repo == nil {

@@ -111,6 +111,10 @@ func (h *DocumentHandler) Create(c *gin.Context) {
 	if created.StorageObject != nil {
 		storageID = created.StorageObject.ID
 	}
+	parentID = ""
+	if created.Parent != nil {
+		parentID = created.Parent.ID
+	}
 	resp := &types.ProjectDocumentDTO{
 		ID:              created.ID,
 		ProjectID:       created.ProjectID,
@@ -208,6 +212,129 @@ func (h *DocumentHandler) List(c *gin.Context) {
 		Code:    "OK",
 		Message: "success",
 		Data:    items,
+	})
+}
+
+// Update
+// @route PUT /api/projects/:project_key/documents/:document_id
+func (h *DocumentHandler) Update(c *gin.Context) {
+	projectKey := strings.TrimSpace(c.Param("project_key"))
+	if projectKey == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{
+			Code:    "MISSING_PROJECT_KEY",
+			Message: "project_key is required",
+		})
+		return
+	}
+	documentID := strings.TrimSpace(c.Param("document_id"))
+	if documentID == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{
+			Code:    "MISSING_DOCUMENT_ID",
+			Message: "document_id is required",
+		})
+		return
+	}
+	if h.projectSvc == nil || h.documentSvc == nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+			Code:    "SERVICE_NOT_READY",
+			Message: "document service is required",
+		})
+		return
+	}
+	project, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+			Code:    "LOAD_PROJECT_FAILED",
+			Message: err.Error(),
+		})
+		return
+	}
+	existing, err := h.documentSvc.Get(c.Request.Context(), documentID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+			Code:    "GET_DOCUMENT_FAILED",
+			Message: err.Error(),
+		})
+		return
+	}
+	if existing == nil || existing.ProjectID != project.ID {
+		c.JSON(http.StatusNotFound, types.ErrorResponse{
+			Code:    "DOCUMENT_NOT_FOUND",
+			Message: "document not found",
+		})
+		return
+	}
+
+	var req types.UpdateDocumentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{
+			Code:    "INVALID_REQUEST",
+			Message: err.Error(),
+		})
+		return
+	}
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{
+			Code:    "MISSING_TITLE",
+			Message: "title is required",
+		})
+		return
+	}
+	storageObjectID := strings.TrimSpace(req.StorageObjectID)
+	if storageObjectID == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{
+			Code:    "MISSING_STORAGE_OBJECT",
+			Message: "storage_object_id is required",
+		})
+		return
+	}
+
+	doc := &domain.Document{
+		ID:          existing.ID,
+		ProjectID:   existing.ProjectID,
+		Type:        existing.Type,
+		Status:      existing.Status,
+		Title:       title,
+		Description: strings.TrimSpace(req.Description),
+		StorageObject: &domain.StorageObject{
+			ID: storageObjectID,
+		},
+	}
+	parentID := strings.TrimSpace(req.ParentID)
+	if parentID != "" {
+		doc.Parent = &domain.Document{ID: parentID}
+	}
+
+	updated, err := h.documentSvc.Update(c.Request.Context(), doc)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+			Code:    "UPDATE_DOCUMENT_FAILED",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	resp := &types.ProjectDocumentDTO{
+		ID:              updated.ID,
+		ProjectID:       updated.ProjectID,
+		Type:            string(updated.Type),
+		Title:           updated.Title,
+		Description:     updated.Description,
+		Status:          string(updated.Status),
+		Path:            updated.Path,
+		Order:           updated.Order,
+		ParentID:        parentID,
+		HasChild:        updated.HasChild,
+		StorageObjectID: storageObjectID,
+		CreatedAt:       updated.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:       updated.UpdatedAt.Format(time.RFC3339),
+	}
+
+	c.JSON(http.StatusOK, types.UpdateDocumentResponse{
+		Code:    "OK",
+		Message: "success",
+		Data:    resp,
 	})
 }
 

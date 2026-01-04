@@ -16,6 +16,19 @@ type CreateDocumentResponse struct {
 	Data    *ProjectDocumentDTO `json:"data,omitempty"`
 }
 
+type UpdateDocumentRequest struct {
+	Title           string `json:"title" form:"title" binding:"required"`
+	Description     string `json:"description" form:"description"`
+	ParentID        string `json:"parent_id" form:"parent_id"`
+	StorageObjectID string `json:"storage_object_id" form:"storage_object_id" binding:"required"`
+}
+
+type UpdateDocumentResponse struct {
+	Code    string              `json:"code"`
+	Message string              `json:"message"`
+	Data    *ProjectDocumentDTO `json:"data,omitempty"`
+}
+
 // RawDocumentDTO API 返回用文档结构
 type RawDocumentDTO struct {
 	ID           string    `json:"id"`

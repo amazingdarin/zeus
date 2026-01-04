@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -43,8 +43,6 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
   const navigate = useNavigate();
 
   const [document, setDocument] = useState<DocumentData | null>(null);
-  const [draftDocument, setDraftDocument] = useState<DocumentData | null>(null);
-  const [mode, setMode] = useState<"view" | "edit">("view");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,20 +56,12 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
 
-  const activeDocument = useMemo(() => {
-    if (mode === "edit" && draftDocument) {
-      return draftDocument;
-    }
-    return document;
-  }, [document, draftDocument, mode]);
-
+  const activeDocument = document;
   const allowChildActions = activeDocument ? activeDocument.type !== "overview" : false;
 
   useEffect(() => {
     if (!resolvedProjectKey || !resolvedDocumentId) {
       setDocument(null);
-      setDraftDocument(null);
-      setMode("view");
       setLoading(false);
       setError(null);
       return;
@@ -103,15 +93,12 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
           storageObjectId: String(data.storage_object_id ?? ""),
         };
         setDocument(mapped);
-        setDraftDocument(null);
-        setMode("view");
       } catch (err) {
         if ((err as Error).name === "AbortError") {
           return;
         }
         setError((err as Error).message || "failed to load document");
         setDocument(null);
-        setDraftDocument(null);
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -124,47 +111,21 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
   }, [resolvedDocumentId, resolvedProjectKey]);
 
   const handleEdit = () => {
-    if (!document) {
+    if (!activeDocument) {
       return;
     }
-    setDraftDocument({ ...document });
-    setMode("edit");
-  };
-
-  const handleCancel = () => {
-    setDraftDocument(null);
-    setMode("view");
-  };
-
-  const handleSave = async () => {
-    if (!draftDocument) {
-      return;
-    }
-    // TODO: call update document API when available.
-    setDocument(draftDocument);
-    setDraftDocument(null);
-    setMode("view");
-  };
-
-  const handleTitleChange = (value: string) => {
-    if (!draftDocument) {
-      return;
-    }
-    setDraftDocument({ ...draftDocument, title: value });
-  };
-
-  const handleDescriptionChange = (value: string) => {
-    if (!draftDocument) {
-      return;
-    }
-    setDraftDocument({ ...draftDocument, description: value });
+    navigate(`/documents/new?document_id=${encodeURIComponent(activeDocument.id)}`);
   };
 
   const handleOpenNew = () => {
     if (!allowChildActions) {
       return;
     }
-    navigate("/documents/new");
+    const parentID = activeDocument?.id ?? "";
+    const target = parentID
+      ? `/documents/new?parent_id=${encodeURIComponent(parentID)}`
+      : "/documents/new";
+    navigate(target);
   };
 
   const handleOpenImport = () => {
@@ -463,13 +424,13 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
       <DocumentHeader
         title={activeDocument.title}
         description={activeDocument.description}
-        mode={mode}
+        mode="view"
         allowChildActions={allowChildActions}
-        onTitleChange={handleTitleChange}
-        onDescriptionChange={handleDescriptionChange}
+        onTitleChange={() => {}}
+        onDescriptionChange={() => {}}
         onEdit={handleEdit}
-        onSave={handleSave}
-        onCancel={handleCancel}
+        onSave={() => {}}
+        onCancel={() => {}}
         onNew={handleOpenNew}
         onImport={handleOpenImport}
       />

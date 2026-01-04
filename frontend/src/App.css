@@ -659,6 +659,13 @@ body {
   font-family: var(--font-sans);
 }
 
+.rich-viewer {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  padding: 16px;
+}
+
 .office-viewer {
   padding: 12px;
   border-radius: 12px;

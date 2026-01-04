@@ -24,6 +24,7 @@ type DocumentService interface {
 		doc *domain.Document,
 		content string,
 	) (*domain.Document, error)
+	Update(ctx context.Context, doc *domain.Document) (*domain.Document, error)
 
 	// Get 根据ID查询文档
 	Get(ctx context.Context, id string) (*domain.Document, error)

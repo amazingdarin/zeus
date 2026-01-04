@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
 import OfficeViewer from "./OfficeViewer";
+import RichTextViewer from "./RichTextViewer";
 import TextViewer from "./TextViewer";
 import UnsupportedViewer from "./UnsupportedViewer";
 import { useStorageObjectDownload } from "../hooks/useStorageObjectDownload";
+import type { JSONContent } from "@tiptap/react";
 
 interface DocumentViewerProps {
   projectKey: string;
@@ -16,6 +18,7 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
     storageObjectId,
   );
   const [textContent, setTextContent] = useState<string | null>(null);
+  const [richContent, setRichContent] = useState<JSONContent | null>(null);
   const [isBinary, setIsBinary] = useState(false);
   const [contentLoading, setContentLoading] = useState(false);
   const [contentError, setContentError] = useState<string | null>(null);
@@ -43,6 +46,7 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
   useEffect(() => {
     setContentError(null);
     setTextContent(null);
+    setRichContent(null);
     setIsBinary(false);
 
     if (!downloadUrl) {
@@ -70,7 +74,12 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
         if (text == null) {
           setIsBinary(true);
         } else {
-          setTextContent(text);
+          const richText = parseZeusRichText(text);
+          if (richText) {
+            setRichContent(richText);
+          } else {
+            setTextContent(text);
+          }
         }
       } catch (err) {
         if ((err as Error).name === "AbortError") {
@@ -116,6 +125,10 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
     );
   }
 
+  if (richContent) {
+    return <RichTextViewer content={richContent} />;
+  }
+
   if (textContent != null) {
     return <TextViewer text={textContent} />;
   }
@@ -132,6 +145,8 @@ export default DocumentViewer;
 const MAX_TEXT_SAMPLE = 8192;
 const MAX_REPLACEMENT_RATIO = 0.1;
 const MAX_CONTROL_RATIO = 0.2;
+const ZEUS_META_FLAG = "zeus";
+const ZEUS_FORMAT = "tiptap";
 
 const extractTextContent = (buffer: ArrayBuffer): string | null => {
   const bytes = new Uint8Array(buffer);
@@ -180,4 +195,30 @@ const extractTextContent = (buffer: ArrayBuffer): string | null => {
   }
 
   return decoder.decode(buffer);
+};
+
+const parseZeusRichText = (text: string): JSONContent | null => {
+  if (!text.trim()) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(text) as {
+      meta?: { zeus?: boolean; format?: string };
+      content?: JSONContent;
+      zeus?: boolean;
+      type?: string;
+    };
+    if (!parsed?.meta?.[ZEUS_META_FLAG] || parsed.meta?.format !== ZEUS_FORMAT) {
+      if (parsed?.zeus && parsed?.type === "doc") {
+        return parsed as JSONContent;
+      }
+      return null;
+    }
+    if (!parsed.content || parsed.content.type !== "doc") {
+      return null;
+    }
+    return parsed.content;
+  } catch {
+    return null;
+  }
 };
