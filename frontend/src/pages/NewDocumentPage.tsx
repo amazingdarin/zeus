@@ -5,6 +5,10 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import RichTextEditor from "../components/RichTextEditor";
 import { buildApiUrl } from "../config/api";
 import { useProjectContext } from "../context/ProjectContext";
+import {
+  exportContentJson,
+  type ContentMetaInput,
+} from "../utils/exportContentJson";
 
 function NewDocumentPage() {
   const { currentProject } = useProjectContext();
@@ -18,6 +22,7 @@ function NewDocumentPage() {
   const [documentId, setDocumentId] = useState("");
   const [parentID, setParentID] = useState("");
   const [storageObjectID, setStorageObjectID] = useState("");
+  const [contentMeta, setContentMeta] = useState<ContentMetaInput>(null);
 
   const parentIdParam = useMemo(() => {
     return (searchParams.get("parent_id") || "").trim();
@@ -26,15 +31,12 @@ function NewDocumentPage() {
     return (searchParams.get("document_id") || "").trim();
   }, [searchParams]);
 
-  const payload = {
-    meta: {
-      zeus: true,
-      format: "tiptap",
-    },
-    title,
-    content,
-    parent_id: parentID || parentIdParam,
-  };
+  const contentPayload = useMemo(() => {
+    return exportContentJson(
+      content ?? { type: "doc", content: [] },
+      contentMeta,
+    );
+  }, [content, contentMeta]);
 
   useEffect(() => {
     setDocumentId(documentIdParam);
@@ -42,6 +44,7 @@ function NewDocumentPage() {
       setParentID(parentIdParam);
       setStorageObjectID("");
       setContent(null);
+      setContentMeta(null);
       setSaveError(null);
       return;
     }
@@ -104,9 +107,7 @@ function NewDocumentPage() {
         const parsed = parseEditorPayload(text);
         if (parsed) {
           setContent(parsed.content);
-          if (parsed.title) {
-            setTitle(parsed.title);
-          }
+          setContentMeta(parsed.meta ?? null);
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
@@ -129,9 +130,13 @@ function NewDocumentPage() {
     setSaving(true);
 
     try {
+      const payloadForSave = exportContentJson(
+        content ?? { type: "doc", content: [] },
+        contentMeta,
+      );
       const safeName = sanitizeFileName(title) || "untitled";
       const fileName = `${safeName}.json`;
-      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      const blob = new Blob([JSON.stringify(payloadForSave, null, 2)], {
         type: "application/json",
       });
       const file = new File([blob], fileName, { type: "application/json" });
@@ -167,6 +172,7 @@ function NewDocumentPage() {
         }
         navigate(`/knowledge?${query.toString()}`);
       }
+      setContentMeta(payloadForSave.meta);
       console.log("document_saved", documentPayload);
     } catch (error) {
       setSaveError(
@@ -200,7 +206,7 @@ function NewDocumentPage() {
       <RichTextEditor content={content} onChange={setContent} />
       <div className="new-doc-json">
         <div className="new-doc-json-title">Document JSON</div>
-        <pre>{JSON.stringify(payload, null, 2)}</pre>
+        <pre>{JSON.stringify(contentPayload, null, 2)}</pre>
       </div>
     </div>
   );
@@ -342,12 +348,17 @@ const fetchStorageDownload = async (
   return payload?.download?.url ?? "";
 };
 
+type EditorMeta = {
+  zeus?: boolean;
+  format?: string;
+  schema_version?: number;
+  editor?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
 type EditorPayload = {
-  meta?: {
-    zeus?: boolean;
-    format?: string;
-  };
-  title?: string;
+  meta?: EditorMeta;
   content?: JSONContent;
 } & JSONContent;
 
@@ -359,7 +370,7 @@ const parseEditorPayload = (raw: string) => {
     const parsed = JSON.parse(raw) as EditorPayload;
     if (parsed.meta?.zeus && parsed.meta.format === "tiptap" && parsed.content) {
       return {
-        title: parsed.title,
+        meta: parsed.meta,
         content: parsed.content,
       };
     }

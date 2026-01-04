@@ -70,6 +70,10 @@ import { ThemeToggle } from "@/components/tiptap-templates/simple/theme-toggle"
 
 // --- Lib ---
 import { handleImageUpload, MAX_FILE_SIZE } from "@/lib/tiptap-utils"
+import {
+  BlockIdExtension,
+  ensureBlockIds,
+} from "@/components/tiptap-extension/BlockIdExtension"
 
 // --- Styles ---
 import "@/components/tiptap-templates/simple/simple-editor.scss"
@@ -204,7 +208,10 @@ export function SimpleEditor({ onChange, content }: SimpleEditorProps) {
   )
   const toolbarRef = useRef<HTMLDivElement>(null)
   const lastContentRef = useRef<string | null>(null)
-  const initialContent = useMemo(() => content ?? defaultContent, [content])
+  const initialContent = useMemo(
+    () => ensureBlockIds(content ?? defaultContent),
+    [content]
+  )
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -227,6 +234,7 @@ export function SimpleEditor({ onChange, content }: SimpleEditorProps) {
       },
     },
     extensions: [
+      BlockIdExtension,
       StarterKit.configure({
         horizontalRule: false,
         link: {
@@ -290,11 +298,12 @@ export function SimpleEditor({ onChange, content }: SimpleEditorProps) {
     if (!editor || !content) {
       return
     }
-    const serialized = JSON.stringify(content)
+    const nextContent = ensureBlockIds(content)
+    const serialized = JSON.stringify(nextContent)
     if (serialized === lastContentRef.current) {
       return
     }
-    editor.commands.setContent(content)
+    editor.commands.setContent(nextContent)
     lastContentRef.current = serialized
   }, [content, editor])
 

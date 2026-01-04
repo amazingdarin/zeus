@@ -3,6 +3,7 @@ import type { JSONContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { createLowlight, common } from "lowlight";
+import { BlockIdExtension } from "@/components/tiptap-extension/BlockIdExtension";
 
 const lowlight = createLowlight(common);
 
@@ -13,6 +14,7 @@ interface RichTextViewerProps {
 function RichTextViewer({ content }: RichTextViewerProps) {
   const editor = useEditor({
     extensions: [
+      BlockIdExtension,
       StarterKit.configure({
         codeBlock: false,
         heading: {
