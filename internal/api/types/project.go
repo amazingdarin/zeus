@@ -5,6 +5,8 @@ type ProjectDTO struct {
 	Key         string `json:"key"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	RepoURL     string `json:"repo_url"`
+	RepoName    string `json:"repo_name"`
 	Status      string `json:"status"`
 	CreatedAt   string `json:"created_at"`
 }
@@ -21,6 +23,8 @@ type CreateProjectResponse struct {
 
 	Data struct {
 		ID        string `json:"id"`
+		RepoURL   string `json:"repo_url"`
+		RepoName  string `json:"repo_name"`
 		CreatedAt string `json:"created_at"`
 	} `json:"data"`
 }

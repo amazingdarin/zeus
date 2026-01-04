@@ -51,9 +51,13 @@ func (h *ProjectHandler) Create(c *gin.Context) {
 		Message: "success",
 		Data: struct {
 			ID        string `json:"id"`
+			RepoURL   string `json:"repo_url"`
+			RepoName  string `json:"repo_name"`
 			CreatedAt string `json:"created_at"`
 		}{
 			ID:        project.ID,
+			RepoURL:   project.RepoURL,
+			RepoName:  project.RepoName,
 			CreatedAt: project.CreatedAt.Format(time.RFC3339),
 		},
 	})
@@ -81,6 +85,8 @@ func (h *ProjectHandler) List(c *gin.Context) {
 			Key:         project.Key,
 			Name:        project.Name,
 			Description: project.Description,
+			RepoURL:     project.RepoURL,
+			RepoName:    project.RepoName,
 			Status:      string(project.Status),
 			CreatedAt:   project.CreatedAt.Format(time.RFC3339),
 		})

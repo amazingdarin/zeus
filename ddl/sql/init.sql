@@ -4,7 +4,9 @@ CREATE TABLE project
     key         TEXT NOT NULL UNIQUE,
     name        TEXT NOT NULL,
     description TEXT,
-    status      TEXT NOT NULL,
+    repo_url    TEXT NOT NULL,
+    repo_name   TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'active',
     created_at  TIMESTAMPTZ DEFAULT now(),
     updated_at  TIMESTAMPTZ DEFAULT now()
 );

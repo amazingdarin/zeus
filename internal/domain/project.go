@@ -9,13 +9,15 @@ import (
 type ProjectStatus string
 
 const (
+	ProjectStatusCreating ProjectStatus = "creating"
 	ProjectStatusActive   ProjectStatus = "active"
+	ProjectStatusFailed   ProjectStatus = "failed"
 	ProjectStatusArchived ProjectStatus = "archived"
 )
 
 func (s ProjectStatus) IsValid() bool {
 	switch s {
-	case ProjectStatusActive, ProjectStatusArchived:
+	case ProjectStatusCreating, ProjectStatusActive, ProjectStatusFailed, ProjectStatusArchived:
 		return true
 	default:
 		return false
@@ -27,6 +29,8 @@ type Project struct {
 	Key         string
 	Name        string
 	Description string
+	RepoURL     string
+	RepoName    string
 	Status      ProjectStatus
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
@@ -41,6 +45,12 @@ func (p Project) Validate() error {
 	}
 	if strings.TrimSpace(p.Name) == "" {
 		return fmt.Errorf("project name is required")
+	}
+	if strings.TrimSpace(p.RepoURL) == "" {
+		return fmt.Errorf("project repo url is required")
+	}
+	if strings.TrimSpace(p.RepoName) == "" {
+		return fmt.Errorf("project repo name is required")
 	}
 	if p.Status == "" {
 		return fmt.Errorf("project status is required")

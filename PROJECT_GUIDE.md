@@ -1,422 +1,236 @@
 # Zeus Project Guide
-**Version 1.0**  
+**Version 2.0**
 **Purpose: Enforce Architecture & Coding Discipline**
 
 所有工程师（包括 AI 代码生成器）必须严格遵守本规范。
 
 ---
 
-## 一、总体架构原则
+## 0. 总体目标与当前阶段
 
-### 1. Clean Architecture + Domain First
+Zeus 是一个全流程智能研发系统。当前阶段聚焦于 **知识库（Knowledge Base）与文档系统** 的基础能力（创建项目、文档读写、版本管理、搜索可派生）。
 
-`api → service → domain → repository / infra`
-
-#### 严格禁止
-- service 层直接操作数据库
-- api 层编写业务逻辑
-- domain 层依赖 infra / repository
-- handler 中直接调用对象存储 SDK
+### 当前阶段核心决策（必须遵守）
+- **Project（项目控制面）**：由 **数据库** 管理（PostgreSQL + GORM）
+- **Knowledge Base（文档事实源）**：由 **Git 仓库** 管理（每项目一个 repo）
+- **搜索/索引/RAG**：均为**派生能力**，不是事实源，可后续引入
 
 ---
 
-## 二、当前阶段红线（必须遵守）
+## 1. Clean Architecture + Domain First
+
+### 1.1 分层约束
+
+推荐依赖方向：
+
+`api(handler) → service → domain → repository / infra`
+
+禁止：
+- service 直接写 SQL / 直接操作 GORM（必须通过 repository）
+- api 层写业务逻辑
+- domain 依赖 infra（domain 只能是纯数据结构 + 规则）
+- 在业务中直接调用 `os/exec git ...`（必须封装在 infra 层）
+
+---
+
+## 2. 当前阶段红线（必须遵守）
 
 在 **文档上传、整理与规范化阶段**，系统必须遵守以下红线：
 
-### ❌ 严格禁止的行为
-
-- ❌ 调用 LLM 对文档内容进行**主观抽象、总结或系统事实生成**
-- ❌ 自动生成任何 **Spec / 系统说明 / 架构结论**
-- ❌ 写入 `module_snapshot`（系统级聚合视图）
-- ❌ 基于检索结果进行 **RAG 推理、问答或决策输出**
+### 2.1 严格禁止
+- ❌ 调用 LLM 对文档内容进行主观抽象、总结或系统事实生成
+- ❌ 自动生成任何 Spec / 系统说明 / 架构结论
+- ❌ 写入 `module_snapshot`
+- ❌ 基于检索结果进行 RAG 推理/问答或决策输出
 - ❌ 任何会引入“事实判断”“设计意图推断”的自动化行为
 
-### ✅ 明确允许的行为（受控）
-
-- ✅ 原始文档与规范文档（Block JSON）的存储
+### 2.2 明确允许（受控）
+- ✅ 原始文档与规范文档（TipTap Block JSON）的存储
 - ✅ 文档元数据提取与整理（非语义判断）
-- ✅ 文档类型与结构分类（基于规则或确定性算法）
+- ✅ 文档类型与结构分类（规则/确定性算法）
 - ✅ 候选模块推断（低风险、带置信度、不可作为事实）
-- ✅ **RAG 基础索引构建**（仅限以下行为）：
-  - Block 解析与结构化（SemanticItem）
-  - 语义分块（Chunking，规则驱动）
-  - Embedding 计算（无 LLM 推理）
-  - 向量索引写入（不可直接对用户暴露）
-
-### ⚠️ 明确暂缓的能力（后续阶段）
-
-- ⏸ RAG 检索结果对用户可见
-- ⏸ 基于 RAG 的问答、总结、对话
-- ⏸ 基于 RAG 的系统说明生成或模块合并
+- ✅ 可重建的搜索/索引（FTS/倒排）——**派生数据**
 
 ---
 
-## 三、目录结构规范（强制）
+## 3. 数据与事实源边界（DB vs Git）
 
-```text
+### 3.1 数据库（Control Plane）
+
+数据库仅用于：
+- Project 生命周期（create/list/get/update）
+- Project -> Git repo 的绑定信息（repo_url/repo_name）
+- 系统运行配置（如 Git server 地址、默认分支等）
+- 派生索引（可选）：全文索引、搜索缓存（必须可重建）
+
+数据库不得用于：
+- 文档内容事实源
+- 文档元信息事实源（标题/父子关系/tags 等应以 Git 为准）
+
+### 3.2 Git（Knowledge Data Plane）
+
+Git 仓库是文档系统事实源，用于：
+- 文档内容 `content.json`
+- 文档元信息 `.meta.json`
+- 文档历史、diff、回滚（commit log）
+
+---
+
+## 4. Git 仓库规范（每项目一个 Repo）
+
+### 4.1 Repo 命名
+- Repo 名：`zeus-{project_key}.git`
+- `project_key` 创建后不可修改
+- 一个 Project 必须绑定一个 repo（DB 中记录 repo_url）
+
+### 4.2 Repo 目录规范（强制）
+```
+/
+├── README.md
+├── .zeus/
+│   └── project.json            # 可选（只读冗余，不作为主事实）
+└── docs/
+    ├── /
+    │   ├── content.json         # TipTap 内容（仅内容）
+    │   └── .meta.json           # 文档元信息（事实源）
+    └── …
+```
+
+### 4.3 content.json 规范（强制）
+content.json 只包含内容与内容元信息（不含 title/parent_id 等业务字段）：
+```json
+{
+  "meta": {
+    "zeus": true,
+    "format": "tiptap",
+    "schema_version": 1,
+    "editor": "tiptap",
+    "created_at": "RFC3339",
+    "updated_at": "RFC3339"
+  },
+  "content": { "type": "doc", "content": [] }
+}
+```
+
+Block ID（强烈建议）
+- block-level 节点需要 attrs.id（uuid/nanoid）
+- 用于定位、高亮、增量索引
+- 如果暂未实现，解析阶段允许使用 node-path hash 兜底（但必须尽快补齐）
+
+### 4.4 .meta.json 规范（强制）
+
+.meta.json 为文档事实元信息，建议最小字段：
+```
+{
+  "id": "doc-xxx",
+  "slug": "system-design",
+  "title": "系统设计说明",
+  "parent": "root",
+  "path": "/system-design",
+  "created_at": "RFC3339",
+  "updated_at": "RFC3339",
+  "status": "draft",
+  "tags": []
+}
+```
+
+---
+
+## 5. 目录结构（强制）
+```
 /cmd
 /internal
-  /api                 # HTTP API 层
-  /service
-    /raw_document           # 文档上传与整理业务
-  /domain               # 领域模型
+  /api                 # Gin handlers / routing / request/response DTO
+  /config              # Program config
+  /service             # use-cases (business orchestration)
+  /domain              # pure models + rules (no IO)
   /repository
-    /postgres           # PostgreSQL 实现
-      /model            # PostgreSQL 数据模型定义
-      /mapper           # PostgreSQL 数据模型与 Domain 领域的映射
+    /postgres          # GORM repo for control-plane entities (Project, etc.)
+    /git               # repo for knowledge plane (git operations, file read/write)
   /infra
-    /s3      # S3 实现
-  /pipeline             # 文档处理流水线
+    /gitclient         # low-level git operations (clone, pull, commit, push)
   /util
 ```
 
 ---
 
-## 四、Domain 层规范（必须遵守）
+## 6. 服务与接口（推荐边界）
 
-Domain 层必须是：
-- 无 IO
-- 无数据库
-- 无 LLM
-- 无外部依赖
-- 仅包含：数据结构 + 业务不变规则
+### 6.1 Service（面向用例）
+- ProjectService（DB）
+- KnowledgeService（Git）
+- SearchIndexService（派生，可选）
 
-示例：
-
-```go
-type RawDocument struct {
-    DocID    string
-    Title    string
-    Metadata DocumentMetadata
-}
-
-type DocumentMetadata struct {
-    BatchID         string
-    OriginalPath    string
-    Category        string
-    CandidateModule string
-    Confidence      float64
-    Status          string
-}
-```
-
-## 五、Service 层规范
-
-Service 层职责：
-- 业务流程编排
-- 调用 pipeline
-- 调用 repository
-- 处理事务边界
-
-允许：
-- 生成 batch_id
-- 调用分类与模块推断逻辑
-- 保存 raw_document
-
-禁止：
-- 解析 HTTP 请求
-- 拼接 SQL
-- 直接访问 S3 SDK
+### 6.2 Repository（面向数据源）
+- ProjectRepository（GORM）
+- KnowledgeRepository（Git-backed file store）
+- GitClient（infra：clone/pull/commit/push）
 
 ---
 
-## 六、Repository 层规范
+## 7. API 规范（RESTful + 按模块划分）
 
-- 每个外部系统一个 repository
-- 只负责数据读写
-- 不包含业务规则
+路径统一前缀：`/api`
 
-`SaveRawDocument(ctx context.Context, doc *RawDocument) error`
+### Project（DB）
+- `POST   /api/projects`
+- `GET    /api/projects`
+- `GET    /api/projects/{project_key}`
 
-## 七、Pipeline 规范（文档处理）
-
-Pipeline 是可组合、可测试的顺序处理单元：
-
-```text
-Upload
- → ExtractMetadata
- → Classify
- → GuessModule
- → Persist
-```
-
-Pipeline 严禁：
-- 跳过步骤
-- 回写 Spec
-- 直接生成 ModuleSnapshot
-
-## 八、命名规范（强制）
-
-对象规则：
-- Go struct PascalCase
-- Go interface PascalCase + er
-- 文件名 snake_case.go
-- DocID DOC-XXXX
-- BatchID batch-YYYYMMDD-xxx
-- Module 全大写（AUTH / ORDER）
-
-## 九、错误处理规范
-
-- 所有函数必须返回 error
-- 必须使用错误包装：
-
-```go
-return fmt.Errorf("save raw document failed: %w", err)
-```
-
-## 十、测试规范（当前阶段）
-
-必须覆盖的测试：
-- 文档类型分类规则
-- 模块候选推断逻辑
-- pipeline 顺序执行
-- repository mock 测试
+### Knowledge（Git）
+- `GET    /api/projects/{project_key}/documents`            # list (from git)
+- `GET    /api/projects/{project_key}/documents/{doc_id}`   # read (content+meta)
+- `POST   /api/projects/{project_key}/documents`            # create (write files + commit)
+- `PATCH  /api/projects/{project_key}/documents/{doc_id}`   # update (write files + commit)
+- `GET    /api/projects/{project_key}/documents/{doc_id}/history`  # git log (optional)
 
 ---
 
-## 十一、Codex / LLM 使用规范（必须复制）
-```text
-You are generating code for the Zeus project.
-You MUST follow PROJECT_GUIDE.md strictly.
-Current phase: Document Upload & Organization only.
-Do NOT generate Spec, RAG, or ModuleSnapshot logic.
-Do NOT violate layer boundaries.
-```
+## 8. Git 操作原则（必须）
+
+所有写操作必须：
+- pull --rebase（或等价策略）保持与远端一致
+- 写文件（content.json / .meta.json）
+- git add
+- git commit
+- git push
+
+commit message 必须结构化：
+- `docs: create <doc_id>`
+- `docs: update <doc_id>`
+
+任何 git 冲突必须显式处理并返回错误（禁止 silent overwrite）。
+所有 git IO 必须封装在 infra/gitclient，业务层不得直接 exec。
 
 ---
 
-## 十二、GORM Repository 规范（强制）
+## 9. 错误处理规范
 
-本项目使用 **GORM** 作为 ORM 框架，但其使用范围受到严格限制。
-
-> **GORM 仅允许存在于 Repository 的具体实现层（Implementation）中。**  
-> **任何 Domain / Service / API 层代码都不得直接或间接依赖 GORM。**
-
----
-
-### 12.1 GORM 使用边界（红线）
-
-#### ✅ 允许
-
-- GORM 仅用于 PostgreSQL Repository 实现
-- 使用 `gorm.DB` 进行 CRUD
-- 使用 `datatypes.JSON` 映射 `jsonb`
-- 使用 `WithContext(ctx)`
-- 使用 `Transaction`（仅限 Repository 内）
-
-#### ❌ 严禁
-
-- 在 Domain 层定义 GORM Model 或 gorm tag
-- 在 Service / API 层 import GORM
-- 在 Handler 中直接使用 `db.Create / db.Find`
-- 使用 `AutoMigrate()` 作为生产迁移方案
-- 直接将 GORM Model 返回给上层
+- handler 返回统一错误结构：
+  - code
+  - message
+  - request_id（可选）
+- service 返回 domain error（不包含 HTTP）
+- repository 负责将 infra error 转换为可识别错误类型
 
 ---
 
-### 12.2 Domain Model 与 GORM Model 必须分离
+## 10. 日志与可观测（最低要求）
 
-#### Domain Model（纯净）
-
-- 仅表达业务概念
-- 不包含：
-  - gorm tag
-  - 表名
-  - 主键 ID
-  - ORM 行为
-
-示例：
-
-```go
-type RawDocument struct {
-    DocID      string
-    SourceType string
-    SourceURI  string
-    Title      string
-    Metadata   DocumentMetadata
-    CreatedAt  time.Time
-}
-```
+- 所有关键操作必须日志：
+  - project create
+  - repo init
+  - doc create/update
+  - git commit/push
+- 结构化日志（json）
+- request_id 贯穿 handler -> service -> repo
 
 ---
 
-## 十三、API 定义规范（RESTful + 模块化）
+## 11. 安全与权限（当前阶段简化）
 
-本项目所有对外 HTTP API **必须遵循模块化 RESTful 设计规范**。  
-API 定义以 **模块（Module）** 为第一层划分，以 **资源（Resource）** 为核心。
-
-OpenAPI 3.1 是 API 的唯一事实源（Single Source of Truth）。
-
----
-
-### 13.1 API 总体原则（必须遵守）
-
-#### 1. 模块优先（Module-First）
-
-- API 必须按业务模块划分
-- 每个模块拥有清晰、独立的 URL 前缀
-- 不允许跨模块混杂资源
-
-示例：
-
-```text
-/api/knowledge/...
-/api/uploads/...
-/api/raw-documents/...
-```
-
-#### 2. RESTful 资源导向（Resource-Oriented）
-
-- URL 表示资源
-- HTTP Method 表示动作
-- 不在 URL 中出现动词
-
-**✅ 正确：**
-```text
-POST   /api/uploads
-GET    /api/raw-documents
-GET    /api/raw-documents/{doc_id}
-```
-
-**❌ 错误：**
-```text
-POST /api/uploadFile
-GET  /api/getRawDocuments
-```
-
-#### 3. API = 契约，不是实现
-
-- API 定义只描述：请求 / 响应 / 错误
-- 不暴露：数据库结构 / ORM 细节 / 内部状态
-
-### 13.2 URL 结构规范（强制）
-
-**标准结构**
-```text
-/api/{module}/{resource}/{resource_id}/{sub_resource}
-```
-
-**规则**
-- {module}：模块名，小写 + 短名词
-- {resource}：资源名，复数
-- {resource_id}：资源唯一标识
-- {sub_resource}：资源的子资源（可选）
-
-示例：
-```text
-/api/uploads
-/api/uploads/{batch_id}/files
-/api/raw-documents
-/api/raw-documents/{doc_id}
-```
-
-### 13.3 模块划分规则（Zeus 规范）
-
-**当前核心模块（示例）**
-
-| 模块 | URL前缀 | 说明 |
-| --- | --- | --- |
-| Upload | /api/uploads | 文档导入与批次管理 |
-| Knowledge | /api/knowledge | 知识库与模块视图 |
-| Document | /api/raw-documents | 原始文档管理 |
-
-模块一旦发布，不允许随意合并或拆分。
-
-### 13.4 HTTP Method 使用规范（强制）
-**Method 用途**
-
-| Method | 用途 |
-| --- | --- |
-| GET | 查询资源 |
-| POST | 创建资源 |
-| PUT | 整体更新资源 |
-| PATCH | 部分更新资源 |
-| DELETE | 删除资源 |
-
-示例：
-```text
-POST   /api/uploads                # 创建上传批次
-POST   /api/uploads/{id}/files     # 向批次添加文件
-GET    /api/raw-documents          # 查询文档列表
-GET    /api/raw-documents/{doc_id} # 查询单个文档
-```
-
-### 13.5 查询与过滤规范（Query）
-- 查询条件一律使用 query parameter
-- 不使用 body 进行查询
-- 支持分页的接口必须包含：`limit`、`offset`
-
-示例：
-```text
-GET /api/raw-documents?batch_id=xxx&limit=20&offset=0
-```
-
-### 13.6 响应结构规范（强制）
-**列表响应**
-```json
-{
-  "data": [...],
-  "total": 100
-}
-```
-
-**单资源响应**
-```json
-{
-  "data": { ... }
-}
-```
-
-### 13.7 错误响应规范（统一）
-
-所有错误必须使用统一结构：
-```json
-{
-  "code": "INVALID_REQUEST",
-  "message": "Invalid request payload"
-}
-```
-- code：稳定错误码（用于程序判断）
-- message：面向人的错误信息
-
-### 13.8 命名规范（强制）
-
-**URL**
-
-- 全小写
-- 使用 - 分隔
-- 不使用驼峰
-
-**JSON 字段**
-
-- snake_case
-- 与 OpenAPI schema 保持一致
-
----
-
-### 13.9 OpenAPI 使用规范（强制）
-- 每一个 API 必须在 openapi.yaml 中定义
-- OpenAPI 是后端代码生成源
-- OpenAPI 是前端 SDK 生成源
-- OpenAPI 是接口文档生成源
-- 禁止手写未定义的 API
-
----
-
-### 13.10 Codex / LLM 生成 API 的约束
-
-使用 Codex 生成 API 时，必须遵循以下规则：
-```text
-All APIs must:
-- Be defined per module
-- Follow RESTful resource-oriented design
-- Use plural resource names
-- Avoid verbs in URLs
-- Be added to openapi.yaml first
-- Follow the unified response and error format
-```
-
-违反上述任一规则，生成结果必须被拒绝并重写。
+- 暂不实现复杂权限系统
+- 但必须保留 project_key 作用域校验
+- Git 访问凭据由服务端管理（SSH key），不得暴露给前端
 
 ---

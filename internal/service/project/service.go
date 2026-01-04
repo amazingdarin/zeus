@@ -51,6 +51,15 @@ func (s *Service) Create(ctx context.Context, project *domain.Project) error {
 	if strings.TrimSpace(project.ID) == "" {
 		project.ID = uuid.NewString()
 	}
+	project.Key = strings.TrimSpace(project.Key)
+	project.RepoName = strings.TrimSpace(project.RepoName)
+	project.RepoURL = strings.TrimSpace(project.RepoURL)
+	if project.RepoName == "" {
+		project.RepoName = buildRepoName(project.Key)
+	}
+	if project.RepoURL == "" {
+		project.RepoURL = buildRepoURL(project.RepoName)
+	}
 
 	now := time.Now()
 	project.CreatedAt = now
@@ -217,6 +226,22 @@ func buildDocumentDescription(projectDescription, title string) string {
 		return title
 	}
 	return fmt.Sprintf("%s %s", projectDescription, title)
+}
+
+func buildRepoName(projectKey string) string {
+	projectKey = strings.TrimSpace(projectKey)
+	if projectKey == "" {
+		return ""
+	}
+	return fmt.Sprintf("zeus-%s.git", projectKey)
+}
+
+func buildRepoURL(repoName string) string {
+	repoName = strings.TrimSpace(repoName)
+	if repoName == "" {
+		return ""
+	}
+	return repoName
 }
 
 var _ service.ProjectService = (*Service)(nil)
