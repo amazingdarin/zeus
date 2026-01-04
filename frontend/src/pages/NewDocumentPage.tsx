@@ -12,7 +12,6 @@ function NewDocumentPage() {
   const [searchParams] = useSearchParams();
   const [content, setContent] = useState<JSONContent | null>(null);
   const [title, setTitle] = useState("Untitled Document");
-  const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [loadingDocument, setLoadingDocument] = useState(false);
@@ -33,7 +32,6 @@ function NewDocumentPage() {
       format: "tiptap",
     },
     title,
-    description,
     content,
     parent_id: parentID || parentIdParam,
   };
@@ -64,7 +62,6 @@ function NewDocumentPage() {
           return;
         }
         setTitle(String(detail.title ?? "Untitled Document"));
-        setDescription(String(detail.description ?? ""));
         const parentId = String(detail.parent_id ?? "").trim();
         setParentID(parentId);
         const storageId = String(detail.storage_object_id ?? "").trim();
@@ -110,9 +107,6 @@ function NewDocumentPage() {
           if (parsed.title) {
             setTitle(parsed.title);
           }
-          if (parsed.description) {
-            setDescription(parsed.description);
-          }
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
@@ -153,7 +147,6 @@ function NewDocumentPage() {
           projectKey,
           documentId,
           title,
-          description,
           parentID || parentIdParam,
           storageObjectID,
         );
@@ -161,7 +154,6 @@ function NewDocumentPage() {
         documentPayload = await createDocumentRecord(
           projectKey,
           title,
-          description,
           parentID || parentIdParam,
           storageObjectID,
         );
@@ -189,7 +181,7 @@ function NewDocumentPage() {
     <div className="new-doc-page">
       <div className="new-doc-header">
         <button className="btn primary" type="button" onClick={handleSave} disabled={saving}>
-          {saving ? "Saving..." : documentId ? "Update" : "Save"}
+          {saving ? "Saving..." : "Save"}
         </button>
       </div>
       {saveError ? <div className="doc-viewer-error">{saveError}</div> : null}
@@ -203,13 +195,6 @@ function NewDocumentPage() {
           value={title}
           placeholder="Document title"
           onChange={(event) => setTitle(event.target.value)}
-        />
-        <textarea
-          className="kb-description-input new-doc-description-input"
-          value={description}
-          placeholder="Add a short description"
-          rows={2}
-          onChange={(event) => setDescription(event.target.value)}
         />
       </div>
       <RichTextEditor content={content} onChange={setContent} />
@@ -255,7 +240,6 @@ const uploadStorageObject = async (
 const createDocumentRecord = async (
   projectKey: string,
   docTitle: string,
-  docDescription: string,
   parentID: string,
   storageObjectID: string,
 ) => {
@@ -268,7 +252,6 @@ const createDocumentRecord = async (
       },
       body: JSON.stringify({
         title: docTitle,
-        description: docDescription,
         parent_id: parentID,
         storage_object_id: storageObjectID,
       }),
@@ -284,7 +267,6 @@ const updateDocumentRecord = async (
   projectKey: string,
   documentId: string,
   docTitle: string,
-  docDescription: string,
   parentID: string,
   storageObjectID: string,
 ) => {
@@ -301,7 +283,6 @@ const updateDocumentRecord = async (
       },
       body: JSON.stringify({
         title: docTitle,
-        description: docDescription,
         parent_id: parentID,
         storage_object_id: storageObjectID,
       }),
@@ -367,7 +348,6 @@ type EditorPayload = {
     format?: string;
   };
   title?: string;
-  description?: string;
   content?: JSONContent;
 } & JSONContent;
 
@@ -380,7 +360,6 @@ const parseEditorPayload = (raw: string) => {
     if (parsed.meta?.zeus && parsed.meta.format === "tiptap" && parsed.content) {
       return {
         title: parsed.title,
-        description: parsed.description,
         content: parsed.content,
       };
     }

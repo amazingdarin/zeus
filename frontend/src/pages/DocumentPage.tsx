@@ -9,7 +9,6 @@ import { buildApiUrl } from "../config/api";
 type DocumentData = {
   id: string;
   title: string;
-  description: string;
   type: string;
   storageObjectId: string;
   parentId: string;
@@ -19,7 +18,6 @@ type DocumentResponse = {
   data?: {
     id?: string;
     title?: string;
-    description?: string;
     type?: string;
     storage_object_id?: string;
     parent_id?: string;
@@ -93,7 +91,6 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
         const mapped: DocumentData = {
           id: String(data.id ?? resolvedDocumentId),
           title: String(data.title ?? ""),
-          description: String(data.description ?? ""),
           type: String(data.type ?? ""),
           storageObjectId: String(data.storage_object_id ?? ""),
           parentId: String(data.parent_id ?? ""),
@@ -474,9 +471,6 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
       />
       <div className="doc-page-body">
         <div className="doc-page-title">{activeDocument.title}</div>
-        <div className="doc-page-subtitle">
-          {activeDocument.description || ""}
-        </div>
         {activeDocument.storageObjectId ? (
           <DocumentViewer
             projectKey={resolvedProjectKey}

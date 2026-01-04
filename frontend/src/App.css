@@ -460,17 +460,6 @@ body {
   background: transparent;
 }
 
-.kb-description-input {
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  padding: 8px 10px;
-  font-family: var(--font-sans);
-  font-size: 14px;
-  color: var(--ink);
-  background: transparent;
-  resize: vertical;
-}
-
 .kb-header-menu {
   position: relative;
   display: flex;
@@ -622,21 +611,11 @@ body {
   color: var(--ink);
 }
 
-.doc-page-subtitle {
-  color: var(--muted);
-  font-size: 14px;
-}
-
 .doc-viewer-title {
   font-family: var(--font-serif);
   font-size: 24px;
   font-weight: 700;
   color: var(--ink);
-}
-
-.doc-viewer-description {
-  color: var(--muted);
-  font-size: 14px;
 }
 
 .doc-viewer-state {
@@ -728,11 +707,6 @@ body {
   line-height: 1;
   padding: 0;
   background: rgba(31, 35, 40, 0.08);
-}
-
-.content-subtitle {
-  margin: 0 0 24px;
-  color: var(--muted);
 }
 
 .content-panel {
@@ -833,11 +807,6 @@ body {
 }
 
 .new-doc-title-input,
-.new-doc-description-input {
-  width: 100%;
-  box-sizing: border-box;
-}
-
 .tiptap-editor {
   border: 1px solid var(--border);
   border-radius: 16px;

@@ -13,7 +13,6 @@ type DocumentResponse = {
   id?: string;
   type?: string;
   title?: string;
-  description?: string;
   parent_id?: string;
   has_child?: boolean;
   order?: number;
@@ -52,7 +51,6 @@ function KnowledgeBasePage() {
     return {
       id: String(item.id ?? ""),
       title: String(item.title ?? ""),
-      description: String(item.description ?? ""),
       type: String(item.type ?? "").toLowerCase(),
       parentId: String(item.parent_id ?? ""),
       hasChild: Boolean(item.has_child),

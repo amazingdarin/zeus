@@ -1,7 +1,6 @@
 export type KnowledgeBaseDocument = {
   id: string;
   title: string;
-  description: string;
   type: string;
   parentId: string;
   hasChild: boolean;
