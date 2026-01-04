@@ -1,3 +1,6 @@
+@import './@/styles/_variables.scss';
+@import './@/styles/_keyframe-animations.scss';
+
 @import url("https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Space+Grotesk:wght@400;500;600&display=swap");
 
 :root {
@@ -835,14 +838,14 @@ body {
   box-sizing: border-box;
 }
 
-.rich-editor {
+.tiptap-editor {
   border: 1px solid var(--border);
   border-radius: 16px;
   background: var(--surface);
   overflow: hidden;
 }
 
-.rich-editor-toolbar {
+.tiptap-menu {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -851,7 +854,12 @@ body {
   background: rgba(31, 35, 40, 0.04);
 }
 
-.rich-editor-btn {
+.tiptap-menu-group {
+  display: flex;
+  gap: 8px;
+}
+
+.tiptap-btn {
   border: 1px solid transparent;
   background: transparent;
   color: var(--ink);
@@ -862,57 +870,57 @@ body {
   font-size: 13px;
 }
 
-.rich-editor-btn:hover {
+.tiptap-btn:hover {
   background: rgba(31, 35, 40, 0.08);
 }
 
-.rich-editor-btn.active {
+.tiptap-btn.is-active {
   border-color: rgba(31, 35, 40, 0.2);
   background: rgba(31, 35, 40, 0.12);
 }
 
-.rich-editor-surface {
+.tiptap-surface {
   padding: 16px;
   min-height: 280px;
 }
 
-.rich-editor-content {
+.tiptap {
   outline: none;
   font-family: var(--font-sans);
   color: var(--ink);
 }
 
-.rich-editor-content h1 {
+.tiptap h1 {
   font-family: var(--font-serif);
   font-size: 28px;
   margin: 0 0 12px;
 }
 
-.rich-editor-content h2 {
+.tiptap h2 {
   font-family: var(--font-serif);
   font-size: 22px;
   margin: 18px 0 10px;
 }
 
-.rich-editor-content h3 {
+.tiptap h3 {
   font-family: var(--font-serif);
   font-size: 18px;
   margin: 16px 0 8px;
 }
 
-.rich-editor-content p {
+.tiptap p {
   margin: 0 0 12px;
   line-height: 1.6;
 }
 
-.rich-editor-content blockquote {
+.tiptap blockquote {
   margin: 12px 0;
   padding: 8px 12px;
   border-left: 3px solid rgba(31, 35, 40, 0.3);
   background: rgba(31, 35, 40, 0.04);
 }
 
-.rich-editor-content pre {
+.tiptap pre {
   margin: 12px 0;
   padding: 12px;
   border-radius: 12px;

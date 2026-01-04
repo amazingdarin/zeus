@@ -27,7 +27,7 @@ function RichTextViewer({ content }: RichTextViewerProps) {
     editable: false,
     editorProps: {
       attributes: {
-        class: "rich-editor-content",
+        class: "tiptap",
       },
     },
   });

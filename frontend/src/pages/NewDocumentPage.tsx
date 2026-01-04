@@ -11,7 +11,6 @@ function NewDocumentPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [content, setContent] = useState<JSONContent | null>(null);
-  const [editorContent, setEditorContent] = useState<JSONContent | null>(null);
   const [title, setTitle] = useState("Untitled Document");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
@@ -44,7 +43,6 @@ function NewDocumentPage() {
     if (!documentIdParam) {
       setParentID(parentIdParam);
       setStorageObjectID("");
-      setEditorContent(null);
       setContent(null);
       setSaveError(null);
       return;
@@ -108,7 +106,6 @@ function NewDocumentPage() {
         const text = await response.text();
         const parsed = parseEditorPayload(text);
         if (parsed) {
-          setEditorContent(parsed.content);
           setContent(parsed.content);
           if (parsed.title) {
             setTitle(parsed.title);
@@ -215,7 +212,7 @@ function NewDocumentPage() {
           onChange={(event) => setDescription(event.target.value)}
         />
       </div>
-      <RichTextEditor content={editorContent} onChange={setContent} />
+      <RichTextEditor content={content} onChange={setContent} />
       <div className="new-doc-json">
         <div className="new-doc-json-title">Document JSON</div>
         <pre>{JSON.stringify(payload, null, 2)}</pre>
