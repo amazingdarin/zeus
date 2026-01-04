@@ -1,13 +1,15 @@
 import { useState } from "react";
-import type { ChangeEvent } from "react";
+import { Link } from "react-router-dom";
+
+type BreadcrumbItem = {
+  label: string;
+  to?: string;
+};
 
 type DocumentHeaderProps = {
-  title: string;
-  description: string;
+  breadcrumbItems: BreadcrumbItem[];
   mode: "view" | "edit";
   allowChildActions?: boolean;
-  onTitleChange: (value: string) => void;
-  onDescriptionChange: (value: string) => void;
   onEdit: () => void;
   onSave: () => void;
   onCancel: () => void;
@@ -16,12 +18,9 @@ type DocumentHeaderProps = {
 };
 
 function DocumentHeader({
-  title,
-  description,
+  breadcrumbItems,
   mode,
   allowChildActions = true,
-  onTitleChange,
-  onDescriptionChange,
   onEdit,
   onSave,
   onCancel,
@@ -63,41 +62,21 @@ function DocumentHeader({
     onCancel();
   };
 
-  const handleTitleInput = (event: ChangeEvent<HTMLInputElement>) => {
-    onTitleChange(event.target.value);
-  };
-
-  const handleDescriptionInput = (event: ChangeEvent<HTMLTextAreaElement>) => {
-    onDescriptionChange(event.target.value);
-  };
-
   return (
     <div className="kb-main-header">
-      <div className="kb-header-title">
-        {mode === "edit" ? (
-          <input
-            className="kb-title-input"
-            type="text"
-            value={title}
-            placeholder="Untitled document"
-            onChange={handleTitleInput}
-          />
-        ) : (
-          <div className="kb-breadcrumb">{title}</div>
-        )}
-        {mode === "edit" ? (
-          <textarea
-            className="kb-description-input"
-            value={description}
-            placeholder="Add a short description"
-            rows={2}
-            onChange={handleDescriptionInput}
-          />
-        ) : (
-          <div className="doc-viewer-description">
-            {description || "No description"}
-          </div>
-        )}
+      <div className="kb-breadcrumb">
+        {breadcrumbItems.map((item, index) => (
+          <span key={`${item.label}-${index}`}>
+            {index > 0 ? <span className="kb-breadcrumb-sep">/</span> : null}
+            {item.to ? (
+              <Link className="kb-breadcrumb-link" to={item.to}>
+                {item.label}
+              </Link>
+            ) : (
+              <span className="kb-breadcrumb-plain">{item.label}</span>
+            )}
+          </span>
+        ))}
       </div>
       <div className="kb-header-menu">
         <button

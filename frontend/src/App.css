@@ -441,16 +441,9 @@ body {
 
 .kb-main-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
-}
-
-.kb-header-title {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
 }
 
 .kb-title-input {
@@ -613,6 +606,24 @@ body {
   gap: 12px;
 }
 
+.doc-page-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.doc-page-title {
+  font-family: var(--font-serif);
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.doc-page-subtitle {
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .doc-viewer-title {
   font-family: var(--font-serif);
   font-size: 24px;
@@ -643,9 +654,7 @@ body {
 }
 
 .text-viewer {
-  padding: 16px;
-  border-radius: 12px;
-  background: rgba(31, 35, 40, 0.04);
+  padding: 0;
   color: var(--ink);
   font-size: 13px;
   line-height: 1.5;
@@ -660,16 +669,11 @@ body {
 }
 
 .rich-viewer {
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--surface);
-  padding: 16px;
+  padding: 0;
 }
 
 .office-viewer {
-  padding: 12px;
-  border-radius: 12px;
-  background: rgba(31, 35, 40, 0.04);
+  padding: 0;
   color: var(--ink);
   width: 100%;
   max-width: 100%;
@@ -684,9 +688,30 @@ body {
 
 .kb-breadcrumb {
   font-family: var(--font-serif);
-  font-size: 24px;
+  font-size: 16px;
   font-weight: 700;
-  color: var(--ink);
+  color: #2563eb;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kb-breadcrumb-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.kb-breadcrumb-link:hover {
+  text-decoration: underline;
+}
+
+.kb-breadcrumb-plain {
+  color: rgba(37, 99, 235, 0.6);
+}
+
+.kb-breadcrumb-sep {
+  margin: 0 6px;
+  color: rgba(37, 99, 235, 0.6);
 }
 
 .btn.icon {

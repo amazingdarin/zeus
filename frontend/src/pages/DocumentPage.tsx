@@ -12,6 +12,7 @@ type DocumentData = {
   description: string;
   type: string;
   storageObjectId: string;
+  parentId: string;
 };
 
 type DocumentResponse = {
@@ -21,6 +22,7 @@ type DocumentResponse = {
     description?: string;
     type?: string;
     storage_object_id?: string;
+    parent_id?: string;
   };
 };
 
@@ -45,6 +47,9 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
   const [document, setDocument] = useState<DocumentData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [breadcrumbItems, setBreadcrumbItems] = useState<
+    Array<{ label: string; to?: string }>
+  >([]);
 
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importMode, setImportMode] = useState<"file" | "folder">("file");
@@ -91,6 +96,7 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
           description: String(data.description ?? ""),
           type: String(data.type ?? ""),
           storageObjectId: String(data.storage_object_id ?? ""),
+          parentId: String(data.parent_id ?? ""),
         };
         setDocument(mapped);
       } catch (err) {
@@ -109,6 +115,41 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
     loadDocument();
     return () => controller.abort();
   }, [resolvedDocumentId, resolvedProjectKey]);
+
+  useEffect(() => {
+    if (!resolvedProjectKey || !resolvedDocumentId) {
+      setBreadcrumbItems([]);
+      return;
+    }
+    const controller = new AbortController();
+    const loadBreadcrumbs = async () => {
+      try {
+        const items = await fetchBreadcrumbChain(
+          resolvedProjectKey,
+          resolvedDocumentId,
+          controller.signal,
+        );
+        const trimmed = trimBreadcrumbItems(items);
+        setBreadcrumbItems(trimmed);
+      } catch (err) {
+        if ((err as Error).name === "AbortError") {
+          return;
+        }
+        if (document) {
+          setBreadcrumbItems([
+            {
+              label: document.title || "Document",
+              to: `/knowledge?document_id=${encodeURIComponent(document.id)}`,
+            },
+          ]);
+        } else {
+          setBreadcrumbItems([{ label: "Document" }]);
+        }
+      }
+    };
+    loadBreadcrumbs();
+    return () => controller.abort();
+  }, [document, resolvedDocumentId, resolvedProjectKey]);
 
   const handleEdit = () => {
     if (!activeDocument) {
@@ -422,19 +463,20 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
   return (
     <>
       <DocumentHeader
-        title={activeDocument.title}
-        description={activeDocument.description}
+        breadcrumbItems={breadcrumbItems}
         mode="view"
         allowChildActions={allowChildActions}
-        onTitleChange={() => {}}
-        onDescriptionChange={() => {}}
         onEdit={handleEdit}
         onSave={() => {}}
         onCancel={() => {}}
         onNew={handleOpenNew}
         onImport={handleOpenImport}
       />
-      <div className="doc-viewer-page">
+      <div className="doc-page-body">
+        <div className="doc-page-title">{activeDocument.title}</div>
+        <div className="doc-page-subtitle">
+          {activeDocument.description || ""}
+        </div>
         {activeDocument.storageObjectId ? (
           <DocumentViewer
             projectKey={resolvedProjectKey}
@@ -571,3 +613,64 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
 }
 
 export default DocumentPage;
+
+const fetchDocumentDetail = async (
+  projectKey: string,
+  documentId: string,
+  signal: AbortSignal,
+) => {
+  const response = await fetch(
+    buildApiUrl(
+      `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
+        documentId,
+      )}`,
+    ),
+    { signal },
+  );
+  if (!response.ok) {
+    throw new Error("failed to load document");
+  }
+  const payload = (await response.json()) as DocumentResponse;
+  return payload?.data ?? null;
+};
+
+const fetchBreadcrumbChain = async (
+  projectKey: string,
+  documentId: string,
+  signal: AbortSignal,
+) => {
+  const items: Array<{ id: string; label: string; parentId: string }> = [];
+  const visited = new Set<string>();
+  let currentId = documentId;
+
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId);
+    const detail = await fetchDocumentDetail(projectKey, currentId, signal);
+    if (!detail) {
+      break;
+    }
+    const label = String(detail.title ?? "Document");
+    const parentId = String(detail.parent_id ?? "");
+    items.push({ id: currentId, label, parentId });
+    if (!parentId) {
+      break;
+    }
+    currentId = parentId;
+  }
+
+  return items
+    .reverse()
+    .map((item) => ({
+      label: item.label,
+      to: `/knowledge?document_id=${encodeURIComponent(item.id)}`,
+    }));
+};
+
+const trimBreadcrumbItems = (items: Array<{ label: string; to?: string }>) => {
+  if (items.length <= 4) {
+    return items;
+  }
+  const head = items.slice(0, 2);
+  const tail = items.slice(-2);
+  return [...head, { label: "..." }, ...tail];
+};
