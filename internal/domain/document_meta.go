@@ -9,6 +9,7 @@ type DocumentMeta struct {
 	Parent    string    `json:"parent"`
 	Path      string    `json:"path"`
 	Status    string    `json:"status"`
+	DocType   string    `json:"doc_type"`
 	Tags      []string  `json:"tags"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

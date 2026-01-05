@@ -3,13 +3,14 @@ package types
 import "encoding/json"
 
 type KnowledgeDocumentMetaRequest struct {
-	ID     string   `json:"id"`
-	Slug   string   `json:"slug"`
-	Title  string   `json:"title"`
-	Parent string   `json:"parent"`
-	Path   string   `json:"path"`
-	Status string   `json:"status"`
-	Tags   []string `json:"tags"`
+	ID      string   `json:"id"`
+	Slug    string   `json:"slug"`
+	Title   string   `json:"title"`
+	Parent  string   `json:"parent"`
+	Path    string   `json:"path"`
+	Status  string   `json:"status"`
+	DocType string   `json:"doc_type"`
+	Tags    []string `json:"tags"`
 }
 
 type KnowledgeDocumentCreateRequest struct {
@@ -29,6 +30,7 @@ type KnowledgeDocumentMetaDTO struct {
 	Parent    string   `json:"parent"`
 	Path      string   `json:"path"`
 	Status    string   `json:"status"`
+	DocType   string   `json:"doc_type"`
 	Tags      []string `json:"tags"`
 	CreatedAt string   `json:"created_at"`
 	UpdatedAt string   `json:"updated_at"`

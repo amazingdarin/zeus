@@ -161,13 +161,14 @@ func (h *KnowledgeHandler) Create(c *gin.Context) {
 	}
 
 	meta := domain.DocumentMeta{
-		ID:     strings.TrimSpace(req.Meta.ID),
-		Slug:   strings.TrimSpace(req.Meta.Slug),
-		Title:  title,
-		Parent: strings.TrimSpace(req.Meta.Parent),
-		Path:   strings.TrimSpace(req.Meta.Path),
-		Status: strings.TrimSpace(req.Meta.Status),
-		Tags:   req.Meta.Tags,
+		ID:      strings.TrimSpace(req.Meta.ID),
+		Slug:    strings.TrimSpace(req.Meta.Slug),
+		Title:   title,
+		Parent:  strings.TrimSpace(req.Meta.Parent),
+		Path:    strings.TrimSpace(req.Meta.Path),
+		Status:  strings.TrimSpace(req.Meta.Status),
+		DocType: strings.TrimSpace(req.Meta.DocType),
+		Tags:    req.Meta.Tags,
 	}
 
 	createdMeta, createdContent, err := h.svc.CreateDocument(
@@ -232,13 +233,14 @@ func (h *KnowledgeHandler) Update(c *gin.Context) {
 	var metaPatch *domain.DocumentMeta
 	if req.Meta != nil {
 		metaPatch = &domain.DocumentMeta{
-			ID:     strings.TrimSpace(req.Meta.ID),
-			Slug:   strings.TrimSpace(req.Meta.Slug),
-			Title:  strings.TrimSpace(req.Meta.Title),
-			Parent: strings.TrimSpace(req.Meta.Parent),
-			Path:   strings.TrimSpace(req.Meta.Path),
-			Status: strings.TrimSpace(req.Meta.Status),
-			Tags:   req.Meta.Tags,
+			ID:      strings.TrimSpace(req.Meta.ID),
+			Slug:    strings.TrimSpace(req.Meta.Slug),
+			Title:   strings.TrimSpace(req.Meta.Title),
+			Parent:  strings.TrimSpace(req.Meta.Parent),
+			Path:    strings.TrimSpace(req.Meta.Path),
+			Status:  strings.TrimSpace(req.Meta.Status),
+			DocType: strings.TrimSpace(req.Meta.DocType),
+			Tags:    req.Meta.Tags,
 		}
 	}
 
@@ -295,6 +297,10 @@ func (h *KnowledgeHandler) Update(c *gin.Context) {
 }
 
 func mapMetaDTO(meta domain.DocumentMeta) types.KnowledgeDocumentMetaDTO {
+	docType := strings.TrimSpace(meta.DocType)
+	if docType == "" {
+		docType = "document"
+	}
 	return types.KnowledgeDocumentMetaDTO{
 		ID:        meta.ID,
 		Slug:      meta.Slug,
@@ -302,6 +308,7 @@ func mapMetaDTO(meta domain.DocumentMeta) types.KnowledgeDocumentMetaDTO {
 		Parent:    meta.Parent,
 		Path:      meta.Path,
 		Status:    meta.Status,
+		DocType:   docType,
 		Tags:      meta.Tags,
 		CreatedAt: meta.CreatedAt.Format(time.RFC3339),
 		UpdatedAt: meta.UpdatedAt.Format(time.RFC3339),

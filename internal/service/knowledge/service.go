@@ -112,6 +112,7 @@ func (s *Service) CreateDocument(
 	meta.ID = strings.TrimSpace(meta.ID)
 	meta.Slug = strings.TrimSpace(meta.Slug)
 	meta.Title = strings.TrimSpace(meta.Title)
+	meta.DocType = strings.TrimSpace(meta.DocType)
 	if meta.Title == "" {
 		return domain.DocumentMeta{}, domain.DocumentContent{}, fmt.Errorf("doc title is required")
 	}
@@ -123,6 +124,9 @@ func (s *Service) CreateDocument(
 		if meta.Slug == "" {
 			meta.Slug = meta.ID
 		}
+	}
+	if meta.DocType == "" {
+		meta.DocType = "document"
 	}
 
 	now := s.nowTime()
@@ -292,6 +296,9 @@ func buildMetaPatch(
 	if status := strings.TrimSpace(req.Status); status != "" {
 		patch.Status = status
 	}
+	if docType := strings.TrimSpace(req.DocType); docType != "" {
+		patch.DocType = docType
+	}
 	if req.Tags != nil {
 		patch.Tags = req.Tags
 	}
@@ -313,6 +320,9 @@ func applyMetaPatch(current domain.DocumentMeta, patch *domain.DocumentMeta) dom
 	}
 	if patch.Status != "" {
 		current.Status = patch.Status
+	}
+	if patch.DocType != "" {
+		current.DocType = patch.DocType
 	}
 	if patch.Tags != nil {
 		current.Tags = patch.Tags

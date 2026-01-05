@@ -12,11 +12,19 @@ import { useProjectContext } from "../context/ProjectContext";
 type DocumentResponse = {
   id?: string;
   type?: string;
+  doc_type?: string;
   title?: string;
+  parent?: string;
   parent_id?: string;
   has_child?: boolean;
   order?: number;
   storage_object_id?: string;
+  meta?: {
+    id?: string;
+    title?: string;
+    parent?: string;
+    doc_type?: string;
+  };
 };
 
 type DocumentDetailResponse = {
@@ -48,11 +56,19 @@ function KnowledgeBasePage() {
   }, [searchParams]);
 
   const mapDocument = useCallback((item: DocumentResponse): KnowledgeBaseDocument => {
+    const rawType = String(
+      item.doc_type ?? item.meta?.doc_type ?? item.type ?? "",
+    ).toLowerCase();
+    let normalizedType =
+      rawType === "origin" || rawType === "requirement" ? "document" : rawType;
+    if (!normalizedType) {
+      normalizedType = "document";
+    }
     return {
-      id: String(item.id ?? ""),
-      title: String(item.title ?? ""),
-      type: String(item.type ?? "").toLowerCase(),
-      parentId: String(item.parent_id ?? ""),
+      id: String(item.meta?.id ?? item.id ?? ""),
+      title: String(item.meta?.title ?? item.title ?? ""),
+      type: normalizedType,
+      parentId: String(item.meta?.parent ?? item.parent ?? item.parent_id ?? ""),
       hasChild: Boolean(item.has_child),
       order: Number(item.order ?? 0),
       storageObjectId: String(item.storage_object_id ?? ""),
@@ -159,7 +175,7 @@ function KnowledgeBasePage() {
         if (!detail) {
           break;
         }
-        const parentId = String(detail.parent_id ?? "").trim();
+        const parentId = String(detail.meta?.parent ?? detail.parent ?? detail.parent_id ?? "").trim();
         if (!parentId) {
           break;
         }
@@ -241,17 +257,12 @@ function KnowledgeBasePage() {
     [rootDocuments],
   );
   const documentDocs = useMemo(
-    () =>
-      rootDocuments.filter(
-        (doc) => doc.type === "origin" || doc.type === "requirement",
-      ),
+    () => rootDocuments.filter((doc) => doc.type === "document"),
     [rootDocuments],
   );
   const moduleDocs = useMemo(
     () =>
-      rootDocuments.filter(
-        (doc) => doc.type !== "overview" && doc.type !== "origin" && doc.type !== "requirement",
-      ),
+      rootDocuments.filter((doc) => doc.type !== "overview" && doc.type !== "document"),
     [rootDocuments],
   );
   const handleImportSuccess = useCallback(

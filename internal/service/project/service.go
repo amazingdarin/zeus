@@ -210,14 +210,15 @@ func (s *Service) writeRepoScaffold(workdir string, project *domain.Project) err
 		createdAt = s.nowTime()
 	}
 	initDocs := []struct {
-		slug  string
-		title string
+		slug    string
+		title   string
+		docType string
 	}{
-		{slug: "overview", title: "Overview"},
-		{slug: "project", title: "Project"},
+		{slug: "overview", title: "Overview", docType: "overview"},
+		{slug: "project", title: "Project", docType: "document"},
 	}
 	for _, doc := range initDocs {
-		if err := writeEmptyDocument(workdir, doc.slug, doc.title, createdAt); err != nil {
+		if err := writeEmptyDocument(workdir, doc.slug, doc.title, doc.docType, createdAt); err != nil {
 			return err
 		}
 	}
@@ -233,11 +234,14 @@ func (s *Service) markProjectFailed(ctx context.Context, project *domain.Project
 	return s.projectRepo.Update(ctx, project)
 }
 
-func writeEmptyDocument(workdir, slug, title string, now time.Time) error {
+func writeEmptyDocument(workdir, slug, title, docType string, now time.Time) error {
 	slug = strings.TrimSpace(slug)
 	title = strings.TrimSpace(title)
 	if slug == "" || title == "" {
 		return fmt.Errorf("document slug and title are required")
+	}
+	if docType == "" {
+		docType = "document"
 	}
 	docDir := filepath.Join(workdir, "docs", slug)
 	if err := os.MkdirAll(docDir, 0o755); err != nil {
@@ -251,6 +255,7 @@ func writeEmptyDocument(workdir, slug, title string, now time.Time) error {
 		"parent":     "root",
 		"path":       "/" + slug,
 		"status":     "draft",
+		"doc_type":   docType,
 		"tags":       []string{},
 		"created_at": now.Format(time.RFC3339),
 		"updated_at": now.Format(time.RFC3339),

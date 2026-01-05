@@ -249,6 +249,9 @@ func (r *KnowledgeRepository) readMetaFile(docDir string) (domain.DocumentMeta, 
 	if meta.ID == "" {
 		return domain.DocumentMeta{}, fmt.Errorf("meta id is required")
 	}
+	if strings.TrimSpace(meta.DocType) == "" {
+		meta.DocType = "document"
+	}
 	return meta, nil
 }
 
@@ -347,6 +350,9 @@ func mergeMeta(current domain.DocumentMeta, patch *domain.DocumentMeta) domain.D
 	}
 	if patch.Status != "" {
 		current.Status = patch.Status
+	}
+	if patch.DocType != "" {
+		current.DocType = patch.DocType
 	}
 	if patch.Tags != nil {
 		current.Tags = patch.Tags
