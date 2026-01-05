@@ -124,9 +124,19 @@ func (r *KnowledgeRepository) CreateDocument(
 
 	docDir := filepath.Join(localPath, "docs", meta.Slug)
 	if exists(docDir) {
-		return fmt.Errorf("document already exists: %s", meta.Slug)
-	}
-	if err := os.MkdirAll(docDir, 0o755); err != nil {
+		info, err := os.Stat(docDir)
+		if err != nil {
+			return fmt.Errorf("stat document directory: %w", err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("document path is not a directory: %s", meta.Slug)
+		}
+		metaPath := filepath.Join(docDir, ".meta.json")
+		contentPath := filepath.Join(docDir, "content.json")
+		if exists(metaPath) || exists(contentPath) {
+			return fmt.Errorf("document already exists: %s", meta.Slug)
+		}
+	} else if err := os.MkdirAll(docDir, 0o755); err != nil {
 		return fmt.Errorf("create document directory: %w", err)
 	}
 

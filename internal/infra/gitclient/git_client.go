@@ -93,7 +93,29 @@ func (c *ExecClient) PullRebase(ctx context.Context, localPath, branch string) e
 		return fmt.Errorf("branch is required")
 	}
 
-	_, err := c.run(ctx, []string{"-C", localPath, "pull", "--rebase", "origin", branch})
+	remoteRef, err := c.run(ctx, []string{"-C", localPath, "ls-remote", "--heads", "origin", branch})
+	if err != nil {
+		return fmt.Errorf("git ls-remote: %w", err)
+	}
+	if strings.TrimSpace(remoteRef) == "" {
+		return nil
+	}
+
+	if !c.hasCommits(ctx, localPath) {
+		if _, err := c.run(ctx, []string{"-C", localPath, "fetch", "origin", branch}); err != nil {
+			return fmt.Errorf("git fetch: %w", err)
+		}
+		if _, err := c.run(ctx, []string{"-C", localPath, "checkout", "-B", branch, "FETCH_HEAD"}); err != nil {
+			return fmt.Errorf("git checkout: %w", err)
+		}
+		return nil
+	}
+
+	if _, err := c.run(ctx, []string{"-C", localPath, "checkout", "-B", branch}); err != nil {
+		return fmt.Errorf("git checkout: %w", err)
+	}
+
+	_, err = c.run(ctx, []string{"-C", localPath, "pull", "--rebase", "origin", branch})
 	if err != nil {
 		return fmt.Errorf("git pull --rebase: %w", err)
 	}
@@ -183,6 +205,14 @@ func (c *ExecClient) Push(ctx context.Context, localPath, branch string) error {
 		return fmt.Errorf("git push: %w", err)
 	}
 	return nil
+}
+
+func (c *ExecClient) hasCommits(ctx context.Context, localPath string) bool {
+	output, err := c.run(ctx, []string{"-C", localPath, "rev-parse", "--verify", "HEAD"})
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(output) != ""
 }
 
 func (c *ExecClient) run(ctx context.Context, args []string) (string, error) {

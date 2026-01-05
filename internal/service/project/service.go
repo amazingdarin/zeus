@@ -197,6 +197,23 @@ func (s *Service) writeRepoScaffold(workdir string, project *domain.Project) err
 	if err := os.WriteFile(filepath.Join(workdir, ".zeus", "project.json"), data, 0o644); err != nil {
 		return fmt.Errorf("write project.json: %w", err)
 	}
+
+	createdAt := project.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = s.nowTime()
+	}
+	initDocs := []struct {
+		slug  string
+		title string
+	}{
+		{slug: "overview", title: "Overview"},
+		{slug: "project", title: "Project"},
+	}
+	for _, doc := range initDocs {
+		if err := writeEmptyDocument(workdir, doc.slug, doc.title, createdAt); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -207,6 +224,63 @@ func (s *Service) markProjectFailed(ctx context.Context, project *domain.Project
 	project.Status = domain.ProjectStatusFailed
 	project.UpdatedAt = s.nowTime()
 	return s.projectRepo.Update(ctx, project)
+}
+
+func writeEmptyDocument(workdir, slug, title string, now time.Time) error {
+	slug = strings.TrimSpace(slug)
+	title = strings.TrimSpace(title)
+	if slug == "" || title == "" {
+		return fmt.Errorf("document slug and title are required")
+	}
+	docDir := filepath.Join(workdir, "docs", slug)
+	if err := os.MkdirAll(docDir, 0o755); err != nil {
+		return fmt.Errorf("create document dir: %w", err)
+	}
+
+	meta := map[string]interface{}{
+		"id":         uuid.NewString(),
+		"slug":       slug,
+		"title":      title,
+		"parent":     "root",
+		"path":       "/" + slug,
+		"status":     "draft",
+		"tags":       []string{},
+		"created_at": now.Format(time.RFC3339),
+		"updated_at": now.Format(time.RFC3339),
+	}
+	if err := writeJSONFile(filepath.Join(docDir, ".meta.json"), meta); err != nil {
+		return fmt.Errorf("write meta: %w", err)
+	}
+
+	content := map[string]interface{}{
+		"meta": map[string]interface{}{
+			"zeus":           true,
+			"format":         "tiptap",
+			"schema_version": 1,
+			"editor":         "tiptap",
+			"created_at":     now.Format(time.RFC3339),
+			"updated_at":     now.Format(time.RFC3339),
+		},
+		"content": map[string]interface{}{
+			"type":    "doc",
+			"content": []interface{}{},
+		},
+	}
+	if err := writeJSONFile(filepath.Join(docDir, "content.json"), content); err != nil {
+		return fmt.Errorf("write content: %w", err)
+	}
+	return nil
+}
+
+func writeJSONFile(path string, payload interface{}) error {
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal json: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write file: %w", err)
+	}
+	return nil
 }
 
 func buildRepoName(projectKey string) string {
