@@ -31,6 +31,7 @@ type KnowledgeDocumentMetaDTO struct {
 	Path      string   `json:"path"`
 	Status    string   `json:"status"`
 	DocType   string   `json:"doc_type"`
+	HasChild  bool     `json:"has_child,omitempty"`
 	Tags      []string `json:"tags"`
 	CreatedAt string   `json:"created_at"`
 	UpdatedAt string   `json:"updated_at"`

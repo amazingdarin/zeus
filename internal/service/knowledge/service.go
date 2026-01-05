@@ -71,6 +71,36 @@ func (s *Service) ListDocuments(ctx context.Context, projectKey string) ([]domai
 	return s.repo.ListDocuments(ctx, projectKey)
 }
 
+func (s *Service) ListDocumentsByParent(
+	ctx context.Context,
+	projectKey string,
+	parentID string,
+) ([]service.KnowledgeDocumentListItem, error) {
+	if s == nil || s.repo == nil {
+		return nil, fmt.Errorf("knowledge service not initialized")
+	}
+	projectKey = strings.TrimSpace(projectKey)
+	if projectKey == "" {
+		return nil, fmt.Errorf("project key is required")
+	}
+
+	metas, err := s.repo.ListDocuments(ctx, projectKey)
+	if err != nil {
+		return nil, err
+	}
+
+	childMap := buildChildMap(metas)
+	filtered := filterByParent(metas, parentID)
+	items := make([]service.KnowledgeDocumentListItem, 0, len(filtered))
+	for _, meta := range filtered {
+		items = append(items, service.KnowledgeDocumentListItem{
+			Meta:     meta,
+			HasChild: childMap[meta.ID],
+		})
+	}
+	return items, nil
+}
+
 func (s *Service) GetDocument(
 	ctx context.Context,
 	projectKey string,
@@ -404,4 +434,35 @@ func slugify(value string) string {
 	}
 	result := strings.Trim(out.String(), "-")
 	return result
+}
+
+func filterByParent(metas []domain.DocumentMeta, parentID string) []domain.DocumentMeta {
+	parentID = strings.TrimSpace(parentID)
+	rootQuery := parentID == "" || strings.EqualFold(parentID, "root")
+	filtered := make([]domain.DocumentMeta, 0, len(metas))
+	for _, meta := range metas {
+		parent := strings.TrimSpace(meta.Parent)
+		if rootQuery {
+			if parent == "" || strings.EqualFold(parent, "root") {
+				filtered = append(filtered, meta)
+			}
+			continue
+		}
+		if parent == parentID {
+			filtered = append(filtered, meta)
+		}
+	}
+	return filtered
+}
+
+func buildChildMap(metas []domain.DocumentMeta) map[string]bool {
+	childMap := make(map[string]bool, len(metas))
+	for _, meta := range metas {
+		parent := strings.TrimSpace(meta.Parent)
+		if parent == "" || strings.EqualFold(parent, "root") {
+			continue
+		}
+		childMap[parent] = true
+	}
+	return childMap
 }

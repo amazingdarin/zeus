@@ -9,11 +9,13 @@ import (
 func RegisterRoutes(
 	r *gin.Engine,
 	storageObjectSvc service.StorageObjectService,
+	assetSvc service.AssetService,
 	projectSvc service.ProjectService,
 	knowledgeSvc service.KnowledgeService,
 	searchSvc service.SearchService,
 ) {
 	storageObjectHandler := NewStorageObjectHandler(storageObjectSvc, projectSvc)
+	assetHandler := NewAssetHandler(assetSvc)
 	projectHandler := NewProjectHandler(projectSvc)
 	knowledgeHandler := NewKnowledgeHandler(knowledgeSvc)
 	searchHandler := NewSearchHandler(searchSvc)
@@ -23,6 +25,9 @@ func RegisterRoutes(
 	// StorageObject
 	api.POST("/projects/:project_key/storage-objects", storageObjectHandler.Create)
 	api.GET("/projects/:project_key/storage-objects/:storage_object_id", storageObjectHandler.GetAccess)
+
+	// Asset
+	api.POST("/projects/:project_key/assets/import", assetHandler.Import)
 
 	// Project
 	api.POST("/projects", projectHandler.Create)

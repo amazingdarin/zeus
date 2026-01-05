@@ -27,16 +27,31 @@ type DocumentResponse = {
 type DocumentPageProps = {
   projectKey: string;
   documentId: string | null;
-  onImportSuccess?: (parentId: string | null) => void;
 };
 
-type FileEntry = {
-  file: File;
-  relativePath: string;
-  parentPath: string;
+type UploadedAsset = {
+  asset_id: string;
+  filename: string;
+  mime: string;
+  size: number;
 };
 
-function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageProps) {
+type UploadedFolderAsset = {
+  asset_id: string;
+  filename: string;
+  relative_path: string;
+};
+
+type ImportedAssetState = {
+  projectKey: string;
+  assets: Array<{
+    asset_id: string;
+    filename: string;
+    relative_path?: string;
+  }>;
+};
+
+function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
   const params = useParams<{ projectKey?: string; documentId?: string }>();
   const resolvedProjectKey = (params.projectKey || projectKey || "").trim();
   const resolvedDocumentId = (params.documentId || documentId || "").trim();
@@ -55,6 +70,11 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
   const [uploading, setUploading] = useState(false);
   const [uploadTotal, setUploadTotal] = useState(0);
   const [uploadCompleted, setUploadCompleted] = useState(0);
+  const [importStatus, setImportStatus] = useState<{
+    type: "idle" | "success" | "error";
+    message?: string;
+  }>({ type: "idle" });
+  const [importedAssets, setImportedAssets] = useState<ImportedAssetState | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -148,6 +168,18 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
     return () => controller.abort();
   }, [document, resolvedDocumentId, resolvedProjectKey]);
 
+  useEffect(() => {
+    if (!resolvedProjectKey) {
+      setImportedAssets(null);
+      return;
+    }
+    setImportedAssets((prev) =>
+      prev && prev.projectKey === resolvedProjectKey
+        ? prev
+        : { projectKey: resolvedProjectKey, assets: [] },
+    );
+  }, [resolvedProjectKey]);
+
   const handleEdit = () => {
     if (!activeDocument) {
       return;
@@ -166,15 +198,16 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
     navigate(target);
   };
 
-  const handleOpenImport = () => {
+  const handleOpenImportWithMode = (mode: "file" | "folder") => {
     if (!allowChildActions) {
       return;
     }
-    setImportMode("file");
+    setImportMode(mode);
     setSelectedFiles([]);
     setUploading(false);
     setUploadTotal(0);
     setUploadCompleted(0);
+    setImportStatus({ type: "idle" });
     setImportModalOpen(true);
   };
 
@@ -183,6 +216,7 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
     setUploading(false);
     setUploadTotal(0);
     setUploadCompleted(0);
+    setImportStatus({ type: "idle" });
   };
 
   const handleFilePick = () => {
@@ -196,94 +230,10 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files ? Array.from(event.target.files) : [];
     setSelectedFiles(files);
+    setImportStatus({ type: "idle" });
   };
 
-  const uploadStorageObject = async (
-    key: string,
-    file: File,
-    objectKey: string,
-  ): Promise<string> => {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("source_type", "upload");
-    formData.append("storage_type", "s3");
-    formData.append("object_key", objectKey);
-    if (file.type) {
-      formData.append("mime_type", file.type);
-    }
-    const response = await fetch(
-      buildApiUrl(`/api/projects/${encodeURIComponent(key)}/storage-objects`),
-      {
-        method: "POST",
-        body: formData,
-      },
-    );
-    if (!response.ok) {
-      throw new Error("upload failed");
-    }
-    const payload = await response.json();
-    const storageObjectID = String(payload?.id ?? "");
-    if (!storageObjectID) {
-      throw new Error("missing storage object id");
-    }
-    return storageObjectID;
-  };
-
-  const createDocumentRecord = async (
-    key: string,
-    title: string,
-    parentID: string,
-    storageObjectID: string,
-  ) => {
-    const response = await fetch(
-      buildApiUrl(`/api/projects/${encodeURIComponent(key)}/documents`),
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          title,
-          parent_id: parentID,
-          storage_object_id: storageObjectID,
-        }),
-      },
-    );
-    if (!response.ok) {
-      throw new Error("create document failed");
-    }
-    return response.json();
-  };
-
-  const buildFolderPaths = (files: File[]) => {
-    const folders = new Set<string>();
-    files.forEach((file) => {
-      const rawPath =
-        (file as File & { webkitRelativePath?: string }).webkitRelativePath ?? file.name;
-      const normalizedPath = rawPath.replace(/\\/g, "/").replace(/^\/+/, "");
-      const parts = normalizedPath.split("/").filter(Boolean);
-      for (let i = 1; i < parts.length; i += 1) {
-        folders.add(parts.slice(0, i).join("/"));
-      }
-    });
-    return Array.from(folders).sort((a, b) => {
-      const depthDiff = a.split("/").length - b.split("/").length;
-      if (depthDiff !== 0) {
-        return depthDiff;
-      }
-      return a.localeCompare(b);
-    });
-  };
-
-  const buildFileEntries = (files: File[]): FileEntry[] =>
-    files.map((file) => {
-      const rawPath =
-        (file as File & { webkitRelativePath?: string }).webkitRelativePath ?? file.name;
-      const normalizedPath = rawPath.replace(/\\/g, "/").replace(/^\/+/, "");
-      const parentPath = normalizedPath.split("/").slice(0, -1).join("/");
-      return { file, relativePath: normalizedPath, parentPath };
-    });
-
+  // Uploads only create assets; document creation happens in a later step.
   const handleImportSubmit = async () => {
     if (!resolvedProjectKey) {
       console.log("import_missing_project");
@@ -299,24 +249,29 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
       setUploading(true);
       setUploadTotal(1);
       setUploadCompleted(0);
+      setImportStatus({ type: "idle" });
       try {
-        const uploadPrefix = `doc/${Date.now()}`;
-        const storageObjectID = await uploadStorageObject(
-          resolvedProjectKey,
-          file,
-          `${uploadPrefix}/${file.name}`,
-        );
-        const documentPayload = await createDocumentRecord(
-          resolvedProjectKey,
-          file.name,
-          activeDocument?.id ?? "",
-          storageObjectID,
-        );
-        console.log("import_file_success", documentPayload);
+        const uploaded = await uploadSingleFile(resolvedProjectKey, file);
+        setImportedAssets((prev) => {
+          if (!prev || prev.projectKey !== resolvedProjectKey) {
+            return {
+              projectKey: resolvedProjectKey,
+              assets: [{ asset_id: uploaded.asset_id, filename: uploaded.filename }],
+            };
+          }
+          return {
+            projectKey: prev.projectKey,
+            assets: [
+              ...prev.assets,
+              { asset_id: uploaded.asset_id, filename: uploaded.filename },
+            ],
+          };
+        });
         setUploadCompleted(1);
-        onImportSuccess?.(activeDocument?.id ?? null);
+        setImportStatus({ type: "success", message: "Upload completed." });
       } catch (err) {
         console.log("import_file_error", err);
+        setImportStatus({ type: "error", message: "Upload failed." });
       } finally {
         setUploading(false);
         setUploadTotal(0);
@@ -328,65 +283,43 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
         return;
       }
       try {
-        const uploadPrefix = `doc/${Date.now()}`;
-        const folderPaths = buildFolderPaths(selectedFiles);
-        const fileEntries = buildFileEntries(selectedFiles);
-        const totalItems = folderPaths.length + fileEntries.length;
+        const totalItems = selectedFiles.length;
         setUploading(true);
         setUploadTotal(totalItems);
         setUploadCompleted(0);
-        const createdDocs = new Map<string, string>();
-        for (const folderPath of folderPaths) {
-          const parentPath = folderPath.split("/").slice(0, -1).join("/");
-          const parentID = parentPath
-            ? createdDocs.get(parentPath) ?? ""
-            : activeDocument?.id ?? "";
-          const folderName = folderPath.split("/").slice(-1)[0] ?? "Folder";
-          const placeholderFile = new File([""], `${folderName}.dir`, {
-            type: "application/x-directory",
-          });
-          const storageObjectID = await uploadStorageObject(
-            resolvedProjectKey,
-            placeholderFile,
-            `${uploadPrefix}/${folderPath}/.dir`,
-          );
-          const documentPayload = await createDocumentRecord(
-            resolvedProjectKey,
-            folderName,
-            parentID,
-            storageObjectID,
-          );
-          const createdID = String(documentPayload?.data?.id ?? "");
-          if (createdID) {
-            createdDocs.set(folderPath, createdID);
+        setImportStatus({ type: "idle" });
+        const uploadedItems = await uploadFolder(
+          resolvedProjectKey,
+          selectedFiles,
+          (completed) => setUploadCompleted(completed),
+        );
+        setImportedAssets((prev) => {
+          if (!prev || prev.projectKey !== resolvedProjectKey) {
+            return {
+              projectKey: resolvedProjectKey,
+              assets: uploadedItems.map((item) => ({
+                asset_id: item.asset_id,
+                filename: item.filename,
+                relative_path: item.relative_path,
+              })),
+            };
           }
-          setUploadCompleted((prev) => prev + 1);
-        }
-
-        for (const entry of fileEntries) {
-          const parentID = entry.parentPath
-            ? createdDocs.get(entry.parentPath) ?? ""
-            : activeDocument?.id ?? "";
-          const storageObjectID = await uploadStorageObject(
-            resolvedProjectKey,
-            entry.file,
-            `${uploadPrefix}/${entry.relativePath}`,
-          );
-          await createDocumentRecord(
-            resolvedProjectKey,
-            entry.file.name,
-            parentID,
-            storageObjectID,
-          );
-          setUploadCompleted((prev) => prev + 1);
-        }
-        console.log("import_folder_success", {
-          folders: folderPaths.length,
-          files: fileEntries.length,
+          return {
+            projectKey: prev.projectKey,
+            assets: [
+              ...prev.assets,
+              ...uploadedItems.map((item) => ({
+                asset_id: item.asset_id,
+                filename: item.filename,
+                relative_path: item.relative_path,
+              })),
+            ],
+          };
         });
-        onImportSuccess?.(activeDocument?.id ?? null);
+        setImportStatus({ type: "success", message: "Upload completed." });
       } catch (err) {
         console.log("import_folder_error", err);
+        setImportStatus({ type: "error", message: "Upload failed." });
       } finally {
         setUploading(false);
         setUploadTotal(0);
@@ -395,15 +328,6 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
     }
 
     setSelectedFiles([]);
-    setImportModalOpen(false);
-  };
-
-  const handleModeChange = (nextMode: "file" | "folder") => {
-    setImportMode(nextMode);
-    setSelectedFiles([]);
-    setUploading(false);
-    setUploadTotal(0);
-    setUploadCompleted(0);
   };
 
   useEffect(() => {
@@ -467,7 +391,8 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
         onSave={() => {}}
         onCancel={() => {}}
         onNew={handleOpenNew}
-        onImport={handleOpenImport}
+        onUploadFile={() => handleOpenImportWithMode("file")}
+        onUploadFolder={() => handleOpenImportWithMode("folder")}
       />
       <div className="doc-page-body">
         <div className="doc-page-title">{activeDocument.title}</div>
@@ -484,28 +409,12 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
         <div className="modal-overlay" role="dialog" aria-modal="true">
           <div className="modal-card">
             <div className="modal-header">
-              <h2>Import Document</h2>
+              <h2>Upload Assets</h2>
               <button className="modal-close" type="button" onClick={handleCloseImport}>
                 Close
               </button>
             </div>
             <div className="modal-body">
-              <div className="kb-import-tabs" role="tablist">
-                <button
-                  className={`kb-import-tab${importMode === "file" ? " active" : ""}`}
-                  type="button"
-                  onClick={() => handleModeChange("file")}
-                >
-                  File
-                </button>
-                <button
-                  className={`kb-import-tab${importMode === "folder" ? " active" : ""}`}
-                  type="button"
-                  onClick={() => handleModeChange("folder")}
-                >
-                  Folder
-                </button>
-              </div>
               {importMode === "file" ? (
                 <div className="kb-import-panel">
                   <div className="kb-import-visual" aria-hidden="true">
@@ -529,7 +438,7 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
                     </svg>
                   </div>
                   <div className="kb-import-title">Select a file to import</div>
-                  <div className="kb-import-note">Supported for single document upload.</div>
+                  <div className="kb-import-note">Uploads create assets only.</div>
                   <button className="btn ghost" type="button" onClick={handleFilePick}>
                     Choose file
                   </button>
@@ -560,7 +469,7 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
                     </svg>
                   </div>
                   <div className="kb-import-title">Select a folder to import</div>
-                  <div className="kb-import-note">All documents inside will be imported.</div>
+                  <div className="kb-import-note">Uploads create assets only.</div>
                   <button className="btn ghost" type="button" onClick={handleFolderPick}>
                     Choose folder
                   </button>
@@ -571,6 +480,15 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
                   </div>
                 </div>
               )}
+              {importStatus.type !== "idle" ? (
+                <div
+                  className={`kb-import-status ${
+                    importStatus.type === "error" ? "error" : "success"
+                  }`}
+                >
+                  {importStatus.message}
+                </div>
+              ) : null}
             </div>
             <div className="modal-actions">
               <button className="btn ghost" type="button" onClick={handleCloseImport}>
@@ -583,7 +501,7 @@ function DocumentPage({ projectKey, documentId, onImportSuccess }: DocumentPageP
                 disabled={uploading}
               >
                 {uploading ? <span className="kb-import-spinner" aria-hidden="true" /> : null}
-                {importMode === "folder" && uploading ? `Import ${uploadProgress}%` : "Import"}
+                {importMode === "folder" && uploading ? `Upload ${uploadProgress}%` : "Upload"}
               </button>
             </div>
           </div>
@@ -668,3 +586,72 @@ const trimBreadcrumbItems = (items: Array<{ label: string; to?: string }>) => {
   const tail = items.slice(-2);
   return [...head, { label: "..." }, ...tail];
 };
+
+async function uploadSingleFile(
+  projectKey: string,
+  file: File,
+): Promise<UploadedAsset> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("filename", file.name);
+  formData.append("mime", file.type || "application/octet-stream");
+  formData.append("size", String(file.size));
+
+  const response = await fetch(
+    buildApiUrl(`/api/projects/${encodeURIComponent(projectKey)}/assets/import`),
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+  if (!response.ok) {
+    throw new Error("asset upload failed");
+  }
+  const payload = await response.json();
+  const data = payload?.data ?? payload ?? {};
+  const assetID = String(data.asset_id ?? "");
+  if (!assetID) {
+    throw new Error("missing asset id");
+  }
+  return {
+    asset_id: assetID,
+    filename: String(data.filename ?? file.name),
+    mime: String(data.mime ?? file.type ?? "application/octet-stream"),
+    size: Number(data.size ?? file.size ?? 0),
+  };
+}
+
+async function uploadFolder(
+  projectKey: string,
+  files: File[],
+  onProgress?: (completed: number, total: number) => void,
+): Promise<UploadedFolderAsset[]> {
+  const list = Array.from(files);
+  const total = list.length;
+  const results: UploadedFolderAsset[] = [];
+  let completed = 0;
+
+  for (const file of list) {
+    const relativePath = normalizeRelativePath(
+      (file as File & { webkitRelativePath?: string }).webkitRelativePath ?? file.name,
+    );
+    const uploaded = await uploadSingleFile(projectKey, file);
+    results.push({
+      asset_id: uploaded.asset_id,
+      filename: uploaded.filename,
+      relative_path: relativePath,
+    });
+    completed += 1;
+    onProgress?.(completed, total);
+  }
+
+  return results;
+}
+
+function normalizeRelativePath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\/+/, "").trim();
+}
+
+function createDocumentFromAssets(_assets: ImportedAssetState) {
+  // TODO: Step 2 implement document creation from assets.
+}

@@ -14,7 +14,8 @@ type DocumentHeaderProps = {
   onSave: () => void;
   onCancel: () => void;
   onNew: () => void;
-  onImport: () => void;
+  onUploadFile: () => void;
+  onUploadFolder: () => void;
 };
 
 function DocumentHeader({
@@ -25,40 +26,64 @@ function DocumentHeader({
   onSave,
   onCancel,
   onNew,
-  onImport,
+  onUploadFile,
+  onUploadFolder,
 }: DocumentHeaderProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
+  const [actionMenuOpen, setActionMenuOpen] = useState(false);
 
-  const handleToggle = () => {
-    setMenuOpen((prev) => !prev);
+  const toggleUploadMenu = () => {
+    setUploadMenuOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setActionMenuOpen(false);
+      }
+      return next;
+    });
   };
 
-  const handleCloseMenu = () => {
-    setMenuOpen(false);
+  const toggleActionMenu = () => {
+    setActionMenuOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setUploadMenuOpen(false);
+      }
+      return next;
+    });
+  };
+
+  const closeMenus = () => {
+    setUploadMenuOpen(false);
+    setActionMenuOpen(false);
   };
 
   const handleNew = () => {
-    handleCloseMenu();
+    closeMenus();
     onNew();
   };
 
-  const handleImport = () => {
-    handleCloseMenu();
-    onImport();
+  const handleUploadFile = () => {
+    closeMenus();
+    onUploadFile();
+  };
+
+  const handleUploadFolder = () => {
+    closeMenus();
+    onUploadFolder();
   };
 
   const handleEdit = () => {
-    handleCloseMenu();
+    closeMenus();
     onEdit();
   };
 
   const handleSave = () => {
-    handleCloseMenu();
+    closeMenus();
     onSave();
   };
 
   const handleCancel = () => {
-    handleCloseMenu();
+    closeMenus();
     onCancel();
   };
 
@@ -79,44 +104,63 @@ function DocumentHeader({
         ))}
       </div>
       <div className="kb-header-menu">
-        <button
-          className="kb-menu-button"
-          type="button"
-          aria-label="Open menu"
-          onClick={handleToggle}
-        >
-          ...
-        </button>
-        {menuOpen ? (
-          <div className="kb-menu" role="menu">
-            {mode === "edit" ? (
-              <>
-                <button className="kb-menu-item" type="button" onClick={handleSave}>
-                  Save
+        {mode === "view" ? (
+          <div className="kb-menu-group">
+            <button
+              className="kb-menu-button"
+              type="button"
+              aria-label="Upload"
+              onClick={toggleUploadMenu}
+            >
+              +
+            </button>
+            {uploadMenuOpen ? (
+              <div className="kb-menu" role="menu">
+                <button className="kb-menu-item" type="button" onClick={handleUploadFile}>
+                  Upload File
                 </button>
-                <button className="kb-menu-item" type="button" onClick={handleCancel}>
-                  Cancel
+                <button className="kb-menu-item" type="button" onClick={handleUploadFolder}>
+                  Upload Folder
                 </button>
-              </>
-            ) : (
-              <>
-                {allowChildActions ? (
-                  <button className="kb-menu-item" type="button" onClick={handleNew}>
-                    New
-                  </button>
-                ) : null}
-                <button className="kb-menu-item" type="button" onClick={handleEdit}>
-                  Edit
-                </button>
-                {allowChildActions ? (
-                  <button className="kb-menu-item" type="button" onClick={handleImport}>
-                    Import
-                  </button>
-                ) : null}
-              </>
-            )}
+              </div>
+            ) : null}
           </div>
         ) : null}
+        <div className="kb-menu-group">
+          <button
+            className="kb-menu-button"
+            type="button"
+            aria-label="Open menu"
+            onClick={toggleActionMenu}
+          >
+            ...
+          </button>
+          {actionMenuOpen ? (
+            <div className="kb-menu" role="menu">
+              {mode === "edit" ? (
+                <>
+                  <button className="kb-menu-item" type="button" onClick={handleSave}>
+                    Save
+                  </button>
+                  <button className="kb-menu-item" type="button" onClick={handleCancel}>
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <>
+                  {allowChildActions ? (
+                    <button className="kb-menu-item" type="button" onClick={handleNew}>
+                      New
+                    </button>
+                  ) : null}
+                  <button className="kb-menu-item" type="button" onClick={handleEdit}>
+                    Edit
+                  </button>
+                </>
+              )}
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );

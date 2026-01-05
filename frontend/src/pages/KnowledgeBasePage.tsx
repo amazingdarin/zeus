@@ -265,20 +265,6 @@ function KnowledgeBasePage() {
       rootDocuments.filter((doc) => doc.type !== "overview" && doc.type !== "document"),
     [rootDocuments],
   );
-  const handleImportSuccess = useCallback(
-    (parentId: string | null) => {
-      if (!currentProject?.key) {
-        return;
-      }
-      if (!parentId) {
-        loadRootDocuments(currentProject.key);
-        return;
-      }
-      refreshChildren(currentProject.key, parentId);
-    },
-    [currentProject?.key, loadRootDocuments, refreshChildren],
-  );
-
   return (
     <KnowledgeBaseLayout
       sideNav={
@@ -299,7 +285,6 @@ function KnowledgeBasePage() {
       <DocumentPage
         projectKey={currentProject?.key ?? ""}
         documentId={activeDocumentId}
-        onImportSuccess={handleImportSuccess}
       />
     </KnowledgeBaseLayout>
   );

@@ -36,6 +36,7 @@ func (h *KnowledgeHandler) List(c *gin.Context) {
 		})
 		return
 	}
+	parentID := strings.TrimSpace(c.Query("parent_id"))
 	if h.svc == nil {
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
 			Code:    "SERVICE_NOT_READY",
@@ -44,7 +45,7 @@ func (h *KnowledgeHandler) List(c *gin.Context) {
 		return
 	}
 
-	metas, err := h.svc.ListDocuments(c.Request.Context(), projectKey)
+	items, err := h.svc.ListDocumentsByParent(c.Request.Context(), projectKey, parentID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
 			Code:    "LIST_DOCUMENTS_FAILED",
@@ -53,15 +54,15 @@ func (h *KnowledgeHandler) List(c *gin.Context) {
 		return
 	}
 
-	items := make([]types.KnowledgeDocumentMetaDTO, 0, len(metas))
-	for _, meta := range metas {
-		items = append(items, mapMetaDTO(meta))
+	list := make([]types.KnowledgeDocumentMetaDTO, 0, len(items))
+	for _, item := range items {
+		list = append(list, mapMetaDTOWithChild(item.Meta, item.HasChild))
 	}
 
 	c.JSON(http.StatusOK, types.KnowledgeListResponse{
 		Code:    "OK",
 		Message: "success",
-		Data:    items,
+		Data:    list,
 	})
 }
 
@@ -313,6 +314,12 @@ func mapMetaDTO(meta domain.DocumentMeta) types.KnowledgeDocumentMetaDTO {
 		CreatedAt: meta.CreatedAt.Format(time.RFC3339),
 		UpdatedAt: meta.UpdatedAt.Format(time.RFC3339),
 	}
+}
+
+func mapMetaDTOWithChild(meta domain.DocumentMeta, hasChild bool) types.KnowledgeDocumentMetaDTO {
+	dto := mapMetaDTO(meta)
+	dto.HasChild = hasChild
+	return dto
 }
 
 func mapDocumentDTO(

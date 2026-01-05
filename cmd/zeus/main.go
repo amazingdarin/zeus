@@ -14,10 +14,14 @@ import (
 	clients3 "zeus/internal/infra/client/s3"
 	"zeus/internal/infra/gitadmin"
 	"zeus/internal/infra/gitclient"
+	"zeus/internal/infra/gittemp"
 	ingestions3 "zeus/internal/infra/ingestion/s3"
+	"zeus/internal/infra/objectstorage"
 	"zeus/internal/infra/searchindex"
+	"zeus/internal/ingestion"
 	gitrepo "zeus/internal/repository/git"
 	"zeus/internal/repository/postgres"
+	svcasset "zeus/internal/service/asset"
 	svcknowledge "zeus/internal/service/knowledge"
 	svcproject "zeus/internal/service/project"
 	svcsearch "zeus/internal/service/search"
@@ -93,6 +97,17 @@ func main() {
 	}
 	gitclient.SetRepoRoot(gitRepoRoot)
 
+	assetPolicy := ingestion.DefaultPolicy{}
+	gitTempStorage := gittemp.NewGitTempAssetStorage(gitRepoRoot)
+	objectStorage := objectstorage.NewObjectStorageAssetStorage(
+		s3Client,
+		config.AppConfig.ObjectStorage.Bucket,
+	)
+	assetSvc, err := svcasset.NewService(assetPolicy, gitTempStorage, objectStorage)
+	if err != nil {
+		log.Fatalf("init asset service: %v", err)
+	}
+
 	projectSvc := svcproject.NewService(
 		projectRepo,
 		gitAdmin,
@@ -124,7 +139,7 @@ func main() {
 
 	router := gin.Default()
 	router.Use(middleware.CORSMiddleware())
-	handler.RegisterRoutes(router, storageObjectSvc, projectSvc, knowledgeSvc, searchSvc)
+	handler.RegisterRoutes(router, storageObjectSvc, assetSvc, projectSvc, knowledgeSvc, searchSvc)
 
 	if err = router.Run(addr); err != nil {
 		log.Fatalf("start server: %v", err)
