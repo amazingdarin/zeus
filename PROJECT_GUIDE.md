@@ -234,3 +234,13 @@ commit message 必须结构化：
 - Git 访问凭据由服务端管理（SSH key），不得暴露给前端
 
 ---
+
+## 12. 资源摄取与存储判定规范（Ingestion Policy）
+
+- 所有资源在写入前必须经过 Ingestion Policy 判定
+- 判定依据包括：文件大小、MIME 类型、是否适合 Git diff
+- 默认规则：
+  - size > 1MB 或 video/audio/pdf → 对象存储
+  - 其余小型、可 diff 资源 → Git Assets
+- content.json 中统一使用逻辑引用：storage://{asset_id}
+- asset_id 为资源的唯一逻辑身份，不得包含存储实现信息
