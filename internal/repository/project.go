@@ -18,6 +18,7 @@ type ProjectOption struct {
 
 type ProjectRepository interface {
 	Insert(ctx context.Context, obj *domain.Project) error
+	Update(ctx context.Context, obj *domain.Project) error
 	FindByID(ctx context.Context, id string) (*domain.Project, error)
 	FindByKey(ctx context.Context, key string) (*domain.Project, error)
 	List(ctx context.Context, filter ProjectFilter, option ProjectOption) ([]*domain.Project, int, error)

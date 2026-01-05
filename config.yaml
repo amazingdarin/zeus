@@ -21,3 +21,14 @@ object_storage:
   bucket: zeus-docs
   use_path_style: true
   insecure: true
+
+git:
+  repo_root: resources/zeus/repos
+  bare_repo_root: resources/zeus/git
+  repo_url_prefix: ""
+  author_name: Zeus
+  author_email: zeus@local
+  default_branch: main
+
+search:
+  index_root: resources/zeus/index

@@ -35,6 +35,20 @@ func (r *ProjectRepository) Insert(ctx context.Context, obj *domain.Project) err
 	return nil
 }
 
+func (r *ProjectRepository) Update(ctx context.Context, obj *domain.Project) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("repository not initialized")
+	}
+	modelObj := mapper.ProjectFromDomain(obj)
+	if modelObj == nil {
+		return fmt.Errorf("project is nil")
+	}
+	if err := r.db.WithContext(ctx).Save(modelObj).Error; err != nil {
+		return fmt.Errorf("update project: %w", err)
+	}
+	return nil
+}
+
 func (r *ProjectRepository) FindByID(ctx context.Context, id string) (*domain.Project, error) {
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("repository not initialized")

@@ -12,10 +12,15 @@ import (
 	"zeus/internal/api/handler"
 	"zeus/internal/config"
 	clients3 "zeus/internal/infra/client/s3"
+	"zeus/internal/infra/gitadmin"
+	"zeus/internal/infra/gitclient"
 	ingestions3 "zeus/internal/infra/ingestion/s3"
+	"zeus/internal/infra/searchindex"
+	gitrepo "zeus/internal/repository/git"
 	"zeus/internal/repository/postgres"
-	svcdocument "zeus/internal/service/document"
+	svcknowledge "zeus/internal/service/knowledge"
 	svcproject "zeus/internal/service/project"
+	svcsearch "zeus/internal/service/search"
 	svcstorageobject "zeus/internal/service/storage_object"
 )
 
@@ -51,7 +56,6 @@ func main() {
 		log.Fatalf("init postgres: %v", err)
 	}
 	projectRepo := postgres.NewProjectRepository(db)
-	documentRepo := postgres.NewDocumentRepository(db)
 
 	s3Client, err := clients3.NewS3Client(context.Background(), clients3.Config{
 		Endpoint:     config.AppConfig.ObjectStorage.Endpoint,
@@ -72,15 +76,55 @@ func main() {
 		log.Fatalf("init storage object repository: %v", err)
 	}
 	storageObjectSvc := svcstorageobject.NewService(s3Ingestion, s3Client, storageObjectRepo)
-	documentSvc, err := svcdocument.NewService(s3Ingestion, documentRepo)
-	if err != nil {
-		log.Fatalf("init document service: %v", err)
+	gitAuthorName := getenv("ZEUS_GIT_AUTHOR_NAME", config.AppConfig.Git.AuthorName)
+	gitAuthorEmail := getenv("ZEUS_GIT_AUTHOR_EMAIL", config.AppConfig.Git.AuthorEmail)
+	gitBranch := getenv("ZEUS_GIT_BRANCH", config.AppConfig.Git.DefaultBranch)
+	gitRepoRoot := getenv("ZEUS_GIT_REPO_ROOT", config.AppConfig.Git.RepoRoot)
+	gitBareRepoRoot := getenv("ZEUS_GIT_BARE_ROOT", config.AppConfig.Git.BareRepoRoot)
+	gitRepoURLPrefix := getenv("ZEUS_GIT_REPO_URL_PREFIX", config.AppConfig.Git.RepoURLPrefix)
+	if gitBareRepoRoot == "" {
+		gitBareRepoRoot = gitadmin.DefaultBareRepoRoot
 	}
-	projectSvc := svcproject.NewService(projectRepo, documentRepo, s3Ingestion, storageObjectSvc, documentSvc)
+
+	gitAdmin := gitadmin.NewExecAdmin(gitBareRepoRoot, gitRepoURLPrefix, log.WithField("component", "git-admin"))
+	gitClient := gitclient.NewClient(log.WithField("component", "git"))
+	if gitRepoRoot == "" {
+		gitRepoRoot = gitclient.DefaultRepoRoot
+	}
+	gitclient.SetRepoRoot(gitRepoRoot)
+
+	projectSvc := svcproject.NewService(
+		projectRepo,
+		gitAdmin,
+		gitClient,
+		gitAuthorName,
+		gitAuthorEmail,
+		gitBranch,
+	)
+
+	knowledgeRepo := gitrepo.NewKnowledgeRepository(gitClient, projectRepo, "")
+	knowledgeSvc, err := svcknowledge.NewService(
+		knowledgeRepo,
+		projectRepo,
+		gitClient,
+		gitAuthorName,
+		gitAuthorEmail,
+		"",
+	)
+	if err != nil {
+		log.Fatalf("init knowledge service: %v", err)
+	}
+
+	searchIndexRoot := getenv("ZEUS_SEARCH_INDEX_ROOT", config.AppConfig.Search.IndexRoot)
+	if searchIndexRoot == "" {
+		searchIndexRoot = searchindex.DefaultIndexRoot
+	}
+	indexBuilder := searchindex.NewIndexBuilder(knowledgeRepo, searchIndexRoot)
+	searchSvc := svcsearch.NewService(indexBuilder)
 
 	router := gin.Default()
 	router.Use(middleware.CORSMiddleware())
-	handler.RegisterRoutes(router, storageObjectSvc, documentSvc, projectSvc)
+	handler.RegisterRoutes(router, storageObjectSvc, projectSvc, knowledgeSvc, searchSvc)
 
 	if err = router.Run(addr); err != nil {
 		log.Fatalf("start server: %v", err)

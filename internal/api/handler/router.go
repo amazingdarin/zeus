@@ -9,12 +9,14 @@ import (
 func RegisterRoutes(
 	r *gin.Engine,
 	storageObjectSvc service.StorageObjectService,
-	documentSvc service.DocumentService,
 	projectSvc service.ProjectService,
+	knowledgeSvc service.KnowledgeService,
+	searchSvc service.SearchService,
 ) {
 	storageObjectHandler := NewStorageObjectHandler(storageObjectSvc, projectSvc)
 	projectHandler := NewProjectHandler(projectSvc)
-	documentHandler := NewDocumentHandler(projectSvc, documentSvc)
+	knowledgeHandler := NewKnowledgeHandler(knowledgeSvc)
+	searchHandler := NewSearchHandler(searchSvc)
 
 	api := r.Group("/api")
 
@@ -26,9 +28,12 @@ func RegisterRoutes(
 	api.POST("/projects", projectHandler.Create)
 	api.GET("/projects", projectHandler.List)
 
-	// Document
-	api.GET("/projects/:project_key/documents", documentHandler.List)
-	api.POST("/projects/:project_key/documents", documentHandler.Create)
-	api.PUT("/projects/:project_key/documents/:document_id", documentHandler.Update)
-	api.GET("/projects/:project_key/documents/:document_id", documentHandler.Get)
+	// Knowledge
+	api.GET("/projects/:project_key/documents", knowledgeHandler.List)
+	api.POST("/projects/:project_key/documents", knowledgeHandler.Create)
+	api.PATCH("/projects/:project_key/documents/:doc_id", knowledgeHandler.Update)
+	api.GET("/projects/:project_key/documents/:doc_id", knowledgeHandler.Get)
+
+	// Search
+	api.GET("/projects/:project_key/search", searchHandler.Search)
 }

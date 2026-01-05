@@ -2,49 +2,58 @@ package project
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"zeus/internal/infra/ingestion"
-
 	"github.com/google/uuid"
 
 	"zeus/internal/domain"
+	"zeus/internal/infra/gitadmin"
+	"zeus/internal/infra/gitclient"
 	"zeus/internal/repository"
 	"zeus/internal/service"
 )
 
 type Service struct {
-	projectRepo  repository.ProjectRepository
-	documentRepo repository.DocumentRepository
-	documentSvc  service.DocumentService
-
-	ingestion ingestion.FileIngestionService
-
-	storageObjectSvc service.StorageObjectService
+	projectRepo repository.ProjectRepository
+	gitAdmin    gitadmin.GitAdmin
+	gitClient   gitclient.GitClient
+	branch      string
+	authorName  string
+	authorEmail string
+	now         func() time.Time
 }
 
 func NewService(
 	projectRepo repository.ProjectRepository,
-	documentRepo repository.DocumentRepository,
-	ingestion ingestion.FileIngestionService,
-	storageObjectSvc service.StorageObjectService,
-	documentSvc service.DocumentService) *Service {
+	gitAdmin gitadmin.GitAdmin,
+	gitClient gitclient.GitClient,
+	authorName string,
+	authorEmail string,
+	branch string,
+) *Service {
+	if branch == "" {
+		branch = "main"
+	}
 	return &Service{
-		projectRepo:      projectRepo,
-		documentRepo:     documentRepo,
-		ingestion:        ingestion,
-		storageObjectSvc: storageObjectSvc,
-		documentSvc:      documentSvc,
+		projectRepo: projectRepo,
+		gitAdmin:    gitAdmin,
+		gitClient:   gitClient,
+		branch:      branch,
+		authorName:  strings.TrimSpace(authorName),
+		authorEmail: strings.TrimSpace(authorEmail),
+		now:         time.Now,
 	}
 }
 
 func (s *Service) Create(ctx context.Context, project *domain.Project) error {
+	if s == nil || s.projectRepo == nil {
+		return fmt.Errorf("project service not initialized")
+	}
 	if project == nil {
 		return fmt.Errorf("project is required")
 	}
@@ -58,10 +67,11 @@ func (s *Service) Create(ctx context.Context, project *domain.Project) error {
 		project.RepoName = buildRepoName(project.Key)
 	}
 	if project.RepoURL == "" {
-		project.RepoURL = buildRepoURL(project.RepoName)
+		project.RepoURL = s.buildRepoURL(project.RepoName)
 	}
 
-	now := time.Now()
+	now := s.nowTime()
+	project.Status = domain.ProjectStatusCreating
 	project.CreatedAt = now
 	project.UpdatedAt = now
 
@@ -73,8 +83,15 @@ func (s *Service) Create(ctx context.Context, project *domain.Project) error {
 		return fmt.Errorf("insert project: %w", err)
 	}
 
-	if err := s.initProject(ctx, project); err != nil {
-		return fmt.Errorf("init project: %w", err)
+	if err := s.initRepo(ctx, project); err != nil {
+		_ = s.markProjectFailed(ctx, project)
+		return fmt.Errorf("init repo: %w", err)
+	}
+
+	project.Status = domain.ProjectStatusActive
+	project.UpdatedAt = s.nowTime()
+	if err := s.projectRepo.Update(ctx, project); err != nil {
+		return fmt.Errorf("update project: %w", err)
 	}
 	return nil
 }
@@ -102,130 +119,94 @@ func (s *Service) GetByKey(ctx context.Context, key string) (*domain.Project, er
 	return project, nil
 }
 
-func (s *Service) initProject(ctx context.Context, project *domain.Project) error {
+func (s *Service) initRepo(ctx context.Context, project *domain.Project) error {
 	if project == nil {
 		return fmt.Errorf("project is required")
 	}
-	if s.ingestion == nil {
-		return fmt.Errorf("ingestion service is required")
+	if s.gitAdmin == nil {
+		return fmt.Errorf("git admin is required")
 	}
-	if s.storageObjectSvc == nil {
-		return fmt.Errorf("storage object service is required")
+	if s.gitClient == nil {
+		return fmt.Errorf("git client is required")
 	}
-	if s.documentRepo == nil {
-		return fmt.Errorf("document repository is required")
-	}
-
-	const projectDocDir = "doc"
-	if _, err := s.ingestion.CreateDirectory(ctx, ingestion.DirectoryInput{
-		Namespace: project.ID,
-		Path:      projectDocDir,
-	}); err != nil {
-		return fmt.Errorf("create project directory: %w", err)
+	if s.authorName == "" || s.authorEmail == "" {
+		return fmt.Errorf("git author name and email are required")
 	}
 
-	type initDocSpec struct {
-		filename string
-		title    string
-		docType  domain.DocumentType
-		order    int
+	repoURL, err := s.gitAdmin.CreateBareRepo(ctx, project.RepoName)
+	if err != nil {
+		return fmt.Errorf("create bare repo: %w", err)
+	}
+	if repoURL != "" {
+		project.RepoURL = repoURL
 	}
 
-	specs := []initDocSpec{
-		{
-			filename: "overview",
-			title:    "Overview",
-			docType:  domain.DocumentTypeOverview,
-			order:    1,
-		},
-		{
-			filename: "project",
-			title:    "Project Documents",
-			docType:  domain.DocumentTypeOrigin,
-			order:    2,
-		},
-		{
-			filename: "requirement",
-			title:    "Requirement Documents",
-			docType:  domain.DocumentTypeRequirement,
-			order:    3,
-		},
+	tempRoot, err := os.MkdirTemp("", fmt.Sprintf("zeus-%s-", project.Key))
+	if err != nil {
+		return fmt.Errorf("create temp repo: %w", err)
+	}
+	defer os.RemoveAll(tempRoot)
+	workdir := filepath.Join(tempRoot, "repo")
+
+	if err := s.gitClient.EnsureCloned(ctx, project.RepoURL, workdir); err != nil {
+		return fmt.Errorf("clone repo: %w", err)
+	}
+	if err := s.gitClient.CheckoutBranch(ctx, workdir, s.branch); err != nil {
+		return fmt.Errorf("checkout branch: %w", err)
 	}
 
-	for _, spec := range specs {
-		filePath := filepath.Join("resource", "initdoc", spec.filename)
-		file, size, err := openInitFile(filePath)
-		if err != nil {
-			return err
-		}
-		so := &domain.StorageObject{
-			ID:        uuid.NewString(),
-			ProjectID: project.ID,
-			Source: domain.SourceInfo{
-				Type:         domain.StorageObjectSourceTypeSystem,
-				ImportedFrom: filePath,
-			},
-			Storage: domain.StorageInfo{
-				Type: domain.StorageTypeS3,
-				Key:  path.Join(projectDocDir, spec.filename),
-			},
-		}
-
-		payload := service.StoragePayload{
-			Reader:    file,
-			SizeBytes: size,
-			MimeType:  "text/plain",
-			Namespace: project.ID,
-		}
-
-		if err := s.storageObjectSvc.Create(ctx, so, payload); err != nil {
-			file.Close()
-			return fmt.Errorf("create storage object: %w", err)
-		}
-		file.Close()
-
-		now := time.Now()
-		document := &domain.Document{
-			ID:            uuid.NewString(),
-			ProjectID:     project.ID,
-			Type:          spec.docType,
-			Title:         spec.title,
-			Description:   buildDocumentDescription(project.Description, spec.title),
-			Status:        domain.DocumentStatusActive,
-			Path:          path.Join("/", projectDocDir, spec.filename),
-			Order:         spec.order,
-			StorageObject: so,
-			CreatedAt:     now,
-			UpdatedAt:     now,
-		}
-
-		if err := s.documentRepo.Save(ctx, document); err != nil {
-			return fmt.Errorf("save initial document: %w", err)
-		}
+	if err := s.writeRepoScaffold(workdir, project); err != nil {
+		return err
 	}
 
+	if _, err := s.gitClient.CommitAll(ctx, workdir, fmt.Sprintf("docs: init %s", project.Key), s.authorName, s.authorEmail); err != nil {
+		return fmt.Errorf("commit init: %w", err)
+	}
+	if err := s.gitClient.Push(ctx, workdir, s.branch); err != nil {
+		return fmt.Errorf("push init: %w", err)
+	}
 	return nil
 }
 
-func openInitFile(filePath string) (io.ReadCloser, int64, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, 0, fmt.Errorf("open init file: %w", err)
+func (s *Service) writeRepoScaffold(workdir string, project *domain.Project) error {
+	if err := os.MkdirAll(filepath.Join(workdir, "docs"), 0o755); err != nil {
+		return fmt.Errorf("create docs dir: %w", err)
 	}
-	stat, err := file.Stat()
-	if err != nil {
-		file.Close()
-		return nil, 0, fmt.Errorf("stat init file: %w", err)
+	if err := os.MkdirAll(filepath.Join(workdir, ".zeus"), 0o755); err != nil {
+		return fmt.Errorf("create .zeus dir: %w", err)
 	}
-	return file, stat.Size(), nil
+
+	readme := fmt.Sprintf("# %s\n\nProject Key: %s\n", project.Name, project.Key)
+	if err := os.WriteFile(filepath.Join(workdir, "README.md"), []byte(readme), 0o644); err != nil {
+		return fmt.Errorf("write README: %w", err)
+	}
+
+	meta := map[string]interface{}{
+		"id":          project.ID,
+		"key":         project.Key,
+		"name":        project.Name,
+		"description": project.Description,
+		"repo_name":   project.RepoName,
+		"repo_url":    project.RepoURL,
+		"created_at":  project.CreatedAt.Format(time.RFC3339),
+	}
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal project meta: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, ".zeus", "project.json"), data, 0o644); err != nil {
+		return fmt.Errorf("write project.json: %w", err)
+	}
+	return nil
 }
 
-func buildDocumentDescription(projectDescription, title string) string {
-	projectDescription = strings.TrimSpace(projectDescription)
-	if projectDescription == "" {
-		return title
+func (s *Service) markProjectFailed(ctx context.Context, project *domain.Project) error {
+	if project == nil || s.projectRepo == nil {
+		return fmt.Errorf("project repository is required")
 	}
-	return fmt.Sprintf("%s %s", projectDescription, title)
+	project.Status = domain.ProjectStatusFailed
+	project.UpdatedAt = s.nowTime()
+	return s.projectRepo.Update(ctx, project)
 }
 
 func buildRepoName(projectKey string) string {
@@ -236,12 +217,22 @@ func buildRepoName(projectKey string) string {
 	return fmt.Sprintf("zeus-%s.git", projectKey)
 }
 
-func buildRepoURL(repoName string) string {
+func (s *Service) buildRepoURL(repoName string) string {
 	repoName = strings.TrimSpace(repoName)
 	if repoName == "" {
 		return ""
 	}
+	if s.gitAdmin != nil {
+		return s.gitAdmin.RepoURL(repoName)
+	}
 	return repoName
+}
+
+func (s *Service) nowTime() time.Time {
+	if s.now == nil {
+		return time.Now()
+	}
+	return s.now()
 }
 
 var _ service.ProjectService = (*Service)(nil)

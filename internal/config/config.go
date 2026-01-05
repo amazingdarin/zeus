@@ -11,6 +11,8 @@ type Config struct {
 	Server        ServerConfig        `mapstructure:"server"`
 	Postgres      PostgresConfig      `mapstructure:"postgres"`
 	ObjectStorage ObjectStorageConfig `mapstructure:"object_storage"`
+	Git           GitConfig           `mapstructure:"git"`
+	Search        SearchConfig        `mapstructure:"search"`
 }
 
 var AppConfig *Config
@@ -49,6 +51,19 @@ type ObjectStorageConfig struct {
 	Insecure     bool   `mapstructure:"insecure"`
 }
 
+type GitConfig struct {
+	RepoRoot      string `mapstructure:"repo_root"`
+	BareRepoRoot  string `mapstructure:"bare_repo_root"`
+	RepoURLPrefix string `mapstructure:"repo_url_prefix"`
+	AuthorName    string `mapstructure:"author_name"`
+	AuthorEmail   string `mapstructure:"author_email"`
+	DefaultBranch string `mapstructure:"default_branch"`
+}
+
+type SearchConfig struct {
+	IndexRoot string `mapstructure:"index_root"`
+}
+
 func Load(path string) (*Config, error) {
 	if path == "" {
 		return nil, fmt.Errorf("config path is required")
@@ -67,5 +82,24 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 
+	applyDefaults(&cfg)
 	return &cfg, nil
+}
+
+func applyDefaults(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	if cfg.Git.BareRepoRoot == "" {
+		cfg.Git.BareRepoRoot = "/var/lib/zeus/git"
+	}
+	if cfg.Git.RepoRoot == "" {
+		cfg.Git.RepoRoot = "/var/lib/zeus/repos"
+	}
+	if cfg.Git.DefaultBranch == "" {
+		cfg.Git.DefaultBranch = "main"
+	}
+	if cfg.Search.IndexRoot == "" {
+		cfg.Search.IndexRoot = "/var/lib/zeus/index"
+	}
 }
