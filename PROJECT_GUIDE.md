@@ -244,3 +244,11 @@ commit message 必须结构化：
   - 其余小型、可 diff 资源 → Git Assets
 - content.json 中统一使用逻辑引用：storage://{asset_id}
 - asset_id 为资源的唯一逻辑身份，不得包含存储实现信息
+
+## 13. 文档类型（doc_type）规范
+
+- 每个文档的 .meta.json 中必须包含 doc_type 字段
+- doc_type 用于决定文档在系统中的行为逻辑，而非展示样式
+- 默认 doc_type 为 "document"
+- doc_type 为稳定枚举值，新增类型必须明确行为差异
+- 禁止通过解析 content.json 来推断文档类型
