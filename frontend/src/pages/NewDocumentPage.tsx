@@ -64,11 +64,27 @@ function NewDocumentPage() {
         if (!detail) {
           return;
         }
-        setTitle(String(detail.title ?? "Untitled Document"));
-        const parentId = String(detail.parent_id ?? "").trim();
-        setParentID(parentId);
-        const storageId = String(detail.storage_object_id ?? "").trim();
-        setStorageObjectID(storageId);
+        const metaValue = detail?.meta;
+        if (metaValue) {
+          const contentValue = detail?.content ?? {};
+          setTitle(String(metaValue.title ?? "Untitled Document"));
+          const parentId = String(metaValue.parent ?? "").trim();
+          setParentID(parentId);
+          const contentMetaValue =
+            typeof contentValue.meta === "object" ? contentValue.meta : null;
+          const documentContent = contentValue.content;
+          if (documentContent && typeof documentContent === "object") {
+            setContent(documentContent);
+          }
+          setContentMeta(contentMetaValue);
+          setStorageObjectID("");
+        } else {
+          setTitle(String(detail?.title ?? "Untitled Document"));
+          const parentId = String(detail?.parent_id ?? "").trim();
+          setParentID(parentId);
+          const storageId = String(detail?.storage_object_id ?? "").trim();
+          setStorageObjectID(storageId);
+        }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
           setSaveError("Failed to load document.");
@@ -119,7 +135,6 @@ function NewDocumentPage() {
     loadContent();
     return () => controller.abort();
   }, [currentProject?.key, storageObjectID]);
-
   const handleSave = async () => {
     const projectKey = currentProject?.key ?? "";
     if (!projectKey) {
@@ -134,36 +149,34 @@ function NewDocumentPage() {
         content ?? { type: "doc", content: [] },
         contentMeta,
       );
-      const safeName = sanitizeFileName(title) || "untitled";
-      const fileName = `${safeName}.json`;
-      const blob = new Blob([JSON.stringify(payloadForSave, null, 2)], {
-        type: "application/json",
-      });
-      const file = new File([blob], fileName, { type: "application/json" });
-      const uploadPrefix = `doc/${Date.now()}`;
-      const storageObjectID = await uploadStorageObject(
-        projectKey,
-        file,
-        `${uploadPrefix}/${fileName}`,
-      );
       let documentPayload;
+      const safeSlug = sanitizeFileName(title);
+      const meta = {
+        id: documentId || undefined,
+        slug: safeSlug || undefined,
+        title: title.trim(),
+        parent: (parentID || parentIdParam || "root").trim(),
+        path: safeSlug ? `/${safeSlug}` : "",
+        status: "draft",
+        tags: [],
+      };
       if (documentId) {
         documentPayload = await updateDocumentRecord(
           projectKey,
           documentId,
-          title,
-          parentID || parentIdParam,
-          storageObjectID,
+          meta,
+          payloadForSave,
         );
       } else {
         documentPayload = await createDocumentRecord(
           projectKey,
-          title,
-          parentID || parentIdParam,
-          storageObjectID,
+          meta,
+          payloadForSave,
         );
       }
-      const targetID = String(documentPayload?.data?.id ?? documentId ?? "");
+      const targetID = String(
+        documentPayload?.data?.meta?.id ?? documentPayload?.data?.id ?? documentId ?? "",
+      );
       if (targetID) {
         const query = new URLSearchParams({ document_id: targetID });
         const parentValue = parentID || parentIdParam;
@@ -214,40 +227,18 @@ function NewDocumentPage() {
 
 export default NewDocumentPage;
 
-const uploadStorageObject = async (
-  projectKey: string,
-  file: File,
-  objectKey: string,
-): Promise<string> => {
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("source_type", "upload");
-  formData.append("storage_type", "s3");
-  formData.append("object_key", objectKey);
-  formData.append("mime_type", file.type || "application/json");
-  const response = await fetch(
-    buildApiUrl(`/api/projects/${encodeURIComponent(projectKey)}/storage-objects`),
-    {
-      method: "POST",
-      body: formData,
-    },
-  );
-  if (!response.ok) {
-    throw new Error("upload failed");
-  }
-  const payload = await response.json();
-  const storageObjectID = String(payload?.id ?? "");
-  if (!storageObjectID) {
-    throw new Error("missing storage object id");
-  }
-  return storageObjectID;
-};
-
 const createDocumentRecord = async (
   projectKey: string,
-  docTitle: string,
-  parentID: string,
-  storageObjectID: string,
+  meta: {
+    id?: string;
+    slug?: string;
+    title: string;
+    parent: string;
+    path?: string;
+    status?: string;
+    tags?: string[];
+  },
+  content: { meta: EditorMeta; content: JSONContent },
 ) => {
   const response = await fetch(
     buildApiUrl(`/api/projects/${encodeURIComponent(projectKey)}/documents`),
@@ -257,9 +248,8 @@ const createDocumentRecord = async (
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        title: docTitle,
-        parent_id: parentID,
-        storage_object_id: storageObjectID,
+        meta,
+        content,
       }),
     },
   );
@@ -272,9 +262,14 @@ const createDocumentRecord = async (
 const updateDocumentRecord = async (
   projectKey: string,
   documentId: string,
-  docTitle: string,
-  parentID: string,
-  storageObjectID: string,
+  meta: {
+    title: string;
+    parent: string;
+    path?: string;
+    status?: string;
+    tags?: string[];
+  },
+  content: { meta: EditorMeta; content: JSONContent },
 ) => {
   const response = await fetch(
     buildApiUrl(
@@ -283,14 +278,13 @@ const updateDocumentRecord = async (
       )}`,
     ),
     {
-      method: "PUT",
+      method: "PATCH",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        title: docTitle,
-        parent_id: parentID,
-        storage_object_id: storageObjectID,
+        meta,
+        content,
       }),
     },
   );
@@ -322,7 +316,27 @@ const fetchDocumentDetail = async (
   if (!response.ok) {
     throw new Error("failed to load document");
   }
-  const payload = (await response.json()) as { data?: Record<string, unknown> };
+  const payload = (await response.json()) as {
+    data?: {
+      meta?: {
+        id?: string;
+        slug?: string;
+        title?: string;
+        parent?: string;
+        path?: string;
+        status?: string;
+        tags?: string[];
+      };
+      content?: {
+        meta?: EditorMeta;
+        content?: JSONContent;
+      };
+      id?: string;
+      title?: string;
+      parent_id?: string;
+      storage_object_id?: string;
+    };
+  };
   return payload?.data ?? null;
 };
 
