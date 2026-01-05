@@ -137,7 +137,7 @@ func (s *Service) CreateDocument(
 		return domain.DocumentMeta{}, domain.DocumentContent{}, err
 	}
 
-	if err := s.commitAndPush(ctx, localPath, fmt.Sprintf("docs: create %s", meta.ID)); err != nil {
+	if err := s.commitAndPush(ctx, projectKey, localPath, fmt.Sprintf("docs: create %s", meta.ID)); err != nil {
 		return domain.DocumentMeta{}, domain.DocumentContent{}, err
 	}
 	return meta, content, nil
@@ -191,7 +191,7 @@ func (s *Service) UpdateDocument(
 		return domain.DocumentMeta{}, domain.DocumentContent{}, err
 	}
 
-	if err := s.commitAndPush(ctx, localPath, fmt.Sprintf("docs: update %s", docID)); err != nil {
+	if err := s.commitAndPush(ctx, projectKey, localPath, fmt.Sprintf("docs: update %s", docID)); err != nil {
 		return domain.DocumentMeta{}, domain.DocumentContent{}, err
 	}
 
@@ -233,23 +233,23 @@ func (s *Service) ensureRepoReady(ctx context.Context, projectKey string) (strin
 	if localPath == "" {
 		return "", fmt.Errorf("local repo path is required")
 	}
-	if err := s.gitClient.EnsureCloned(ctx, repoURL, localPath); err != nil {
+	if err := s.gitClient.EnsureCloned(ctx, projectKey, repoURL, localPath); err != nil {
 		return "", fmt.Errorf("ensure repo: %w", err)
 	}
-	if err := s.gitClient.PullRebase(ctx, localPath, s.branch); err != nil {
+	if err := s.gitClient.PullRebase(ctx, projectKey, localPath, s.branch); err != nil {
 		return "", fmt.Errorf("pull rebase: %w", err)
 	}
 	return localPath, nil
 }
 
-func (s *Service) commitAndPush(ctx context.Context, localPath, message string) error {
+func (s *Service) commitAndPush(ctx context.Context, projectKey, localPath, message string) error {
 	if s.gitClient == nil {
 		return fmt.Errorf("git client is required")
 	}
-	if _, err := s.gitClient.CommitAll(ctx, localPath, message, s.authorName, s.authorEmail); err != nil {
+	if _, err := s.gitClient.CommitAll(ctx, projectKey, localPath, message, s.authorName, s.authorEmail); err != nil {
 		return err
 	}
-	if err := s.gitClient.Push(ctx, localPath, s.branch); err != nil {
+	if err := s.gitClient.Push(ctx, projectKey, localPath, s.branch); err != nil {
 		return err
 	}
 	return nil

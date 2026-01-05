@@ -1,12 +1,14 @@
 package gitclient
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -17,22 +19,32 @@ const DefaultRepoRoot = "/var/lib/zeus/repos"
 var RepoRoot = DefaultRepoRoot
 
 type GitClient interface {
-	EnsureCloned(ctx context.Context, repoURL, localPath string) error
-	PullRebase(ctx context.Context, localPath, branch string) error
-	CheckoutBranch(ctx context.Context, localPath, branch string) error
-	CommitAll(ctx context.Context, localPath, message, authorName, authorEmail string) (string, error)
-	Push(ctx context.Context, localPath, branch string) error
+	EnsureCloned(ctx context.Context, projectKey, repoURL, localPath string) error
+	PullRebase(ctx context.Context, projectKey, localPath, branch string) error
+	CheckoutBranch(ctx context.Context, projectKey, localPath, branch string) error
+	CommitAll(
+		ctx context.Context,
+		projectKey, localPath, message, authorName, authorEmail string,
+	) (string, error)
+	Push(ctx context.Context, projectKey, localPath, branch string) error
 }
 
 type ExecClient struct {
-	logger *log.Entry
+	logger      *log.Entry
+	lockManager RepoLockManager
+	runner      *GitCommandRunner
 }
 
 func NewClient(logger *log.Entry) *ExecClient {
 	if logger == nil {
 		logger = log.NewEntry(log.StandardLogger())
 	}
-	return &ExecClient{logger: logger}
+	runner := NewGitCommandRunner(logger)
+	return &ExecClient{
+		logger:      logger,
+		lockManager: NewRepoLockManager(),
+		runner:      runner,
+	}
 }
 
 func SetRepoRoot(root string) {
@@ -51,7 +63,10 @@ func RepoPath(projectKey string) string {
 	return filepath.Join(RepoRoot, projectKey)
 }
 
-func (c *ExecClient) EnsureCloned(ctx context.Context, repoURL, localPath string) error {
+func (c *ExecClient) EnsureCloned(
+	ctx context.Context,
+	projectKey, repoURL, localPath string,
+) error {
 	repoURL = strings.TrimSpace(repoURL)
 	localPath = strings.TrimSpace(localPath)
 	if repoURL == "" {
@@ -60,30 +75,36 @@ func (c *ExecClient) EnsureCloned(ctx context.Context, repoURL, localPath string
 	if localPath == "" {
 		return fmt.Errorf("local path is required")
 	}
+	if err := c.validateProjectKey(projectKey); err != nil {
+		return err
+	}
 
-	if isGitRepo(localPath) {
-		_, err := c.run(ctx, []string{"-C", localPath, "fetch", "--all", "--prune"})
-		if err != nil {
-			return fmt.Errorf("git fetch: %w", err)
+	return c.withRepoLock(ctx, projectKey, func() error {
+		if isGitRepo(localPath) {
+			if err := c.run(ctx, localPath, projectKey, "-C", localPath, "fetch", "--all", "--prune"); err != nil {
+				return fmt.Errorf("git fetch: %w", err)
+			}
+			return nil
+		}
+		if exists(localPath) {
+			return fmt.Errorf("local path exists but is not a git repo")
+		}
+
+		if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+			return fmt.Errorf("create repo root: %w", err)
+		}
+
+		if err := c.run(ctx, localPath, projectKey, "clone", repoURL, localPath); err != nil {
+			return fmt.Errorf("git clone: %w", err)
 		}
 		return nil
-	}
-	if exists(localPath) {
-		return fmt.Errorf("local path exists but is not a git repo")
-	}
-
-	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
-		return fmt.Errorf("create repo root: %w", err)
-	}
-
-	_, err := c.run(ctx, []string{"clone", repoURL, localPath})
-	if err != nil {
-		return fmt.Errorf("git clone: %w", err)
-	}
-	return nil
+	})
 }
 
-func (c *ExecClient) PullRebase(ctx context.Context, localPath, branch string) error {
+func (c *ExecClient) PullRebase(
+	ctx context.Context,
+	projectKey, localPath, branch string,
+) error {
 	localPath = strings.TrimSpace(localPath)
 	branch = strings.TrimSpace(branch)
 	if localPath == "" {
@@ -92,37 +113,44 @@ func (c *ExecClient) PullRebase(ctx context.Context, localPath, branch string) e
 	if branch == "" {
 		return fmt.Errorf("branch is required")
 	}
-
-	remoteRef, err := c.run(ctx, []string{"-C", localPath, "ls-remote", "--heads", "origin", branch})
-	if err != nil {
-		return fmt.Errorf("git ls-remote: %w", err)
-	}
-	if strings.TrimSpace(remoteRef) == "" {
-		return nil
+	if err := c.validateProjectKey(projectKey); err != nil {
+		return err
 	}
 
-	if !c.hasCommits(ctx, localPath) {
-		if _, err := c.run(ctx, []string{"-C", localPath, "fetch", "origin", branch}); err != nil {
-			return fmt.Errorf("git fetch: %w", err)
+	return c.withRepoLock(ctx, projectKey, func() error {
+		remoteRef, err := c.runOutput(ctx, localPath, projectKey, "-C", localPath, "ls-remote", "--heads", "origin", branch)
+		if err != nil {
+			return fmt.Errorf("git ls-remote: %w", err)
 		}
-		if _, err := c.run(ctx, []string{"-C", localPath, "checkout", "-B", branch, "FETCH_HEAD"}); err != nil {
+		if strings.TrimSpace(remoteRef) == "" {
+			return nil
+		}
+
+		if !c.hasCommits(ctx, localPath, projectKey) {
+			if err := c.run(ctx, localPath, projectKey, "-C", localPath, "fetch", "origin", branch); err != nil {
+				return fmt.Errorf("git fetch: %w", err)
+			}
+			if err := c.run(ctx, localPath, projectKey, "-C", localPath, "checkout", "-B", branch, "FETCH_HEAD"); err != nil {
+				return fmt.Errorf("git checkout: %w", err)
+			}
+			return nil
+		}
+
+		if err := c.run(ctx, localPath, projectKey, "-C", localPath, "checkout", "-B", branch); err != nil {
 			return fmt.Errorf("git checkout: %w", err)
 		}
+
+		if err := c.run(ctx, localPath, projectKey, "-C", localPath, "pull", "--rebase", "origin", branch); err != nil {
+			return fmt.Errorf("git pull --rebase: %w", err)
+		}
 		return nil
-	}
-
-	if _, err := c.run(ctx, []string{"-C", localPath, "checkout", "-B", branch}); err != nil {
-		return fmt.Errorf("git checkout: %w", err)
-	}
-
-	_, err = c.run(ctx, []string{"-C", localPath, "pull", "--rebase", "origin", branch})
-	if err != nil {
-		return fmt.Errorf("git pull --rebase: %w", err)
-	}
-	return nil
+	})
 }
 
-func (c *ExecClient) CheckoutBranch(ctx context.Context, localPath, branch string) error {
+func (c *ExecClient) CheckoutBranch(
+	ctx context.Context,
+	projectKey, localPath, branch string,
+) error {
 	localPath = strings.TrimSpace(localPath)
 	branch = strings.TrimSpace(branch)
 	if localPath == "" {
@@ -131,16 +159,21 @@ func (c *ExecClient) CheckoutBranch(ctx context.Context, localPath, branch strin
 	if branch == "" {
 		return fmt.Errorf("branch is required")
 	}
-
-	_, err := c.run(ctx, []string{"-C", localPath, "checkout", "-B", branch})
-	if err != nil {
-		return fmt.Errorf("git checkout -B: %w", err)
+	if err := c.validateProjectKey(projectKey); err != nil {
+		return err
 	}
-	return nil
+
+	return c.withRepoLock(ctx, projectKey, func() error {
+		if err := c.run(ctx, localPath, projectKey, "-C", localPath, "checkout", "-B", branch); err != nil {
+			return fmt.Errorf("git checkout -B: %w", err)
+		}
+		return nil
+	})
 }
 
 func (c *ExecClient) CommitAll(
 	ctx context.Context,
+	projectKey,
 	localPath,
 	message,
 	authorName,
@@ -159,38 +192,52 @@ func (c *ExecClient) CommitAll(
 	if authorName == "" || authorEmail == "" {
 		return "", fmt.Errorf("author name and email are required")
 	}
+	if err := c.validateProjectKey(projectKey); err != nil {
+		return "", err
+	}
 
-	statusOutput, err := c.run(ctx, []string{"-C", localPath, "status", "--porcelain"})
+	var hash string
+	err := c.withRepoLock(ctx, projectKey, func() error {
+		statusOutput, err := c.runOutput(ctx, localPath, projectKey, "-C", localPath, "status", "--porcelain")
+		if err != nil {
+			return fmt.Errorf("git status: %w", err)
+		}
+		if strings.TrimSpace(statusOutput) == "" {
+			return fmt.Errorf("no changes to commit")
+		}
+
+		if err := c.run(ctx, localPath, projectKey, "-C", localPath, "add", "-A"); err != nil {
+			return fmt.Errorf("git add: %w", err)
+		}
+
+		commitArgs := []string{
+			"-C", localPath,
+			"-c", fmt.Sprintf("user.name=%s", authorName),
+			"-c", fmt.Sprintf("user.email=%s", authorEmail),
+			"commit", "-m", message,
+			"--author", fmt.Sprintf("%s <%s>", authorName, authorEmail),
+		}
+		if err := c.run(ctx, localPath, projectKey, commitArgs...); err != nil {
+			return fmt.Errorf("git commit: %w", err)
+		}
+
+		value, err := c.runOutput(ctx, localPath, projectKey, "-C", localPath, "rev-parse", "HEAD")
+		if err != nil {
+			return fmt.Errorf("git rev-parse: %w", err)
+		}
+		hash = strings.TrimSpace(value)
+		return nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("git status: %w", err)
+		return "", err
 	}
-	if strings.TrimSpace(statusOutput) == "" {
-		return "", fmt.Errorf("no changes to commit")
-	}
-
-	if _, err := c.run(ctx, []string{"-C", localPath, "add", "-A"}); err != nil {
-		return "", fmt.Errorf("git add: %w", err)
-	}
-
-	if _, err := c.runWithEnv(ctx, []string{
-		"-C", localPath, "commit", "-m", message, "--author", fmt.Sprintf("%s <%s>", authorName, authorEmail),
-	}, map[string]string{
-		"GIT_AUTHOR_NAME":     authorName,
-		"GIT_AUTHOR_EMAIL":    authorEmail,
-		"GIT_COMMITTER_NAME":  authorName,
-		"GIT_COMMITTER_EMAIL": authorEmail,
-	}); err != nil {
-		return "", fmt.Errorf("git commit: %w", err)
-	}
-
-	hash, err := c.run(ctx, []string{"-C", localPath, "rev-parse", "HEAD"})
-	if err != nil {
-		return "", fmt.Errorf("git rev-parse: %w", err)
-	}
-	return strings.TrimSpace(hash), nil
+	return hash, nil
 }
 
-func (c *ExecClient) Push(ctx context.Context, localPath, branch string) error {
+func (c *ExecClient) Push(
+	ctx context.Context,
+	projectKey, localPath, branch string,
+) error {
 	localPath = strings.TrimSpace(localPath)
 	branch = strings.TrimSpace(branch)
 	if localPath == "" {
@@ -199,60 +246,167 @@ func (c *ExecClient) Push(ctx context.Context, localPath, branch string) error {
 	if branch == "" {
 		return fmt.Errorf("branch is required")
 	}
-
-	_, err := c.run(ctx, []string{"-C", localPath, "push", "origin", branch})
-	if err != nil {
-		return fmt.Errorf("git push: %w", err)
+	if err := c.validateProjectKey(projectKey); err != nil {
+		return err
 	}
-	return nil
+
+	return c.withRepoLock(ctx, projectKey, func() error {
+		if err := c.run(ctx, localPath, projectKey, "-C", localPath, "push", "origin", branch); err != nil {
+			return fmt.Errorf("git push: %w", err)
+		}
+		return nil
+	})
 }
 
-func (c *ExecClient) hasCommits(ctx context.Context, localPath string) bool {
-	output, err := c.run(ctx, []string{"-C", localPath, "rev-parse", "--verify", "HEAD"})
+func (c *ExecClient) hasCommits(ctx context.Context, localPath, projectKey string) bool {
+	output, err := c.runOutput(ctx, localPath, projectKey, "-C", localPath, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		return false
 	}
 	return strings.TrimSpace(output) != ""
 }
 
-func (c *ExecClient) run(ctx context.Context, args []string) (string, error) {
-	return c.runWithEnv(ctx, args, nil)
+func (c *ExecClient) run(
+	ctx context.Context,
+	repoPath string,
+	projectKey string,
+	args ...string,
+) error {
+	if c.runner == nil {
+		return fmt.Errorf("git command runner is required")
+	}
+	return c.runner.Run(ctx, repoPath, projectKey, args...)
 }
 
-func (c *ExecClient) runWithEnv(
+func (c *ExecClient) runOutput(
 	ctx context.Context,
-	args []string,
-	env map[string]string,
+	repoPath string,
+	projectKey string,
+	args ...string,
+) (string, error) {
+	if c.runner == nil {
+		return "", fmt.Errorf("git command runner is required")
+	}
+	return c.runner.RunWithOutput(ctx, repoPath, projectKey, args...)
+}
+
+func (c *ExecClient) withRepoLock(
+	ctx context.Context,
+	projectKey string,
+	fn func() error,
+) error {
+	if c.lockManager == nil {
+		return fmt.Errorf("repo lock manager is required")
+	}
+	return c.lockManager.WithRepoLock(ctx, projectKey, fn)
+}
+
+func (c *ExecClient) validateProjectKey(projectKey string) error {
+	projectKey = strings.TrimSpace(projectKey)
+	if projectKey == "" {
+		return fmt.Errorf("project key is required")
+	}
+	return nil
+}
+
+type RepoLockManager interface {
+	WithRepoLock(ctx context.Context, projectKey string, fn func() error) error
+}
+
+type RepoLockManagerImpl struct {
+	locks sync.Map
+}
+
+func NewRepoLockManager() *RepoLockManagerImpl {
+	return &RepoLockManagerImpl{}
+}
+
+func (m *RepoLockManagerImpl) WithRepoLock(
+	_ context.Context,
+	projectKey string,
+	fn func() error,
+) error {
+	if strings.TrimSpace(projectKey) == "" {
+		return fmt.Errorf("project key is required")
+	}
+	value, _ := m.locks.LoadOrStore(projectKey, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+	return fn()
+}
+
+type GitCommandRunner struct {
+	logger *log.Entry
+}
+
+func NewGitCommandRunner(logger *log.Entry) *GitCommandRunner {
+	if logger == nil {
+		logger = log.NewEntry(log.StandardLogger())
+	}
+	return &GitCommandRunner{logger: logger}
+}
+
+func (r *GitCommandRunner) Run(
+	ctx context.Context,
+	repoPath string,
+	projectKey string,
+	args ...string,
+) error {
+	_, err := r.run(ctx, repoPath, projectKey, args...)
+	return err
+}
+
+func (r *GitCommandRunner) RunWithOutput(
+	ctx context.Context,
+	repoPath string,
+	projectKey string,
+	args ...string,
+) (string, error) {
+	stdout, err := r.run(ctx, repoPath, projectKey, args...)
+	return stdout, err
+}
+
+func (r *GitCommandRunner) run(
+	ctx context.Context,
+	repoPath string,
+	projectKey string,
+	args ...string,
 ) (string, error) {
 	start := time.Now()
 	cmd := exec.CommandContext(ctx, "git", args...)
-	if len(env) > 0 {
-		cmd.Env = append([]string{}, os.Environ()...)
-		for key, value := range env {
-			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", key, value))
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if repoPath != "" && exists(repoPath) {
+		cmd.Dir = repoPath
+	}
+	err := cmd.Run()
+	elapsed := time.Since(start)
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ProcessState != nil {
+			exitCode = exitErr.ProcessState.ExitCode()
+		} else {
+			exitCode = -1
 		}
 	}
-
-	output, err := cmd.CombinedOutput()
-	elapsed := time.Since(start)
-	c.logCommand(args, elapsed, err)
-	if err != nil {
-		return string(output), fmt.Errorf("git %s failed: %w", strings.Join(args, " "), err)
-	}
-	return string(output), nil
-}
-
-func (c *ExecClient) logCommand(args []string, elapsed time.Duration, err error) {
-	entry := c.logger.WithFields(log.Fields{
-		"cmd":     "git " + strings.Join(args, " "),
-		"elapsed": elapsed.String(),
-		"success": err == nil,
+	entry := r.logger.WithFields(log.Fields{
+		"project_key": projectKey,
+		"repo_path":   repoPath,
+		"command":     "git " + strings.Join(args, " "),
+		"stdout":      stdout.String(),
+		"stderr":      stderr.String(),
+		"duration_ms": elapsed.Milliseconds(),
+		"exit_code":   exitCode,
 	})
 	if err != nil {
-		entry.WithField("error", err.Error()).Warn("git command failed")
-		return
+		entry.Error("git command failed")
+		return stdout.String(), fmt.Errorf("git %s failed: %s", strings.Join(args, " "), strings.TrimSpace(stderr.String()))
 	}
 	entry.Info("git command completed")
+	return stdout.String(), nil
 }
 
 func isGitRepo(localPath string) bool {

@@ -220,10 +220,10 @@ func (r *KnowledgeRepository) ensureRepoReady(ctx context.Context, projectKey st
 	if localPath == "" {
 		return "", fmt.Errorf("local path is required")
 	}
-	if err := r.gitClient.EnsureCloned(ctx, project.RepoURL, localPath); err != nil {
+	if err := r.gitClient.EnsureCloned(ctx, projectKey, project.RepoURL, localPath); err != nil {
 		return "", fmt.Errorf("ensure repo: %w", err)
 	}
-	if err := r.gitClient.PullRebase(ctx, localPath, r.branch); err != nil {
+	if err := r.gitClient.PullRebase(ctx, projectKey, localPath, r.branch); err != nil {
 		return "", fmt.Errorf("pull rebase: %w", err)
 	}
 	return localPath, nil

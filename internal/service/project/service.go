@@ -148,10 +148,10 @@ func (s *Service) initRepo(ctx context.Context, project *domain.Project) error {
 	defer os.RemoveAll(tempRoot)
 	workdir := filepath.Join(tempRoot, "repo")
 
-	if err := s.gitClient.EnsureCloned(ctx, project.RepoURL, workdir); err != nil {
+	if err := s.gitClient.EnsureCloned(ctx, project.Key, project.RepoURL, workdir); err != nil {
 		return fmt.Errorf("clone repo: %w", err)
 	}
-	if err := s.gitClient.CheckoutBranch(ctx, workdir, s.branch); err != nil {
+	if err := s.gitClient.CheckoutBranch(ctx, project.Key, workdir, s.branch); err != nil {
 		return fmt.Errorf("checkout branch: %w", err)
 	}
 
@@ -159,10 +159,17 @@ func (s *Service) initRepo(ctx context.Context, project *domain.Project) error {
 		return err
 	}
 
-	if _, err := s.gitClient.CommitAll(ctx, workdir, fmt.Sprintf("docs: init %s", project.Key), s.authorName, s.authorEmail); err != nil {
+	if _, err := s.gitClient.CommitAll(
+		ctx,
+		project.Key,
+		workdir,
+		fmt.Sprintf("docs: init %s", project.Key),
+		s.authorName,
+		s.authorEmail,
+	); err != nil {
 		return fmt.Errorf("commit init: %w", err)
 	}
-	if err := s.gitClient.Push(ctx, workdir, s.branch); err != nil {
+	if err := s.gitClient.Push(ctx, project.Key, workdir, s.branch); err != nil {
 		return fmt.Errorf("push init: %w", err)
 	}
 	return nil
