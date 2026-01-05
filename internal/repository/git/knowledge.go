@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,7 +47,7 @@ func (r *KnowledgeRepository) ListDocuments(
 	}
 
 	docsDir := filepath.Join(localPath, "docs")
-	entries, err := os.ReadDir(docsDir)
+	docDirs, err := r.listDocDirs(docsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []domain.DocumentMeta{}, nil
@@ -54,16 +55,13 @@ func (r *KnowledgeRepository) ListDocuments(
 		return nil, fmt.Errorf("read docs directory: %w", err)
 	}
 
-	metas := make([]domain.DocumentMeta, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		slug := entry.Name()
-		meta, err := r.readMetaFile(docsDir, slug)
+	metas := make([]domain.DocumentMeta, 0, len(docDirs))
+	for _, docDir := range docDirs {
+		meta, err := r.readMetaFile(docDir)
 		if err != nil {
 			return nil, err
 		}
+		slug := filepath.Base(docDir)
 		if meta.Slug == "" {
 			meta.Slug = slug
 		}
@@ -94,7 +92,7 @@ func (r *KnowledgeRepository) ReadDocument(
 		return domain.DocumentMeta{}, domain.DocumentContent{}, err
 	}
 
-	content, err := r.readContentFile(localPath, slug)
+	content, err := r.readContentFile(slug)
 	if err != nil {
 		return domain.DocumentMeta{}, domain.DocumentContent{}, err
 	}
@@ -122,7 +120,16 @@ func (r *KnowledgeRepository) CreateDocument(
 		return fmt.Errorf("doc slug is required")
 	}
 
-	docDir := filepath.Join(localPath, "docs", meta.Slug)
+	docsRoot := filepath.Join(localPath, "docs")
+	baseDir, err := r.resolveParentDir(localPath, meta.Parent)
+	if err != nil {
+		return err
+	}
+	if baseDir == "" {
+		baseDir = docsRoot
+	}
+
+	docDir := filepath.Join(baseDir, meta.Slug)
 	if exists(docDir) {
 		info, err := os.Stat(docDir)
 		if err != nil {
@@ -180,13 +187,13 @@ func (r *KnowledgeRepository) UpdateDocument(
 			return fmt.Errorf("doc slug mismatch")
 		}
 		meta = mergeMeta(meta, metaPatch)
-		if err := writeJSON(filepath.Join(localPath, "docs", slug, ".meta.json"), meta); err != nil {
+		if err := writeJSON(filepath.Join(slug, ".meta.json"), meta); err != nil {
 			return fmt.Errorf("write meta: %w", err)
 		}
 	}
 
 	if contentPatch != nil {
-		if err := writeJSON(filepath.Join(localPath, "docs", slug, "content.json"), contentPatch); err != nil {
+		if err := writeJSON(filepath.Join(slug, "content.json"), contentPatch); err != nil {
 			return fmt.Errorf("write content: %w", err)
 		}
 	}
@@ -229,8 +236,8 @@ func (r *KnowledgeRepository) ensureRepoReady(ctx context.Context, projectKey st
 	return localPath, nil
 }
 
-func (r *KnowledgeRepository) readMetaFile(docsDir, slug string) (domain.DocumentMeta, error) {
-	metaPath := filepath.Join(docsDir, slug, ".meta.json")
+func (r *KnowledgeRepository) readMetaFile(docDir string) (domain.DocumentMeta, error) {
+	metaPath := filepath.Join(docDir, ".meta.json")
 	data, err := os.ReadFile(metaPath)
 	if err != nil {
 		return domain.DocumentMeta{}, fmt.Errorf("read meta: %w", err)
@@ -245,8 +252,8 @@ func (r *KnowledgeRepository) readMetaFile(docsDir, slug string) (domain.Documen
 	return meta, nil
 }
 
-func (r *KnowledgeRepository) readContentFile(localPath, slug string) (domain.DocumentContent, error) {
-	contentPath := filepath.Join(localPath, "docs", slug, "content.json")
+func (r *KnowledgeRepository) readContentFile(docDir string) (domain.DocumentContent, error) {
+	contentPath := filepath.Join(docDir, "content.json")
 	data, err := os.ReadFile(contentPath)
 	if err != nil {
 		return domain.DocumentContent{}, fmt.Errorf("read content: %w", err)
@@ -262,32 +269,67 @@ func (r *KnowledgeRepository) findMetaByID(
 	localPath, docID string,
 ) (domain.DocumentMeta, string, error) {
 	docsDir := filepath.Join(localPath, "docs")
-	entries, err := os.ReadDir(docsDir)
+	docDirs, err := r.listDocDirs(docsDir)
 	if err != nil {
 		return domain.DocumentMeta{}, "", fmt.Errorf("read docs directory: %w", err)
 	}
 
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		slug := entry.Name()
-		meta, err := r.readMetaFile(docsDir, slug)
+	for _, docDir := range docDirs {
+		meta, err := r.readMetaFile(docDir)
 		if err != nil {
 			return domain.DocumentMeta{}, "", err
 		}
 		if meta.ID == docID {
+			slug := filepath.Base(docDir)
 			if meta.Slug == "" {
 				meta.Slug = slug
 			}
 			if meta.Slug != slug {
 				return domain.DocumentMeta{}, "", fmt.Errorf("meta slug mismatch: %s", slug)
 			}
-			return meta, slug, nil
+			return meta, docDir, nil
 		}
 	}
 
 	return domain.DocumentMeta{}, "", repository.ErrDocumentNotFound
+}
+
+func (r *KnowledgeRepository) listDocDirs(docsDir string) ([]string, error) {
+	if docsDir == "" {
+		return nil, fmt.Errorf("docs directory is required")
+	}
+	dirs := make([]string, 0)
+	err := filepath.WalkDir(docsDir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		if path == docsDir {
+			return nil
+		}
+		if exists(filepath.Join(path, ".meta.json")) {
+			dirs = append(dirs, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return dirs, nil
+}
+
+func (r *KnowledgeRepository) resolveParentDir(localPath, parentID string) (string, error) {
+	parentID = strings.TrimSpace(parentID)
+	if parentID == "" || parentID == "root" {
+		return filepath.Join(localPath, "docs"), nil
+	}
+	_, docDir, err := r.findMetaByID(localPath, parentID)
+	if err != nil {
+		return "", fmt.Errorf("find parent document: %w", err)
+	}
+	return docDir, nil
 }
 
 func mergeMeta(current domain.DocumentMeta, patch *domain.DocumentMeta) domain.DocumentMeta {
