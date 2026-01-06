@@ -22,6 +22,9 @@ object_storage:
   use_path_style: true
   insecure: true
 
+asset:
+  meta_root: /Users/darin/mine/code/zeus/resources/zeus/assets
+
 git:
   repo_root: /Users/darin/mine/code/zeus/resources/zeus/repos
   bare_repo_root: /Users/darin/mine/code/zeus/resources/zeus/git

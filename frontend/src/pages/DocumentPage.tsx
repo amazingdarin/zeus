@@ -49,6 +49,7 @@ type DocumentContentPayload =
 type DocumentPageProps = {
   projectKey: string;
   documentId: string | null;
+  onDocumentsChanged?: (parentId: string) => void;
 };
 
 type UploadedAsset = {
@@ -84,7 +85,7 @@ type ImportedAssetState = {
   }>;
 };
 
-function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
+function DocumentPage({ projectKey, documentId, onDocumentsChanged }: DocumentPageProps) {
   const params = useParams<{ projectKey?: string; documentId?: string }>();
   const resolvedProjectKey = (params.projectKey || projectKey || "").trim();
   const resolvedDocumentId = (params.documentId || documentId || "").trim();
@@ -289,6 +290,8 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
       return;
     }
 
+    let shouldClearSelection = false;
+
     if (importMode === "file") {
       const file = selectedFiles[0];
       if (!file) {
@@ -314,6 +317,7 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
             type: "success",
             message: `Created OpenAPI document: ${created.title}`,
           });
+          onDocumentsChanged?.(activeDocument?.id ?? "");
         } else {
           setImportedAssets((prev) => {
             if (!prev || prev.projectKey !== resolvedProjectKey) {
@@ -334,6 +338,7 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
         }
         setUploadCompleted(1);
         setImportModalOpen(false);
+        shouldClearSelection = true;
       } catch (err) {
         console.log("import_file_error", err);
         setImportStatus({ type: "error", message: "Upload failed." });
@@ -391,10 +396,12 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
             type: "success",
             message: `Created ${createdDocs.length} OpenAPI document(s).`,
           });
+          onDocumentsChanged?.(parentId);
         } else {
           setImportStatus({ type: "success", message: "Upload completed." });
         }
         setImportModalOpen(false);
+        shouldClearSelection = true;
       } catch (err) {
         console.log("import_folder_error", err);
         setImportStatus({ type: "error", message: "Upload failed." });
@@ -405,7 +412,9 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
       }
     }
 
-    setSelectedFiles([]);
+    if (shouldClearSelection) {
+      setSelectedFiles([]);
+    }
   };
 
   useEffect(() => {
@@ -664,6 +673,9 @@ const fetchBreadcrumbChain = async (
   });
 
   while (currentId && !visited.has(currentId)) {
+    if (isRootDocumentId(currentId)) {
+      break;
+    }
     visited.add(currentId);
     const detail = await fetchDocumentDetail(projectKey, currentId, signal);
     if (!detail) {
@@ -672,7 +684,7 @@ const fetchBreadcrumbChain = async (
     const label = detail.title || "Document";
     const parentId = detail.parentId;
     items.push({ id: currentId, label, parentId });
-    if (!parentId) {
+    if (!parentId || isRootDocumentId(parentId)) {
       break;
     }
     currentId = parentId;
@@ -889,4 +901,8 @@ function stripExtension(filename: string): string {
 
 function createDocumentFromAssets(_assets: ImportedAssetState) {
   // TODO: Step 2 implement document creation from assets.
+}
+
+function isRootDocumentId(value: string): boolean {
+  return value.trim().toLowerCase() === "root";
 }

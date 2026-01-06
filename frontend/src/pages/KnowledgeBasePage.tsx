@@ -170,13 +170,16 @@ function KnowledgeBasePage() {
       const visited = new Set<string>();
       let currentId = documentId;
       while (currentId && !visited.has(currentId)) {
+        if (isRootDocumentId(currentId)) {
+          break;
+        }
         visited.add(currentId);
         const detail = await fetchDocumentDetail(projectKey, currentId);
         if (!detail) {
           break;
         }
         const parentId = String(detail.meta?.parent ?? detail.parent ?? detail.parent_id ?? "").trim();
-        if (!parentId) {
+        if (!parentId || isRootDocumentId(parentId)) {
           break;
         }
         ancestors.push(parentId);
@@ -252,6 +255,23 @@ function KnowledgeBasePage() {
     [currentProject, expandedIds, loadChildren],
   );
 
+  const handleDocumentsChanged = useCallback(
+    async (parentId: string) => {
+      const projectKey = currentProject?.key;
+      if (!projectKey) {
+        return;
+      }
+      const normalizedParent = parentId.trim();
+      if (!normalizedParent || isRootDocumentId(normalizedParent)) {
+        await loadRootDocuments(projectKey);
+        return;
+      }
+      setExpandedIds((prev) => ({ ...prev, [normalizedParent]: true }));
+      await loadChildren(projectKey, normalizedParent);
+    },
+    [currentProject, loadChildren, loadRootDocuments],
+  );
+
   const overviewDocs = useMemo(
     () => rootDocuments.filter((doc) => doc.type === "overview"),
     [rootDocuments],
@@ -285,9 +305,14 @@ function KnowledgeBasePage() {
       <DocumentPage
         projectKey={currentProject?.key ?? ""}
         documentId={activeDocumentId}
+        onDocumentsChanged={handleDocumentsChanged}
       />
     </KnowledgeBaseLayout>
   );
 }
 
 export default KnowledgeBasePage;
+
+function isRootDocumentId(value: string): boolean {
+  return value.trim().toLowerCase() === "root";
+}

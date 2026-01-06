@@ -106,7 +106,7 @@ func main() {
 		s3Client,
 		config.AppConfig.ObjectStorage.Bucket,
 	)
-	assetMetaRoot := getenv("ZEUS_ASSET_META_ROOT", "")
+	assetMetaRoot := getenv("ZEUS_ASSET_META_ROOT", config.AppConfig.Asset.MetaRoot)
 	assetMetaStore := assetmeta.NewFileStore(assetMetaRoot)
 	assetReader := assetcontent.NewReader(s3Client)
 	assetSvc, err := svcasset.NewService(

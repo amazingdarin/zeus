@@ -11,6 +11,7 @@ type Config struct {
 	Server        ServerConfig        `mapstructure:"server"`
 	Postgres      PostgresConfig      `mapstructure:"postgres"`
 	ObjectStorage ObjectStorageConfig `mapstructure:"object_storage"`
+	Asset         AssetConfig         `mapstructure:"asset"`
 	Git           GitConfig           `mapstructure:"git"`
 	Search        SearchConfig        `mapstructure:"search"`
 }
@@ -51,6 +52,10 @@ type ObjectStorageConfig struct {
 	Insecure     bool   `mapstructure:"insecure"`
 }
 
+type AssetConfig struct {
+	MetaRoot string `mapstructure:"meta_root"`
+}
+
 type GitConfig struct {
 	RepoRoot      string `mapstructure:"repo_root"`
 	BareRepoRoot  string `mapstructure:"bare_repo_root"`
@@ -89,6 +94,9 @@ func Load(path string) (*Config, error) {
 func applyDefaults(cfg *Config) {
 	if cfg == nil {
 		return
+	}
+	if cfg.Asset.MetaRoot == "" {
+		cfg.Asset.MetaRoot = "/var/lib/zeus/assets"
 	}
 	if cfg.Git.BareRepoRoot == "" {
 		cfg.Git.BareRepoRoot = "/var/lib/zeus/git"
