@@ -103,7 +103,7 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
   const loadRequestRef = useRef<string | null>(null);
 
   const activeDocument = document;
-  const allowChildActions = activeDocument ? activeDocument.docType !== "overview" : false;
+  const allowChildActions = activeDocument ? activeDocument.docType !== "overview" : true;
 
   useEffect(() => {
     if (!resolvedProjectKey || !resolvedDocumentId) {
@@ -386,48 +386,24 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
   const uploadProgress =
     uploadTotal > 0 ? Math.round((uploadCompleted / uploadTotal) * 100) : 0;
 
-  if (!resolvedDocumentId) {
-    return (
-      <div className="doc-viewer-page">
+  const bodyContent = () => {
+    if (!resolvedDocumentId) {
+      return (
         <div className="doc-viewer-state">
           Select a document from the left navigation to view its details.
         </div>
-      </div>
-    );
-  }
-
-  if (loading) {
+      );
+    }
+    if (loading) {
+      return <div className="doc-viewer-state">Loading document...</div>;
+    }
+    if (error) {
+      return <div className="doc-viewer-error">{error}</div>;
+    }
+    if (!activeDocument) {
+      return <div className="doc-viewer-state">No document available</div>;
+    }
     return (
-      <div className="doc-viewer-page">
-        <div className="doc-viewer-state">Loading document...</div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="doc-viewer-page">
-        <div className="doc-viewer-error">{error}</div>
-      </div>
-    );
-  }
-
-  if (!activeDocument) {
-    return <div className="doc-viewer-page" />;
-  }
-
-  return (
-    <>
-      <DocumentHeader
-        breadcrumbItems={breadcrumbItems}
-        mode="view"
-        allowChildActions={allowChildActions}
-        onEdit={handleEdit}
-        onSave={() => {}}
-        onCancel={() => {}}
-        onNew={handleOpenNew}
-        onImport={() => handleOpenImportWithMode("file")}
-      />
       <div className="doc-page-body">
         <div className="doc-page-title">{activeDocument.title}</div>
         {activeDocument.content ? (
@@ -436,6 +412,23 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
           <div className="doc-viewer-state">No document content</div>
         )}
       </div>
+    );
+  };
+
+  return (
+    <>
+      <DocumentHeader
+        breadcrumbItems={breadcrumbItems}
+        mode="view"
+        allowChildActions={allowChildActions}
+        allowEdit={Boolean(activeDocument)}
+        onEdit={handleEdit}
+        onSave={() => {}}
+        onCancel={() => {}}
+        onNew={handleOpenNew}
+        onImport={() => handleOpenImportWithMode("file")}
+      />
+      <div className="doc-viewer-page">{bodyContent()}</div>
       {importModalOpen ? (
         <div className="modal-overlay" role="dialog" aria-modal="true">
           <div className="modal-card">

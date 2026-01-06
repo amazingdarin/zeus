@@ -10,6 +10,7 @@ type DocumentHeaderProps = {
   breadcrumbItems: BreadcrumbItem[];
   mode: "view" | "edit";
   allowChildActions?: boolean;
+  allowEdit?: boolean;
   onEdit: () => void;
   onSave: () => void;
   onCancel: () => void;
@@ -21,6 +22,7 @@ function DocumentHeader({
   breadcrumbItems,
   mode,
   allowChildActions = true,
+  allowEdit = true,
   onEdit,
   onSave,
   onCancel,
@@ -105,9 +107,11 @@ function DocumentHeader({
                     New
                   </button>
                 ) : null}
-                <button className="kb-menu-item" type="button" onClick={handleEdit}>
-                  Edit
-                </button>
+                {allowEdit ? (
+                  <button className="kb-menu-item" type="button" onClick={handleEdit}>
+                    Edit
+                  </button>
+                ) : null}
                 {allowChildActions ? (
                   <button className="kb-menu-item" type="button" onClick={handleImport}>
                     Import
