@@ -76,9 +76,10 @@ function ProjectSelector() {
       {showModal ? (
         <CreateProjectModal
           onClose={() => setShowModal(false)}
-          onCreated={(project) => {
+          onCreated={async (project) => {
             setCurrentProject(project.key);
-            void reloadProjects();
+            await reloadProjects();
+            setCurrentProject(project.key);
           }}
         />
       ) : null}

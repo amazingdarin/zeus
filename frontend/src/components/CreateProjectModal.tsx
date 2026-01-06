@@ -36,13 +36,14 @@ function CreateProjectModal({ onClose, onCreated }: CreateProjectModalProps) {
         throw new Error(message);
       }
       const data = payload?.data;
+      const resolvedKey = String(data?.key ?? keyValue).trim();
       const project: Project = {
         id: String(data?.id ?? ""),
-        key: keyValue,
-        name,
+        key: resolvedKey,
+        name: String(data?.name ?? name),
         description: description || undefined,
-        status: "active",
-        createdAt: data?.created_at ?? undefined,
+        status: String(data?.status ?? "active"),
+        createdAt: data?.created_at ?? data?.createdAt ?? undefined,
       };
       if (!project.id) {
         throw new Error("Project id is missing");

@@ -1,28 +1,50 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
+import type { JSONContent } from "@tiptap/react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import DocumentHeader from "../components/DocumentHeader";
-import DocumentViewer from "../components/DocumentViewer";
+import RichTextViewer from "../components/RichTextViewer";
 import { buildApiUrl } from "../config/api";
 
 type DocumentData = {
   id: string;
   title: string;
-  type: string;
-  storageObjectId: string;
+  docType: string;
+  parentId: string;
+  content: JSONContent | null;
+};
+
+type DocumentMetaInfo = {
+  id: string;
+  title: string;
+  docType: string;
   parentId: string;
 };
 
 type DocumentResponse = {
   data?: {
+    meta?: {
+      id?: string;
+      title?: string;
+      parent?: string;
+      doc_type?: string;
+    };
+    content?: DocumentContentPayload;
     id?: string;
     title?: string;
-    type?: string;
-    storage_object_id?: string;
     parent_id?: string;
+    doc_type?: string;
   };
 };
+
+type DocumentContentPayload =
+  | {
+      meta?: Record<string, unknown>;
+      content?: JSONContent;
+    }
+  | JSONContent
+  | null;
 
 type DocumentPageProps = {
   projectKey: string;
@@ -78,19 +100,26 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
+  const loadRequestRef = useRef<string | null>(null);
 
   const activeDocument = document;
-  const allowChildActions = activeDocument ? activeDocument.type !== "overview" : false;
+  const allowChildActions = activeDocument ? activeDocument.docType !== "overview" : false;
 
   useEffect(() => {
     if (!resolvedProjectKey || !resolvedDocumentId) {
       setDocument(null);
       setLoading(false);
       setError(null);
+      loadRequestRef.current = null;
       return;
     }
 
     const controller = new AbortController();
+    const requestKey = `${resolvedProjectKey}:${resolvedDocumentId}`;
+    if (loadRequestRef.current === requestKey) {
+      return () => controller.abort();
+    }
+    loadRequestRef.current = requestKey;
     const loadDocument = async () => {
       setLoading(true);
       setError(null);
@@ -107,14 +136,7 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
           throw new Error("failed to load document");
         }
         const payload = (await response.json()) as DocumentResponse;
-        const data = payload?.data ?? {};
-        const mapped: DocumentData = {
-          id: String(data.id ?? resolvedDocumentId),
-          title: String(data.title ?? ""),
-          type: String(data.type ?? ""),
-          storageObjectId: String(data.storage_object_id ?? ""),
-          parentId: String(data.parent_id ?? ""),
-        };
+        const mapped = mapDocumentDetail(payload?.data, resolvedDocumentId);
         setDocument(mapped);
       } catch (err) {
         if ((err as Error).name === "AbortError") {
@@ -125,6 +147,9 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
+        }
+        if (loadRequestRef.current === requestKey) {
+          loadRequestRef.current = null;
         }
       }
     };
@@ -138,12 +163,15 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
       setBreadcrumbItems([]);
       return;
     }
+    if (!document || document.id !== resolvedDocumentId) {
+      return;
+    }
     const controller = new AbortController();
     const loadBreadcrumbs = async () => {
       try {
         const items = await fetchBreadcrumbChain(
           resolvedProjectKey,
-          resolvedDocumentId,
+          document,
           controller.signal,
         );
         const trimmed = trimBreadcrumbItems(items);
@@ -152,16 +180,12 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
         if ((err as Error).name === "AbortError") {
           return;
         }
-        if (document) {
-          setBreadcrumbItems([
-            {
-              label: document.title || "Document",
-              to: `/knowledge?document_id=${encodeURIComponent(document.id)}`,
-            },
-          ]);
-        } else {
-          setBreadcrumbItems([{ label: "Document" }]);
-        }
+        setBreadcrumbItems([
+          {
+            label: document.title || "Document",
+            to: `/knowledge?document_id=${encodeURIComponent(document.id)}`,
+          },
+        ]);
       }
     };
     loadBreadcrumbs();
@@ -233,6 +257,15 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
     setImportStatus({ type: "idle" });
   };
 
+  const handleModeChange = (nextMode: "file" | "folder") => {
+    setImportMode(nextMode);
+    setSelectedFiles([]);
+    setUploading(false);
+    setUploadTotal(0);
+    setUploadCompleted(0);
+    setImportStatus({ type: "idle" });
+  };
+
   // Uploads only create assets; document creation happens in a later step.
   const handleImportSubmit = async () => {
     if (!resolvedProjectKey) {
@@ -269,6 +302,7 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
         });
         setUploadCompleted(1);
         setImportStatus({ type: "success", message: "Upload completed." });
+        setImportModalOpen(false);
       } catch (err) {
         console.log("import_file_error", err);
         setImportStatus({ type: "error", message: "Upload failed." });
@@ -317,6 +351,7 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
           };
         });
         setImportStatus({ type: "success", message: "Upload completed." });
+        setImportModalOpen(false);
       } catch (err) {
         console.log("import_folder_error", err);
         setImportStatus({ type: "error", message: "Upload failed." });
@@ -391,18 +426,14 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
         onSave={() => {}}
         onCancel={() => {}}
         onNew={handleOpenNew}
-        onUploadFile={() => handleOpenImportWithMode("file")}
-        onUploadFolder={() => handleOpenImportWithMode("folder")}
+        onImport={() => handleOpenImportWithMode("file")}
       />
       <div className="doc-page-body">
         <div className="doc-page-title">{activeDocument.title}</div>
-        {activeDocument.storageObjectId ? (
-          <DocumentViewer
-            projectKey={resolvedProjectKey}
-            storageObjectId={activeDocument.storageObjectId}
-          />
+        {activeDocument.content ? (
+          <RichTextViewer content={activeDocument.content} />
         ) : (
-          <div className="doc-viewer-state">No document available</div>
+          <div className="doc-viewer-state">No document content</div>
         )}
       </div>
       {importModalOpen ? (
@@ -415,6 +446,22 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
               </button>
             </div>
             <div className="modal-body">
+              <div className="kb-import-tabs" role="tablist">
+                <button
+                  className={`kb-import-tab${importMode === "file" ? " active" : ""}`}
+                  type="button"
+                  onClick={() => handleModeChange("file")}
+                >
+                  File
+                </button>
+                <button
+                  className={`kb-import-tab${importMode === "folder" ? " active" : ""}`}
+                  type="button"
+                  onClick={() => handleModeChange("folder")}
+                >
+                  Folder
+                </button>
+              </div>
               {importMode === "file" ? (
                 <div className="kb-import-panel">
                   <div className="kb-import-visual" aria-hidden="true">
@@ -543,17 +590,23 @@ const fetchDocumentDetail = async (
     throw new Error("failed to load document");
   }
   const payload = (await response.json()) as DocumentResponse;
-  return payload?.data ?? null;
+  return mapDocumentMeta(payload?.data, documentId);
 };
 
 const fetchBreadcrumbChain = async (
   projectKey: string,
-  documentId: string,
+  document: DocumentData,
   signal: AbortSignal,
 ) => {
   const items: Array<{ id: string; label: string; parentId: string }> = [];
   const visited = new Set<string>();
-  let currentId = documentId;
+  let currentId = document.parentId;
+
+  items.push({
+    id: document.id,
+    label: document.title || "Document",
+    parentId: document.parentId,
+  });
 
   while (currentId && !visited.has(currentId)) {
     visited.add(currentId);
@@ -561,8 +614,8 @@ const fetchBreadcrumbChain = async (
     if (!detail) {
       break;
     }
-    const label = String(detail.title ?? "Document");
-    const parentId = String(detail.parent_id ?? "");
+    const label = detail.title || "Document";
+    const parentId = detail.parentId;
     items.push({ id: currentId, label, parentId });
     if (!parentId) {
       break;
@@ -586,6 +639,44 @@ const trimBreadcrumbItems = (items: Array<{ label: string; to?: string }>) => {
   const tail = items.slice(-2);
   return [...head, { label: "..." }, ...tail];
 };
+
+function mapDocumentMeta(data: DocumentResponse["data"], fallbackId: string): DocumentMetaInfo {
+  const meta = data?.meta ?? {};
+  const id = String(meta.id ?? data?.id ?? fallbackId ?? "").trim();
+  const title = String(meta.title ?? data?.title ?? "").trim();
+  const docType = String(meta.doc_type ?? data?.doc_type ?? "").trim() || "document";
+  const parentId = String(meta.parent ?? data?.parent_id ?? "").trim();
+  return {
+    id,
+    title,
+    docType,
+    parentId,
+  };
+}
+
+function mapDocumentDetail(data: DocumentResponse["data"], fallbackId: string): DocumentData {
+  const meta = mapDocumentMeta(data, fallbackId);
+  const content = extractContentNode(data?.content);
+  return {
+    ...meta,
+    content,
+  };
+}
+
+function extractContentNode(content?: DocumentContentPayload): JSONContent | null {
+  if (!content || typeof content !== "object") {
+    return null;
+  }
+  const maybeContent = (content as { content?: JSONContent }).content;
+  if (maybeContent && typeof maybeContent === "object") {
+    return maybeContent as JSONContent;
+  }
+  const direct = content as JSONContent;
+  if (direct && typeof direct === "object" && "type" in direct) {
+    return direct as JSONContent;
+  }
+  return null;
+}
 
 async function uploadSingleFile(
   projectKey: string,
