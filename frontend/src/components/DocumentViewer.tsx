@@ -126,7 +126,7 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
   }
 
   if (richContent) {
-    return <RichTextViewer content={richContent} />;
+    return <RichTextViewer content={richContent} projectKey={projectKey} />;
   }
 
   if (textContent != null) {

@@ -152,15 +152,6 @@ func (h *KnowledgeHandler) Create(c *gin.Context) {
 		return
 	}
 
-	content, err := parseContentPayload(req.Content)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, types.ErrorResponse{
-			Code:    "INVALID_CONTENT",
-			Message: err.Error(),
-		})
-		return
-	}
-
 	meta := domain.DocumentMeta{
 		ID:      strings.TrimSpace(req.Meta.ID),
 		Slug:    strings.TrimSpace(req.Meta.Slug),
@@ -172,12 +163,54 @@ func (h *KnowledgeHandler) Create(c *gin.Context) {
 		Tags:    req.Meta.Tags,
 	}
 
+	var content *domain.DocumentContent
+	var openapiPayload *service.KnowledgeOpenAPI
+	if req.OpenAPI != nil {
+		source := strings.TrimSpace(req.OpenAPI.Source)
+		if source == "" {
+			c.JSON(http.StatusBadRequest, types.ErrorResponse{
+				Code:    "MISSING_OPENAPI_SOURCE",
+				Message: "openapi.source is required",
+			})
+			return
+		}
+		renderer := strings.TrimSpace(req.OpenAPI.Renderer)
+		if renderer == "" {
+			renderer = "swagger"
+		}
+		if meta.DocType == "" {
+			meta.DocType = string(domain.DocTypeOpenAPI)
+		}
+		if meta.DocType != string(domain.DocTypeOpenAPI) {
+			c.JSON(http.StatusBadRequest, types.ErrorResponse{
+				Code:    "INVALID_DOC_TYPE",
+				Message: "doc_type must be openapi when openapi payload is provided",
+			})
+			return
+		}
+		openapiPayload = &service.KnowledgeOpenAPI{
+			Source:   source,
+			Renderer: renderer,
+		}
+	} else {
+		parsed, err := parseContentPayload(req.Content)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, types.ErrorResponse{
+				Code:    "INVALID_CONTENT",
+				Message: err.Error(),
+			})
+			return
+		}
+		content = &parsed
+	}
+
 	createdMeta, createdContent, err := h.svc.CreateDocument(
 		c.Request.Context(),
 		projectKey,
 		service.KnowledgeCreateRequest{
 			Meta:    meta,
 			Content: content,
+			OpenAPI: openapiPayload,
 		},
 	)
 	if err != nil {
@@ -300,7 +333,7 @@ func (h *KnowledgeHandler) Update(c *gin.Context) {
 func mapMetaDTO(meta domain.DocumentMeta) types.KnowledgeDocumentMetaDTO {
 	docType := strings.TrimSpace(meta.DocType)
 	if docType == "" {
-		docType = "document"
+		docType = string(domain.DocTypeDocument)
 	}
 	return types.KnowledgeDocumentMetaDTO{
 		ID:        meta.ID,

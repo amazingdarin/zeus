@@ -12,6 +12,7 @@ import (
 	"zeus/internal/infra/gitclient"
 	"zeus/internal/repository"
 	"zeus/internal/service"
+	"zeus/internal/util"
 )
 
 const defaultBranch = "main"
@@ -143,6 +144,9 @@ func (s *Service) CreateDocument(
 	meta.Slug = strings.TrimSpace(meta.Slug)
 	meta.Title = strings.TrimSpace(meta.Title)
 	meta.DocType = strings.TrimSpace(meta.DocType)
+	if req.OpenAPI != nil && meta.DocType == "" {
+		meta.DocType = string(domain.DocTypeOpenAPI)
+	}
 	if meta.Title == "" {
 		return domain.DocumentMeta{}, domain.DocumentContent{}, fmt.Errorf("doc title is required")
 	}
@@ -150,13 +154,17 @@ func (s *Service) CreateDocument(
 		meta.ID = uuid.NewString()
 	}
 	if meta.Slug == "" {
-		meta.Slug = slugify(meta.Title)
+		if meta.DocType == string(domain.DocTypeOpenAPI) {
+			meta.Slug = util.SlugifyFilename(meta.Title)
+		} else {
+			meta.Slug = slugify(meta.Title)
+		}
 		if meta.Slug == "" {
 			meta.Slug = meta.ID
 		}
 	}
 	if meta.DocType == "" {
-		meta.DocType = "document"
+		meta.DocType = string(domain.DocTypeDocument)
 	}
 
 	now := s.nowTime()
@@ -165,7 +173,25 @@ func (s *Service) CreateDocument(
 	}
 	meta.UpdatedAt = now
 
-	content := normalizeContent(req.Content, nil, now)
+	if err := s.resolveOpenAPISlug(ctx, projectKey, &meta); err != nil {
+		return domain.DocumentMeta{}, domain.DocumentContent{}, err
+	}
+	if meta.Path == "" {
+		meta.Path = "/" + meta.Slug
+	}
+
+	var content domain.DocumentContent
+	if req.OpenAPI != nil {
+		if meta.DocType != string(domain.DocTypeOpenAPI) {
+			return domain.DocumentMeta{}, domain.DocumentContent{}, fmt.Errorf("doc_type must be openapi")
+		}
+		content = buildOpenAPIContent(*req.OpenAPI, now)
+	} else {
+		if req.Content == nil {
+			return domain.DocumentMeta{}, domain.DocumentContent{}, fmt.Errorf("content is required")
+		}
+		content = normalizeContent(*req.Content, nil, now)
+	}
 
 	if err := s.repo.CreateDocument(ctx, projectKey, meta, content); err != nil {
 		return domain.DocumentMeta{}, domain.DocumentContent{}, err
@@ -434,6 +460,71 @@ func slugify(value string) string {
 	}
 	result := strings.Trim(out.String(), "-")
 	return result
+}
+
+func (s *Service) resolveOpenAPISlug(
+	ctx context.Context,
+	projectKey string,
+	meta *domain.DocumentMeta,
+) error {
+	if meta == nil || meta.DocType != string(domain.DocTypeOpenAPI) {
+		return nil
+	}
+	metas, err := s.repo.ListDocuments(ctx, projectKey)
+	if err != nil {
+		return err
+	}
+	parent := strings.TrimSpace(meta.Parent)
+	rootQuery := parent == "" || strings.EqualFold(parent, "root")
+	exists := func(slug string) bool {
+		for _, item := range metas {
+			if strings.TrimSpace(item.Slug) != slug {
+				continue
+			}
+			itemParent := strings.TrimSpace(item.Parent)
+			if rootQuery {
+				if itemParent == "" || strings.EqualFold(itemParent, "root") {
+					return true
+				}
+				continue
+			}
+			if itemParent == parent {
+				return true
+			}
+		}
+		return false
+	}
+	meta.Slug = util.ResolveSlugConflict(meta.Slug, exists)
+	return nil
+}
+
+func buildOpenAPIContent(openapi service.KnowledgeOpenAPI, now time.Time) domain.DocumentContent {
+	renderer := strings.TrimSpace(openapi.Renderer)
+	if renderer == "" {
+		renderer = "swagger"
+	}
+	return domain.DocumentContent{
+		Meta: map[string]interface{}{
+			"zeus":           true,
+			"format":         "tiptap",
+			"schema_version": 1,
+			"editor":         "tiptap",
+			"created_at":     now.Format(time.RFC3339),
+			"updated_at":     now.Format(time.RFC3339),
+		},
+		Content: map[string]interface{}{
+			"type": "doc",
+			"content": []interface{}{
+				map[string]interface{}{
+					"type": "openapi",
+					"attrs": map[string]interface{}{
+						"source":   openapi.Source,
+						"renderer": renderer,
+					},
+				},
+			},
+		},
+	}
 }
 
 func filterByParent(metas []domain.DocumentMeta, parentID string) []domain.DocumentMeta {

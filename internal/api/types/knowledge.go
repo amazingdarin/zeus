@@ -15,12 +15,18 @@ type KnowledgeDocumentMetaRequest struct {
 
 type KnowledgeDocumentCreateRequest struct {
 	Meta    KnowledgeDocumentMetaRequest `json:"meta" binding:"required"`
-	Content json.RawMessage              `json:"content" binding:"required"`
+	Content json.RawMessage              `json:"content"`
+	OpenAPI *KnowledgeOpenAPIRequest     `json:"openapi"`
 }
 
 type KnowledgeDocumentUpdateRequest struct {
 	Meta    *KnowledgeDocumentMetaRequest `json:"meta"`
 	Content json.RawMessage               `json:"content"`
+}
+
+type KnowledgeOpenAPIRequest struct {
+	Source   string `json:"source"`
+	Renderer string `json:"renderer"`
 }
 
 type KnowledgeDocumentMetaDTO struct {

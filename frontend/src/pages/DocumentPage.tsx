@@ -58,10 +58,21 @@ type UploadedAsset = {
   size: number;
 };
 
+type AssetKindResult = {
+  kind: string;
+  openapi_version?: string;
+};
+
 type UploadedFolderAsset = {
   asset_id: string;
   filename: string;
   relative_path: string;
+};
+
+type OpenApiCreatedDocument = {
+  id: string;
+  title: string;
+  assetId: string;
 };
 
 type ImportedAssetState = {
@@ -96,7 +107,9 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
     type: "idle" | "success" | "error";
     message?: string;
   }>({ type: "idle" });
+  const [openApiDocs, setOpenApiDocs] = useState<OpenApiCreatedDocument[]>([]);
   const [importedAssets, setImportedAssets] = useState<ImportedAssetState | null>(null);
+  const importedAssetCount = importedAssets?.assets.length ?? 0;
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -232,6 +245,7 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
     setUploadTotal(0);
     setUploadCompleted(0);
     setImportStatus({ type: "idle" });
+    setOpenApiDocs([]);
     setImportModalOpen(true);
   };
 
@@ -241,6 +255,7 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
     setUploadTotal(0);
     setUploadCompleted(0);
     setImportStatus({ type: "idle" });
+    setOpenApiDocs([]);
   };
 
   const handleFilePick = () => {
@@ -264,6 +279,7 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
     setUploadTotal(0);
     setUploadCompleted(0);
     setImportStatus({ type: "idle" });
+    setOpenApiDocs([]);
   };
 
   // Uploads only create assets; document creation happens in a later step.
@@ -285,23 +301,38 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
       setImportStatus({ type: "idle" });
       try {
         const uploaded = await uploadSingleFile(resolvedProjectKey, file);
-        setImportedAssets((prev) => {
-          if (!prev || prev.projectKey !== resolvedProjectKey) {
+        const kindResult = await fetchAssetKind(resolvedProjectKey, uploaded.asset_id);
+        if (kindResult.kind === "openapi") {
+          const created = await createOpenApiDocument(
+            resolvedProjectKey,
+            activeDocument?.id ?? "",
+            uploaded.filename,
+            uploaded.asset_id,
+          );
+          setOpenApiDocs([created]);
+          setImportStatus({
+            type: "success",
+            message: `Created OpenAPI document: ${created.title}`,
+          });
+        } else {
+          setImportedAssets((prev) => {
+            if (!prev || prev.projectKey !== resolvedProjectKey) {
+              return {
+                projectKey: resolvedProjectKey,
+                assets: [{ asset_id: uploaded.asset_id, filename: uploaded.filename }],
+              };
+            }
             return {
-              projectKey: resolvedProjectKey,
-              assets: [{ asset_id: uploaded.asset_id, filename: uploaded.filename }],
+              projectKey: prev.projectKey,
+              assets: [
+                ...prev.assets,
+                { asset_id: uploaded.asset_id, filename: uploaded.filename },
+              ],
             };
-          }
-          return {
-            projectKey: prev.projectKey,
-            assets: [
-              ...prev.assets,
-              { asset_id: uploaded.asset_id, filename: uploaded.filename },
-            ],
-          };
-        });
+          });
+          setImportStatus({ type: "success", message: "Upload completed." });
+        }
         setUploadCompleted(1);
-        setImportStatus({ type: "success", message: "Upload completed." });
         setImportModalOpen(false);
       } catch (err) {
         console.log("import_file_error", err);
@@ -322,11 +353,15 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
         setUploadTotal(totalItems);
         setUploadCompleted(0);
         setImportStatus({ type: "idle" });
-        const uploadedItems = await uploadFolder(
-          resolvedProjectKey,
-          selectedFiles,
-          (completed) => setUploadCompleted(completed),
-        );
+        const parentId = activeDocument?.id ?? "";
+        const { assets: uploadedItems, openapiDocs: createdDocs } =
+          await uploadFolderWithOpenApi(
+            resolvedProjectKey,
+            selectedFiles,
+            parentId,
+            (completed) => setUploadCompleted(completed),
+          );
+
         setImportedAssets((prev) => {
           if (!prev || prev.projectKey !== resolvedProjectKey) {
             return {
@@ -350,7 +385,15 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
             ],
           };
         });
-        setImportStatus({ type: "success", message: "Upload completed." });
+        if (createdDocs.length > 0) {
+          setOpenApiDocs(createdDocs);
+          setImportStatus({
+            type: "success",
+            message: `Created ${createdDocs.length} OpenAPI document(s).`,
+          });
+        } else {
+          setImportStatus({ type: "success", message: "Upload completed." });
+        }
         setImportModalOpen(false);
       } catch (err) {
         console.log("import_folder_error", err);
@@ -407,7 +450,10 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
       <div className="doc-page-body">
         <div className="doc-page-title">{activeDocument.title}</div>
         {activeDocument.content ? (
-          <RichTextViewer content={activeDocument.content} />
+          <RichTextViewer
+            content={activeDocument.content}
+            projectKey={resolvedProjectKey}
+          />
         ) : (
           <div className="doc-viewer-state">No document content</div>
         )}
@@ -527,6 +573,22 @@ function DocumentPage({ projectKey, documentId }: DocumentPageProps) {
                   }`}
                 >
                   {importStatus.message}
+                </div>
+              ) : null}
+              {openApiDocs.length > 0 ? (
+                <div className="kb-import-summary">
+                  {openApiDocs.map((doc) => (
+                    <div key={doc.assetId} className="kb-import-summary-item">
+                      Created OpenAPI document: {doc.title}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {importedAssetCount > 0 ? (
+                <div className="kb-import-summary">
+                  <div className="kb-import-summary-item">
+                    Imported assets queued: {importedAssetCount}
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -705,14 +767,80 @@ async function uploadSingleFile(
   };
 }
 
-async function uploadFolder(
+async function fetchAssetKind(
+  projectKey: string,
+  assetID: string,
+): Promise<AssetKindResult> {
+  const response = await fetch(
+    buildApiUrl(
+      `/api/projects/${encodeURIComponent(projectKey)}/assets/${encodeURIComponent(
+        assetID,
+      )}/kind`,
+    ),
+  );
+  if (!response.ok) {
+    throw new Error("asset kind lookup failed");
+  }
+  const payload = await response.json();
+  const data = payload?.data ?? payload ?? {};
+  return {
+    kind: String(data.kind ?? "generic"),
+    openapi_version: typeof data.openapi_version === "string" ? data.openapi_version : "",
+  };
+}
+
+async function createOpenApiDocument(
+  projectKey: string,
+  parentId: string,
+  filename: string,
+  assetId: string,
+): Promise<OpenApiCreatedDocument> {
+  const title = stripExtension(filename) || filename;
+  const payload = {
+    meta: {
+      title,
+      parent: parentId,
+      doc_type: "openapi",
+    },
+    openapi: {
+      source: `storage://${assetId}`,
+      renderer: "swagger",
+    },
+  };
+
+  const response = await fetch(
+    buildApiUrl(`/api/projects/${encodeURIComponent(projectKey)}/documents`),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("failed to create OpenAPI document");
+  }
+  const data = await response.json();
+  const meta = data?.data?.meta ?? data?.data ?? {};
+  return {
+    id: String(meta.id ?? ""),
+    title: String(meta.title ?? title),
+    assetId,
+  };
+}
+
+async function uploadFolderWithOpenApi(
   projectKey: string,
   files: File[],
+  parentId: string,
   onProgress?: (completed: number, total: number) => void,
-): Promise<UploadedFolderAsset[]> {
+): Promise<{ assets: UploadedFolderAsset[]; openapiDocs: OpenApiCreatedDocument[] }> {
   const list = Array.from(files);
   const total = list.length;
-  const results: UploadedFolderAsset[] = [];
+  const assets: UploadedFolderAsset[] = [];
+  const openapiDocs: OpenApiCreatedDocument[] = [];
   let completed = 0;
 
   for (const file of list) {
@@ -720,20 +848,43 @@ async function uploadFolder(
       (file as File & { webkitRelativePath?: string }).webkitRelativePath ?? file.name,
     );
     const uploaded = await uploadSingleFile(projectKey, file);
-    results.push({
-      asset_id: uploaded.asset_id,
-      filename: uploaded.filename,
-      relative_path: relativePath,
-    });
+    const kindResult = await fetchAssetKind(projectKey, uploaded.asset_id);
+    if (kindResult.kind === "openapi") {
+      const created = await createOpenApiDocument(
+        projectKey,
+        parentId,
+        uploaded.filename,
+        uploaded.asset_id,
+      );
+      openapiDocs.push(created);
+    } else {
+      assets.push({
+        asset_id: uploaded.asset_id,
+        filename: uploaded.filename,
+        relative_path: relativePath,
+      });
+    }
     completed += 1;
     onProgress?.(completed, total);
   }
 
-  return results;
+  return { assets, openapiDocs };
 }
 
 function normalizeRelativePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\/+/, "").trim();
+}
+
+function stripExtension(filename: string): string {
+  const trimmed = filename.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const lastDot = trimmed.lastIndexOf(".");
+  if (lastDot <= 0) {
+    return trimmed;
+  }
+  return trimmed.slice(0, lastDot);
 }
 
 function createDocumentFromAssets(_assets: ImportedAssetState) {

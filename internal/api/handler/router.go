@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"zeus/internal/service"
+	svcopenapi "zeus/internal/service/openapi"
 )
 
 func RegisterRoutes(
@@ -13,12 +14,14 @@ func RegisterRoutes(
 	projectSvc service.ProjectService,
 	knowledgeSvc service.KnowledgeService,
 	searchSvc service.SearchService,
+	openapiIndexSvc svcopenapi.IndexService,
 ) {
 	storageObjectHandler := NewStorageObjectHandler(storageObjectSvc, projectSvc)
 	assetHandler := NewAssetHandler(assetSvc)
 	projectHandler := NewProjectHandler(projectSvc)
 	knowledgeHandler := NewKnowledgeHandler(knowledgeSvc)
 	searchHandler := NewSearchHandler(searchSvc)
+	openapiHandler := NewOpenAPIHandler(openapiIndexSvc)
 
 	api := r.Group("/api")
 
@@ -28,6 +31,8 @@ func RegisterRoutes(
 
 	// Asset
 	api.POST("/projects/:project_key/assets/import", assetHandler.Import)
+	api.GET("/projects/:project_key/assets/:asset_id/kind", assetHandler.Kind)
+	api.GET("/projects/:project_key/assets/:asset_id/content", assetHandler.Content)
 
 	// Project
 	api.POST("/projects", projectHandler.Create)
@@ -38,6 +43,9 @@ func RegisterRoutes(
 	api.POST("/projects/:project_key/documents", knowledgeHandler.Create)
 	api.PATCH("/projects/:project_key/documents/:doc_id", knowledgeHandler.Update)
 	api.GET("/projects/:project_key/documents/:doc_id", knowledgeHandler.Get)
+
+	// OpenAPI
+	api.GET("/projects/:project_key/openapi/index", openapiHandler.Index)
 
 	// Search
 	api.GET("/projects/:project_key/search", searchHandler.Search)

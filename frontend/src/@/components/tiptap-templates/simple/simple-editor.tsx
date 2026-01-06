@@ -26,6 +26,8 @@ import {
 
 // --- Tiptap Node ---
 import { ImageUploadNode } from "@/components/tiptap-node/image-upload-node/image-upload-node-extension"
+import { OpenApiNode } from "@/components/tiptap-node/openapi-node/openapi-node-extension"
+import { OpenApiRefNode } from "@/components/tiptap-node/openapi-ref-node/openapi-ref-node-extension"
 import { HorizontalRule } from "@/components/tiptap-node/horizontal-rule-node/horizontal-rule-node-extension"
 import "@/components/tiptap-node/blockquote-node/blockquote-node.scss"
 import "@/components/tiptap-node/code-block-node/code-block-node.scss"
@@ -259,6 +261,8 @@ export function SimpleEditor({ onChange, content }: SimpleEditorProps) {
         upload: handleImageUpload,
         onError: (error) => console.error("Upload failed:", error),
       }),
+      OpenApiNode,
+      OpenApiRefNode,
     ],
     content: initialContent,
   })

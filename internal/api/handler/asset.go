@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -117,6 +118,114 @@ func (h *AssetHandler) Import(c *gin.Context) {
 			Size:     size,
 		},
 	})
+}
+
+// Kind
+// @route GET /api/projects/:project_key/assets/:asset_id/kind
+func (h *AssetHandler) Kind(c *gin.Context) {
+	projectKey := strings.TrimSpace(c.Param("project_key"))
+	if projectKey == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{
+			Code:    "MISSING_PROJECT_KEY",
+			Message: "project_key is required",
+		})
+		return
+	}
+	assetID := strings.TrimSpace(c.Param("asset_id"))
+	if assetID == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{
+			Code:    "MISSING_ASSET_ID",
+			Message: "asset_id is required",
+		})
+		return
+	}
+	if h.svc == nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+			Code:    "SERVICE_NOT_READY",
+			Message: "asset service is required",
+		})
+		return
+	}
+
+	result, err := h.svc.GetKind(c.Request.Context(), projectKey, assetID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		code := "GET_ASSET_KIND_FAILED"
+		if errors.Is(err, service.ErrAssetNotFound) {
+			status = http.StatusNotFound
+			code = "ASSET_NOT_FOUND"
+		}
+		c.JSON(status, types.ErrorResponse{
+			Code:    code,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.AssetKindResponse{
+		Code:    "OK",
+		Message: "success",
+		Data: types.AssetKindData{
+			Kind:           string(result.Kind),
+			OpenAPIVersion: result.OpenAPIVersion,
+		},
+	})
+}
+
+// Content
+// @route GET /api/projects/:project_key/assets/:asset_id/content
+func (h *AssetHandler) Content(c *gin.Context) {
+	projectKey := strings.TrimSpace(c.Param("project_key"))
+	if projectKey == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{
+			Code:    "MISSING_PROJECT_KEY",
+			Message: "project_key is required",
+		})
+		return
+	}
+	assetID := strings.TrimSpace(c.Param("asset_id"))
+	if assetID == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{
+			Code:    "MISSING_ASSET_ID",
+			Message: "asset_id is required",
+		})
+		return
+	}
+	if h.svc == nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+			Code:    "SERVICE_NOT_READY",
+			Message: "asset service is required",
+		})
+		return
+	}
+
+	meta, data, err := h.svc.GetContent(c.Request.Context(), projectKey, assetID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		code := "GET_ASSET_CONTENT_FAILED"
+		if errors.Is(err, service.ErrAssetNotFound) {
+			status = http.StatusNotFound
+			code = "ASSET_NOT_FOUND"
+		}
+		c.JSON(status, types.ErrorResponse{
+			Code:    code,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	contentType := strings.TrimSpace(meta.Mime)
+	if contentType == "" {
+		contentType = "text/plain; charset=utf-8"
+	} else if strings.HasPrefix(contentType, "text/") ||
+		strings.Contains(contentType, "json") ||
+		strings.Contains(contentType, "yaml") {
+		if !strings.Contains(strings.ToLower(contentType), "charset") {
+			contentType = contentType + "; charset=utf-8"
+		}
+	}
+
+	c.Data(http.StatusOK, contentType, data)
 }
 
 func parseSize(raw string) int64 {

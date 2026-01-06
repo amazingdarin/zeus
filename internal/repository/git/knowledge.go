@@ -250,7 +250,7 @@ func (r *KnowledgeRepository) readMetaFile(docDir string) (domain.DocumentMeta, 
 		return domain.DocumentMeta{}, fmt.Errorf("meta id is required")
 	}
 	if strings.TrimSpace(meta.DocType) == "" {
-		meta.DocType = "document"
+		meta.DocType = string(domain.DocTypeDocument)
 	}
 	return meta, nil
 }

@@ -8,12 +8,18 @@ import (
 
 type KnowledgeCreateRequest struct {
 	Meta    domain.DocumentMeta
-	Content domain.DocumentContent
+	Content *domain.DocumentContent
+	OpenAPI *KnowledgeOpenAPI
 }
 
 type KnowledgeUpdateRequest struct {
 	Meta    *domain.DocumentMeta
 	Content *domain.DocumentContent
+}
+
+type KnowledgeOpenAPI struct {
+	Source   string
+	Renderer string
 }
 
 type KnowledgeDocumentListItem struct {

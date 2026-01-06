@@ -4,17 +4,22 @@ import StarterKit from "@tiptap/starter-kit";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { createLowlight, common } from "lowlight";
 import { BlockIdExtension } from "@/components/tiptap-extension/BlockIdExtension";
+import { OpenApiNode } from "@/components/tiptap-node/openapi-node/openapi-node-extension";
+import { OpenApiRefNode } from "@/components/tiptap-node/openapi-ref-node/openapi-ref-node-extension";
 
 const lowlight = createLowlight(common);
 
 interface RichTextViewerProps {
   content: JSONContent;
+  projectKey?: string;
 }
 
-function RichTextViewer({ content }: RichTextViewerProps) {
+function RichTextViewer({ content, projectKey }: RichTextViewerProps) {
   const editor = useEditor({
     extensions: [
       BlockIdExtension,
+      OpenApiNode.configure({ projectKey }),
+      OpenApiRefNode.configure({ projectKey }),
       StarterKit.configure({
         codeBlock: false,
         heading: {

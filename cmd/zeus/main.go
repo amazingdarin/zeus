@@ -11,6 +11,8 @@ import (
 
 	"zeus/internal/api/handler"
 	"zeus/internal/config"
+	"zeus/internal/infra/assetcontent"
+	"zeus/internal/infra/assetmeta"
 	clients3 "zeus/internal/infra/client/s3"
 	"zeus/internal/infra/gitadmin"
 	"zeus/internal/infra/gitclient"
@@ -23,6 +25,7 @@ import (
 	"zeus/internal/repository/postgres"
 	svcasset "zeus/internal/service/asset"
 	svcknowledge "zeus/internal/service/knowledge"
+	svcopenapi "zeus/internal/service/openapi"
 	svcproject "zeus/internal/service/project"
 	svcsearch "zeus/internal/service/search"
 	svcstorageobject "zeus/internal/service/storage_object"
@@ -103,9 +106,22 @@ func main() {
 		s3Client,
 		config.AppConfig.ObjectStorage.Bucket,
 	)
-	assetSvc, err := svcasset.NewService(assetPolicy, gitTempStorage, objectStorage)
+	assetMetaRoot := getenv("ZEUS_ASSET_META_ROOT", "")
+	assetMetaStore := assetmeta.NewFileStore(assetMetaRoot)
+	assetReader := assetcontent.NewReader(s3Client)
+	assetSvc, err := svcasset.NewService(
+		assetPolicy,
+		gitTempStorage,
+		objectStorage,
+		assetMetaStore,
+		assetReader,
+	)
 	if err != nil {
 		log.Fatalf("init asset service: %v", err)
+	}
+	openapiIndexSvc, err := svcopenapi.NewIndexService(assetMetaStore, assetReader)
+	if err != nil {
+		log.Fatalf("init openapi service: %v", err)
 	}
 
 	projectSvc := svcproject.NewService(
@@ -139,7 +155,15 @@ func main() {
 
 	router := gin.Default()
 	router.Use(middleware.CORSMiddleware())
-	handler.RegisterRoutes(router, storageObjectSvc, assetSvc, projectSvc, knowledgeSvc, searchSvc)
+	handler.RegisterRoutes(
+		router,
+		storageObjectSvc,
+		assetSvc,
+		projectSvc,
+		knowledgeSvc,
+		searchSvc,
+		openapiIndexSvc,
+	)
 
 	if err = router.Run(addr); err != nil {
 		log.Fatalf("start server: %v", err)
