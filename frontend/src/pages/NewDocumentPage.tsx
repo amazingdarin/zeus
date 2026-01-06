@@ -23,6 +23,9 @@ function NewDocumentPage() {
   const [parentID, setParentID] = useState("");
   const [storageObjectID, setStorageObjectID] = useState("");
   const [contentMeta, setContentMeta] = useState<ContentMetaInput>(null);
+  const [jsonMode, setJsonMode] = useState(false);
+  const [jsonDraft, setJsonDraft] = useState("");
+  const [jsonError, setJsonError] = useState<string | null>(null);
 
   const parentIdParam = useMemo(() => {
     return (searchParams.get("parent_id") || "").trim();
@@ -37,6 +40,13 @@ function NewDocumentPage() {
       contentMeta,
     );
   }, [content, contentMeta]);
+
+  useEffect(() => {
+    if (jsonMode) {
+      setJsonDraft(JSON.stringify(contentPayload, null, 2));
+      setJsonError(null);
+    }
+  }, [contentPayload, jsonMode]);
 
   useEffect(() => {
     setDocumentId(documentIdParam);
@@ -145,10 +155,21 @@ function NewDocumentPage() {
     setSaving(true);
 
     try {
-      const payloadForSave = exportContentJson(
+      let payloadForSave = exportContentJson(
         content ?? { type: "doc", content: [] },
         contentMeta,
       );
+      if (jsonMode) {
+        const parsed = parseContentJson(jsonDraft);
+        if (!parsed) {
+          setJsonError("Invalid JSON content.");
+          setSaving(false);
+          return;
+        }
+        payloadForSave = exportContentJson(parsed.content, parsed.meta ?? null);
+        setContent(parsed.content);
+        setContentMeta(parsed.meta ?? null);
+      }
       let documentPayload;
       const safeSlug = sanitizeFileName(title);
       const meta = {
@@ -196,11 +217,30 @@ function NewDocumentPage() {
     }
   };
 
+  const handleToggleJsonMode = () => {
+    if (!jsonMode) {
+      setJsonMode(true);
+      return;
+    }
+    const parsed = parseContentJson(jsonDraft);
+    if (!parsed) {
+      setJsonError("Invalid JSON content.");
+      return;
+    }
+    setContent(parsed.content);
+    setContentMeta(parsed.meta);
+    setJsonError(null);
+    setJsonMode(false);
+  };
+
   return (
     <div className="new-doc-page">
       <div className="new-doc-header">
         <button className="btn primary" type="button" onClick={handleSave} disabled={saving}>
           {saving ? "Saving..." : "Save"}
+        </button>
+        <button className="btn ghost" type="button" onClick={handleToggleJsonMode}>
+          {jsonMode ? "Editor" : "JSON"}
         </button>
       </div>
       {saveError ? <div className="doc-viewer-error">{saveError}</div> : null}
@@ -216,11 +256,26 @@ function NewDocumentPage() {
           onChange={(event) => setTitle(event.target.value)}
         />
       </div>
-      <RichTextEditor content={content} onChange={setContent} />
-      <div className="new-doc-json">
-        <div className="new-doc-json-title">Document JSON</div>
-        <pre>{JSON.stringify(contentPayload, null, 2)}</pre>
-      </div>
+      {jsonMode ? (
+        <div className="new-doc-json">
+          <div className="new-doc-json-title">Document JSON</div>
+          <textarea
+            className="new-doc-json-editor"
+            value={jsonDraft}
+            onChange={(event) => setJsonDraft(event.target.value)}
+            spellCheck={false}
+          />
+          {jsonError ? <div className="doc-viewer-error">{jsonError}</div> : null}
+        </div>
+      ) : (
+        <>
+          <RichTextEditor content={content} onChange={setContent} />
+          <div className="new-doc-json">
+            <div className="new-doc-json-title">Document JSON</div>
+            <pre>{JSON.stringify(contentPayload, null, 2)}</pre>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -397,6 +452,28 @@ const parseEditorPayload = (raw: string) => {
       return {
         content: parsed.content,
       };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const parseContentJson = (raw: string) => {
+  if (!raw.trim()) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as {
+      meta?: EditorMeta;
+      content?: JSONContent;
+      type?: string;
+    };
+    if (parsed?.content && parsed.content.type === "doc") {
+      return { meta: parsed.meta ?? null, content: parsed.content };
+    }
+    if (parsed?.type === "doc") {
+      return { meta: null, content: parsed as JSONContent };
     }
     return null;
   } catch {
