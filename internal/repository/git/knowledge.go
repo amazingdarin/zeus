@@ -14,26 +14,26 @@ import (
 	"zeus/internal/repository"
 )
 
-const defaultBranch = "main"
-
 type KnowledgeRepository struct {
-	gitClient   *gitclient.ClientFactory
-	projectRepo repository.ProjectRepository
-	branch      string
+	git     *gitclient.SessionGitClient
+	resolve SessionGitResolver
 }
 
+type SessionGitResolver func(ctx context.Context, projectKey string) (*gitclient.SessionGitClient, error)
+
 func NewKnowledgeRepository(
-	gitClient *gitclient.ClientFactory,
-	projectRepo repository.ProjectRepository,
-	branch string,
+	resolve SessionGitResolver,
 ) *KnowledgeRepository {
-	if branch == "" {
-		branch = defaultBranch
-	}
 	return &KnowledgeRepository{
-		gitClient:   gitClient,
-		projectRepo: projectRepo,
-		branch:      branch,
+		resolve: resolve,
+	}
+}
+
+func NewKnowledgeRepositoryWithSession(
+	git *gitclient.SessionGitClient,
+) *KnowledgeRepository {
+	return &KnowledgeRepository{
+		git: git,
 	}
 }
 
@@ -41,7 +41,7 @@ func (r *KnowledgeRepository) ListDocuments(
 	ctx context.Context,
 	projectKey string,
 ) ([]domain.DocumentMeta, error) {
-	localPath, err := r.ensureRepoReady(ctx, projectKey)
+	localPath, err := r.repoPath(ctx, projectKey)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +78,7 @@ func (r *KnowledgeRepository) ReadDocument(
 	ctx context.Context,
 	projectKey, docID string,
 ) (domain.DocumentMeta, domain.DocumentContent, error) {
-	localPath, err := r.ensureRepoReady(ctx, projectKey)
+	localPath, err := r.repoPath(ctx, projectKey)
 	if err != nil {
 		return domain.DocumentMeta{}, domain.DocumentContent{}, err
 	}
@@ -106,7 +106,7 @@ func (r *KnowledgeRepository) CreateDocument(
 	meta domain.DocumentMeta,
 	content domain.DocumentContent,
 ) error {
-	localPath, err := r.ensureRepoReady(ctx, projectKey)
+	localPath, err := r.repoPath(ctx, projectKey)
 	if err != nil {
 		return err
 	}
@@ -162,7 +162,7 @@ func (r *KnowledgeRepository) UpdateDocument(
 	metaPatch *domain.DocumentMeta,
 	contentPatch *domain.DocumentContent,
 ) error {
-	localPath, err := r.ensureRepoReady(ctx, projectKey)
+	localPath, err := r.repoPath(ctx, projectKey)
 	if err != nil {
 		return err
 	}
@@ -200,41 +200,40 @@ func (r *KnowledgeRepository) UpdateDocument(
 	return nil
 }
 
-func (r *KnowledgeRepository) ensureRepoReady(ctx context.Context, projectKey string) (string, error) {
-	if r.gitClient == nil {
-		return "", fmt.Errorf("git client is required")
-	}
-	if r.projectRepo == nil {
-		return "", fmt.Errorf("project repository is required")
+func (r *KnowledgeRepository) repoPath(ctx context.Context, projectKey string) (string, error) {
+	sessionGit, err := r.sessionGit(ctx, projectKey)
+	if err != nil {
+		return "", err
 	}
 	projectKey = strings.TrimSpace(projectKey)
 	if projectKey == "" {
 		return "", fmt.Errorf("project key is required")
 	}
+	repoPath := strings.TrimSpace(sessionGit.Context().RepoPath)
+	if repoPath == "" {
+		return "", fmt.Errorf("session repo path is required")
+	}
+	return repoPath, nil
+}
 
-	project, err := r.projectRepo.FindByKey(ctx, projectKey)
+func (r *KnowledgeRepository) sessionGit(
+	ctx context.Context,
+	projectKey string,
+) (*gitclient.SessionGitClient, error) {
+	if r.git != nil {
+		return r.git, nil
+	}
+	if r.resolve == nil {
+		return nil, fmt.Errorf("session git client resolver is required")
+	}
+	sessionGit, err := r.resolve(ctx, projectKey)
 	if err != nil {
-		return "", fmt.Errorf("find project: %w", err)
+		return nil, err
 	}
-	if project == nil {
-		return "", fmt.Errorf("project not found")
+	if sessionGit == nil {
+		return nil, fmt.Errorf("session git client is required")
 	}
-	if strings.TrimSpace(project.RepoURL) == "" {
-		return "", fmt.Errorf("project repo url is required")
-	}
-
-	localPath := gitclient.RepoPath(projectKey)
-	if localPath == "" {
-		return "", fmt.Errorf("local path is required")
-	}
-	client := r.gitClient.ForRepo(localPath, projectKey)
-	client.SetRemote(project.RepoURL)
-	if err := client.WithRepo(ctx, func(session *gitclient.GitSession) error {
-		return session.PullRebase("origin", r.branch)
-	}); err != nil {
-		return "", err
-	}
-	return localPath, nil
+	return sessionGit, nil
 }
 
 func (r *KnowledgeRepository) readMetaFile(docDir string) (domain.DocumentMeta, error) {

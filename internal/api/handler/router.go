@@ -12,14 +12,14 @@ func RegisterRoutes(
 	storageObjectSvc service.StorageObjectService,
 	assetSvc service.AssetService,
 	projectSvc service.ProjectService,
-	knowledgeSvc service.KnowledgeService,
+	knowledgeFactory KnowledgeServiceFactory,
 	searchSvc service.SearchService,
 	openapiIndexSvc svcopenapi.IndexService,
 ) {
 	storageObjectHandler := NewStorageObjectHandler(storageObjectSvc, projectSvc)
 	assetHandler := NewAssetHandler(assetSvc)
 	projectHandler := NewProjectHandler(projectSvc)
-	knowledgeHandler := NewKnowledgeHandler(knowledgeSvc)
+	knowledgeHandler := NewKnowledgeHandler(knowledgeFactory)
 	searchHandler := NewSearchHandler(searchSvc)
 	openapiHandler := NewOpenAPIHandler(openapiIndexSvc)
 

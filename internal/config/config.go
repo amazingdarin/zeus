@@ -57,12 +57,13 @@ type AssetConfig struct {
 }
 
 type GitConfig struct {
-	RepoRoot      string `mapstructure:"repo_root"`
-	BareRepoRoot  string `mapstructure:"bare_repo_root"`
-	RepoURLPrefix string `mapstructure:"repo_url_prefix"`
-	AuthorName    string `mapstructure:"author_name"`
-	AuthorEmail   string `mapstructure:"author_email"`
-	DefaultBranch string `mapstructure:"default_branch"`
+	RepoRoot        string `mapstructure:"repo_root"`
+	SessionRepoRoot string `mapstructure:"session_repo_root"`
+	BareRepoRoot    string `mapstructure:"bare_repo_root"`
+	RepoURLPrefix   string `mapstructure:"repo_url_prefix"`
+	AuthorName      string `mapstructure:"author_name"`
+	AuthorEmail     string `mapstructure:"author_email"`
+	DefaultBranch   string `mapstructure:"default_branch"`
 }
 
 type SearchConfig struct {
@@ -103,6 +104,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Git.RepoRoot == "" {
 		cfg.Git.RepoRoot = "/var/lib/zeus/repos"
+	}
+	if cfg.Git.SessionRepoRoot == "" {
+		cfg.Git.SessionRepoRoot = "/var/lib/zeus/git-sessions"
 	}
 	if cfg.Git.DefaultBranch == "" {
 		cfg.Git.DefaultBranch = "main"

@@ -296,6 +296,16 @@ var (
 
 // WithRepo serializes access to a single repo, ensures repo readiness, then runs fn.
 func (c *GitClient) WithRepo(ctx context.Context, fn func(*GitSession) error) error {
+	return c.withRepoSession(ctx, fn)
+}
+
+func (c *GitClient) EnsureReady(ctx context.Context) error {
+	return c.withRepoSession(ctx, func(session *GitSession) error {
+		return session.EnsureReady()
+	})
+}
+
+func (c *GitClient) withRepoSession(ctx context.Context, fn func(*GitSession) error) error {
 	if c == nil {
 		return fmt.Errorf("git client is required")
 	}
@@ -329,6 +339,12 @@ func (c *GitClient) WithRepo(ctx context.Context, fn func(*GitSession) error) er
 		"project_key":  c.projectKey,
 		"repo_path":    c.repoPath,
 	})
+	if sessionClient, ok := SessionClientFromContext(ctx); ok {
+		sessionID := strings.TrimSpace(sessionClient.Context().SessionID)
+		if sessionID != "" {
+			entry = entry.WithField("session_id", sessionID)
+		}
+	}
 
 	session := &GitSession{
 		repoPath:    c.repoPath,
@@ -341,10 +357,6 @@ func (c *GitClient) WithRepo(ctx context.Context, fn func(*GitSession) error) er
 		ctx:         ctx,
 	}
 
-	if err := session.EnsureReady(); err != nil {
-		entry.WithError(err).Error("git repo not ready")
-		return err
-	}
 	if err := fn(session); err != nil {
 		entry.WithError(err).Error("git repo operation failed")
 		return err

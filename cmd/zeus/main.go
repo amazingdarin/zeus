@@ -21,9 +21,11 @@ import (
 	ingestions3 "zeus/internal/infra/ingestion/s3"
 	"zeus/internal/infra/objectstorage"
 	"zeus/internal/infra/searchindex"
+	httpsession "zeus/internal/infra/session"
 	"zeus/internal/ingestion"
 	gitrepo "zeus/internal/repository/git"
 	"zeus/internal/repository/postgres"
+	"zeus/internal/service"
 	svcasset "zeus/internal/service/asset"
 	svcknowledge "zeus/internal/service/knowledge"
 	svcopenapi "zeus/internal/service/openapi"
@@ -89,6 +91,7 @@ func main() {
 	gitAuthorEmail := getenv("ZEUS_GIT_AUTHOR_EMAIL", config.AppConfig.Git.AuthorEmail)
 	gitBranch := getenv("ZEUS_GIT_BRANCH", config.AppConfig.Git.DefaultBranch)
 	gitRepoRoot := getenv("ZEUS_GIT_REPO_ROOT", config.AppConfig.Git.RepoRoot)
+	gitSessionRepoRoot := getenv("ZEUS_GIT_SESSION_ROOT", config.AppConfig.Git.SessionRepoRoot)
 	gitBareRepoRoot := getenv("ZEUS_GIT_BARE_ROOT", config.AppConfig.Git.BareRepoRoot)
 	gitRepoURLPrefix := getenv("ZEUS_GIT_REPO_URL_PREFIX", config.AppConfig.Git.RepoURLPrefix)
 	if gitBareRepoRoot == "" {
@@ -101,6 +104,13 @@ func main() {
 		gitRepoRoot = gitclient.DefaultRepoRoot
 	}
 	gitclient.SetRepoRoot(gitRepoRoot)
+	if gitSessionRepoRoot == "" {
+		gitSessionRepoRoot = gitclient.DefaultSessionRepoRoot
+	}
+	gitclient.SetSessionRepoRoot(gitSessionRepoRoot)
+	sessionGitManager := gitclient.NewSessionGitManager(gitSessionRepoRoot, gitClient)
+	handler.SetSessionGitManager(sessionGitManager)
+	sessionManager := httpsession.NewSessionManager(sessionGitManager.Release)
 
 	assetPolicy := ingestion.DefaultPolicy{}
 	gitTempStorage := gittemp.NewGitTempAssetStorage(gitRepoRoot)
@@ -135,17 +145,20 @@ func main() {
 		gitBranch,
 	)
 
-	knowledgeRepo := gitrepo.NewKnowledgeRepository(gitClient, projectRepo, "")
-	knowledgeSvc, err := svcknowledge.NewService(
-		knowledgeRepo,
-		projectRepo,
-		gitClient,
-		gitAuthorName,
-		gitAuthorEmail,
-		"",
-	)
-	if err != nil {
-		log.Fatalf("init knowledge service: %v", err)
+	systemSessionID := "system"
+	knowledgeRepo := gitrepo.NewKnowledgeRepository(func(ctx context.Context, projectKey string) (*gitclient.SessionGitClient, error) {
+		return sessionGitManager.Get(systemSessionID, projectKey)
+	})
+	knowledgeFactory := func(sessionGit *gitclient.SessionGitClient) (service.KnowledgeService, error) {
+		repo := gitrepo.NewKnowledgeRepositoryWithSession(sessionGit)
+		return svcknowledge.NewService(
+			repo,
+			projectRepo,
+			sessionGit,
+			gitAuthorName,
+			gitAuthorEmail,
+			gitBranch,
+		)
 	}
 
 	searchIndexRoot := getenv("ZEUS_SEARCH_INDEX_ROOT", config.AppConfig.Search.IndexRoot)
@@ -157,12 +170,13 @@ func main() {
 
 	router := gin.Default()
 	router.Use(middleware.CORSMiddleware())
+	router.Use(middleware.SessionMiddleware(sessionManager))
 	handler.RegisterRoutes(
 		router,
 		storageObjectSvc,
 		assetSvc,
 		projectSvc,
-		knowledgeSvc,
+		knowledgeFactory,
 		searchSvc,
 		openapiIndexSvc,
 	)

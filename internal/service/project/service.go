@@ -152,6 +152,9 @@ func (s *Service) initRepo(ctx context.Context, project *domain.Project) error {
 	client.SetRemote(project.RepoURL)
 	client.SetAuthor(s.authorName, s.authorEmail)
 
+	if err := client.EnsureReady(ctx); err != nil {
+		return err
+	}
 	return client.WithRepo(ctx, func(session *gitclient.GitSession) error {
 		if err := s.writeRepoScaffold(workdir, project); err != nil {
 			return err

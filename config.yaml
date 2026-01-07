@@ -27,6 +27,7 @@ asset:
 
 git:
   repo_root: /Users/darin/mine/code/zeus/resources/zeus/repos
+  session_repo_root: /Users/darin/mine/code/zeus/resources/zeus/git-sessions
   bare_repo_root: /Users/darin/mine/code/zeus/resources/zeus/git
   repo_url_prefix: ""
   author_name: Zeus

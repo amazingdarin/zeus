@@ -20,7 +20,7 @@ const defaultBranch = "main"
 type Service struct {
 	repo        repository.KnowledgeRepository
 	projectRepo repository.ProjectRepository
-	gitClient   *gitclient.ClientFactory
+	git         *gitclient.SessionGitClient
 	now         func() time.Time
 	branch      string
 	authorName  string
@@ -30,7 +30,7 @@ type Service struct {
 func NewService(
 	repo repository.KnowledgeRepository,
 	projectRepo repository.ProjectRepository,
-	gitClient *gitclient.ClientFactory,
+	git *gitclient.SessionGitClient,
 	authorName string,
 	authorEmail string,
 	branch string,
@@ -41,8 +41,8 @@ func NewService(
 	if projectRepo == nil {
 		return nil, fmt.Errorf("project repository is required")
 	}
-	if gitClient == nil {
-		return nil, fmt.Errorf("git client is required")
+	if git == nil {
+		return nil, fmt.Errorf("session git client is required")
 	}
 	if strings.TrimSpace(authorName) == "" || strings.TrimSpace(authorEmail) == "" {
 		return nil, fmt.Errorf("git author name and email are required")
@@ -53,7 +53,7 @@ func NewService(
 	return &Service{
 		repo:        repo,
 		projectRepo: projectRepo,
-		gitClient:   gitClient,
+		git:         git,
 		now:         time.Now,
 		branch:      branch,
 		authorName:  strings.TrimSpace(authorName),
@@ -69,7 +69,15 @@ func (s *Service) ListDocuments(ctx context.Context, projectKey string) ([]domai
 	if projectKey == "" {
 		return nil, fmt.Errorf("project key is required")
 	}
-	return s.repo.ListDocuments(ctx, projectKey)
+	var metas []domain.DocumentMeta
+	if err := s.withSessionRepo(ctx, projectKey, func(session *gitclient.GitSession) error {
+		var err error
+		metas, err = s.repo.ListDocuments(ctx, projectKey)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	return metas, nil
 }
 
 func (s *Service) ListDocumentsByParent(
@@ -85,8 +93,12 @@ func (s *Service) ListDocumentsByParent(
 		return nil, fmt.Errorf("project key is required")
 	}
 
-	metas, err := s.repo.ListDocuments(ctx, projectKey)
-	if err != nil {
+	var metas []domain.DocumentMeta
+	if err := s.withSessionRepo(ctx, projectKey, func(session *gitclient.GitSession) error {
+		var err error
+		metas, err = s.repo.ListDocuments(ctx, projectKey)
+		return err
+	}); err != nil {
 		return nil, err
 	}
 
@@ -118,7 +130,16 @@ func (s *Service) GetDocument(
 	if docID == "" {
 		return domain.DocumentMeta{}, domain.DocumentContent{}, fmt.Errorf("doc id is required")
 	}
-	return s.repo.ReadDocument(ctx, projectKey, docID)
+	var meta domain.DocumentMeta
+	var content domain.DocumentContent
+	if err := s.withSessionRepo(ctx, projectKey, func(session *gitclient.GitSession) error {
+		var err error
+		meta, content, err = s.repo.ReadDocument(ctx, projectKey, docID)
+		return err
+	}); err != nil {
+		return domain.DocumentMeta{}, domain.DocumentContent{}, err
+	}
+	return meta, content, nil
 }
 
 func (s *Service) CreateDocument(
@@ -126,17 +147,12 @@ func (s *Service) CreateDocument(
 	projectKey string,
 	req service.KnowledgeCreateRequest,
 ) (domain.DocumentMeta, domain.DocumentContent, error) {
-	if s == nil || s.repo == nil || s.gitClient == nil {
+	if s == nil || s.repo == nil || s.git == nil {
 		return domain.DocumentMeta{}, domain.DocumentContent{}, fmt.Errorf("knowledge service not initialized")
 	}
 	projectKey = strings.TrimSpace(projectKey)
 	if projectKey == "" {
 		return domain.DocumentMeta{}, domain.DocumentContent{}, fmt.Errorf("project key is required")
-	}
-
-	localPath, repoURL, err := s.ensureRepoReady(ctx, projectKey)
-	if err != nil {
-		return domain.DocumentMeta{}, domain.DocumentContent{}, err
 	}
 
 	meta := req.Meta
@@ -173,34 +189,48 @@ func (s *Service) CreateDocument(
 	}
 	meta.UpdatedAt = now
 
-	if err := s.resolveOpenAPISlug(ctx, projectKey, &meta); err != nil {
-		return domain.DocumentMeta{}, domain.DocumentContent{}, err
-	}
-	if meta.Path == "" {
-		meta.Path = "/" + meta.Slug
-	}
-
-	var content domain.DocumentContent
-	if req.OpenAPI != nil {
-		if meta.DocType != string(domain.DocTypeOpenAPI) {
-			return domain.DocumentMeta{}, domain.DocumentContent{}, fmt.Errorf("doc_type must be openapi")
+	var createdMeta domain.DocumentMeta
+	var createdContent domain.DocumentContent
+	if err := s.withSessionRepo(ctx, projectKey, func(session *gitclient.GitSession) error {
+		if err := s.resolveOpenAPISlug(ctx, projectKey, &meta); err != nil {
+			return err
 		}
-		content = buildOpenAPIContent(*req.OpenAPI, now)
-	} else {
-		if req.Content == nil {
-			return domain.DocumentMeta{}, domain.DocumentContent{}, fmt.Errorf("content is required")
+		if meta.Path == "" {
+			meta.Path = "/" + meta.Slug
 		}
-		content = normalizeContent(*req.Content, nil, now)
-	}
 
-	if err := s.repo.CreateDocument(ctx, projectKey, meta, content); err != nil {
+		var content domain.DocumentContent
+		if req.OpenAPI != nil {
+			if meta.DocType != string(domain.DocTypeOpenAPI) {
+				return fmt.Errorf("doc_type must be openapi")
+			}
+			content = buildOpenAPIContent(*req.OpenAPI, now)
+		} else {
+			if req.Content == nil {
+				return fmt.Errorf("content is required")
+			}
+			content = normalizeContent(*req.Content, nil, now)
+		}
+
+		if err := s.repo.CreateDocument(ctx, projectKey, meta, content); err != nil {
+			return err
+		}
+		if err := session.AddAll(); err != nil {
+			return err
+		}
+		if err := session.Commit(fmt.Sprintf("docs: create %s", meta.ID)); err != nil {
+			return err
+		}
+		if err := session.Push("origin", s.branch); err != nil {
+			return err
+		}
+		createdMeta = meta
+		createdContent = content
+		return nil
+	}); err != nil {
 		return domain.DocumentMeta{}, domain.DocumentContent{}, err
 	}
-
-	if err := s.commitAndPush(ctx, projectKey, repoURL, localPath, fmt.Sprintf("docs: create %s", meta.ID)); err != nil {
-		return domain.DocumentMeta{}, domain.DocumentContent{}, err
-	}
-	return meta, content, nil
+	return createdMeta, createdContent, nil
 }
 
 func (s *Service) UpdateDocument(
@@ -209,7 +239,7 @@ func (s *Service) UpdateDocument(
 	docID string,
 	req service.KnowledgeUpdateRequest,
 ) (domain.DocumentMeta, domain.DocumentContent, error) {
-	if s == nil || s.repo == nil || s.gitClient == nil {
+	if s == nil || s.repo == nil || s.git == nil {
 		return domain.DocumentMeta{}, domain.DocumentContent{}, fmt.Errorf("knowledge service not initialized")
 	}
 	projectKey = strings.TrimSpace(projectKey)
@@ -223,108 +253,90 @@ func (s *Service) UpdateDocument(
 	if req.Meta == nil && req.Content == nil {
 		return domain.DocumentMeta{}, domain.DocumentContent{}, fmt.Errorf("no updates provided")
 	}
+	var updatedMeta domain.DocumentMeta
+	var updatedContent domain.DocumentContent
+	if err := s.withSessionRepo(ctx, projectKey, func(session *gitclient.GitSession) error {
+		existingMeta, existingContent, err := s.repo.ReadDocument(ctx, projectKey, docID)
+		if err != nil {
+			return err
+		}
 
-	localPath, repoURL, err := s.ensureRepoReady(ctx, projectKey)
-	if err != nil {
+		now := s.nowTime()
+		metaPatch, err := buildMetaPatch(existingMeta, req.Meta, now)
+		if err != nil {
+			return err
+		}
+
+		var contentPatch *domain.DocumentContent
+		if req.Content != nil {
+			normalized := normalizeContent(*req.Content, existingContent.Meta, now)
+			contentPatch = &normalized
+		}
+
+		if err := s.repo.UpdateDocument(ctx, projectKey, docID, metaPatch, contentPatch); err != nil {
+			return err
+		}
+		if err := session.AddAll(); err != nil {
+			return err
+		}
+		if err := session.Commit(fmt.Sprintf("docs: update %s", docID)); err != nil {
+			return err
+		}
+		if err := session.Push("origin", s.branch); err != nil {
+			return err
+		}
+
+		updatedMeta = existingMeta
+		if metaPatch != nil {
+			updatedMeta = applyMetaPatch(existingMeta, metaPatch)
+		}
+		updatedContent = existingContent
+		if contentPatch != nil {
+			updatedContent = *contentPatch
+		}
+		return nil
+	}); err != nil {
 		return domain.DocumentMeta{}, domain.DocumentContent{}, err
-	}
-
-	existingMeta, existingContent, err := s.repo.ReadDocument(ctx, projectKey, docID)
-	if err != nil {
-		return domain.DocumentMeta{}, domain.DocumentContent{}, err
-	}
-
-	now := s.nowTime()
-
-	metaPatch, err := buildMetaPatch(existingMeta, req.Meta, now)
-	if err != nil {
-		return domain.DocumentMeta{}, domain.DocumentContent{}, err
-	}
-
-	var contentPatch *domain.DocumentContent
-	if req.Content != nil {
-		normalized := normalizeContent(*req.Content, existingContent.Meta, now)
-		contentPatch = &normalized
-	}
-
-	if err := s.repo.UpdateDocument(ctx, projectKey, docID, metaPatch, contentPatch); err != nil {
-		return domain.DocumentMeta{}, domain.DocumentContent{}, err
-	}
-
-	if err := s.commitAndPush(ctx, projectKey, repoURL, localPath, fmt.Sprintf("docs: update %s", docID)); err != nil {
-		return domain.DocumentMeta{}, domain.DocumentContent{}, err
-	}
-
-	updatedMeta := existingMeta
-	if metaPatch != nil {
-		updatedMeta = applyMetaPatch(existingMeta, metaPatch)
-	}
-
-	updatedContent := existingContent
-	if contentPatch != nil {
-		updatedContent = *contentPatch
 	}
 
 	return updatedMeta, updatedContent, nil
 }
 
-func (s *Service) ensureRepoReady(ctx context.Context, projectKey string) (string, string, error) {
-	if s.gitClient == nil || s.projectRepo == nil {
-		return "", "", fmt.Errorf("git client and project repository are required")
+func (s *Service) withSessionRepo(
+	ctx context.Context,
+	projectKey string,
+	fn func(*gitclient.GitSession) error,
+) error {
+	if s.git == nil || s.projectRepo == nil {
+		return fmt.Errorf("session git client and project repository are required")
+	}
+	if fn == nil {
+		return fmt.Errorf("repo operation is required")
 	}
 	projectKey = strings.TrimSpace(projectKey)
 	if projectKey == "" {
-		return "", "", fmt.Errorf("project key is required")
+		return fmt.Errorf("project key is required")
 	}
 
 	project, err := s.projectRepo.FindByKey(ctx, projectKey)
 	if err != nil {
-		return "", "", fmt.Errorf("find project: %w", err)
+		return fmt.Errorf("find project: %w", err)
 	}
 	if project == nil {
-		return "", "", fmt.Errorf("project not found")
+		return fmt.Errorf("project not found")
 	}
 	repoURL := strings.TrimSpace(project.RepoURL)
 	if repoURL == "" {
-		return "", "", fmt.Errorf("project repo url is required")
+		return fmt.Errorf("project repo url is required")
 	}
 
-	localPath := gitclient.RepoPath(projectKey)
-	if localPath == "" {
-		return "", "", fmt.Errorf("local repo path is required")
-	}
-
-	client := s.gitClient.ForRepo(localPath, projectKey)
-	client.SetRemote(repoURL)
-	if err := client.WithRepo(ctx, func(session *gitclient.GitSession) error {
-		return session.PullRebase("origin", s.branch)
-	}); err != nil {
-		return "", "", err
-	}
-	return localPath, repoURL, nil
-}
-
-func (s *Service) commitAndPush(
-	ctx context.Context,
-	projectKey,
-	repoURL,
-	localPath,
-	message string,
-) error {
-	if s.gitClient == nil {
-		return fmt.Errorf("git client is required")
-	}
-	client := s.gitClient.ForRepo(localPath, projectKey)
-	client.SetRemote(repoURL)
-	client.SetAuthor(s.authorName, s.authorEmail)
-	return client.WithRepo(ctx, func(session *gitclient.GitSession) error {
-		if err := session.AddAll(); err != nil {
+	s.git.SetRemote(repoURL)
+	s.git.SetAuthor(s.authorName, s.authorEmail)
+	return s.git.WithSessionRepo(ctx, func(session *gitclient.GitSession) error {
+		if err := session.PullRebase("origin", s.branch); err != nil {
 			return err
 		}
-		if err := session.Commit(message); err != nil {
-			return err
-		}
-		return session.Push("origin", s.branch)
+		return fn(session)
 	})
 }
 
