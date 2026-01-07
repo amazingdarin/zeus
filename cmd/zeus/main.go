@@ -3,14 +3,12 @@ package main
 import (
 	"context"
 	"os"
-	"path/filepath"
-
-	"zeus/internal/api/middleware"
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
 	"zeus/internal/api/handler"
+	"zeus/internal/api/middleware"
 	"zeus/internal/config"
 	"zeus/internal/infra/assetcontent"
 	"zeus/internal/infra/assetmeta"
@@ -19,6 +17,7 @@ import (
 	"zeus/internal/infra/gitclient"
 	"zeus/internal/infra/gittemp"
 	ingestions3 "zeus/internal/infra/ingestion/s3"
+	"zeus/internal/infra/logger"
 	"zeus/internal/infra/objectstorage"
 	"zeus/internal/infra/searchindex"
 	httpsession "zeus/internal/infra/session"
@@ -35,21 +34,22 @@ import (
 )
 
 func main() {
-	initLogger()
+	logger.InitLogger()
+	ctx := context.Background()
 	configPath := getenv("ZEUS_CONFIG_PATH", "config.yaml")
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		log.WithContext(ctx).Fatalf("load config: %v", err)
 	}
 	config.AppConfig = cfg
 	addr := config.AppConfig.Server.Addr
 	if addr == "" {
-		log.Fatal("server addr is required")
+		log.WithContext(ctx).Fatal("server addr is required")
 	}
 	connMaxLifetime, err := config.AppConfig.Postgres.ConnMaxLifetimeDuration()
 	if err != nil {
-		log.Fatalf("parse conn_max_lifetime: %v", err)
+		log.WithContext(ctx).Fatalf("parse conn_max_lifetime: %v", err)
 	}
 	db, err := postgres.NewGormDB(postgres.Config{
 		Host:            config.AppConfig.Postgres.Host,
@@ -64,7 +64,7 @@ func main() {
 		ConnMaxLifetime: connMaxLifetime,
 	})
 	if err != nil {
-		log.Fatalf("init postgres: %v", err)
+		log.WithContext(ctx).Fatalf("init postgres: %v", err)
 	}
 	projectRepo := postgres.NewProjectRepository(db)
 
@@ -77,14 +77,14 @@ func main() {
 		Insecure:     config.AppConfig.ObjectStorage.Insecure,
 	})
 	if err != nil {
-		log.Fatalf("init object storage: %v", err)
+		log.WithContext(ctx).Fatalf("init object storage: %v", err)
 	}
 
 	s3Ingestion := ingestions3.NewS3FileIngestion(s3Client, "zeus", "")
 
 	storageObjectRepo, err := postgres.NewStorageObjectRepository(db)
 	if err != nil {
-		log.Fatalf("init storage object repository: %v", err)
+		log.WithContext(ctx).Fatalf("init storage object repository: %v", err)
 	}
 	storageObjectSvc := svcstorageobject.NewService(s3Ingestion, s3Client, storageObjectRepo)
 	gitAuthorName := getenv("ZEUS_GIT_AUTHOR_NAME", config.AppConfig.Git.AuthorName)
@@ -129,11 +129,11 @@ func main() {
 		assetReader,
 	)
 	if err != nil {
-		log.Fatalf("init asset service: %v", err)
+		log.WithContext(ctx).Fatalf("init asset service: %v", err)
 	}
 	openapiIndexSvc, err := svcopenapi.NewIndexService(assetMetaStore, assetReader)
 	if err != nil {
-		log.Fatalf("init openapi service: %v", err)
+		log.WithContext(ctx).Fatalf("init openapi service: %v", err)
 	}
 
 	projectSvc := svcproject.NewService(
@@ -182,36 +182,8 @@ func main() {
 	)
 
 	if err = router.Run(addr); err != nil {
-		log.Fatalf("start server: %v", err)
+		log.WithContext(ctx).Fatalf("start server: %v", err)
 	}
-}
-
-type ErrorCallerFormatter struct {
-	base log.Formatter
-}
-
-func (f *ErrorCallerFormatter) Format(entry *log.Entry) ([]byte, error) {
-	base := f.base
-	if base == nil {
-		base = &log.TextFormatter{}
-	}
-	if entry.Level <= log.ErrorLevel && entry.Caller != nil {
-		newEntry := *entry
-		data := log.Fields{}
-		for k, v := range entry.Data {
-			data[k] = v
-		}
-		data["caller_file"] = filepath.Base(entry.Caller.File)
-		data["caller_line"] = entry.Caller.Line
-		newEntry.Data = data
-		return base.Format(&newEntry)
-	}
-	return base.Format(entry)
-}
-
-func initLogger() {
-	log.SetReportCaller(true)
-	log.SetFormatter(&ErrorCallerFormatter{base: log.StandardLogger().Formatter})
 }
 
 func getenv(key, fallback string) string {

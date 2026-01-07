@@ -34,6 +34,8 @@ func SessionMiddleware(sm *session.SessionManager) gin.HandlerFunc {
 				})
 				return
 			}
+			ctx := session.WithSession(c.Request.Context(), sess)
+			c.Request = c.Request.WithContext(ctx)
 			c.Set("session", sess)
 			c.Set("session_id", sessionID)
 			setSessionCookie(c, sessionID)
@@ -55,6 +57,8 @@ func SessionMiddleware(sm *session.SessionManager) gin.HandlerFunc {
 		}
 
 		sess.LastSeen = time.Now()
+		ctx := session.WithSession(c.Request.Context(), sess)
+		c.Request = c.Request.WithContext(ctx)
 		c.Set("session", sess)
 		c.Set("session_id", sessionID)
 		c.Next()

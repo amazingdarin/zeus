@@ -113,6 +113,7 @@ func DiagnoseGitExecError(err error) GitExecDiagnosis {
 }
 
 type Logger interface {
+	WithContext(ctx context.Context) *log.Entry
 	WithFields(fields log.Fields) *log.Entry
 	WithField(key string, value interface{}) *log.Entry
 	Info(args ...interface{})
@@ -334,7 +335,7 @@ func (c *GitClient) withRepoSession(ctx context.Context, fn func(*GitSession) er
 	if logger == nil {
 		logger = log.NewEntry(log.StandardLogger())
 	}
-	entry := logger.WithFields(log.Fields{
+	entry := logger.WithContext(ctx).WithFields(log.Fields{
 		"operation_id": operationID,
 		"project_key":  c.projectKey,
 		"repo_path":    c.repoPath,
@@ -585,7 +586,7 @@ func (s *GitSession) Exec(ctx context.Context, args ...string) (string, string, 
 	}
 
 	command := "git " + strings.Join(cleanArgs, " ")
-	entry := s.logger.WithFields(log.Fields{
+	entry := s.logger.WithContext(ctx).WithFields(log.Fields{
 		"operation_id": s.operationID,
 		"project_key":  s.projectKey,
 		"repo_path":    s.repoPath,
@@ -674,14 +675,14 @@ func (s *GitSession) ExecWithRetry(ctx context.Context, policy RetryPolicy, args
 		if deadline, ok := ctx.Deadline(); ok {
 			logFields["deadline_ms"] = time.Until(deadline).Milliseconds()
 		}
-		s.logger.WithFields(logFields).Warn("retrying git command")
+		s.logger.WithContext(ctx).WithFields(logFields).Warn("retrying git command")
 
 		if err := sleepWithContext(ctx, delay); err != nil {
 			return stdout, stderr, err
 		}
 	}
 
-	s.logger.WithFields(log.Fields{
+	s.logger.WithContext(ctx).WithFields(log.Fields{
 		"operation_id": s.operationID,
 		"project_key":  s.projectKey,
 		"repo_path":    s.repoPath,
@@ -719,7 +720,7 @@ func (s *GitSession) cleanupIndexLock(gitDir string) error {
 	if err := os.Remove(lockPath); err != nil {
 		return fmt.Errorf("remove index.lock: %w", err)
 	}
-	s.logger.WithFields(log.Fields{
+	s.logger.WithContext(s.ctx).WithFields(log.Fields{
 		"operation_id": s.operationID,
 		"repo_path":    s.repoPath,
 	}).Warn("removed stale index.lock")

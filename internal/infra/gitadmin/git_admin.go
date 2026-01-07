@@ -74,15 +74,15 @@ func (a *ExecAdmin) run(ctx context.Context, args []string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	output, err := cmd.CombinedOutput()
 	elapsed := time.Since(start)
-	a.logCommand(args, elapsed, err)
+	a.logCommand(ctx, args, elapsed, err)
 	if err != nil {
 		return string(output), fmt.Errorf("git %s failed: %w", strings.Join(args, " "), err)
 	}
 	return string(output), nil
 }
 
-func (a *ExecAdmin) logCommand(args []string, elapsed time.Duration, err error) {
-	entry := a.logger.WithFields(log.Fields{
+func (a *ExecAdmin) logCommand(ctx context.Context, args []string, elapsed time.Duration, err error) {
+	entry := a.logger.WithContext(ctx).WithFields(log.Fields{
 		"cmd":     "git " + strings.Join(args, " "),
 		"elapsed": elapsed.String(),
 		"success": err == nil,

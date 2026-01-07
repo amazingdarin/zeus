@@ -1,11 +1,14 @@
 package session
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
 	"sync"
 	"time"
+
+	"zeus/internal/types"
 )
 
 // Session stores HTTP session state for repository isolation.
@@ -14,6 +17,15 @@ type Session struct {
 	UserID    string
 	CreatedAt time.Time
 	LastSeen  time.Time
+}
+
+func WithSession(ctx context.Context, s *Session) context.Context {
+	return context.WithValue(ctx, types.SessionKey{}, s)
+}
+
+func FromContext(ctx context.Context) (*Session, bool) {
+	s, ok := ctx.Value(types.SessionKey{}).(*Session)
+	return s, ok
 }
 
 type SessionManager struct {
