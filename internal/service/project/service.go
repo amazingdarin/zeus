@@ -21,7 +21,7 @@ import (
 type Service struct {
 	projectRepo repository.ProjectRepository
 	gitAdmin    gitadmin.GitAdmin
-	gitClient   gitclient.GitClient
+	gitClient   *gitclient.ClientFactory
 	branch      string
 	authorName  string
 	authorEmail string
@@ -31,7 +31,7 @@ type Service struct {
 func NewService(
 	projectRepo repository.ProjectRepository,
 	gitAdmin gitadmin.GitAdmin,
-	gitClient gitclient.GitClient,
+	gitClient *gitclient.ClientFactory,
 	authorName string,
 	authorEmail string,
 	branch string,
@@ -148,31 +148,22 @@ func (s *Service) initRepo(ctx context.Context, project *domain.Project) error {
 	defer os.RemoveAll(tempRoot)
 	workdir := filepath.Join(tempRoot, "repo")
 
-	if err := s.gitClient.EnsureCloned(ctx, project.Key, project.RepoURL, workdir); err != nil {
-		return fmt.Errorf("clone repo: %w", err)
-	}
-	if err := s.gitClient.CheckoutBranch(ctx, project.Key, workdir, s.branch); err != nil {
-		return fmt.Errorf("checkout branch: %w", err)
-	}
+	client := s.gitClient.ForRepo(workdir, project.Key)
+	client.SetRemote(project.RepoURL)
+	client.SetAuthor(s.authorName, s.authorEmail)
 
-	if err := s.writeRepoScaffold(workdir, project); err != nil {
-		return err
-	}
-
-	if _, err := s.gitClient.CommitAll(
-		ctx,
-		project.Key,
-		workdir,
-		fmt.Sprintf("docs: init %s", project.Key),
-		s.authorName,
-		s.authorEmail,
-	); err != nil {
-		return fmt.Errorf("commit init: %w", err)
-	}
-	if err := s.gitClient.Push(ctx, project.Key, workdir, s.branch); err != nil {
-		return fmt.Errorf("push init: %w", err)
-	}
-	return nil
+	return client.WithRepo(ctx, func(session *gitclient.GitSession) error {
+		if err := s.writeRepoScaffold(workdir, project); err != nil {
+			return err
+		}
+		if err := session.Commit(fmt.Sprintf("docs: init %s", project.Key)); err != nil {
+			return fmt.Errorf("commit init: %w", err)
+		}
+		if err := session.Push("origin", s.branch); err != nil {
+			return fmt.Errorf("push init: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *Service) writeRepoScaffold(workdir string, project *domain.Project) error {

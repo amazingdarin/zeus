@@ -83,6 +83,7 @@ import "@/components/tiptap-templates/simple/simple-editor.scss"
 type SimpleEditorProps = {
   onChange?: (content: JSONContent) => void
   content?: JSONContent | null
+  projectKey?: string
 }
 
 const defaultContent: JSONContent = {
@@ -202,7 +203,7 @@ const MobileToolbarContent = ({
   </>
 )
 
-export function SimpleEditor({ onChange, content }: SimpleEditorProps) {
+export function SimpleEditor({ onChange, content, projectKey }: SimpleEditorProps) {
   const isMobile = useIsBreakpoint()
   const { height } = useWindowSize()
   const [mobileView, setMobileView] = useState<"main" | "highlighter" | "link">(
@@ -261,8 +262,8 @@ export function SimpleEditor({ onChange, content }: SimpleEditorProps) {
         upload: handleImageUpload,
         onError: (error) => console.error("Upload failed:", error),
       }),
-      OpenApiNode,
-      OpenApiRefNode,
+      OpenApiNode.configure({ projectKey }),
+      OpenApiRefNode.configure({ projectKey }),
     ],
     content: initialContent,
   })

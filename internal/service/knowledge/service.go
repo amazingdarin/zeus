@@ -20,7 +20,7 @@ const defaultBranch = "main"
 type Service struct {
 	repo        repository.KnowledgeRepository
 	projectRepo repository.ProjectRepository
-	gitClient   gitclient.GitClient
+	gitClient   *gitclient.ClientFactory
 	now         func() time.Time
 	branch      string
 	authorName  string
@@ -30,7 +30,7 @@ type Service struct {
 func NewService(
 	repo repository.KnowledgeRepository,
 	projectRepo repository.ProjectRepository,
-	gitClient gitclient.GitClient,
+	gitClient *gitclient.ClientFactory,
 	authorName string,
 	authorEmail string,
 	branch string,
@@ -134,7 +134,7 @@ func (s *Service) CreateDocument(
 		return domain.DocumentMeta{}, domain.DocumentContent{}, fmt.Errorf("project key is required")
 	}
 
-	localPath, err := s.ensureRepoReady(ctx, projectKey)
+	localPath, repoURL, err := s.ensureRepoReady(ctx, projectKey)
 	if err != nil {
 		return domain.DocumentMeta{}, domain.DocumentContent{}, err
 	}
@@ -197,7 +197,7 @@ func (s *Service) CreateDocument(
 		return domain.DocumentMeta{}, domain.DocumentContent{}, err
 	}
 
-	if err := s.commitAndPush(ctx, projectKey, localPath, fmt.Sprintf("docs: create %s", meta.ID)); err != nil {
+	if err := s.commitAndPush(ctx, projectKey, repoURL, localPath, fmt.Sprintf("docs: create %s", meta.ID)); err != nil {
 		return domain.DocumentMeta{}, domain.DocumentContent{}, err
 	}
 	return meta, content, nil
@@ -224,7 +224,7 @@ func (s *Service) UpdateDocument(
 		return domain.DocumentMeta{}, domain.DocumentContent{}, fmt.Errorf("no updates provided")
 	}
 
-	localPath, err := s.ensureRepoReady(ctx, projectKey)
+	localPath, repoURL, err := s.ensureRepoReady(ctx, projectKey)
 	if err != nil {
 		return domain.DocumentMeta{}, domain.DocumentContent{}, err
 	}
@@ -251,7 +251,7 @@ func (s *Service) UpdateDocument(
 		return domain.DocumentMeta{}, domain.DocumentContent{}, err
 	}
 
-	if err := s.commitAndPush(ctx, projectKey, localPath, fmt.Sprintf("docs: update %s", docID)); err != nil {
+	if err := s.commitAndPush(ctx, projectKey, repoURL, localPath, fmt.Sprintf("docs: update %s", docID)); err != nil {
 		return domain.DocumentMeta{}, domain.DocumentContent{}, err
 	}
 
@@ -268,51 +268,64 @@ func (s *Service) UpdateDocument(
 	return updatedMeta, updatedContent, nil
 }
 
-func (s *Service) ensureRepoReady(ctx context.Context, projectKey string) (string, error) {
+func (s *Service) ensureRepoReady(ctx context.Context, projectKey string) (string, string, error) {
 	if s.gitClient == nil || s.projectRepo == nil {
-		return "", fmt.Errorf("git client and project repository are required")
+		return "", "", fmt.Errorf("git client and project repository are required")
 	}
 	projectKey = strings.TrimSpace(projectKey)
 	if projectKey == "" {
-		return "", fmt.Errorf("project key is required")
+		return "", "", fmt.Errorf("project key is required")
 	}
 
 	project, err := s.projectRepo.FindByKey(ctx, projectKey)
 	if err != nil {
-		return "", fmt.Errorf("find project: %w", err)
+		return "", "", fmt.Errorf("find project: %w", err)
 	}
 	if project == nil {
-		return "", fmt.Errorf("project not found")
+		return "", "", fmt.Errorf("project not found")
 	}
 	repoURL := strings.TrimSpace(project.RepoURL)
 	if repoURL == "" {
-		return "", fmt.Errorf("project repo url is required")
+		return "", "", fmt.Errorf("project repo url is required")
 	}
 
 	localPath := gitclient.RepoPath(projectKey)
 	if localPath == "" {
-		return "", fmt.Errorf("local repo path is required")
+		return "", "", fmt.Errorf("local repo path is required")
 	}
-	if err := s.gitClient.EnsureCloned(ctx, projectKey, repoURL, localPath); err != nil {
-		return "", fmt.Errorf("ensure repo: %w", err)
+
+	client := s.gitClient.ForRepo(localPath, projectKey)
+	client.SetRemote(repoURL)
+	if err := client.WithRepo(ctx, func(session *gitclient.GitSession) error {
+		return session.PullRebase("origin", s.branch)
+	}); err != nil {
+		return "", "", err
 	}
-	if err := s.gitClient.PullRebase(ctx, projectKey, localPath, s.branch); err != nil {
-		return "", fmt.Errorf("pull rebase: %w", err)
-	}
-	return localPath, nil
+	return localPath, repoURL, nil
 }
 
-func (s *Service) commitAndPush(ctx context.Context, projectKey, localPath, message string) error {
+func (s *Service) commitAndPush(
+	ctx context.Context,
+	projectKey,
+	repoURL,
+	localPath,
+	message string,
+) error {
 	if s.gitClient == nil {
 		return fmt.Errorf("git client is required")
 	}
-	if _, err := s.gitClient.CommitAll(ctx, projectKey, localPath, message, s.authorName, s.authorEmail); err != nil {
-		return err
-	}
-	if err := s.gitClient.Push(ctx, projectKey, localPath, s.branch); err != nil {
-		return err
-	}
-	return nil
+	client := s.gitClient.ForRepo(localPath, projectKey)
+	client.SetRemote(repoURL)
+	client.SetAuthor(s.authorName, s.authorEmail)
+	return client.WithRepo(ctx, func(session *gitclient.GitSession) error {
+		if err := session.AddAll(); err != nil {
+			return err
+		}
+		if err := session.Commit(message); err != nil {
+			return err
+		}
+		return session.Push("origin", s.branch)
+	})
 }
 
 func (s *Service) nowTime() time.Time {

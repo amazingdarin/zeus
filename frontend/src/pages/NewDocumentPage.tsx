@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { JSONContent } from "@tiptap/react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
@@ -26,6 +26,7 @@ function NewDocumentPage() {
   const [jsonMode, setJsonMode] = useState(false);
   const [jsonDraft, setJsonDraft] = useState("");
   const [jsonError, setJsonError] = useState<string | null>(null);
+  const loadRequestRef = useRef<string | null>(null);
 
   const parentIdParam = useMemo(() => {
     return (searchParams.get("parent_id") || "").trim();
@@ -56,12 +57,19 @@ function NewDocumentPage() {
       setContent(null);
       setContentMeta(null);
       setSaveError(null);
+      loadRequestRef.current = null;
       return;
     }
     if (!currentProject?.key) {
+      loadRequestRef.current = null;
       return;
     }
 
+    const requestKey = `${currentProject.key}:${documentIdParam}`;
+    if (loadRequestRef.current === requestKey) {
+      return;
+    }
+    loadRequestRef.current = requestKey;
     const controller = new AbortController();
     const loadDocument = async () => {
       setLoadingDocument(true);
@@ -102,6 +110,9 @@ function NewDocumentPage() {
       } finally {
         if (!controller.signal.aborted) {
           setLoadingDocument(false);
+        }
+        if (loadRequestRef.current === requestKey) {
+          loadRequestRef.current = null;
         }
       }
     };
@@ -269,7 +280,11 @@ function NewDocumentPage() {
         </div>
       ) : (
         <>
-          <RichTextEditor content={content} onChange={setContent} />
+          <RichTextEditor
+            content={content}
+            onChange={setContent}
+            projectKey={currentProject?.key ?? ""}
+          />
           <div className="new-doc-json">
             <div className="new-doc-json-title">Document JSON</div>
             <pre>{JSON.stringify(contentPayload, null, 2)}</pre>

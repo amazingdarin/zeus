@@ -695,6 +695,19 @@ body {
   font-size: 14px;
 }
 
+.openapi-source-preview {
+  margin: 0;
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(31, 35, 40, 0.04);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow: auto;
+  font-family: var(--font-sans);
+}
+
 .text-viewer {
   padding: 0;
   color: var(--ink);

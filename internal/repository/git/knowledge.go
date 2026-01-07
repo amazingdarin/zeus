@@ -17,13 +17,13 @@ import (
 const defaultBranch = "main"
 
 type KnowledgeRepository struct {
-	gitClient   gitclient.GitClient
+	gitClient   *gitclient.ClientFactory
 	projectRepo repository.ProjectRepository
 	branch      string
 }
 
 func NewKnowledgeRepository(
-	gitClient gitclient.GitClient,
+	gitClient *gitclient.ClientFactory,
 	projectRepo repository.ProjectRepository,
 	branch string,
 ) *KnowledgeRepository {
@@ -227,11 +227,12 @@ func (r *KnowledgeRepository) ensureRepoReady(ctx context.Context, projectKey st
 	if localPath == "" {
 		return "", fmt.Errorf("local path is required")
 	}
-	if err := r.gitClient.EnsureCloned(ctx, projectKey, project.RepoURL, localPath); err != nil {
-		return "", fmt.Errorf("ensure repo: %w", err)
-	}
-	if err := r.gitClient.PullRebase(ctx, projectKey, localPath, r.branch); err != nil {
-		return "", fmt.Errorf("pull rebase: %w", err)
+	client := r.gitClient.ForRepo(localPath, projectKey)
+	client.SetRemote(project.RepoURL)
+	if err := client.WithRepo(ctx, func(session *gitclient.GitSession) error {
+		return session.PullRebase("origin", r.branch)
+	}); err != nil {
+		return "", err
 	}
 	return localPath, nil
 }

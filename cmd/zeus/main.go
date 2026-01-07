@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"path/filepath"
 
 	"zeus/internal/api/middleware"
 
@@ -32,6 +33,7 @@ import (
 )
 
 func main() {
+	initLogger()
 	configPath := getenv("ZEUS_CONFIG_PATH", "config.yaml")
 
 	cfg, err := config.Load(configPath)
@@ -94,7 +96,7 @@ func main() {
 	}
 
 	gitAdmin := gitadmin.NewExecAdmin(gitBareRepoRoot, gitRepoURLPrefix, log.WithField("component", "git-admin"))
-	gitClient := gitclient.NewClient(log.WithField("component", "git"))
+	gitClient := gitclient.NewClientFactory(log.WithField("component", "git"))
 	if gitRepoRoot == "" {
 		gitRepoRoot = gitclient.DefaultRepoRoot
 	}
@@ -168,6 +170,34 @@ func main() {
 	if err = router.Run(addr); err != nil {
 		log.Fatalf("start server: %v", err)
 	}
+}
+
+type ErrorCallerFormatter struct {
+	base log.Formatter
+}
+
+func (f *ErrorCallerFormatter) Format(entry *log.Entry) ([]byte, error) {
+	base := f.base
+	if base == nil {
+		base = &log.TextFormatter{}
+	}
+	if entry.Level <= log.ErrorLevel && entry.Caller != nil {
+		newEntry := *entry
+		data := log.Fields{}
+		for k, v := range entry.Data {
+			data[k] = v
+		}
+		data["caller_file"] = filepath.Base(entry.Caller.File)
+		data["caller_line"] = entry.Caller.Line
+		newEntry.Data = data
+		return base.Format(&newEntry)
+	}
+	return base.Format(entry)
+}
+
+func initLogger() {
+	log.SetReportCaller(true)
+	log.SetFormatter(&ErrorCallerFormatter{base: log.StandardLogger().Formatter})
 }
 
 func getenv(key, fallback string) string {
