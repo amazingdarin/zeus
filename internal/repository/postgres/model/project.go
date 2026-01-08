@@ -8,6 +8,7 @@ type Project struct {
 	Name        string    `gorm:"column:name;not null"`
 	Description string    `gorm:"column:description"`
 	RepoURL     string    `gorm:"column:repo_url;not null"`
+	RepoBaseURL string    `gorm:"column:repo_base_url;not null"`
 	RepoName    string    `gorm:"column:repo_name;not null"`
 	Status      string    `gorm:"column:status;not null;default:active"`
 	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime"`

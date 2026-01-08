@@ -50,15 +50,17 @@ func (h *ProjectHandler) Create(c *gin.Context) {
 		Code:    "OK",
 		Message: "success",
 		Data: struct {
-			ID        string `json:"id"`
-			RepoURL   string `json:"repo_url"`
-			RepoName  string `json:"repo_name"`
-			CreatedAt string `json:"created_at"`
+			ID          string `json:"id"`
+			RepoURL     string `json:"repo_url"`
+			RepoBaseURL string `json:"repo_base_url"`
+			RepoName    string `json:"repo_name"`
+			CreatedAt   string `json:"created_at"`
 		}{
-			ID:        project.ID,
-			RepoURL:   project.RepoURL,
-			RepoName:  project.RepoName,
-			CreatedAt: project.CreatedAt.Format(time.RFC3339),
+			ID:          project.ID,
+			RepoURL:     project.RepoURL,
+			RepoBaseURL: project.RepoBaseURL,
+			RepoName:    project.RepoName,
+			CreatedAt:   project.CreatedAt.Format(time.RFC3339),
 		},
 	})
 }
@@ -86,6 +88,7 @@ func (h *ProjectHandler) List(c *gin.Context) {
 			Name:        project.Name,
 			Description: project.Description,
 			RepoURL:     project.RepoURL,
+			RepoBaseURL: project.RepoBaseURL,
 			RepoName:    project.RepoName,
 			Status:      string(project.Status),
 			CreatedAt:   project.CreatedAt.Format(time.RFC3339),

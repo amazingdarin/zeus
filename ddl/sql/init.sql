@@ -5,6 +5,7 @@ CREATE TABLE project
     name        TEXT NOT NULL,
     description TEXT,
     repo_url    TEXT NOT NULL,
+    repo_base_url TEXT NOT NULL,
     repo_name   TEXT NOT NULL,
     status      TEXT NOT NULL DEFAULT 'active',
     created_at  TIMESTAMPTZ DEFAULT now(),

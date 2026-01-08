@@ -50,12 +50,14 @@ func (s *Service) Create(ctx context.Context, project *domain.Project) error {
 	project.Key = strings.TrimSpace(project.Key)
 	project.RepoName = strings.TrimSpace(project.RepoName)
 	project.RepoURL = strings.TrimSpace(project.RepoURL)
+	project.RepoBaseURL = strings.TrimSpace(project.RepoBaseURL)
 	if project.RepoName == "" {
 		project.RepoName = buildRepoName(project.Key)
 	}
-	if project.RepoURL == "" {
-		project.RepoURL = s.buildRepoURL(project.RepoName)
+	if project.RepoBaseURL == "" {
+		project.RepoBaseURL = s.buildRepoBaseURL()
 	}
+	project.RepoURL = s.buildRepoURL(project.RepoBaseURL, project.RepoName)
 
 	now := s.nowTime()
 	project.Status = domain.ProjectStatusCreating
@@ -170,13 +172,14 @@ func (s *Service) writeRepoScaffold(workdir string, project *domain.Project) err
 	}
 
 	meta := map[string]interface{}{
-		"id":          project.ID,
-		"key":         project.Key,
-		"name":        project.Name,
-		"description": project.Description,
-		"repo_name":   project.RepoName,
-		"repo_url":    project.RepoURL,
-		"created_at":  project.CreatedAt.Format(time.RFC3339),
+		"id":            project.ID,
+		"key":           project.Key,
+		"name":          project.Name,
+		"description":   project.Description,
+		"repo_name":     project.RepoName,
+		"repo_url":      project.RepoURL,
+		"repo_base_url": project.RepoBaseURL,
+		"created_at":    project.CreatedAt.Format(time.RFC3339),
 	}
 	data, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
@@ -284,19 +287,35 @@ func buildRepoName(projectKey string) string {
 	return fmt.Sprintf("zeus-%s.git", projectKey)
 }
 
-func (s *Service) buildRepoURL(repoName string) string {
+func (s *Service) buildRepoURL(baseURL, repoName string) string {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	repoName = strings.TrimSpace(repoName)
-	if repoName == "" {
+	if baseURL == "" || repoName == "" {
 		return ""
 	}
-	if s.gitAdmin != nil {
-		return s.gitAdmin.RepoURL(repoName)
-	}
-	return repoName
+	return baseURL + "/" + strings.TrimLeft(repoName, "/")
 }
 
 func (s *Service) nowTime() time.Time {
 	return time.Now()
+}
+
+func (s *Service) buildRepoBaseURL() string {
+	if config.AppConfig != nil {
+		base := strings.TrimSpace(config.AppConfig.Git.RepoURLPrefix)
+		if base != "" {
+			return base
+		}
+		base = strings.TrimSpace(config.AppConfig.Git.BareRepoRoot)
+		if base != "" {
+			return base
+		}
+	}
+	if s.gitAdmin != nil {
+		// Best effort: RepoURL(repoName) uses base + repoName; caller can overwrite base later.
+		return strings.TrimSpace(s.gitAdmin.RepoURL(""))
+	}
+	return ""
 }
 
 func (s *Service) repoRoot() string {

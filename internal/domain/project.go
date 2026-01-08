@@ -30,6 +30,7 @@ type Project struct {
 	Name        string
 	Description string
 	RepoURL     string
+	RepoBaseURL string
 	RepoName    string
 	Status      ProjectStatus
 	CreatedAt   time.Time
@@ -49,8 +50,16 @@ func (p Project) Validate() error {
 	if strings.TrimSpace(p.RepoURL) == "" {
 		return fmt.Errorf("project repo url is required")
 	}
+	if strings.TrimSpace(p.RepoBaseURL) == "" {
+		return fmt.Errorf("project repo base url is required")
+	}
 	if strings.TrimSpace(p.RepoName) == "" {
 		return fmt.Errorf("project repo name is required")
+	}
+	expected := strings.TrimRight(strings.TrimSpace(p.RepoBaseURL), "/") + "/" +
+		strings.TrimLeft(strings.TrimSpace(p.RepoName), "/")
+	if strings.TrimSpace(p.RepoURL) != expected {
+		return fmt.Errorf("project repo url mismatch")
 	}
 	if p.Status == "" {
 		return fmt.Errorf("project status is required")
