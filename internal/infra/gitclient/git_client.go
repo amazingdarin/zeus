@@ -42,14 +42,13 @@ type GitClient struct {
 	refCount int64
 	lastUsed int64
 
-	repoPath    string
-	repo        string
-	projectKey  string
-	remoteURL   string
-	branch      string
-	authorName  string
-	authorEmail string
-	emptyRepo   bool
+	repoPath      string
+	projectKey    string
+	remoteURL     string
+	defaultBranch string
+	authorName    string
+	authorEmail   string
+	emptyRepo     bool
 
 	initFn  func(ctx context.Context, client *GitClient) error
 	closeFn func(ctx context.Context, client *GitClient) error
@@ -92,13 +91,6 @@ func WithRepoPath(path string) GitClientOption {
 	}
 }
 
-// WithRepo sets the repo path under the git server, e.g. "team/zeus.git".
-func WithRepo(repo string) GitClientOption {
-	return func(client *GitClient) {
-		client.repo = strings.TrimSpace(repo)
-	}
-}
-
 func WithProjectKey(projectKey string) GitClientOption {
 	return func(client *GitClient) {
 		client.projectKey = strings.TrimSpace(projectKey)
@@ -113,7 +105,7 @@ func WithRemoteURL(url string) GitClientOption {
 
 func WithBranch(branch string) GitClientOption {
 	return func(client *GitClient) {
-		client.branch = strings.TrimSpace(branch)
+		client.defaultBranch = strings.TrimSpace(branch)
 	}
 }
 
@@ -242,7 +234,7 @@ func (c *GitClient) Pull(ctx context.Context, remote, branch string) error {
 			remote = "origin"
 		}
 		if strings.TrimSpace(branch) == "" {
-			branch = c.defaultBranch()
+			branch = c.defaultBranch
 		}
 		return c.pullRebase(ctx, remote, branch)
 	})
@@ -266,7 +258,7 @@ func (c *GitClient) Push(ctx context.Context, remote, branch string) error {
 			remote = "origin"
 		}
 		if strings.TrimSpace(branch) == "" {
-			branch = c.defaultBranch()
+			branch = c.defaultBranch
 		}
 		return c.push(ctx, remote, branch)
 	})
@@ -363,13 +355,6 @@ func (c *GitClient) ensureReady(ctx context.Context) error {
 		c.emptyRepo = true
 	}
 	return nil
-}
-
-func (c *GitClient) defaultBranch() string {
-	if strings.TrimSpace(c.branch) != "" {
-		return c.branch
-	}
-	return "main"
 }
 
 func (c *GitClient) pullRebase(ctx context.Context, remote, branch string) error {
@@ -469,9 +454,6 @@ func (c *GitClient) hasCommit(ctx context.Context) (bool, error) {
 
 func (c *GitClient) ensureRemote(ctx context.Context) error {
 	remoteURL := strings.TrimSpace(c.remoteURL)
-	if strings.TrimSpace(c.repo) != "" {
-		remoteURL = joinRemote(remoteURL, c.repo)
-	}
 	if remoteURL == "" {
 		return nil
 	}
@@ -623,19 +605,4 @@ func commandTimeout(args []string) time.Duration {
 	default:
 		return 3 * time.Second
 	}
-}
-
-func joinRemote(serverPath, repo string) string {
-	serverPath = strings.TrimSpace(serverPath)
-	repo = strings.TrimLeft(strings.TrimSpace(repo), "/")
-	if serverPath == "" {
-		return ""
-	}
-	if repo == "" {
-		return strings.TrimRight(serverPath, "/")
-	}
-	if strings.HasSuffix(serverPath, "/") || strings.HasSuffix(serverPath, ":") {
-		return serverPath + repo
-	}
-	return serverPath + "/" + repo
 }

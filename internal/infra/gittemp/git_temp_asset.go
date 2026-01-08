@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"zeus/internal/domain"
-	"zeus/internal/infra/gitclient"
 	"zeus/internal/service"
 )
 
@@ -22,9 +21,6 @@ type GitTempAssetStorage struct {
 
 func NewGitTempAssetStorage(repoRoot string) *GitTempAssetStorage {
 	repoRoot = strings.TrimSpace(repoRoot)
-	if repoRoot == "" {
-		repoRoot = gitclient.RepoRoot
-	}
 	return &GitTempAssetStorage{repoRoot: repoRoot}
 }
 
