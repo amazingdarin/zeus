@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import type { NodeViewProps } from "@tiptap/react"
 import { NodeViewWrapper } from "@tiptap/react"
 import OpenApiSpecViewer from "@/components/OpenApiSpecViewer"
-import { buildApiUrl } from "../../../../config/api"
+import { apiFetch } from "../../../../config/api"
 import { parse as parseYaml } from "yaml"
 import "@/components/tiptap-node/openapi-node/openapi-node.scss"
 
@@ -106,12 +106,10 @@ function OpenApiSourcePreview({ projectKey, source }: OpenApiSourcePreviewProps)
     const loadSpec = async () => {
       setState({ loading: true, error: null, jsonText: null })
       try {
-        const response = await fetch(
-          buildApiUrl(
-            `/api/projects/${encodeURIComponent(projectKey)}/assets/${encodeURIComponent(
-              assetId,
-            )}/content`,
-          ),
+        const response = await apiFetch(
+          `/api/projects/${encodeURIComponent(projectKey)}/assets/${encodeURIComponent(
+            assetId,
+          )}/content`,
           { signal: controller.signal },
         )
         if (!response.ok) {

@@ -6,7 +6,7 @@ import KnowledgeBaseSideNav, {
   type KnowledgeBaseDocument,
 } from "../components/KnowledgeBaseSideNav";
 import DocumentPage from "./DocumentPage";
-import { buildApiUrl } from "../config/api";
+import { apiFetch } from "../config/api";
 import { useProjectContext } from "../context/ProjectContext";
 
 type DocumentResponse = {
@@ -77,10 +77,9 @@ function KnowledgeBasePage() {
 
   const fetchDocumentDetail = useCallback(
     async (projectKey: string, documentId: string) => {
-      const url = buildApiUrl(
+      const response = await apiFetch(
         `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(documentId)}`,
       );
-      const response = await fetch(url);
       if (!response.ok) {
         throw new Error("Failed to load document detail");
       }
@@ -93,10 +92,9 @@ function KnowledgeBasePage() {
   const fetchDocuments = useCallback(
     async (projectKey: string, parentId: string) => {
       const params = new URLSearchParams({ parent_id: parentId });
-      const url = buildApiUrl(
+      const response = await apiFetch(
         `/api/projects/${encodeURIComponent(projectKey)}/documents?${params.toString()}`,
       );
-      const response = await fetch(url);
       if (!response.ok) {
         throw new Error("Failed to load documents");
       }

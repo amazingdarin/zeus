@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { OpenAPISpec, OpenAPIRefType, OpenAPIRef } from "../../utils/openapiFilter";
 import { filterOpenAPISpec } from "../../utils/openapiFilter";
-import { buildApiUrl } from "../../config/api";
+import { apiFetch } from "../../config/api";
 import { parse as parseYaml } from "yaml";
 import "swagger-ui-react/swagger-ui.css";
 
@@ -83,12 +83,10 @@ function OpenApiSpecViewer({
     const loadSpec = async () => {
       setState({ loading: true, error: null, spec: null });
       try {
-        const response = await fetch(
-          buildApiUrl(
-            `/api/projects/${encodeURIComponent(projectKey)}/assets/${encodeURIComponent(
-              assetId,
-            )}/content`,
-          ),
+        const response = await apiFetch(
+          `/api/projects/${encodeURIComponent(projectKey)}/assets/${encodeURIComponent(
+            assetId,
+          )}/content`,
           { signal: controller.signal },
         );
         if (!response.ok) {

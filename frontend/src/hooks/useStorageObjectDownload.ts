@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { buildApiUrl } from "../config/api";
+import { apiFetch } from "../config/api";
 
 type DownloadPayload = {
   mime_type?: string;
@@ -41,10 +41,8 @@ export const useStorageObjectDownload = (
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch(
-          buildApiUrl(
-            `/api/projects/${encodeURIComponent(key)}/storage-objects/${encodeURIComponent(id)}`,
-          ),
+        const response = await apiFetch(
+          `/api/projects/${encodeURIComponent(key)}/storage-objects/${encodeURIComponent(id)}`,
           { signal: controller.signal },
         );
         if (!response.ok) {

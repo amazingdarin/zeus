@@ -3,7 +3,7 @@ import type { JSONContent } from "@tiptap/react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import RichTextEditor from "../components/RichTextEditor";
-import { buildApiUrl } from "../config/api";
+import { apiFetch } from "../config/api";
 import { useProjectContext } from "../context/ProjectContext";
 import {
   exportContentJson,
@@ -310,8 +310,8 @@ const createDocumentRecord = async (
   },
   content: { meta: EditorMeta; content: JSONContent },
 ) => {
-  const response = await fetch(
-    buildApiUrl(`/api/projects/${encodeURIComponent(projectKey)}/documents`),
+  const response = await apiFetch(
+    `/api/projects/${encodeURIComponent(projectKey)}/documents`,
     {
       method: "POST",
       headers: {
@@ -341,12 +341,10 @@ const updateDocumentRecord = async (
   },
   content: { meta: EditorMeta; content: JSONContent },
 ) => {
-  const response = await fetch(
-    buildApiUrl(
-      `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
-        documentId,
-      )}`,
-    ),
+  const response = await apiFetch(
+    `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
+      documentId,
+    )}`,
     {
       method: "PATCH",
       headers: {
@@ -375,12 +373,10 @@ const fetchDocumentDetail = async (
   documentId: string,
   signal: AbortSignal,
 ) => {
-  const response = await fetch(
-    buildApiUrl(
-      `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
-        documentId,
-      )}`,
-    ),
+  const response = await apiFetch(
+    `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
+      documentId,
+    )}`,
     { signal },
   );
   if (!response.ok) {
@@ -415,12 +411,10 @@ const fetchStorageDownload = async (
   storageObjectID: string,
   signal: AbortSignal,
 ) => {
-  const response = await fetch(
-    buildApiUrl(
-      `/api/projects/${encodeURIComponent(projectKey)}/storage-objects/${encodeURIComponent(
-        storageObjectID,
-      )}`,
-    ),
+  const response = await apiFetch(
+    `/api/projects/${encodeURIComponent(projectKey)}/storage-objects/${encodeURIComponent(
+      storageObjectID,
+    )}`,
     { signal },
   );
   if (!response.ok) {

@@ -5,7 +5,7 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import DocumentHeader from "../components/DocumentHeader";
 import RichTextViewer from "../components/RichTextViewer";
-import { buildApiUrl } from "../config/api";
+import { apiFetch } from "../config/api";
 
 type DocumentData = {
   id: string;
@@ -138,12 +138,10 @@ function DocumentPage({ projectKey, documentId, onDocumentsChanged }: DocumentPa
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch(
-          buildApiUrl(
-            `/api/projects/${encodeURIComponent(resolvedProjectKey)}/documents/${encodeURIComponent(
-              resolvedDocumentId,
-            )}`,
-          ),
+        const response = await apiFetch(
+          `/api/projects/${encodeURIComponent(resolvedProjectKey)}/documents/${encodeURIComponent(
+            resolvedDocumentId,
+          )}`,
           { signal: controller.signal },
         );
         if (!response.ok) {
@@ -642,12 +640,10 @@ const fetchDocumentDetail = async (
   documentId: string,
   signal: AbortSignal,
 ) => {
-  const response = await fetch(
-    buildApiUrl(
-      `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
-        documentId,
-      )}`,
-    ),
+  const response = await apiFetch(
+    `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
+      documentId,
+    )}`,
     { signal },
   );
   if (!response.ok) {
@@ -755,8 +751,8 @@ async function uploadSingleFile(
   formData.append("mime", file.type || "application/octet-stream");
   formData.append("size", String(file.size));
 
-  const response = await fetch(
-    buildApiUrl(`/api/projects/${encodeURIComponent(projectKey)}/assets/import`),
+  const response = await apiFetch(
+    `/api/projects/${encodeURIComponent(projectKey)}/assets/import`,
     {
       method: "POST",
       body: formData,
@@ -783,12 +779,10 @@ async function fetchAssetKind(
   projectKey: string,
   assetID: string,
 ): Promise<AssetKindResult> {
-  const response = await fetch(
-    buildApiUrl(
-      `/api/projects/${encodeURIComponent(projectKey)}/assets/${encodeURIComponent(
-        assetID,
-      )}/kind`,
-    ),
+  const response = await apiFetch(
+    `/api/projects/${encodeURIComponent(projectKey)}/assets/${encodeURIComponent(
+      assetID,
+    )}/kind`,
   );
   if (!response.ok) {
     throw new Error("asset kind lookup failed");
@@ -820,8 +814,8 @@ async function createOpenApiDocument(
     },
   };
 
-  const response = await fetch(
-    buildApiUrl(`/api/projects/${encodeURIComponent(projectKey)}/documents`),
+  const response = await apiFetch(
+    `/api/projects/${encodeURIComponent(projectKey)}/documents`,
     {
       method: "POST",
       headers: {
