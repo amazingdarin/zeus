@@ -98,12 +98,11 @@ func InitGitClientManager(ctx context.Context) *gitclient.GitClientManager {
 	manager := gitclient.NewGitClientManager(func(key gitclient.GitKey, remoteURL string) *gitclient.GitClient {
 		return gitclient.NewGitClient(
 			key,
-			gitclient.WithRepoPath(config.AppConfig.Git.RepoRoot+string(key)),
+			gitclient.WithRepoPath(config.AppConfig.Git.RepoRoot+"/"+string(key)),
 			gitclient.WithProjectKey(string(key)),
 			gitclient.WithRemoteURL(remoteURL),
 			gitclient.WithBranch(config.AppConfig.Git.DefaultBranch),
 			gitclient.WithAuthor(config.AppConfig.Git.AuthorName, config.AppConfig.Git.AuthorEmail),
-			gitclient.WithInitFunc(gitclient.DefaultInitFunc),
 		)
 	})
 	manager.StartGC(ctx, 2*time.Minute, 10*time.Minute)

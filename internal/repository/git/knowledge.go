@@ -238,6 +238,10 @@ func (r *KnowledgeRepository) sessionGit(
 		}
 		return nil, fmt.Errorf("git client is required")
 	}
+	if err = handle.Client().EnsureReady(ctx); err != nil {
+		handle.Close()
+		return nil, fmt.Errorf("ensure git client ready: %w", err)
+	}
 	return handle, nil
 }
 

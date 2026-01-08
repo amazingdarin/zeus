@@ -11,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type GitState string
@@ -483,10 +485,12 @@ func (c *GitClient) exec(ctx context.Context, args ...string) (string, string, e
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	start := time.Now()
 	cleanArgs := append([]string{}, args...)
 	if isReadOnlyCommand(cleanArgs) {
 		cleanArgs = append([]string{"--no-optional-locks"}, cleanArgs...)
 	}
+	command := "git " + strings.Join(cleanArgs, " ")
 	cmd := exec.CommandContext(ctx, "git", cleanArgs...)
 	cmd.Dir = c.repoPath
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
@@ -495,10 +499,28 @@ func (c *GitClient) exec(ctx context.Context, args ...string) (string, string, e
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
+	exitCodeValue := 0
+	if err != nil {
+		exitCodeValue = exitCode(err)
+	}
+	entry := log.WithContext(ctx).WithFields(log.Fields{
+		"command":     command,
+		"repo_path":   c.repoPath,
+		"project_key": c.projectKey,
+		"duration_ms": time.Since(start).Milliseconds(),
+		"stdout":      stdout.String(),
+		"stderr":      stderr.String(),
+		"exit_code":   exitCodeValue,
+	})
+	if err != nil {
+		entry.Error("git command failed")
+	} else {
+		entry.Info("git command completed")
+	}
 	if err != nil {
 		return stdout.String(), stderr.String(), &execError{
-			command:  "git " + strings.Join(cleanArgs, " "),
-			exitCode: exitCode(err),
+			command:  command,
+			exitCode: exitCodeValue,
 			stderr:   stderr.String(),
 			err:      err,
 		}
