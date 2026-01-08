@@ -1,4 +1,4 @@
-package gitclient
+package gitmanager
 
 import (
 	"context"
@@ -23,9 +23,9 @@ const (
 )
 
 var (
-	ErrClientClosed = fmt.Errorf("git client is closed")
-	ErrNoChanges    = fmt.Errorf("no changes to commit")
-	ErrRepoBusy     = fmt.Errorf("git repo has in-progress operation")
+	ErrClientClosed = errors.New("git client is closed")
+	ErrNoChanges    = errors.New("no changes to commit")
+	ErrRepoBusy     = errors.New("git repo has in-progress operation")
 )
 
 type GitKey string
