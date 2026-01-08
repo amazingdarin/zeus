@@ -17,11 +17,8 @@ type StorageObjectRepository struct {
 	db *gorm.DB
 }
 
-func NewStorageObjectRepository(db *gorm.DB) (*StorageObjectRepository, error) {
-	if db == nil {
-		return nil, fmt.Errorf("db is nil")
-	}
-	return &StorageObjectRepository{db: db}, nil
+func NewStorageObjectRepository(db *gorm.DB) *StorageObjectRepository {
+	return &StorageObjectRepository{db: db}
 }
 
 func (r *StorageObjectRepository) Insert(ctx context.Context, obj *domain.StorageObject) error {

@@ -63,18 +63,18 @@ func (c Config) DSN() (string, error) {
 	), nil
 }
 
-func NewGormDB(cfg Config) (*gorm.DB, error) {
+func NewGormDB(cfg Config) *gorm.DB {
 	dsn, err := cfg.DSN()
 	if err != nil {
-		return nil, err
+		return nil
 	}
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		return nil, fmt.Errorf("open gorm: %w", err)
+		return nil
 	}
 	sqlDB, err := db.DB()
 	if err != nil {
-		return nil, fmt.Errorf("get sql db: %w", err)
+		return db
 	}
 	if cfg.MaxOpenConns > 0 {
 		sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
@@ -85,5 +85,5 @@ func NewGormDB(cfg Config) (*gorm.DB, error) {
 	if cfg.ConnMaxLifetime > 0 {
 		sqlDB.SetConnMaxLifetime(cfg.ConnMaxLifetime)
 	}
-	return db, nil
+	return db
 }

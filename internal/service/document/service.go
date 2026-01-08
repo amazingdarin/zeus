@@ -26,18 +26,12 @@ type Service struct {
 func NewService(
 	ingestionSvc ingestion.FileIngestionService,
 	repo repository.DocumentRepository,
-) (*Service, error) {
-	if ingestionSvc == nil {
-		return nil, fmt.Errorf("ingestion service is required")
-	}
-	if repo == nil {
-		return nil, fmt.Errorf("document repository is required")
-	}
+) *Service {
 	return &Service{
 		ingestion: ingestionSvc,
 		repo:      repo,
 		now:       time.Now,
-	}, nil
+	}
 }
 
 func (s *Service) Create(

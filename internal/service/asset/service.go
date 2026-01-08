@@ -27,29 +27,14 @@ func NewService(
 	objectStorage service.AssetStorageService,
 	metaStore service.AssetMetaStore,
 	reader service.AssetContentReader,
-) (*Service, error) {
-	if policy == nil {
-		return nil, fmt.Errorf("ingestion policy is required")
-	}
-	if gitStorage == nil {
-		return nil, fmt.Errorf("git asset storage is required")
-	}
-	if objectStorage == nil {
-		return nil, fmt.Errorf("object asset storage is required")
-	}
-	if metaStore == nil {
-		return nil, fmt.Errorf("asset meta store is required")
-	}
-	if reader == nil {
-		return nil, fmt.Errorf("asset content reader is required")
-	}
+) *Service {
 	return &Service{
 		policy:        policy,
 		gitStorage:    gitStorage,
 		objectStorage: objectStorage,
 		metaStore:     metaStore,
 		reader:        reader,
-	}, nil
+	}
 }
 
 func (s *Service) ImportFile(

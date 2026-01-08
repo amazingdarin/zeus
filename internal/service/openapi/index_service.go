@@ -17,17 +17,11 @@ type Service struct {
 	reader    service.AssetContentReader
 }
 
-func NewIndexService(metaStore service.AssetMetaStore, reader service.AssetContentReader) (*Service, error) {
-	if metaStore == nil {
-		return nil, fmt.Errorf("asset meta store is required")
-	}
-	if reader == nil {
-		return nil, fmt.Errorf("asset content reader is required")
-	}
+func NewIndexService(metaStore service.AssetMetaStore, reader service.AssetContentReader) *Service {
 	return &Service{
 		metaStore: metaStore,
 		reader:    reader,
-	}, nil
+	}
 }
 
 func (s *Service) BuildIndex(

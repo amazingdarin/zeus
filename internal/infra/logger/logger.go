@@ -6,18 +6,12 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func InitLogger() {
-	log.SetReportCaller(true)
-	log.SetFormatter(&ErrorCallerFormatter{base: log.StandardLogger().Formatter})
-	log.AddHook(&SessionHook{})
-}
-
 type ErrorCallerFormatter struct {
-	base log.Formatter
+	Base log.Formatter
 }
 
 func (f *ErrorCallerFormatter) Format(entry *log.Entry) ([]byte, error) {
-	base := f.base
+	base := f.Base
 	if base == nil {
 		base = &log.TextFormatter{}
 	}

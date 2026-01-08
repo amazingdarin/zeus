@@ -34,19 +34,7 @@ func NewService(
 	authorName string,
 	authorEmail string,
 	branch string,
-) (*Service, error) {
-	if repo == nil {
-		return nil, fmt.Errorf("knowledge repository is required")
-	}
-	if projectRepo == nil {
-		return nil, fmt.Errorf("project repository is required")
-	}
-	if git == nil {
-		return nil, fmt.Errorf("session git client is required")
-	}
-	if strings.TrimSpace(authorName) == "" || strings.TrimSpace(authorEmail) == "" {
-		return nil, fmt.Errorf("git author name and email are required")
-	}
+) *Service {
 	if branch == "" {
 		branch = defaultBranch
 	}
@@ -55,10 +43,10 @@ func NewService(
 		projectRepo: projectRepo,
 		git:         git,
 		now:         time.Now,
-		branch:      branch,
+		branch:      strings.TrimSpace(branch),
 		authorName:  strings.TrimSpace(authorName),
 		authorEmail: strings.TrimSpace(authorEmail),
-	}, nil
+	}
 }
 
 func (s *Service) ListDocuments(ctx context.Context, projectKey string) ([]domain.DocumentMeta, error) {

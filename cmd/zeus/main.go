@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
 	"zeus/internal/api/handler"
 	"zeus/internal/api/middleware"
@@ -33,25 +37,27 @@ import (
 	svcstorageobject "zeus/internal/service/storage_object"
 )
 
-func main() {
-	logger.InitLogger()
-	ctx := context.Background()
+func InitConfig() {
 	configPath := getenv("ZEUS_CONFIG_PATH", "config.yaml")
-
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		log.WithContext(ctx).Fatalf("load config: %v", err)
 	}
 	config.AppConfig = cfg
-	addr := config.AppConfig.Server.Addr
-	if addr == "" {
-		log.WithContext(ctx).Fatal("server addr is required")
-	}
+}
+
+func InitLogger() {
+	log.SetReportCaller(true)
+	log.SetFormatter(&logger.ErrorCallerFormatter{Base: log.StandardLogger().Formatter})
+	log.AddHook(&logger.SessionHook{})
+}
+
+func InitDB(ctx context.Context) *gorm.DB {
 	connMaxLifetime, err := config.AppConfig.Postgres.ConnMaxLifetimeDuration()
 	if err != nil {
 		log.WithContext(ctx).Fatalf("parse conn_max_lifetime: %v", err)
 	}
-	db, err := postgres.NewGormDB(postgres.Config{
+	db := postgres.NewGormDB(postgres.Config{
 		Host:            config.AppConfig.Postgres.Host,
 		Port:            config.AppConfig.Postgres.Port,
 		User:            config.AppConfig.Postgres.User,
@@ -63,12 +69,14 @@ func main() {
 		MaxIdleConns:    config.AppConfig.Postgres.MaxIdleConns,
 		ConnMaxLifetime: connMaxLifetime,
 	})
-	if err != nil {
-		log.WithContext(ctx).Fatalf("init postgres: %v", err)
+	if db == nil {
+		log.WithContext(ctx).Fatal("init database: nil db")
 	}
-	projectRepo := postgres.NewProjectRepository(db)
+	return db
+}
 
-	s3Client, err := clients3.NewS3Client(context.Background(), clients3.Config{
+func InitS3(ctx context.Context) (*s3.Client, *ingestions3.S3FileIngestion) {
+	s3Client, err := clients3.NewS3Client(ctx, clients3.Config{
 		Endpoint:     config.AppConfig.ObjectStorage.Endpoint,
 		Region:       config.AppConfig.ObjectStorage.Region,
 		AccessKey:    config.AppConfig.ObjectStorage.AccessKey,
@@ -79,41 +87,52 @@ func main() {
 	if err != nil {
 		log.WithContext(ctx).Fatalf("init object storage: %v", err)
 	}
-
 	s3Ingestion := ingestions3.NewS3FileIngestion(s3Client, "zeus", "")
+	return s3Client, s3Ingestion
+}
 
-	storageObjectRepo, err := postgres.NewStorageObjectRepository(db)
-	if err != nil {
-		log.WithContext(ctx).Fatalf("init storage object repository: %v", err)
+func InitGitAdmin() *gitadmin.ExecAdmin {
+	gitAdmin := gitadmin.NewExecAdmin(config.AppConfig.Git.BareRepoRoot, config.AppConfig.Git.BareRepoRoot, log.WithField("component", "git-admin"))
+	return gitAdmin
+}
+
+func InitGitClientManager(ctx context.Context) *gitclient.GitClientManager {
+	manager := gitclient.NewGitClientManager(func(key gitclient.GitKey, repo string) *gitclient.GitClient {
+		return gitclient.NewGitClient(
+			key,
+			gitclient.WithRepoPath(config.AppConfig.Git.RepoRoot+string(key)),
+			gitclient.WithProjectKey(string(key)),
+			gitclient.WithRepo(repo),
+			gitclient.WithRemoteURL(fmt.Sprintf("git@%s/%s", config.AppConfig.Git.BareRepoRoot, string(repo)+".git")),
+			gitclient.WithBranch(config.AppConfig.Git.DefaultBranch),
+			gitclient.WithAuthor(config.AppConfig.Git.AuthorName, config.AppConfig.Git.AuthorEmail),
+			gitclient.WithInitFunc(gitclient.DefaultInitFunc),
+		)
+	})
+	manager.StartGC(ctx, 2*time.Minute, 10*time.Minute)
+	return manager
+}
+
+func main() {
+	ctx := context.Background()
+	InitConfig()
+	InitLogger()
+	db := InitDB(ctx)
+	s3Client, s3Ingestion := InitS3(ctx)
+	gitAdmin := InitGitAdmin()
+	gitClientManager := InitGitClientManager(ctx)
+
+	addr := config.AppConfig.Server.Addr
+	if addr == "" {
+		log.WithContext(ctx).Fatal("server addr is required")
 	}
+
+	projectRepo := postgres.NewProjectRepository(db)
+	storageObjectRepo := postgres.NewStorageObjectRepository(db)
 	storageObjectSvc := svcstorageobject.NewService(s3Ingestion, s3Client, storageObjectRepo)
-	gitAuthorName := getenv("ZEUS_GIT_AUTHOR_NAME", config.AppConfig.Git.AuthorName)
-	gitAuthorEmail := getenv("ZEUS_GIT_AUTHOR_EMAIL", config.AppConfig.Git.AuthorEmail)
-	gitBranch := getenv("ZEUS_GIT_BRANCH", config.AppConfig.Git.DefaultBranch)
-	gitRepoRoot := getenv("ZEUS_GIT_REPO_ROOT", config.AppConfig.Git.RepoRoot)
-	gitSessionRepoRoot := getenv("ZEUS_GIT_SESSION_ROOT", config.AppConfig.Git.SessionRepoRoot)
-	gitBareRepoRoot := getenv("ZEUS_GIT_BARE_ROOT", config.AppConfig.Git.BareRepoRoot)
-	gitRepoURLPrefix := getenv("ZEUS_GIT_REPO_URL_PREFIX", config.AppConfig.Git.RepoURLPrefix)
-	if gitBareRepoRoot == "" {
-		gitBareRepoRoot = gitadmin.DefaultBareRepoRoot
-	}
-
-	gitAdmin := gitadmin.NewExecAdmin(gitBareRepoRoot, gitRepoURLPrefix, log.WithField("component", "git-admin"))
-	gitClient := gitclient.NewClientFactory(log.WithField("component", "git"))
-	if gitRepoRoot == "" {
-		gitRepoRoot = gitclient.DefaultRepoRoot
-	}
-	gitclient.SetRepoRoot(gitRepoRoot)
-	if gitSessionRepoRoot == "" {
-		gitSessionRepoRoot = gitclient.DefaultSessionRepoRoot
-	}
-	gitclient.SetSessionRepoRoot(gitSessionRepoRoot)
-	sessionGitManager := gitclient.NewSessionGitManager(gitSessionRepoRoot, gitClient)
-	handler.SetSessionGitManager(sessionGitManager)
-	sessionManager := httpsession.NewSessionManager(sessionGitManager.Release)
 
 	assetPolicy := ingestion.DefaultPolicy{}
-	gitTempStorage := gittemp.NewGitTempAssetStorage(gitRepoRoot)
+	gitTempStorage := gittemp.NewGitTempAssetStorage(config.AppConfig.Git.RepoRoot)
 	objectStorage := objectstorage.NewObjectStorageAssetStorage(
 		s3Client,
 		config.AppConfig.ObjectStorage.Bucket,
@@ -121,29 +140,9 @@ func main() {
 	assetMetaRoot := getenv("ZEUS_ASSET_META_ROOT", config.AppConfig.Asset.MetaRoot)
 	assetMetaStore := assetmeta.NewFileStore(assetMetaRoot)
 	assetReader := assetcontent.NewReader(s3Client)
-	assetSvc, err := svcasset.NewService(
-		assetPolicy,
-		gitTempStorage,
-		objectStorage,
-		assetMetaStore,
-		assetReader,
-	)
-	if err != nil {
-		log.WithContext(ctx).Fatalf("init asset service: %v", err)
-	}
-	openapiIndexSvc, err := svcopenapi.NewIndexService(assetMetaStore, assetReader)
-	if err != nil {
-		log.WithContext(ctx).Fatalf("init openapi service: %v", err)
-	}
-
-	projectSvc := svcproject.NewService(
-		projectRepo,
-		gitAdmin,
-		gitClient,
-		gitAuthorName,
-		gitAuthorEmail,
-		gitBranch,
-	)
+	assetSvc := svcasset.NewService(assetPolicy, gitTempStorage, objectStorage, assetMetaStore, assetReader)
+	openapiIndexSvc := svcopenapi.NewIndexService(assetMetaStore, assetReader)
+	projectSvc := svcproject.NewService(projectRepo, gitAdmin, gitClientManager)
 
 	systemSessionID := "system"
 	knowledgeRepo := gitrepo.NewKnowledgeRepository(func(ctx context.Context, projectKey string) (*gitclient.SessionGitClient, error) {
@@ -158,7 +157,7 @@ func main() {
 			gitAuthorName,
 			gitAuthorEmail,
 			gitBranch,
-		)
+		), nil
 	}
 
 	searchIndexRoot := getenv("ZEUS_SEARCH_INDEX_ROOT", config.AppConfig.Search.IndexRoot)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"zeus/internal/config"
 	"zeus/internal/domain"
 	"zeus/internal/infra/gitadmin"
 	"zeus/internal/infra/gitclient"
@@ -19,34 +20,20 @@ import (
 )
 
 type Service struct {
-	projectRepo repository.ProjectRepository
-	gitAdmin    gitadmin.GitAdmin
-	gitClient   *gitclient.ClientFactory
-	branch      string
-	authorName  string
-	authorEmail string
-	now         func() time.Time
+	projectRepo      repository.ProjectRepository
+	gitAdmin         gitadmin.GitAdmin
+	gitClientManager *gitclient.GitClientManager
 }
 
 func NewService(
 	projectRepo repository.ProjectRepository,
 	gitAdmin gitadmin.GitAdmin,
-	gitClient *gitclient.ClientFactory,
-	authorName string,
-	authorEmail string,
-	branch string,
+	gitClientManager *gitclient.GitClientManager,
 ) *Service {
-	if branch == "" {
-		branch = "main"
-	}
 	return &Service{
-		projectRepo: projectRepo,
-		gitAdmin:    gitAdmin,
-		gitClient:   gitClient,
-		branch:      branch,
-		authorName:  strings.TrimSpace(authorName),
-		authorEmail: strings.TrimSpace(authorEmail),
-		now:         time.Now,
+		projectRepo:      projectRepo,
+		gitAdmin:         gitAdmin,
+		gitClientManager: gitClientManager,
 	}
 }
 
@@ -126,12 +113,10 @@ func (s *Service) initRepo(ctx context.Context, project *domain.Project) error {
 	if s.gitAdmin == nil {
 		return fmt.Errorf("git admin is required")
 	}
-	if s.gitClient == nil {
-		return fmt.Errorf("git client is required")
+	if s.gitClientManager == nil {
+		return fmt.Errorf("git client manager is required")
 	}
-	if s.authorName == "" || s.authorEmail == "" {
-		return fmt.Errorf("git author name and email are required")
-	}
+	branch := s.defaultBranch()
 
 	repoURL, err := s.gitAdmin.CreateBareRepo(ctx, project.RepoName)
 	if err != nil {
@@ -141,32 +126,34 @@ func (s *Service) initRepo(ctx context.Context, project *domain.Project) error {
 		project.RepoURL = repoURL
 	}
 
-	tempRoot, err := os.MkdirTemp("", fmt.Sprintf("zeus-%s-", project.Key))
-	if err != nil {
-		return fmt.Errorf("create temp repo: %w", err)
+	workdir := filepath.Join(s.repoRoot(), project.Key)
+	if err := os.MkdirAll(workdir, 0o755); err != nil {
+		return fmt.Errorf("create repo root: %w", err)
 	}
-	defer os.RemoveAll(tempRoot)
-	workdir := filepath.Join(tempRoot, "repo")
 
-	client := s.gitClient.ForRepo(workdir, project.Key)
-	client.SetRemote(project.RepoURL)
-	client.SetAuthor(s.authorName, s.authorEmail)
+	handle, err := s.gitClientManager.Get(gitclient.GitKey(project.Key), project.RepoName)
+	if err != nil {
+		return fmt.Errorf("get git client: %w", err)
+	}
+	defer handle.Close()
 
+	client := handle.Client()
+	if client == nil {
+		return fmt.Errorf("git client is required")
+	}
 	if err := client.EnsureReady(ctx); err != nil {
 		return err
 	}
-	return client.WithRepo(ctx, func(session *gitclient.GitSession) error {
-		if err := s.writeRepoScaffold(workdir, project); err != nil {
-			return err
-		}
-		if err := session.Commit(fmt.Sprintf("docs: init %s", project.Key)); err != nil {
-			return fmt.Errorf("commit init: %w", err)
-		}
-		if err := session.Push("origin", s.branch); err != nil {
-			return fmt.Errorf("push init: %w", err)
-		}
-		return nil
-	})
+	if err := s.writeRepoScaffold(workdir, project); err != nil {
+		return err
+	}
+	if err := client.Commit(ctx, fmt.Sprintf("docs: init %s", project.Key)); err != nil {
+		return fmt.Errorf("commit init: %w", err)
+	}
+	if err := client.Push(ctx, "origin", branch); err != nil {
+		return fmt.Errorf("push init: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) writeRepoScaffold(workdir string, project *domain.Project) error {
@@ -309,10 +296,21 @@ func (s *Service) buildRepoURL(repoName string) string {
 }
 
 func (s *Service) nowTime() time.Time {
-	if s.now == nil {
-		return time.Now()
+	return time.Now()
+}
+
+func (s *Service) repoRoot() string {
+	if config.AppConfig != nil && strings.TrimSpace(config.AppConfig.Git.RepoRoot) != "" {
+		return strings.TrimSpace(config.AppConfig.Git.RepoRoot)
 	}
-	return s.now()
+	return "/var/lib/zeus/repos"
+}
+
+func (s *Service) defaultBranch() string {
+	if config.AppConfig != nil && strings.TrimSpace(config.AppConfig.Git.DefaultBranch) != "" {
+		return strings.TrimSpace(config.AppConfig.Git.DefaultBranch)
+	}
+	return "main"
 }
 
 var _ service.ProjectService = (*Service)(nil)
