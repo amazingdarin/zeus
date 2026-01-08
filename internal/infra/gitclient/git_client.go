@@ -43,6 +43,7 @@ type GitClient struct {
 	lastUsed int64
 
 	repoPath    string
+	repo        string
 	projectKey  string
 	remoteURL   string
 	branch      string
@@ -91,6 +92,13 @@ func WithRepoPath(path string) GitClientOption {
 	}
 }
 
+// WithRepo sets the repo path under the git server, e.g. "team/zeus.git".
+func WithRepo(repo string) GitClientOption {
+	return func(client *GitClient) {
+		client.repo = strings.TrimSpace(repo)
+	}
+}
+
 func WithProjectKey(projectKey string) GitClientOption {
 	return func(client *GitClient) {
 		client.projectKey = strings.TrimSpace(projectKey)
@@ -121,6 +129,13 @@ func (c *GitClient) Key() GitKey {
 		return ""
 	}
 	return c.key
+}
+
+func (c *GitClient) RepoPath() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.repoPath)
 }
 
 func (c *GitClient) State() GitState {
@@ -454,6 +469,9 @@ func (c *GitClient) hasCommit(ctx context.Context) (bool, error) {
 
 func (c *GitClient) ensureRemote(ctx context.Context) error {
 	remoteURL := strings.TrimSpace(c.remoteURL)
+	if strings.TrimSpace(c.repo) != "" {
+		remoteURL = joinRemote(remoteURL, c.repo)
+	}
 	if remoteURL == "" {
 		return nil
 	}
@@ -605,4 +623,19 @@ func commandTimeout(args []string) time.Duration {
 	default:
 		return 3 * time.Second
 	}
+}
+
+func joinRemote(serverPath, repo string) string {
+	serverPath = strings.TrimSpace(serverPath)
+	repo = strings.TrimLeft(strings.TrimSpace(repo), "/")
+	if serverPath == "" {
+		return ""
+	}
+	if repo == "" {
+		return strings.TrimRight(serverPath, "/")
+	}
+	if strings.HasSuffix(serverPath, "/") || strings.HasSuffix(serverPath, ":") {
+		return serverPath + repo
+	}
+	return serverPath + "/" + repo
 }
