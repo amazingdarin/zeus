@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"time"
 
@@ -28,7 +27,6 @@ import (
 	"zeus/internal/ingestion"
 	gitrepo "zeus/internal/repository/git"
 	"zeus/internal/repository/postgres"
-	"zeus/internal/service"
 	svcasset "zeus/internal/service/asset"
 	svcknowledge "zeus/internal/service/knowledge"
 	svcopenapi "zeus/internal/service/openapi"
@@ -37,11 +35,11 @@ import (
 	svcstorageobject "zeus/internal/service/storage_object"
 )
 
-func InitConfig() {
+func InitConfig(ctx context.Context) {
 	configPath := getenv("ZEUS_CONFIG_PATH", "config.yaml")
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		log.WithContext(ctx).Fatalf("load config: %v", err)
+		log.Fatalf("load config: %v", err)
 	}
 	config.AppConfig = cfg
 }
@@ -97,13 +95,12 @@ func InitGitAdmin() *gitadmin.ExecAdmin {
 }
 
 func InitGitClientManager(ctx context.Context) *gitclient.GitClientManager {
-	manager := gitclient.NewGitClientManager(func(key gitclient.GitKey, repo string) *gitclient.GitClient {
+	manager := gitclient.NewGitClientManager(func(key gitclient.GitKey, remoteURL string) *gitclient.GitClient {
 		return gitclient.NewGitClient(
 			key,
 			gitclient.WithRepoPath(config.AppConfig.Git.RepoRoot+string(key)),
 			gitclient.WithProjectKey(string(key)),
-			gitclient.WithRepo(repo),
-			gitclient.WithRemoteURL(fmt.Sprintf("git@%s/%s", config.AppConfig.Git.BareRepoRoot, string(repo)+".git")),
+			gitclient.WithRemoteURL(remoteURL),
 			gitclient.WithBranch(config.AppConfig.Git.DefaultBranch),
 			gitclient.WithAuthor(config.AppConfig.Git.AuthorName, config.AppConfig.Git.AuthorEmail),
 			gitclient.WithInitFunc(gitclient.DefaultInitFunc),
@@ -115,20 +112,19 @@ func InitGitClientManager(ctx context.Context) *gitclient.GitClientManager {
 
 func main() {
 	ctx := context.Background()
-	InitConfig()
 	InitLogger()
+	InitConfig(ctx)
 	db := InitDB(ctx)
 	s3Client, s3Ingestion := InitS3(ctx)
 	gitAdmin := InitGitAdmin()
 	gitClientManager := InitGitClientManager(ctx)
 
-	addr := config.AppConfig.Server.Addr
-	if addr == "" {
-		log.WithContext(ctx).Fatal("server addr is required")
-	}
-
+	// Init Repositories
 	projectRepo := postgres.NewProjectRepository(db)
 	storageObjectRepo := postgres.NewStorageObjectRepository(db)
+	knowledgeRepo := gitrepo.NewKnowledgeRepository(gitClientManager)
+
+	// Init Services
 	storageObjectSvc := svcstorageobject.NewService(s3Ingestion, s3Client, storageObjectRepo)
 
 	assetPolicy := ingestion.DefaultPolicy{}
@@ -144,29 +140,17 @@ func main() {
 	openapiIndexSvc := svcopenapi.NewIndexService(assetMetaStore, assetReader)
 	projectSvc := svcproject.NewService(projectRepo, gitAdmin, gitClientManager)
 
-	systemSessionID := "system"
-	knowledgeRepo := gitrepo.NewKnowledgeRepository(func(ctx context.Context, projectKey string) (*gitclient.SessionGitClient, error) {
-		return sessionGitManager.Get(systemSessionID, projectKey)
-	})
-	knowledgeFactory := func(sessionGit *gitclient.SessionGitClient) (service.KnowledgeService, error) {
-		repo := gitrepo.NewKnowledgeRepositoryWithSession(sessionGit)
-		return svcknowledge.NewService(
-			repo,
-			projectRepo,
-			sessionGit,
-			gitAuthorName,
-			gitAuthorEmail,
-			gitBranch,
-		), nil
-	}
-
 	searchIndexRoot := getenv("ZEUS_SEARCH_INDEX_ROOT", config.AppConfig.Search.IndexRoot)
 	if searchIndexRoot == "" {
 		searchIndexRoot = searchindex.DefaultIndexRoot
 	}
 	indexBuilder := searchindex.NewIndexBuilder(knowledgeRepo, searchIndexRoot)
 	searchSvc := svcsearch.NewService(indexBuilder)
+	knowledgeSvc := svcknowledge.NewService(knowledgeRepo, projectRepo)
 
+	sessionManager := httpsession.NewSessionManager(nil)
+
+	// Register Handlers and Start Server
 	router := gin.Default()
 	router.Use(middleware.CORSMiddleware())
 	router.Use(middleware.SessionMiddleware(sessionManager))
@@ -175,12 +159,12 @@ func main() {
 		storageObjectSvc,
 		assetSvc,
 		projectSvc,
-		knowledgeFactory,
+		knowledgeSvc,
 		searchSvc,
 		openapiIndexSvc,
 	)
 
-	if err = router.Run(addr); err != nil {
+	if err := router.Run(config.AppConfig.Server.Addr); err != nil {
 		log.WithContext(ctx).Fatalf("start server: %v", err)
 	}
 }

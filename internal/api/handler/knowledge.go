@@ -13,33 +13,16 @@ import (
 
 	"zeus/internal/api/types"
 	"zeus/internal/domain"
-	"zeus/internal/infra/gitclient"
 	"zeus/internal/repository"
 	"zeus/internal/service"
 )
 
 type KnowledgeHandler struct {
-	factory KnowledgeServiceFactory
+	knowledgeSvc service.KnowledgeService
 }
 
-type KnowledgeServiceFactory func(*gitclient.SessionGitClient) (service.KnowledgeService, error)
-
-func NewKnowledgeHandler(factory KnowledgeServiceFactory) *KnowledgeHandler {
-	return &KnowledgeHandler{factory: factory}
-}
-
-func (h *KnowledgeHandler) serviceFor(
-	c *gin.Context,
-	projectKey string,
-) (service.KnowledgeService, error) {
-	if h == nil || h.factory == nil {
-		return nil, fmt.Errorf("knowledge service factory is required")
-	}
-	sessionClient, err := GetSessionGitClientFromGin(c, projectKey)
-	if err != nil {
-		return nil, err
-	}
-	return h.factory(sessionClient)
+func NewKnowledgeHandler(knowledgeSvc service.KnowledgeService) *KnowledgeHandler {
+	return &KnowledgeHandler{knowledgeSvc: knowledgeSvc}
 }
 
 // List
@@ -54,16 +37,8 @@ func (h *KnowledgeHandler) List(c *gin.Context) {
 		return
 	}
 	parentID := strings.TrimSpace(c.Query("parent_id"))
-	svc, err := h.serviceFor(c, projectKey)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, types.ErrorResponse{
-			Code:    "SESSION_NOT_READY",
-			Message: err.Error(),
-		})
-		return
-	}
 
-	items, err := svc.ListDocumentsByParent(c.Request.Context(), projectKey, parentID)
+	items, err := h.knowledgeSvc.ListDocumentsByParent(c.Request.Context(), projectKey, parentID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
 			Code:    "LIST_DOCUMENTS_FAILED",
@@ -103,16 +78,8 @@ func (h *KnowledgeHandler) Get(c *gin.Context) {
 		})
 		return
 	}
-	svc, err := h.serviceFor(c, projectKey)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, types.ErrorResponse{
-			Code:    "SESSION_NOT_READY",
-			Message: err.Error(),
-		})
-		return
-	}
 
-	meta, content, err := svc.GetDocument(c.Request.Context(), projectKey, docID)
+	meta, content, err := h.knowledgeSvc.GetDocument(c.Request.Context(), projectKey, docID)
 	if err != nil {
 		if errors.Is(err, repository.ErrDocumentNotFound) {
 			c.JSON(http.StatusNotFound, types.ErrorResponse{
@@ -143,14 +110,6 @@ func (h *KnowledgeHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, types.ErrorResponse{
 			Code:    "MISSING_PROJECT_KEY",
 			Message: "project_key is required",
-		})
-		return
-	}
-	svc, err := h.serviceFor(c, projectKey)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, types.ErrorResponse{
-			Code:    "SESSION_NOT_READY",
-			Message: err.Error(),
 		})
 		return
 	}
@@ -224,7 +183,7 @@ func (h *KnowledgeHandler) Create(c *gin.Context) {
 		content = &parsed
 	}
 
-	createdMeta, createdContent, err := svc.CreateDocument(
+	createdMeta, createdContent, err := h.knowledgeSvc.CreateDocument(
 		c.Request.Context(),
 		projectKey,
 		service.KnowledgeCreateRequest{
@@ -264,14 +223,6 @@ func (h *KnowledgeHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, types.ErrorResponse{
 			Code:    "MISSING_DOCUMENT_ID",
 			Message: "doc_id is required",
-		})
-		return
-	}
-	svc, err := h.serviceFor(c, projectKey)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, types.ErrorResponse{
-			Code:    "SESSION_NOT_READY",
-			Message: err.Error(),
 		})
 		return
 	}
@@ -320,7 +271,7 @@ func (h *KnowledgeHandler) Update(c *gin.Context) {
 		return
 	}
 
-	updatedMeta, updatedContent, err := svc.UpdateDocument(
+	updatedMeta, updatedContent, err := h.knowledgeSvc.UpdateDocument(
 		c.Request.Context(),
 		projectKey,
 		docID,
