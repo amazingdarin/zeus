@@ -22,8 +22,12 @@ func RegisterRoutes(
 	knowledgeHandler := NewKnowledgeHandler(knowledgeSvc)
 	searchHandler := NewSearchHandler(searchSvc)
 	openapiHandler := NewOpenAPIHandler(openapiIndexSvc)
+	systemHandler := NewSystemHandler()
 
 	api := r.Group("/api")
+
+	// System
+	api.GET("/system", systemHandler.Get)
 
 	// StorageObject
 	api.POST("/projects/:project_key/storage-objects", storageObjectHandler.Create)
