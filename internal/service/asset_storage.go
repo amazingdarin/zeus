@@ -14,6 +14,7 @@ type StoredAssetInfo struct {
 	Mime        string
 
 	// Optional location hints for downstream services.
+	GitRepo     string
 	GitTempPath string
 	Bucket      string
 	ObjectKey   string
@@ -24,7 +25,7 @@ type StoredAssetInfo struct {
 type AssetStorageService interface {
 	Store(
 		ctx context.Context,
-		projectKey string,
+		repo string,
 		assetID string,
 		filename string,
 		content io.Reader,

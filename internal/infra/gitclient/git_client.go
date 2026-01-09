@@ -32,6 +32,10 @@ var (
 
 type GitKey string
 
+func GenGitKeyFromSession(sessionID string, repo string) GitKey {
+	return GitKey(sessionID + "-" + strings.ReplaceAll(repo, "/", "-"))
+}
+
 type GitClientOption func(*GitClient)
 
 type GitClient struct {

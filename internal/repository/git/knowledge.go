@@ -233,7 +233,7 @@ func (r *KnowledgeRepository) sessionGit(
 	if repo == "" {
 		return nil, fmt.Errorf("repo is required")
 	}
-	key := gitclient.GitKey(sessionID + "-" + strings.ReplaceAll(repo, "/", "-"))
+	key := gitclient.GenGitKeyFromSession(sessionID, repo)
 	handle, err := r.gitClientManager.Get(key, repo)
 	if err != nil {
 		return nil, err

@@ -284,7 +284,7 @@ func buildRepoName(projectKey string) string {
 	if projectKey == "" {
 		return ""
 	}
-	return fmt.Sprintf("zeus-%s.git", projectKey)
+	return fmt.Sprintf("%s.git", projectKey)
 }
 
 func (s *Service) buildRepoURL(baseURL, repoName string) string {

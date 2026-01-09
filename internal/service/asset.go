@@ -29,6 +29,7 @@ type AssetMeta struct {
 	Size        int64                   `json:"size"`
 	Mime        string                  `json:"mime"`
 	StorageType domain.AssetStorageType `json:"storage_type"`
+	GitRepo     string                  `json:"git_repo,omitempty"`
 	GitTempPath string                  `json:"git_temp_path,omitempty"`
 	Bucket      string                  `json:"bucket,omitempty"`
 	ObjectKey   string                  `json:"object_key,omitempty"`
