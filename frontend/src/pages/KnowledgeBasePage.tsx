@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import KnowledgeBaseLayout from "../components/KnowledgeBaseLayout";
 import KnowledgeBaseSideNav, {
   type KnowledgeBaseDocument,
+  type KnowledgeBaseMoveRequest,
 } from "../components/KnowledgeBaseSideNav";
 import DocumentPage from "./DocumentPage";
 import { apiFetch } from "../config/api";
@@ -18,6 +19,7 @@ type DocumentResponse = {
   parent_id?: string;
   has_child?: boolean;
   order?: number;
+  index?: number;
   storage_object_id?: string;
   meta?: {
     id?: string;
@@ -70,7 +72,7 @@ function KnowledgeBasePage() {
       type: normalizedType,
       parentId: String(item.meta?.parent ?? item.parent ?? item.parent_id ?? ""),
       hasChild: Boolean(item.has_child),
-      order: Number(item.order ?? 0),
+      order: Number(item.index ?? item.order ?? 0),
       storageObjectId: String(item.storage_object_id ?? ""),
     };
   }, []);
@@ -270,6 +272,53 @@ function KnowledgeBasePage() {
     [currentProject, loadChildren, loadRootDocuments],
   );
 
+  const refreshParent = useCallback(
+    async (parentId: string) => {
+      const projectKey = currentProject?.key;
+      if (!projectKey) {
+        return;
+      }
+      const normalized = parentId.trim();
+      if (!normalized || isRootDocumentId(normalized)) {
+        await loadRootDocuments(projectKey);
+        return;
+      }
+      setExpandedIds((prev) => ({ ...prev, [normalized]: true }));
+      await loadChildren(projectKey, normalized);
+    },
+    [currentProject?.key, loadChildren, loadRootDocuments],
+  );
+
+  const handleMove = useCallback(
+    async (request: KnowledgeBaseMoveRequest) => {
+      const projectKey = currentProject?.key;
+      if (!projectKey) {
+        return;
+      }
+      const payload = {
+        new_parent_id: request.newParentId,
+        before_id: request.beforeId,
+        after_id: request.afterId,
+      };
+      const response = await apiFetch(
+        `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(request.docId)}/move`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+      if (!response.ok) {
+        return;
+      }
+      await refreshParent(request.sourceParentId);
+      if (request.targetParentId !== request.sourceParentId) {
+        await refreshParent(request.targetParentId);
+      }
+    },
+    [currentProject?.key, refreshParent],
+  );
+
   return (
     <KnowledgeBaseLayout
       sideNav={
@@ -282,6 +331,7 @@ function KnowledgeBasePage() {
           rootLoading={rootLoading}
           onSelect={setActiveDocumentId}
           onToggle={handleToggle}
+          onMove={handleMove}
         />
       }
     >
