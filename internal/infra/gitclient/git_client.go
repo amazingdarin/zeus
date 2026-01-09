@@ -43,6 +43,7 @@ type GitClient struct {
 
 	stateMu  sync.Mutex
 	readyMu  sync.Mutex
+	execMu   sync.Mutex
 	state    GitState
 	lastErr  error
 	refCount int64
@@ -487,6 +488,8 @@ func (c *GitClient) ensureRemote(ctx context.Context) error {
 }
 
 func (c *GitClient) exec(ctx context.Context, args ...string) (string, string, error) {
+	c.execMu.Lock()
+	defer c.execMu.Unlock()
 	if ctx == nil {
 		ctx = context.Background()
 	}
