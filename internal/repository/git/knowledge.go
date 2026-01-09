@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"zeus/internal/infra/gitclient"
 	"zeus/internal/infra/session"
 	"zeus/internal/repository"
+	"zeus/internal/types"
 )
 
 type KnowledgeRepository struct {
@@ -190,6 +192,120 @@ func (r *KnowledgeRepository) UpdateDocument(
 	return nil
 }
 
+func (r *KnowledgeRepository) MoveDocumentDir(
+	ctx context.Context,
+	repo, docID string,
+	newParentID string,
+) error {
+	localPath, err := r.repoPath(ctx, repo)
+	if err != nil {
+		return err
+	}
+	docID = strings.TrimSpace(docID)
+	if docID == "" {
+		return fmt.Errorf("doc id is required")
+	}
+
+	meta, currentDir, err := r.findMetaByID(localPath, docID)
+	if err != nil {
+		return err
+	}
+
+	newParentDir, err := r.resolveParentDir(localPath, newParentID)
+	if err != nil {
+		return err
+	}
+	if newParentDir == "" {
+		newParentDir = filepath.Join(localPath, "docs")
+	}
+	slug := strings.TrimSpace(meta.Slug)
+	if slug == "" {
+		slug = filepath.Base(currentDir)
+	}
+	targetDir := filepath.Join(newParentDir, slug)
+	if currentDir == targetDir {
+		return nil
+	}
+	if exists(targetDir) {
+		return fmt.Errorf("target document path already exists: %s", targetDir)
+	}
+	if err := os.MkdirAll(newParentDir, 0o755); err != nil {
+		return fmt.Errorf("ensure parent directory: %w", err)
+	}
+	if err := os.Rename(currentDir, targetDir); err != nil {
+		return fmt.Errorf("move document directory: %w", err)
+	}
+	return nil
+}
+
+func (r *KnowledgeRepository) ReadOrder(
+	ctx context.Context,
+	repo, parentID string,
+) (domain.DocumentOrder, bool, error) {
+	localPath, err := r.repoPath(ctx, repo)
+	if err != nil {
+		return domain.DocumentOrder{}, false, err
+	}
+	parentDir, err := r.resolveParentDir(localPath, parentID)
+	if err != nil {
+		return domain.DocumentOrder{}, false, err
+	}
+	indexPath := filepath.Join(parentDir, "index.json")
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return domain.DocumentOrder{}, false, nil
+		}
+		return domain.DocumentOrder{}, false, fmt.Errorf("read index: %w", err)
+	}
+	var order domain.DocumentOrder
+	if err := json.Unmarshal(data, &order); err != nil {
+		return domain.DocumentOrder{}, false, fmt.Errorf("parse index: %w", err)
+	}
+	if order.Version == 0 {
+		order.Version = 1
+	}
+	return order, true, nil
+}
+
+func (r *KnowledgeRepository) WriteOrder(
+	ctx context.Context,
+	repo, parentID string,
+	order domain.DocumentOrder,
+) error {
+	localPath, err := r.repoPath(ctx, repo)
+	if err != nil {
+		return err
+	}
+	parentDir, err := r.resolveParentDir(localPath, parentID)
+	if err != nil {
+		return err
+	}
+	if order.Version == 0 {
+		order.Version = 1
+	}
+	return writeJSON(filepath.Join(parentDir, "index.json"), order)
+}
+
+func (r *KnowledgeRepository) Commit(ctx context.Context, repo, message string) error {
+	handle, err := r.sessionGit(ctx, repo)
+	if err != nil {
+		return err
+	}
+	defer handle.Close()
+
+	if err := handle.Client().Commit(ctx, message); err != nil {
+		if errors.Is(err, gitclient.ErrNoChanges) {
+			return nil
+		}
+		return fmt.Errorf("git commit: %w", err)
+	}
+	if err := handle.Client().Push(ctx, "", ""); err != nil {
+		return fmt.Errorf("git push: %w", err)
+	}
+	return nil
+}
+
 func (r *KnowledgeRepository) repoPath(ctx context.Context, repo string) (string, error) {
 	handle, err := r.sessionGit(ctx, repo)
 	if err != nil {
@@ -197,10 +313,12 @@ func (r *KnowledgeRepository) repoPath(ctx context.Context, repo string) (string
 	}
 
 	// Pull the latest changes
-	err = handle.Client().Pull(ctx, "", "")
-	if err != nil {
-		handle.Close()
-		return "", fmt.Errorf("git pull: %w", err)
+	if !skipRepoPull(ctx) {
+		err = handle.Client().Pull(ctx, "", "")
+		if err != nil {
+			handle.Close()
+			return "", fmt.Errorf("git pull: %w", err)
+		}
 	}
 
 	repo = strings.TrimSpace(repo)
@@ -212,6 +330,14 @@ func (r *KnowledgeRepository) repoPath(ctx context.Context, repo string) (string
 		return "", fmt.Errorf("repo path is required")
 	}
 	return repoPath, nil
+}
+
+func skipRepoPull(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	value, ok := ctx.Value(types.RepoSkipPullKey{}).(bool)
+	return ok && value
 }
 
 func (r *KnowledgeRepository) sessionGit(

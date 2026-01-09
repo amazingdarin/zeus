@@ -24,6 +24,12 @@ type KnowledgeDocumentUpdateRequest struct {
 	Content json.RawMessage               `json:"content"`
 }
 
+type KnowledgeDocumentMoveRequest struct {
+	NewParentID string `json:"new_parent_id"`
+	BeforeID    string `json:"before_id"`
+	AfterID     string `json:"after_id"`
+}
+
 type KnowledgeOpenAPIRequest struct {
 	Source   string `json:"source"`
 	Renderer string `json:"renderer"`
@@ -63,4 +69,10 @@ type KnowledgeDocumentResponse struct {
 	Code    string               `json:"code"`
 	Message string               `json:"message"`
 	Data    KnowledgeDocumentDTO `json:"data"`
+}
+
+type KnowledgeDocumentMoveResponse struct {
+	Code    string                   `json:"code"`
+	Message string                   `json:"message"`
+	Data    KnowledgeDocumentMetaDTO `json:"data"`
 }

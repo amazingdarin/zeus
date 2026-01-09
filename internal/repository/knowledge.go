@@ -19,4 +19,8 @@ type KnowledgeRepository interface {
 		metaPatch *domain.DocumentMeta,
 		contentPatch *domain.DocumentContent,
 	) error
+	MoveDocumentDir(ctx context.Context, repo, docID, newParentID string) error
+	ReadOrder(ctx context.Context, repo, parentID string) (domain.DocumentOrder, bool, error)
+	WriteOrder(ctx context.Context, repo, parentID string, order domain.DocumentOrder) error
+	Commit(ctx context.Context, repo, message string) error
 }

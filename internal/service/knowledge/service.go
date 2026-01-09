@@ -3,6 +3,7 @@ package knowledge
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"zeus/internal/domain"
 	"zeus/internal/repository"
 	"zeus/internal/service"
+	"zeus/internal/types"
 	"zeus/internal/util"
 )
 
@@ -69,6 +71,11 @@ func (s *Service) ListDocumentsByParent(
 
 	childMap := buildChildMap(metas)
 	filtered := filterByParent(metas, parentID)
+	order, err := s.normalizeIndex(ctx, project.RepoName, parentID, filtered)
+	if err != nil {
+		return nil, err
+	}
+	filtered = sortDocumentsByOrder(filtered, order)
 	items := make([]service.KnowledgeDocumentListItem, 0, len(filtered))
 	for _, meta := range filtered {
 		items = append(items, service.KnowledgeDocumentListItem{
@@ -233,6 +240,130 @@ func (s *Service) UpdateDocument(
 		updatedContent = *contentPatch
 	}
 	return updatedMeta, updatedContent, nil
+}
+
+func (s *Service) MoveDocument(
+	ctx context.Context,
+	projectKey, docID string,
+	req service.KnowledgeMoveRequest,
+) (domain.DocumentMeta, error) {
+	projectKey = strings.TrimSpace(projectKey)
+	if projectKey == "" {
+		return domain.DocumentMeta{}, fmt.Errorf("project key is required")
+	}
+	docID = strings.TrimSpace(docID)
+	if docID == "" {
+		return domain.DocumentMeta{}, fmt.Errorf("doc id is required")
+	}
+
+	project, err := s.projectRepo.FindByKey(ctx, projectKey)
+	if err != nil {
+		return domain.DocumentMeta{}, fmt.Errorf("find project: %w", err)
+	}
+
+	metas, err := s.knowledgeRepo.ListDocuments(ctx, project.RepoName)
+	if err != nil {
+		return domain.DocumentMeta{}, err
+	}
+
+	current, ok := findMetaByID(metas, docID)
+	if !ok {
+		return domain.DocumentMeta{}, repository.ErrDocumentNotFound
+	}
+
+	targetParent := strings.TrimSpace(req.NewParentID)
+	if targetParent == "" {
+		targetParent = strings.TrimSpace(current.Parent)
+	}
+	targetParentNorm := normalizeParentID(targetParent)
+	currentParentNorm := normalizeParentID(current.Parent)
+
+	currentSiblings := filterByParent(metas, currentParentNorm)
+	targetSiblings := currentSiblings
+	if targetParentNorm != currentParentNorm {
+		targetSiblings = filterByParent(metas, targetParentNorm)
+	}
+
+	oldOrder, err := s.normalizeIndex(ctx, project.RepoName, currentParentNorm, currentSiblings)
+	if err != nil {
+		return domain.DocumentMeta{}, err
+	}
+	sameParent := targetParentNorm == currentParentNorm
+	newOrder := oldOrder
+	if !sameParent {
+		newOrder, err = s.normalizeIndex(ctx, project.RepoName, targetParentNorm, targetSiblings)
+		if err != nil {
+			return domain.DocumentMeta{}, err
+		}
+	}
+
+	if sameParent {
+		updatedOrder, err := insertIntoOrder(
+			removeFromOrder(oldOrder.Order, docID),
+			docID,
+			req.BeforeID,
+			req.AfterID,
+		)
+		if err != nil {
+			return domain.DocumentMeta{}, err
+		}
+		newOrder.Order = updatedOrder
+	} else {
+		oldOrder.Order = removeFromOrder(oldOrder.Order, docID)
+		updatedOrder, err := insertIntoOrder(newOrder.Order, docID, req.BeforeID, req.AfterID)
+		if err != nil {
+			return domain.DocumentMeta{}, err
+		}
+		newOrder.Order = updatedOrder
+	}
+
+	ctxNoPull := withSkipRepoPull(ctx)
+	if !sameParent {
+		if err := s.knowledgeRepo.WriteOrder(ctxNoPull, project.RepoName, currentParentNorm, oldOrder); err != nil {
+			return domain.DocumentMeta{}, err
+		}
+	}
+	if err := s.knowledgeRepo.WriteOrder(ctxNoPull, project.RepoName, targetParentNorm, newOrder); err != nil {
+		return domain.DocumentMeta{}, err
+	}
+
+	now := time.Now()
+	if !sameParent {
+		parentValue := targetParentNorm
+		if parentValue == "" {
+			parentValue = "root"
+		}
+		patch := &domain.DocumentMeta{
+			Parent:    parentValue,
+			UpdatedAt: now,
+		}
+		if err := s.knowledgeRepo.UpdateDocument(ctxNoPull, project.RepoName, docID, patch, nil); err != nil {
+			return domain.DocumentMeta{}, err
+		}
+		if err := s.knowledgeRepo.MoveDocumentDir(ctxNoPull, project.RepoName, docID, targetParentNorm); err != nil {
+			return domain.DocumentMeta{}, err
+		}
+	}
+
+	commitMsg := fmt.Sprintf(
+		"move document %s from %s to %s",
+		docID,
+		formatParentForCommit(currentParentNorm),
+		formatParentForCommit(targetParentNorm),
+	)
+	if sameParent {
+		commitMsg = fmt.Sprintf("reorder documents under parent %s", formatParentForCommit(targetParentNorm))
+	}
+	if err := s.knowledgeRepo.Commit(ctxNoPull, project.RepoName, commitMsg); err != nil {
+		return domain.DocumentMeta{}, err
+	}
+
+	updated := current
+	updated.UpdatedAt = now
+	if targetParentNorm != currentParentNorm {
+		updated.Parent = targetParentNorm
+	}
+	return updated, nil
 }
 
 func buildMetaPatch(
@@ -469,4 +600,277 @@ func buildChildMap(metas []domain.DocumentMeta) map[string]bool {
 		childMap[parent] = true
 	}
 	return childMap
+}
+
+func normalizeParentID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.EqualFold(value, "root") {
+		return ""
+	}
+	return value
+}
+
+func findMetaByID(metas []domain.DocumentMeta, docID string) (domain.DocumentMeta, bool) {
+	docID = strings.TrimSpace(docID)
+	for _, meta := range metas {
+		if meta.ID == docID {
+			return meta, true
+		}
+	}
+	return domain.DocumentMeta{}, false
+}
+
+// loadChildrenOrder ensures index.json exists so ordering is centralized per parent.
+func (s *Service) loadChildrenOrder(
+	ctx context.Context,
+	repo string,
+	parentID string,
+	siblings []domain.DocumentMeta,
+) (domain.DocumentOrder, error) {
+	order, exists, err := s.knowledgeRepo.ReadOrder(ctx, repo, parentID)
+	if err != nil {
+		return domain.DocumentOrder{}, err
+	}
+	if exists {
+		if order.Version == 0 {
+			order.Version = 1
+		}
+		return order, nil
+	}
+
+	sortSiblingsStable(siblings)
+	ids := make([]string, 0, len(siblings))
+	for _, meta := range siblings {
+		if strings.TrimSpace(meta.ID) == "" {
+			continue
+		}
+		ids = append(ids, meta.ID)
+	}
+	order = domain.DocumentOrder{
+		Version: 1,
+		Order:   ids,
+	}
+
+	ctxNoPull := withSkipRepoPull(ctx)
+	if err := s.knowledgeRepo.WriteOrder(ctxNoPull, repo, parentID, order); err != nil {
+		return domain.DocumentOrder{}, err
+	}
+	if err := s.knowledgeRepo.Commit(
+		ctxNoPull,
+		repo,
+		fmt.Sprintf("initialize index under parent %s", formatParentForCommit(parentID)),
+	); err != nil {
+		return domain.DocumentOrder{}, err
+	}
+	return order, nil
+}
+
+// normalizeIndex lazily appends missing children to index.json to keep ordering stable
+// without touching every meta.json, minimizing Git conflict surface.
+func (s *Service) normalizeIndex(
+	ctx context.Context,
+	repo string,
+	parentID string,
+	siblings []domain.DocumentMeta,
+) (domain.DocumentOrder, error) {
+	order, err := s.loadChildrenOrder(ctx, repo, parentID, siblings)
+	if err != nil {
+		return domain.DocumentOrder{}, err
+	}
+	if len(siblings) == 0 {
+		return order, nil
+	}
+
+	seen := make(map[string]struct{}, len(order.Order))
+	for _, id := range order.Order {
+		if id = strings.TrimSpace(id); id != "" {
+			seen[id] = struct{}{}
+		}
+	}
+
+	missing := make([]domain.DocumentMeta, 0)
+	for _, meta := range siblings {
+		if meta.ID == "" {
+			continue
+		}
+		if _, ok := seen[meta.ID]; ok {
+			continue
+		}
+		missing = append(missing, meta)
+	}
+	if len(missing) == 0 {
+		return order, nil
+	}
+
+	sortSiblingsStable(missing)
+	for _, meta := range missing {
+		order.Order = append(order.Order, meta.ID)
+	}
+
+	ctxNoPull := withSkipRepoPull(ctx)
+	if err := s.knowledgeRepo.WriteOrder(ctxNoPull, repo, parentID, order); err != nil {
+		return domain.DocumentOrder{}, err
+	}
+	if err := s.knowledgeRepo.Commit(
+		ctxNoPull,
+		repo,
+		fmt.Sprintf("normalize index under parent %s", formatParentForCommit(parentID)),
+	); err != nil {
+		return domain.DocumentOrder{}, err
+	}
+	return order, nil
+}
+
+func sortDocumentsByOrder(
+	siblings []domain.DocumentMeta,
+	order domain.DocumentOrder,
+) []domain.DocumentMeta {
+	if len(siblings) == 0 {
+		return siblings
+	}
+	index := make(map[string]domain.DocumentMeta, len(siblings))
+	for _, meta := range siblings {
+		index[meta.ID] = meta
+	}
+	ordered := make([]domain.DocumentMeta, 0, len(siblings))
+	seen := make(map[string]struct{}, len(siblings))
+	for _, id := range order.Order {
+		if meta, ok := index[id]; ok {
+			ordered = append(ordered, meta)
+			seen[id] = struct{}{}
+		}
+	}
+	if len(ordered) == len(siblings) {
+		return ordered
+	}
+	rest := make([]domain.DocumentMeta, 0, len(siblings)-len(ordered))
+	for _, meta := range siblings {
+		if _, ok := seen[meta.ID]; ok {
+			continue
+		}
+		rest = append(rest, meta)
+	}
+	sortSiblingsStable(rest)
+	return append(ordered, rest...)
+}
+
+func insertIntoOrder(
+	order []string,
+	docID string,
+	beforeID string,
+	afterID string,
+) ([]string, error) {
+	docID = strings.TrimSpace(docID)
+	if docID == "" {
+		return nil, fmt.Errorf("doc id is required")
+	}
+	order = removeFromOrder(order, docID)
+	beforeID = strings.TrimSpace(beforeID)
+	afterID = strings.TrimSpace(afterID)
+
+	if beforeID == "" && afterID == "" {
+		return append(order, docID), nil
+	}
+
+	beforeIndex := indexOf(order, beforeID)
+	afterIndex := indexOf(order, afterID)
+
+	if beforeID != "" && beforeIndex == -1 {
+		return nil, fmt.Errorf("before_id not found")
+	}
+	if afterID != "" && afterIndex == -1 {
+		return nil, fmt.Errorf("after_id not found")
+	}
+
+	if beforeID != "" && afterID != "" {
+		if afterIndex >= beforeIndex {
+			return nil, fmt.Errorf("invalid anchor order")
+		}
+		return insertAt(order, beforeIndex, docID), nil
+	}
+	if beforeID != "" {
+		return insertAt(order, beforeIndex, docID), nil
+	}
+	return insertAt(order, afterIndex+1, docID), nil
+}
+
+func removeFromOrder(order []string, docID string) []string {
+	if docID == "" || len(order) == 0 {
+		return order
+	}
+	out := make([]string, 0, len(order))
+	for _, id := range order {
+		if id == docID {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
+func indexOf(order []string, value string) int {
+	if value == "" {
+		return -1
+	}
+	for i, id := range order {
+		if id == value {
+			return i
+		}
+	}
+	return -1
+}
+
+func insertAt(order []string, index int, value string) []string {
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(order) {
+		return append(order, value)
+	}
+	out := make([]string, 0, len(order)+1)
+	out = append(out, order[:index]...)
+	out = append(out, value)
+	out = append(out, order[index:]...)
+	return out
+}
+
+func sortSiblingsStable(siblings []domain.DocumentMeta) {
+	sort.SliceStable(siblings, func(i, j int) bool {
+		left := siblings[i]
+		right := siblings[j]
+		return compareMetaFallback(left, right)
+	})
+}
+
+func compareMetaFallback(left, right domain.DocumentMeta) bool {
+	if !left.CreatedAt.IsZero() || !right.CreatedAt.IsZero() {
+		if left.CreatedAt.IsZero() {
+			return false
+		}
+		if right.CreatedAt.IsZero() {
+			return true
+		}
+		if !left.CreatedAt.Equal(right.CreatedAt) {
+			return left.CreatedAt.Before(right.CreatedAt)
+		}
+	}
+	if left.Slug != right.Slug {
+		return left.Slug < right.Slug
+	}
+	return left.ID < right.ID
+}
+
+func formatParentForCommit(parentID string) string {
+	parentID = normalizeParentID(parentID)
+	if parentID == "" {
+		return "root"
+	}
+	return parentID
+}
+
+func withSkipRepoPull(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.WithValue(context.Background(), types.RepoSkipPullKey{}, true)
+	}
+	return context.WithValue(ctx, types.RepoSkipPullKey{}, true)
 }

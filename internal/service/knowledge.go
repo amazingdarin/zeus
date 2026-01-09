@@ -27,6 +27,12 @@ type KnowledgeDocumentListItem struct {
 	HasChild bool
 }
 
+type KnowledgeMoveRequest struct {
+	NewParentID string
+	BeforeID    string
+	AfterID     string
+}
+
 type KnowledgeService interface {
 	ListDocuments(ctx context.Context, projectKey string) ([]domain.DocumentMeta, error)
 	ListDocumentsByParent(
@@ -37,4 +43,5 @@ type KnowledgeService interface {
 	GetDocument(ctx context.Context, projectKey, docID string) (domain.DocumentMeta, domain.DocumentContent, error)
 	CreateDocument(ctx context.Context, projectKey string, req KnowledgeCreateRequest) (domain.DocumentMeta, domain.DocumentContent, error)
 	UpdateDocument(ctx context.Context, projectKey, docID string, req KnowledgeUpdateRequest) (domain.DocumentMeta, domain.DocumentContent, error)
+	MoveDocument(ctx context.Context, projectKey, docID string, req KnowledgeMoveRequest) (domain.DocumentMeta, error)
 }

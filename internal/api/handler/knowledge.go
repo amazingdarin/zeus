@@ -302,6 +302,67 @@ func (h *KnowledgeHandler) Update(c *gin.Context) {
 	})
 }
 
+// Move
+// @route PATCH /api/projects/:project_key/documents/:doc_id/move
+func (h *KnowledgeHandler) Move(c *gin.Context) {
+	projectKey := strings.TrimSpace(c.Param("project_key"))
+	if projectKey == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{
+			Code:    "MISSING_PROJECT_KEY",
+			Message: "project_key is required",
+		})
+		return
+	}
+	docID := strings.TrimSpace(c.Param("doc_id"))
+	if docID == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{
+			Code:    "MISSING_DOCUMENT_ID",
+			Message: "doc_id is required",
+		})
+		return
+	}
+
+	var req types.KnowledgeDocumentMoveRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{
+			Code:    "INVALID_REQUEST",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	meta, err := h.knowledgeSvc.MoveDocument(
+		c.Request.Context(),
+		projectKey,
+		docID,
+		service.KnowledgeMoveRequest{
+			NewParentID: strings.TrimSpace(req.NewParentID),
+			BeforeID:    strings.TrimSpace(req.BeforeID),
+			AfterID:     strings.TrimSpace(req.AfterID),
+		},
+	)
+	if err != nil {
+		if errors.Is(err, repository.ErrDocumentNotFound) {
+			c.JSON(http.StatusNotFound, types.ErrorResponse{
+				Code:    "DOCUMENT_NOT_FOUND",
+				Message: "document not found",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+			Code:    "MOVE_DOCUMENT_FAILED",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.KnowledgeDocumentMoveResponse{
+		Code:    "OK",
+		Message: "success",
+		Data:    mapMetaDTO(meta),
+	})
+}
+
 func mapMetaDTO(meta domain.DocumentMeta) types.KnowledgeDocumentMetaDTO {
 	docType := strings.TrimSpace(meta.DocType)
 	if docType == "" {
