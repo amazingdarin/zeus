@@ -856,6 +856,32 @@ body {
   max-width: 100%;
 }
 
+.openapi-viewer .swagger-ui .info .title {
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.openapi-viewer .swagger-ui .info .title small {
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  position: relative;
+  top: 5px;
+}
+
+.openapi-viewer .swagger-ui .info .title small + small {
+  margin-left: 8px;
+}
+
+.openapi-viewer .swagger-ui .info .title .version-stamp + .version-stamp {
+  margin-left: 8px;
+}
+
 .openapi-viewer-state {
   padding: 20px;
   border-radius: 12px;
