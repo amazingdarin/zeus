@@ -9,7 +9,11 @@ const mockProjects: Project[] = [
   { id: "project-orbit", key: "orbit", name: "Orbit" },
 ];
 
-function ProjectSelector() {
+type ProjectSelectorProps = {
+  collapsed?: boolean;
+};
+
+function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
   const [open, setOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const { projects, currentProject, setCurrentProject, reloadProjects } = useProjectContext();
@@ -24,6 +28,7 @@ function ProjectSelector() {
   const activeProject = currentProject ?? availableProjects[0] ?? null;
 
   const toggleOpen = () => setOpen((prev) => !prev);
+  const projectInitial = (activeProject?.name || "P").trim().charAt(0).toUpperCase();
 
   const handleSelect = (project: Project) => {
     setCurrentProject(project.key);
@@ -36,21 +41,32 @@ function ProjectSelector() {
   };
 
   return (
-    <div className="project-selector">
-      <div className="sidebar-title">Project</div>
+    <div className={`project-selector${collapsed ? " compact" : ""}`}>
+      <div className={`sidebar-title-wrap${collapsed ? " compact" : ""}`}>
+        <div className={`sidebar-title${collapsed ? " compact" : ""}`}>Project</div>
+        {collapsed ? <div className="sidebar-divider" aria-hidden="true" /> : null}
+      </div>
       <button
-        className="project-selector-button"
+        className={`project-selector-button${collapsed ? " compact" : ""}`}
         type="button"
         aria-expanded={open}
         onClick={toggleOpen}
       >
-        <span className="project-selector-label">
-          {activeProject ? activeProject.name : "Select a project"}
-        </span>
-        <span className="project-selector-caret">{open ? "v" : ">"}</span>
+        {collapsed ? (
+          <span className="project-selector-icon" aria-label="Project">
+            {projectInitial}
+          </span>
+        ) : (
+          <>
+            <span className="project-selector-label">
+              {activeProject ? activeProject.name : "Select a project"}
+            </span>
+            <span className="project-selector-caret">{open ? "v" : ">"}</span>
+          </>
+        )}
       </button>
       {open ? (
-        <div className="project-selector-menu">
+        <div className={`project-selector-menu${collapsed ? " compact" : ""}`}>
           <button
             className="project-selector-item project-selector-add"
             type="button"
