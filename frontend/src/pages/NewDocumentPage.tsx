@@ -221,12 +221,7 @@ function NewDocumentPage() {
         documentPayload?.data?.meta?.id ?? documentPayload?.data?.id ?? documentId ?? "",
       );
       if (targetID) {
-        const query = new URLSearchParams({ document_id: targetID });
-        const parentValue = parentID || parentIdParam;
-        if (parentValue) {
-          query.set("parent_id", parentValue);
-        }
-        navigate(`/knowledge?${query.toString()}`);
+        navigate(`/knowledge?document_id=${encodeURIComponent(targetID)}`);
       }
       setContentMeta(payloadForSave.meta);
       console.log("document_saved", documentPayload);

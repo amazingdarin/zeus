@@ -290,6 +290,15 @@ func (s *Service) UpdateDocument(
 		return domain.DocumentMeta{}, domain.DocumentContent{}, err
 	}
 
+	ctxNoPull := withSkipRepoPull(ctx)
+	if err := s.knowledgeRepo.Commit(
+		ctxNoPull,
+		project.RepoName,
+		fmt.Sprintf("docs: update %s", docID),
+	); err != nil {
+		return domain.DocumentMeta{}, domain.DocumentContent{}, err
+	}
+
 	updatedMeta := existingMeta
 	if metaPatch != nil {
 		updatedMeta = applyMetaPatch(existingMeta, metaPatch)
