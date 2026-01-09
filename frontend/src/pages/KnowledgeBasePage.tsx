@@ -35,7 +35,7 @@ type DocumentDetailResponse = {
 
 function KnowledgeBasePage() {
   const { currentProject } = useProjectContext();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [rootDocuments, setRootDocuments] = useState<KnowledgeBaseDocument[]>(
     [],
   );
@@ -44,10 +44,15 @@ function KnowledgeBasePage() {
   >({});
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
+  const [activeDocumentMeta, setActiveDocumentMeta] = useState<{
+    id: string;
+    parentId: string;
+  } | null>(null);
   const [loadingIds, setLoadingIds] = useState<Record<string, boolean>>({});
   const [rootLoading, setRootLoading] = useState(false);
   const projectKeyRef = useRef<string | null>(null);
   const loadingIdsRef = useRef<Record<string, boolean>>({});
+  const rootLoadAttemptRef = useRef<string | null>(null);
   const documentIdParam = useMemo(() => {
     const value = searchParams.get("document_id");
     return value ? value.trim() : null;
@@ -56,6 +61,18 @@ function KnowledgeBasePage() {
     const value = searchParams.get("parent_id");
     return value ? value.trim() : null;
   }, [searchParams]);
+  const docParentMap = useMemo(() => {
+    const map = new Map<string, string>();
+    rootDocuments.forEach((doc) => {
+      map.set(doc.id, doc.parentId);
+    });
+    Object.values(childrenByParent).forEach((children) => {
+      children.forEach((doc) => {
+        map.set(doc.id, doc.parentId);
+      });
+    });
+    return map;
+  }, [childrenByParent, rootDocuments]);
 
   const mapDocument = useCallback((item: DocumentResponse): KnowledgeBaseDocument => {
     const rawType = String(
@@ -109,6 +126,7 @@ function KnowledgeBasePage() {
 
   const loadRootDocuments = useCallback(
     async (projectKey: string) => {
+      rootLoadAttemptRef.current = projectKey;
       setRootLoading(true);
       try {
         const docs = await fetchDocuments(projectKey, "");
@@ -165,9 +183,36 @@ function KnowledgeBasePage() {
   const refreshChildren = loadChildren;
 
   const loadAncestorChain = useCallback(
-    async (projectKey: string, documentId: string) => {
+    async (projectKey: string, documentId: string, initialParentId?: string) => {
       const ancestors: string[] = [];
       const visited = new Set<string>();
+      const initialParent = initialParentId?.trim();
+      if (initialParent !== undefined) {
+        if (!initialParent || isRootDocumentId(initialParent)) {
+          return [];
+        }
+        ancestors.push(initialParent);
+        let currentId = initialParent;
+        while (currentId && !visited.has(currentId)) {
+          if (isRootDocumentId(currentId)) {
+            break;
+          }
+          visited.add(currentId);
+          const detail = await fetchDocumentDetail(projectKey, currentId);
+          if (!detail) {
+            break;
+          }
+          const parentId = String(
+            detail.meta?.parent ?? detail.parent ?? detail.parent_id ?? "",
+          ).trim();
+          if (!parentId || isRootDocumentId(parentId)) {
+            break;
+          }
+          ancestors.push(parentId);
+          currentId = parentId;
+        }
+        return ancestors.reverse();
+      }
       let currentId = documentId;
       while (currentId && !visited.has(currentId)) {
         if (isRootDocumentId(currentId)) {
@@ -190,24 +235,79 @@ function KnowledgeBasePage() {
     [fetchDocumentDetail],
   );
 
+  const buildAncestorsFromMap = useCallback(
+    (documentId: string, map: Map<string, string>) => {
+      const ancestors: string[] = [];
+      const visited = new Set<string>();
+      let currentId = map.get(documentId);
+      while (currentId && !visited.has(currentId)) {
+        if (isRootDocumentId(currentId)) {
+          break;
+        }
+        ancestors.push(currentId);
+        visited.add(currentId);
+        currentId = map.get(currentId);
+      }
+      return ancestors.reverse();
+    },
+    [],
+  );
+
   useEffect(() => {
     const projectKey = currentProject?.key ?? null;
     projectKeyRef.current = projectKey;
     setRootDocuments([]);
     setChildrenByParent({});
     setExpandedIds({});
-    setActiveDocumentId(documentIdParam);
     setLoadingIds({});
     loadingIdsRef.current = {};
+    rootLoadAttemptRef.current = null;
     setRootLoading(false);
+    setActiveDocumentMeta(null);
     if (!projectKey) {
       return;
     }
     loadRootDocuments(projectKey);
+  }, [currentProject?.key, loadRootDocuments]);
+
+  useEffect(() => {
+    const projectKey = currentProject?.key ?? null;
+    setActiveDocumentId(documentIdParam);
+    if (!projectKey) {
+      return;
+    }
+    const ensureRootLoaded = async () => {
+      if (rootLoadAttemptRef.current !== projectKey) {
+        await loadRootDocuments(projectKey);
+      }
+    };
     const expandToDocument = async () => {
+      await ensureRootLoaded();
+      if (projectKeyRef.current !== projectKey) {
+        return;
+      }
       if (documentIdParam) {
+        if (docParentMap.has(documentIdParam)) {
+          const ancestors = buildAncestorsFromMap(documentIdParam, docParentMap);
+          if (ancestors.length > 0) {
+            const expanded: Record<string, boolean> = {};
+            ancestors.forEach((id) => {
+              expanded[id] = true;
+            });
+            setExpandedIds((prev) => ({ ...prev, ...expanded }));
+          }
+          return;
+        }
+        if (!activeDocumentMeta || activeDocumentMeta.id !== documentIdParam) {
+          return;
+        }
         try {
-          const ancestors = await loadAncestorChain(projectKey, documentIdParam);
+          const knownParentId = activeDocumentMeta.parentId;
+          const ancestors = await loadAncestorChain(
+            projectKey,
+            documentIdParam,
+            knownParentId,
+          );
           if (projectKeyRef.current !== projectKey) {
             return;
           }
@@ -235,10 +335,13 @@ function KnowledgeBasePage() {
   }, [
     currentProject?.key,
     documentIdParam,
+    docParentMap,
+    buildAncestorsFromMap,
     loadAncestorChain,
     loadChildren,
-    loadRootDocuments,
     parentIdParam,
+    activeDocumentMeta,
+    loadRootDocuments,
   ]);
 
   const handleToggle = useCallback(
@@ -270,6 +373,21 @@ function KnowledgeBasePage() {
       await loadChildren(projectKey, normalizedParent);
     },
     [currentProject, loadChildren, loadRootDocuments],
+  );
+
+  const handleSelectDocument = useCallback(
+    (id: string) => {
+      setActiveDocumentId(id);
+      const params = new URLSearchParams(searchParams);
+      if (id) {
+        params.set("document_id", id);
+      } else {
+        params.delete("document_id");
+      }
+      params.delete("parent_id");
+      setSearchParams(params);
+    },
+    [searchParams, setSearchParams],
   );
 
   const refreshParent = useCallback(
@@ -329,7 +447,7 @@ function KnowledgeBasePage() {
           activeId={activeDocumentId}
           loadingIds={loadingIds}
           rootLoading={rootLoading}
-          onSelect={setActiveDocumentId}
+          onSelect={handleSelectDocument}
           onToggle={handleToggle}
           onMove={handleMove}
         />
@@ -339,6 +457,7 @@ function KnowledgeBasePage() {
         projectKey={currentProject?.key ?? ""}
         documentId={activeDocumentId}
         onDocumentsChanged={handleDocumentsChanged}
+        onDocumentMetaLoaded={setActiveDocumentMeta}
       />
     </KnowledgeBaseLayout>
   );

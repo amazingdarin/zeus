@@ -392,6 +392,16 @@ func (r *KnowledgeRepository) readMetaFile(docDir string) (domain.DocumentMeta, 
 	if meta.ID == "" {
 		return domain.DocumentMeta{}, fmt.Errorf("meta id is required")
 	}
+	if strings.TrimSpace(meta.Parent) == "" {
+		var raw map[string]interface{}
+		if err := json.Unmarshal(data, &raw); err == nil {
+			if value, ok := raw["parent_id"]; ok {
+				if parent, ok := value.(string); ok {
+					meta.Parent = strings.TrimSpace(parent)
+				}
+			}
+		}
+	}
 	if strings.TrimSpace(meta.DocType) == "" {
 		meta.DocType = string(domain.DocTypeDocument)
 	}

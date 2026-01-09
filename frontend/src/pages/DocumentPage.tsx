@@ -50,6 +50,7 @@ type DocumentPageProps = {
   projectKey: string;
   documentId: string | null;
   onDocumentsChanged?: (parentId: string) => void;
+  onDocumentMetaLoaded?: (meta: { id: string; parentId: string } | null) => void;
 };
 
 type UploadedAsset = {
@@ -85,7 +86,12 @@ type ImportedAssetState = {
   }>;
 };
 
-function DocumentPage({ projectKey, documentId, onDocumentsChanged }: DocumentPageProps) {
+function DocumentPage({
+  projectKey,
+  documentId,
+  onDocumentsChanged,
+  onDocumentMetaLoaded,
+}: DocumentPageProps) {
   const params = useParams<{ projectKey?: string; documentId?: string }>();
   const resolvedProjectKey = (params.projectKey || projectKey || "").trim();
   const resolvedDocumentId = (params.documentId || documentId || "").trim();
@@ -169,6 +175,21 @@ function DocumentPage({ projectKey, documentId, onDocumentsChanged }: DocumentPa
     loadDocument();
     return () => controller.abort();
   }, [resolvedDocumentId, resolvedProjectKey]);
+
+  useEffect(() => {
+    if (!onDocumentMetaLoaded) {
+      return;
+    }
+    if (!resolvedDocumentId) {
+      onDocumentMetaLoaded(null);
+      return;
+    }
+    if (!document || document.id !== resolvedDocumentId) {
+      onDocumentMetaLoaded(null);
+      return;
+    }
+    onDocumentMetaLoaded({ id: document.id, parentId: document.parentId });
+  }, [document, onDocumentMetaLoaded, resolvedDocumentId]);
 
   useEffect(() => {
     if (!resolvedProjectKey || !resolvedDocumentId) {
@@ -673,7 +694,12 @@ const fetchBreadcrumbChain = async (
       break;
     }
     visited.add(currentId);
-    const detail = await fetchDocumentDetail(projectKey, currentId, signal);
+    let detail: DocumentMetaInfo | null = null;
+    try {
+      detail = await fetchDocumentDetail(projectKey, currentId, signal);
+    } catch {
+      break;
+    }
     if (!detail) {
       break;
     }

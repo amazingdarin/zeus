@@ -263,11 +263,13 @@ function KnowledgeBaseSideNav({
                 >
                   {doc.title || "Untitled"}
                 </button>
+                {isLoading ? (
+                  <span className="kb-doc-spinner" aria-hidden="true" />
+                ) : null}
               </div>
             </div>
             {isExpanded ? (
               <div className="kb-doc-children">
-                {isLoading ? <div className="kb-doc-loading">Loading...</div> : null}
                 {!isLoading && children.length === 0 ? (
                   <div className="kb-doc-empty">No items</div>
                 ) : null}
