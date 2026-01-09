@@ -112,6 +112,65 @@ func (s *Service) GetDocument(
 	return meta, content, nil
 }
 
+func (s *Service) GetDocumentHierarchy(
+	ctx context.Context,
+	projectKey string,
+	docID string,
+) ([]service.KnowledgeDocumentHierarchyItem, error) {
+	projectKey = strings.TrimSpace(projectKey)
+	if projectKey == "" {
+		return nil, fmt.Errorf("project key is required")
+	}
+	docID = strings.TrimSpace(docID)
+	if docID == "" {
+		return nil, fmt.Errorf("doc id is required")
+	}
+
+	project, err := s.projectRepo.FindByKey(ctx, projectKey)
+	if err != nil {
+		return nil, fmt.Errorf("find project: %w", err)
+	}
+
+	metas, err := s.knowledgeRepo.ListDocuments(ctx, project.RepoName)
+	if err != nil {
+		return nil, err
+	}
+
+	metaByID := make(map[string]domain.DocumentMeta, len(metas))
+	for _, meta := range metas {
+		if meta.ID == "" {
+			continue
+		}
+		metaByID[meta.ID] = meta
+	}
+
+	chain := make([]service.KnowledgeDocumentHierarchyItem, 0, 4)
+	visited := make(map[string]struct{})
+	currentID := docID
+	for currentID != "" {
+		if _, seen := visited[currentID]; seen {
+			break
+		}
+		visited[currentID] = struct{}{}
+		meta, ok := metaByID[currentID]
+		if !ok {
+			return nil, repository.ErrDocumentNotFound
+		}
+		chain = append(chain, service.KnowledgeDocumentHierarchyItem{
+			ID:   meta.ID,
+			Name: meta.Title,
+		})
+		parentID := normalizeParentID(meta.Parent)
+		if parentID == "" {
+			break
+		}
+		currentID = parentID
+	}
+
+	reverseHierarchy(chain)
+	return chain, nil
+}
+
 func (s *Service) CreateDocument(
 	ctx context.Context,
 	projectKey string,
@@ -608,6 +667,12 @@ func normalizeParentID(value string) string {
 		return ""
 	}
 	return value
+}
+
+func reverseHierarchy(items []service.KnowledgeDocumentHierarchyItem) {
+	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
+		items[i], items[j] = items[j], items[i]
+	}
 }
 
 func findMetaByID(metas []domain.DocumentMeta, docID string) (domain.DocumentMeta, bool) {

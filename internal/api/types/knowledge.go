@@ -49,14 +49,20 @@ type KnowledgeDocumentMetaDTO struct {
 	UpdatedAt string   `json:"updated_at"`
 }
 
+type KnowledgeDocumentHierarchyDTO struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type KnowledgeDocumentContentDTO struct {
 	Meta    map[string]interface{} `json:"meta"`
 	Content map[string]interface{} `json:"content"`
 }
 
 type KnowledgeDocumentDTO struct {
-	Meta    KnowledgeDocumentMetaDTO    `json:"meta"`
-	Content KnowledgeDocumentContentDTO `json:"content"`
+	Meta      KnowledgeDocumentMetaDTO        `json:"meta"`
+	Content   KnowledgeDocumentContentDTO     `json:"content"`
+	Hierarchy []KnowledgeDocumentHierarchyDTO `json:"hierarchy,omitempty"`
 }
 
 type KnowledgeListResponse struct {

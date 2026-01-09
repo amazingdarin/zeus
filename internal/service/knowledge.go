@@ -27,6 +27,11 @@ type KnowledgeDocumentListItem struct {
 	HasChild bool
 }
 
+type KnowledgeDocumentHierarchyItem struct {
+	ID   string
+	Name string
+}
+
 type KnowledgeMoveRequest struct {
 	NewParentID string
 	BeforeID    string
@@ -41,6 +46,11 @@ type KnowledgeService interface {
 		parentID string,
 	) ([]KnowledgeDocumentListItem, error)
 	GetDocument(ctx context.Context, projectKey, docID string) (domain.DocumentMeta, domain.DocumentContent, error)
+	GetDocumentHierarchy(
+		ctx context.Context,
+		projectKey string,
+		docID string,
+	) ([]KnowledgeDocumentHierarchyItem, error)
 	CreateDocument(ctx context.Context, projectKey string, req KnowledgeCreateRequest) (domain.DocumentMeta, domain.DocumentContent, error)
 	UpdateDocument(ctx context.Context, projectKey, docID string, req KnowledgeUpdateRequest) (domain.DocumentMeta, domain.DocumentContent, error)
 	MoveDocument(ctx context.Context, projectKey, docID string, req KnowledgeMoveRequest) (domain.DocumentMeta, error)

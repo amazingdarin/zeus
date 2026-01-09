@@ -95,10 +95,34 @@ func (h *KnowledgeHandler) Get(c *gin.Context) {
 		return
 	}
 
+	hierarchyItems, err := h.knowledgeSvc.GetDocumentHierarchy(c.Request.Context(), projectKey, docID)
+	if err != nil {
+		if errors.Is(err, repository.ErrDocumentNotFound) {
+			c.JSON(http.StatusNotFound, types.ErrorResponse{
+				Code:    "DOCUMENT_NOT_FOUND",
+				Message: "document not found",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+			Code:    "GET_DOCUMENT_HIERARCHY_FAILED",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	hierarchy := make([]types.KnowledgeDocumentHierarchyDTO, 0, len(hierarchyItems))
+	for _, item := range hierarchyItems {
+		hierarchy = append(hierarchy, types.KnowledgeDocumentHierarchyDTO{
+			ID:   item.ID,
+			Name: item.Name,
+		})
+	}
+
 	c.JSON(http.StatusOK, types.KnowledgeDocumentResponse{
 		Code:    "OK",
 		Message: "success",
-		Data:    mapDocumentDTO(meta, content),
+		Data:    mapDocumentDTOWithHierarchy(meta, content, hierarchy),
 	})
 }
 
@@ -399,6 +423,18 @@ func mapDocumentDTO(
 			Content: content.Content,
 		},
 	}
+}
+
+func mapDocumentDTOWithHierarchy(
+	meta domain.DocumentMeta,
+	content domain.DocumentContent,
+	hierarchy []types.KnowledgeDocumentHierarchyDTO,
+) types.KnowledgeDocumentDTO {
+	dto := mapDocumentDTO(meta, content)
+	if len(hierarchy) > 0 {
+		dto.Hierarchy = hierarchy
+	}
+	return dto
 }
 
 func parseContentPayload(raw json.RawMessage) (domain.DocumentContent, error) {

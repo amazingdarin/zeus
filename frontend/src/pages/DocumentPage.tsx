@@ -13,6 +13,7 @@ type DocumentData = {
   docType: string;
   parentId: string;
   content: JSONContent | null;
+  hierarchy: Array<{ id: string; name: string }>;
 };
 
 type DocumentMetaInfo = {
@@ -31,6 +32,10 @@ type DocumentResponse = {
       doc_type?: string;
     };
     content?: DocumentContentPayload;
+    hierarchy?: Array<{
+      id?: string;
+      name?: string;
+    }>;
     id?: string;
     title?: string;
     parent_id?: string;
@@ -50,7 +55,11 @@ type DocumentPageProps = {
   projectKey: string;
   documentId: string | null;
   onDocumentsChanged?: (parentId: string) => void;
-  onDocumentMetaLoaded?: (meta: { id: string; parentId: string } | null) => void;
+  onDocumentMetaLoaded?: (meta: {
+    id: string;
+    parentId: string;
+    hierarchy: string[];
+  } | null) => void;
 };
 
 type UploadedAsset = {
@@ -120,7 +129,8 @@ function DocumentPage({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
-  const loadRequestRef = useRef<string | null>(null);
+  const inFlightRef = useRef<Map<string, Promise<DocumentData>>>(new Map());
+  const currentRequestRef = useRef<string | null>(null);
 
   const activeDocument = document;
   const allowChildActions = activeDocument ? activeDocument.docType !== "overview" : true;
@@ -130,50 +140,62 @@ function DocumentPage({
       setDocument(null);
       setLoading(false);
       setError(null);
-      loadRequestRef.current = null;
+      currentRequestRef.current = null;
       return;
     }
 
-    const controller = new AbortController();
     const requestKey = `${resolvedProjectKey}:${resolvedDocumentId}`;
-    if (loadRequestRef.current === requestKey) {
-      return () => controller.abort();
-    }
-    loadRequestRef.current = requestKey;
-    const loadDocument = async () => {
-      setLoading(true);
-      setError(null);
-      try {
+    currentRequestRef.current = requestKey;
+    let isActive = true;
+    setLoading(true);
+    setError(null);
+
+    let promise = inFlightRef.current.get(requestKey);
+    if (!promise) {
+      promise = (async () => {
         const response = await apiFetch(
           `/api/projects/${encodeURIComponent(resolvedProjectKey)}/documents/${encodeURIComponent(
             resolvedDocumentId,
           )}`,
-          { signal: controller.signal },
         );
         if (!response.ok) {
           throw new Error("failed to load document");
         }
         const payload = (await response.json()) as DocumentResponse;
-        const mapped = mapDocumentDetail(payload?.data, resolvedDocumentId);
+        return mapDocumentDetail(payload?.data, resolvedDocumentId);
+      })();
+      inFlightRef.current.set(requestKey, promise);
+      promise.finally(() => {
+        if (inFlightRef.current.get(requestKey) === promise) {
+          inFlightRef.current.delete(requestKey);
+        }
+      });
+    }
+
+    promise
+      .then((mapped) => {
+        if (!isActive || currentRequestRef.current !== requestKey) {
+          return;
+        }
         setDocument(mapped);
-      } catch (err) {
-        if ((err as Error).name === "AbortError") {
+      })
+      .catch((err) => {
+        if (!isActive || currentRequestRef.current !== requestKey) {
           return;
         }
         setError((err as Error).message || "failed to load document");
         setDocument(null);
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
+      })
+      .finally(() => {
+        if (!isActive || currentRequestRef.current !== requestKey) {
+          return;
         }
-        if (loadRequestRef.current === requestKey) {
-          loadRequestRef.current = null;
-        }
-      }
-    };
+        setLoading(false);
+      });
 
-    loadDocument();
-    return () => controller.abort();
+    return () => {
+      isActive = false;
+    };
   }, [resolvedDocumentId, resolvedProjectKey]);
 
   useEffect(() => {
@@ -188,42 +210,24 @@ function DocumentPage({
       onDocumentMetaLoaded(null);
       return;
     }
-    onDocumentMetaLoaded({ id: document.id, parentId: document.parentId });
+    onDocumentMetaLoaded({
+      id: document.id,
+      parentId: document.parentId,
+      hierarchy: document.hierarchy.map((item) => item.id),
+    });
   }, [document, onDocumentMetaLoaded, resolvedDocumentId]);
 
   useEffect(() => {
-    if (!resolvedProjectKey || !resolvedDocumentId) {
+    if (!resolvedDocumentId) {
       setBreadcrumbItems([]);
       return;
     }
     if (!document || document.id !== resolvedDocumentId) {
       return;
     }
-    const controller = new AbortController();
-    const loadBreadcrumbs = async () => {
-      try {
-        const items = await fetchBreadcrumbChain(
-          resolvedProjectKey,
-          document,
-          controller.signal,
-        );
-        const trimmed = trimBreadcrumbItems(items);
-        setBreadcrumbItems(trimmed);
-      } catch (err) {
-        if ((err as Error).name === "AbortError") {
-          return;
-        }
-        setBreadcrumbItems([
-          {
-            label: document.title || "Document",
-            to: `/knowledge?document_id=${encodeURIComponent(document.id)}`,
-          },
-        ]);
-      }
-    };
-    loadBreadcrumbs();
-    return () => controller.abort();
-  }, [document, resolvedDocumentId, resolvedProjectKey]);
+    const items = mapHierarchyToBreadcrumb(document.hierarchy, document.id, document.title);
+    setBreadcrumbItems(trimBreadcrumbItems(items));
+  }, [document, resolvedDocumentId]);
 
   useEffect(() => {
     if (!resolvedProjectKey) {
@@ -656,68 +660,23 @@ function DocumentPage({
 
 export default DocumentPage;
 
-const fetchDocumentDetail = async (
-  projectKey: string,
-  documentId: string,
-  signal: AbortSignal,
+const mapHierarchyToBreadcrumb = (
+  hierarchy: Array<{ id: string; name: string }>,
+  fallbackId: string,
+  fallbackTitle: string,
 ) => {
-  const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
-      documentId,
-    )}`,
-    { signal },
-  );
-  if (!response.ok) {
-    throw new Error("failed to load document");
+  if (!hierarchy || hierarchy.length === 0) {
+    return [
+      {
+        label: fallbackTitle || "Document",
+        to: `/knowledge?document_id=${encodeURIComponent(fallbackId)}`,
+      },
+    ];
   }
-  const payload = (await response.json()) as DocumentResponse;
-  return mapDocumentMeta(payload?.data, documentId);
-};
-
-const fetchBreadcrumbChain = async (
-  projectKey: string,
-  document: DocumentData,
-  signal: AbortSignal,
-) => {
-  const items: Array<{ id: string; label: string; parentId: string }> = [];
-  const visited = new Set<string>();
-  let currentId = document.parentId;
-
-  items.push({
-    id: document.id,
-    label: document.title || "Document",
-    parentId: document.parentId,
-  });
-
-  while (currentId && !visited.has(currentId)) {
-    if (isRootDocumentId(currentId)) {
-      break;
-    }
-    visited.add(currentId);
-    let detail: DocumentMetaInfo | null = null;
-    try {
-      detail = await fetchDocumentDetail(projectKey, currentId, signal);
-    } catch {
-      break;
-    }
-    if (!detail) {
-      break;
-    }
-    const label = detail.title || "Document";
-    const parentId = detail.parentId;
-    items.push({ id: currentId, label, parentId });
-    if (!parentId || isRootDocumentId(parentId)) {
-      break;
-    }
-    currentId = parentId;
-  }
-
-  return items
-    .reverse()
-    .map((item) => ({
-      label: item.label,
-      to: `/knowledge?document_id=${encodeURIComponent(item.id)}`,
-    }));
+  return hierarchy.map((item) => ({
+    label: item.name || "Document",
+    to: `/knowledge?document_id=${encodeURIComponent(item.id)}`,
+  }));
 };
 
 const trimBreadcrumbItems = (items: Array<{ label: string; to?: string }>) => {
@@ -746,9 +705,15 @@ function mapDocumentMeta(data: DocumentResponse["data"], fallbackId: string): Do
 function mapDocumentDetail(data: DocumentResponse["data"], fallbackId: string): DocumentData {
   const meta = mapDocumentMeta(data, fallbackId);
   const content = extractContentNode(data?.content);
+  const hierarchy =
+    data?.hierarchy?.map((item) => ({
+      id: String(item?.id ?? "").trim(),
+      name: String(item?.name ?? "").trim(),
+    })) ?? [];
   return {
     ...meta,
     content,
+    hierarchy: hierarchy.filter((item) => item.id),
   };
 }
 

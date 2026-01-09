@@ -47,6 +47,7 @@ function KnowledgeBasePage() {
   const [activeDocumentMeta, setActiveDocumentMeta] = useState<{
     id: string;
     parentId: string;
+    hierarchy: string[];
   } | null>(null);
   const [loadingIds, setLoadingIds] = useState<Record<string, boolean>>({});
   const [rootLoading, setRootLoading] = useState(false);
@@ -298,19 +299,10 @@ function KnowledgeBasePage() {
           }
           return;
         }
-        if (!activeDocumentMeta || activeDocumentMeta.id !== documentIdParam) {
-          return;
-        }
-        try {
-          const knownParentId = activeDocumentMeta.parentId;
-          const ancestors = await loadAncestorChain(
-            projectKey,
-            documentIdParam,
-            knownParentId,
+        if (activeDocumentMeta && activeDocumentMeta.id === documentIdParam) {
+          const ancestors = activeDocumentMeta.hierarchy.filter(
+            (id) => id && id !== documentIdParam && !isRootDocumentId(id),
           );
-          if (projectKeyRef.current !== projectKey) {
-            return;
-          }
           if (ancestors.length > 0) {
             const expanded: Record<string, boolean> = {};
             ancestors.forEach((id) => {
@@ -322,8 +314,9 @@ function KnowledgeBasePage() {
             }
             return;
           }
-        } catch {
-          // ignore and fallback
+        }
+        if (!activeDocumentMeta || activeDocumentMeta.id !== documentIdParam) {
+          return;
         }
       }
       if (parentIdParam) {
