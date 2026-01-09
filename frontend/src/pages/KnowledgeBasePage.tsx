@@ -270,26 +270,11 @@ function KnowledgeBasePage() {
     [currentProject, loadChildren, loadRootDocuments],
   );
 
-  const overviewDocs = useMemo(
-    () => rootDocuments.filter((doc) => doc.type === "overview"),
-    [rootDocuments],
-  );
-  const documentDocs = useMemo(
-    () => rootDocuments.filter((doc) => doc.type === "document"),
-    [rootDocuments],
-  );
-  const moduleDocs = useMemo(
-    () =>
-      rootDocuments.filter((doc) => doc.type !== "overview" && doc.type !== "document"),
-    [rootDocuments],
-  );
   return (
     <KnowledgeBaseLayout
       sideNav={
         <KnowledgeBaseSideNav
-          overviewDocs={overviewDocs}
-          moduleDocs={moduleDocs}
-          documentDocs={documentDocs}
+          documents={rootDocuments}
           childrenByParent={childrenByParent}
           expandedIds={expandedIds}
           activeId={activeDocumentId}

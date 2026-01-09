@@ -9,9 +9,7 @@ export type KnowledgeBaseDocument = {
 };
 
 type KnowledgeBaseSideNavProps = {
-  overviewDocs: KnowledgeBaseDocument[];
-  moduleDocs: KnowledgeBaseDocument[];
-  documentDocs: KnowledgeBaseDocument[];
+  documents: KnowledgeBaseDocument[];
   childrenByParent: Record<string, KnowledgeBaseDocument[]>;
   expandedIds: Record<string, boolean>;
   activeId: string | null;
@@ -22,9 +20,7 @@ type KnowledgeBaseSideNavProps = {
 };
 
 function KnowledgeBaseSideNav({
-  overviewDocs,
-  moduleDocs,
-  documentDocs,
+  documents,
   childrenByParent,
   expandedIds,
   activeId,
@@ -82,24 +78,15 @@ function KnowledgeBaseSideNav({
     </div>
   );
 
-  const renderSection = (title: string, docs: KnowledgeBaseDocument[]) => (
-    <div className="kb-nav-section">
-      <div className="kb-nav-title">{title}</div>
-      {rootLoading ? (
-        <div className="kb-doc-loading">Loading...</div>
-      ) : docs.length === 0 ? (
-        <div className="kb-doc-empty">No items</div>
-      ) : (
-        renderTree(docs, 0)
-      )}
-    </div>
-  );
-
   return (
     <aside className="kb-sidebar">
-      {renderSection("Overview", overviewDocs)}
-      {renderSection("Modules", moduleDocs)}
-      {renderSection("Documents", documentDocs)}
+      {rootLoading ? (
+        <div className="kb-doc-loading">Loading...</div>
+      ) : documents.length === 0 ? (
+        <div className="kb-doc-empty">No items</div>
+      ) : (
+        renderTree(documents, 0)
+      )}
     </aside>
   );
 }
