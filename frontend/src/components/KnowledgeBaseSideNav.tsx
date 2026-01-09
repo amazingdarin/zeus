@@ -240,19 +240,21 @@ function KnowledgeBaseSideNav({
                 onDragOver={(event) => handleDragOver(event, doc)}
                 onDrop={(event) => handleDrop(event, doc)}
               >
-                {doc.hasChild ? (
-                  <button
-                    className="kb-doc-toggle"
-                    type="button"
-                    onClick={() => onToggle(doc)}
-                    aria-label={isExpanded ? "Collapse" : "Expand"}
-                    draggable={false}
-                  >
-                    {isExpanded ? "v" : ">"}
-                  </button>
-                ) : (
-                  <span className="kb-doc-dot" aria-hidden="true" />
-                )}
+                <span className="kb-doc-action">
+                  {doc.hasChild ? (
+                    <button
+                      className="kb-doc-toggle"
+                      type="button"
+                      onClick={() => onToggle(doc)}
+                      aria-label={isExpanded ? "Collapse" : "Expand"}
+                      draggable={false}
+                    >
+                      {isExpanded ? "v" : ">"}
+                    </button>
+                  ) : (
+                    <span className="kb-doc-dot" aria-hidden="true" />
+                  )}
+                </span>
                 <button
                   className="kb-doc-item"
                   type="button"
