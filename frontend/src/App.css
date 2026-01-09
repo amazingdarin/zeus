@@ -1153,6 +1153,11 @@ body {
   color: var(--ink);
 }
 
+.tiptap.ProseMirror {
+  --tt-inline-code-text-color: var(--ink);
+  --tt-codeblock-text: var(--ink);
+}
+
 .tiptap h1 {
   font-family: var(--font-serif);
   font-size: 28px;
@@ -1183,13 +1188,19 @@ body {
   background: rgba(31, 35, 40, 0.04);
 }
 
-.tiptap pre {
+.tiptap.ProseMirror pre {
   margin: 12px 0;
   padding: 12px;
   border-radius: 12px;
-  background: rgba(31, 35, 40, 0.08);
+  background: rgba(31, 35, 40, 0.08) !important;
   overflow-x: auto;
   font-size: 13px;
+  color: var(--ink) !important;
+}
+
+.tiptap.ProseMirror pre code,
+.tiptap.ProseMirror code {
+  color: var(--ink) !important;
 }
 
 .new-doc-json {
