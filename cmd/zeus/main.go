@@ -95,12 +95,12 @@ func InitGitAdmin() *gitadmin.ExecAdmin {
 }
 
 func InitGitClientManager(ctx context.Context) *gitclient.GitClientManager {
-	manager := gitclient.NewGitClientManager(func(key gitclient.GitKey, remoteURL string) *gitclient.GitClient {
+	manager := gitclient.NewGitClientManager(config.AppConfig.Git.BareRepoRoot, func(key gitclient.GitKey, baseRepoUrl, repo string) *gitclient.GitClient {
 		return gitclient.NewGitClient(
 			key,
 			gitclient.WithRepoPath(config.AppConfig.Git.RepoRoot+"/"+string(key)),
 			gitclient.WithProjectKey(string(key)),
-			gitclient.WithRemoteURL(remoteURL),
+			gitclient.WithRemoteURL(baseRepoUrl+"/"+repo),
 			gitclient.WithBranch(config.AppConfig.Git.DefaultBranch),
 			gitclient.WithAuthor(config.AppConfig.Git.AuthorName, config.AppConfig.Git.AuthorEmail),
 		)

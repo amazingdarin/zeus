@@ -44,13 +44,13 @@ type GitClient struct {
 	refCount int64
 	lastUsed int64
 
-	repoPath      string
-	projectKey    string
-	remoteURL     string
-	defaultBranch string
-	authorName    string
-	authorEmail   string
-	emptyRepo     bool
+	repoPath      string // 本地仓库路径
+	projectKey    string // 项目标识
+	remoteURL     string // 远程仓库地址
+	defaultBranch string // 默认分支
+	authorName    string // 提交作者名称
+	authorEmail   string // 提交作者邮箱
+	emptyRepo     bool   // 是否为空仓库
 
 	initFn  func(ctx context.Context, client *GitClient) error
 	closeFn func(ctx context.Context, client *GitClient) error
@@ -331,8 +331,16 @@ func (c *GitClient) ensureReady(ctx context.Context) error {
 	if strings.TrimSpace(c.repoPath) == "" {
 		return fmt.Errorf("repo path is required")
 	}
+	c.repoPath = filepath.Clean(c.repoPath)
 	if err := os.MkdirAll(c.repoPath, 0o755); err != nil {
 		return fmt.Errorf("ensure repo path: %w", err)
+	}
+	info, err := os.Stat(c.repoPath)
+	if err != nil {
+		return fmt.Errorf("stat repo path: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("repo path is not a directory")
 	}
 	gitDir := filepath.Join(c.repoPath, ".git")
 	if !exists(gitDir) {

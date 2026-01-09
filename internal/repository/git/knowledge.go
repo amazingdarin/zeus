@@ -195,7 +195,13 @@ func (r *KnowledgeRepository) repoPath(ctx context.Context, repo string) (string
 	if err != nil {
 		return "", err
 	}
-	defer handle.Close()
+
+	// Pull the latest changes
+	err = handle.Client().Pull(ctx, "", "")
+	if err != nil {
+		handle.Close()
+		return "", fmt.Errorf("git pull: %w", err)
+	}
 
 	repo = strings.TrimSpace(repo)
 	if repo == "" {
@@ -227,7 +233,7 @@ func (r *KnowledgeRepository) sessionGit(
 	if repo == "" {
 		return nil, fmt.Errorf("repo is required")
 	}
-	key := gitclient.GitKey(sessionID + "-" + repo)
+	key := gitclient.GitKey(sessionID + "-" + strings.ReplaceAll(repo, "/", "-"))
 	handle, err := r.gitClientManager.Get(key, repo)
 	if err != nil {
 		return nil, err
@@ -238,9 +244,11 @@ func (r *KnowledgeRepository) sessionGit(
 		}
 		return nil, fmt.Errorf("git client is required")
 	}
-	if err = handle.Client().EnsureReady(ctx); err != nil {
-		handle.Close()
-		return nil, fmt.Errorf("ensure git client ready: %w", err)
+	if handle.Client().State() != gitclient.GitStateReady {
+		if err = handle.Client().EnsureReady(ctx); err != nil {
+			handle.Close()
+			return nil, fmt.Errorf("ensure git client ready: %w", err)
+		}
 	}
 	return handle, nil
 }

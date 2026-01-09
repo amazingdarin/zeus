@@ -10,12 +10,12 @@ import (
 // reuses clients and garbage collects idle instances automatically.
 func ExampleUsage() {
 	ctx := context.Background()
-	manager := NewGitClientManager(func(key GitKey, remoteURL string) *GitClient {
+	manager := NewGitClientManager("/var/lib/zeus/repos", func(key GitKey, baseRepoUrl, repo string) *GitClient {
 		return NewGitClient(
 			key,
 			WithRepoPath("/var/lib/zeus/repos/"+string(key)),
 			WithProjectKey(string(key)),
-			WithRemoteURL(remoteURL),
+			WithRemoteURL(baseRepoUrl+"/"+repo),
 			WithBranch("main"),
 			WithAuthor("Zeus", "zeus@local"),
 			WithInitFunc(func(ctx context.Context, client *GitClient) error {

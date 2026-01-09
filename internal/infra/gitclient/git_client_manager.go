@@ -7,29 +7,31 @@ import (
 	"time"
 )
 
-type ClientFactory func(key GitKey, remoteURL string) *GitClient
+type ClientFactory func(key GitKey, baseRepoUrl, repo string) *GitClient
 
 type GitClientManager struct {
-	mu      sync.Mutex
-	clients map[GitKey]*GitClient
-	factory ClientFactory
+	mu          sync.Mutex
+	clients     map[GitKey]*GitClient
+	factory     ClientFactory
+	baseRepoUrl string
 }
 
-func NewGitClientManager(factory ClientFactory) *GitClientManager {
+func NewGitClientManager(baseRepoUrl string, factory ClientFactory) *GitClientManager {
 	if factory == nil {
-		factory = func(key GitKey, remoteURL string) *GitClient {
+		factory = func(key GitKey, baseRepoUrl, repo string) *GitClient {
 			return NewGitClient(key)
 		}
 	}
 	return &GitClientManager{
-		clients: make(map[GitKey]*GitClient),
-		factory: factory,
+		clients:     make(map[GitKey]*GitClient),
+		factory:     factory,
+		baseRepoUrl: baseRepoUrl,
 	}
 }
 
 // Get returns a managed client with an acquired reference.
 // The caller must Close() the returned handle.
-func (m *GitClientManager) Get(key GitKey, remoteURL string) (*ManagedClient, error) {
+func (m *GitClientManager) Get(key GitKey, repo string) (*ManagedClient, error) {
 	if m == nil {
 		return nil, fmt.Errorf("git client manager is required")
 	}
@@ -39,19 +41,18 @@ func (m *GitClientManager) Get(key GitKey, remoteURL string) (*ManagedClient, er
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
 	client := m.clients[key]
 	if client == nil || client.State() == GitStateClosed {
 		if client != nil && client.State() == GitStateClosed {
 			delete(m.clients, key)
 		}
-		client = m.factory(key, remoteURL)
+		client = m.factory(key, m.baseRepoUrl, repo)
 		m.clients[key] = client
 	}
 	if err := client.acquire(); err != nil {
 		if err == ErrClientClosed {
 			delete(m.clients, key)
-			client = m.factory(key, remoteURL)
+			client = m.factory(key, m.baseRepoUrl, repo)
 			m.clients[key] = client
 			if err := client.acquire(); err != nil {
 				return nil, err
