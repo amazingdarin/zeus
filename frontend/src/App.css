@@ -35,8 +35,9 @@ body {
 .app-shell {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
   padding-top: 64px;
+  overflow: hidden;
 }
 
 .topbar {
@@ -67,6 +68,8 @@ body {
   grid-template-columns: 240px 1fr;
   flex: 1;
   min-height: calc(100vh - 64px);
+  height: calc(100vh - 64px);
+  overflow: hidden;
 }
 
 .app-body.compact {
@@ -81,6 +84,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  height: 100%;
+  overflow: auto;
 }
 
 .sidebar.compact {
@@ -389,6 +394,10 @@ body {
 .content {
   padding: 32px;
   min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .content-inner {
@@ -397,6 +406,11 @@ body {
   border: 1px solid var(--border);
   padding: 28px;
   box-shadow: var(--shadow);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .content-inner h1 {
@@ -415,6 +429,8 @@ body {
   display: grid;
   grid-template-columns: 240px 1fr;
   gap: 20px;
+  height: 100%;
+  min-height: 0;
 }
 
 .kb-sidebar {
@@ -424,6 +440,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
 }
 
 .kb-nav-section {
@@ -594,6 +613,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .kb-main-header {
@@ -784,6 +805,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
 .doc-page-body {
