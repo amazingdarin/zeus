@@ -1068,6 +1068,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  flex: 1;
+  min-height: 0;
 }
 
 .new-doc-header {
@@ -1081,6 +1083,21 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.new-doc-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.new-doc-editor {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
 }
 
 .new-doc-title-input,
@@ -1182,7 +1199,11 @@ body {
   padding: 16px;
   font-size: 12px;
   color: var(--ink);
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .new-doc-json-title {
@@ -1195,7 +1216,8 @@ body {
 
 .new-doc-json-editor {
   width: 100%;
-  min-height: 320px;
+  flex: 1;
+  min-height: 0;
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px;
@@ -1203,7 +1225,8 @@ body {
   font-size: 12px;
   color: var(--ink);
   background: rgba(255, 255, 255, 0.7);
-  resize: vertical;
+  resize: none;
+  overflow: auto;
 }
 
 @media (max-width: 960px) {

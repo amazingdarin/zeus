@@ -4,12 +4,19 @@
   border-radius: 16px;
   background: var(--surface);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .simple-editor-content {
   width: 100%;
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
 .simple-editor-content .tiptap.ProseMirror.simple-editor {

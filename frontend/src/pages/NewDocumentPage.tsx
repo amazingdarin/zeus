@@ -26,7 +26,10 @@ function NewDocumentPage() {
   const [jsonMode, setJsonMode] = useState(false);
   const [jsonDraft, setJsonDraft] = useState("");
   const [jsonError, setJsonError] = useState<string | null>(null);
-  const loadRequestRef = useRef<string | null>(null);
+  const inFlightRef = useRef<Map<string, Promise<Awaited<ReturnType<typeof fetchDocumentDetail>>>>>(
+    new Map(),
+  );
+  const currentRequestRef = useRef<string | null>(null);
 
   const parentIdParam = useMemo(() => {
     return (searchParams.get("parent_id") || "").trim();
@@ -57,28 +60,35 @@ function NewDocumentPage() {
       setContent(null);
       setContentMeta(null);
       setSaveError(null);
-      loadRequestRef.current = null;
+      currentRequestRef.current = null;
       return;
     }
     if (!currentProject?.key) {
-      loadRequestRef.current = null;
+      currentRequestRef.current = null;
       return;
     }
 
     const requestKey = `${currentProject.key}:${documentIdParam}`;
-    if (loadRequestRef.current === requestKey) {
-      return;
+    currentRequestRef.current = requestKey;
+    let isActive = true;
+    setLoadingDocument(true);
+
+    let promise = inFlightRef.current.get(requestKey);
+    if (!promise) {
+      promise = fetchDocumentDetail(currentProject.key, documentIdParam);
+      inFlightRef.current.set(requestKey, promise);
+      promise.finally(() => {
+        if (inFlightRef.current.get(requestKey) === promise) {
+          inFlightRef.current.delete(requestKey);
+        }
+      });
     }
-    loadRequestRef.current = requestKey;
-    const controller = new AbortController();
-    const loadDocument = async () => {
-      setLoadingDocument(true);
-      try {
-        const detail = await fetchDocumentDetail(
-          currentProject.key,
-          documentIdParam,
-          controller.signal,
-        );
+
+    promise
+      .then((detail) => {
+        if (!isActive || currentRequestRef.current !== requestKey) {
+          return;
+        }
         if (!detail) {
           return;
         }
@@ -103,22 +113,23 @@ function NewDocumentPage() {
           const storageId = String(detail?.storage_object_id ?? "").trim();
           setStorageObjectID(storageId);
         }
-      } catch (err) {
-        if ((err as Error).name !== "AbortError") {
-          setSaveError("Failed to load document.");
+      })
+      .catch(() => {
+        if (!isActive || currentRequestRef.current !== requestKey) {
+          return;
         }
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoadingDocument(false);
+        setSaveError("Failed to load document.");
+      })
+      .finally(() => {
+        if (!isActive || currentRequestRef.current !== requestKey) {
+          return;
         }
-        if (loadRequestRef.current === requestKey) {
-          loadRequestRef.current = null;
-        }
-      }
-    };
+        setLoadingDocument(false);
+      });
 
-    loadDocument();
-    return () => controller.abort();
+    return () => {
+      isActive = false;
+    };
   }, [currentProject?.key, documentIdParam, parentIdParam]);
 
   useEffect(() => {
@@ -267,30 +278,28 @@ function NewDocumentPage() {
           onChange={(event) => setTitle(event.target.value)}
         />
       </div>
-      {jsonMode ? (
-        <div className="new-doc-json">
-          <div className="new-doc-json-title">Document JSON</div>
-          <textarea
-            className="new-doc-json-editor"
-            value={jsonDraft}
-            onChange={(event) => setJsonDraft(event.target.value)}
-            spellCheck={false}
-          />
-          {jsonError ? <div className="doc-viewer-error">{jsonError}</div> : null}
-        </div>
-      ) : (
-        <>
-          <RichTextEditor
-            content={content}
-            onChange={setContent}
-            projectKey={currentProject?.key ?? ""}
-          />
+      <div className="new-doc-body">
+        {jsonMode ? (
           <div className="new-doc-json">
             <div className="new-doc-json-title">Document JSON</div>
-            <pre>{JSON.stringify(contentPayload, null, 2)}</pre>
+            <textarea
+              className="new-doc-json-editor"
+              value={jsonDraft}
+              onChange={(event) => setJsonDraft(event.target.value)}
+              spellCheck={false}
+            />
+            {jsonError ? <div className="doc-viewer-error">{jsonError}</div> : null}
           </div>
-        </>
-      )}
+        ) : (
+          <div className="new-doc-editor">
+            <RichTextEditor
+              content={content}
+              onChange={setContent}
+              projectKey={currentProject?.key ?? ""}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -371,13 +380,11 @@ const sanitizeFileName = (value: string) => {
 const fetchDocumentDetail = async (
   projectKey: string,
   documentId: string,
-  signal: AbortSignal,
 ) => {
   const response = await apiFetch(
     `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
       documentId,
     )}`,
-    { signal },
   );
   if (!response.ok) {
     throw new Error("failed to load document");
