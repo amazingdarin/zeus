@@ -33,7 +33,7 @@ func NewObjectStorageAssetStorage(client *s3.Client, bucket string) *ObjectStora
 
 func (s *ObjectStorageAssetStorage) Store(
 	ctx context.Context,
-	projectKey string,
+	repo string,
 	assetID string,
 	filename string,
 	content io.Reader,
@@ -47,9 +47,9 @@ func (s *ObjectStorageAssetStorage) Store(
 	if strings.TrimSpace(s.bucket) == "" {
 		return service.StoredAssetInfo{}, fmt.Errorf("bucket is required")
 	}
-	projectKey = strings.TrimSpace(projectKey)
-	if projectKey == "" {
-		return service.StoredAssetInfo{}, fmt.Errorf("project key is required")
+	repo = strings.TrimSpace(repo)
+	if repo == "" {
+		return service.StoredAssetInfo{}, fmt.Errorf("repo is required")
 	}
 	assetID = strings.TrimSpace(assetID)
 	if assetID == "" {
@@ -62,7 +62,7 @@ func (s *ObjectStorageAssetStorage) Store(
 	now := s.nowTime()
 	objectKey := fmt.Sprintf(
 		"%s/assets/%04d/%02d/%s",
-		projectKey,
+		repo,
 		now.Year(),
 		int(now.Month()),
 		assetID,

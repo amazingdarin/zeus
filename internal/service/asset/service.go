@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"zeus/internal/ingestion"
+	"zeus/internal/repository"
 	"zeus/internal/service"
 	"zeus/internal/service/openapi"
 )
@@ -19,6 +20,7 @@ type Service struct {
 	objectStorage service.AssetStorageService
 	metaStore     service.AssetMetaStore
 	reader        service.AssetContentReader
+	projectRepo   repository.ProjectRepository
 }
 
 func NewService(
@@ -27,6 +29,7 @@ func NewService(
 	objectStorage service.AssetStorageService,
 	metaStore service.AssetMetaStore,
 	reader service.AssetContentReader,
+	projectRepo repository.ProjectRepository,
 ) *Service {
 	return &Service{
 		policy:        policy,
@@ -34,6 +37,7 @@ func NewService(
 		objectStorage: objectStorage,
 		metaStore:     metaStore,
 		reader:        reader,
+		projectRepo:   projectRepo,
 	}
 }
 
@@ -56,6 +60,21 @@ func (s *Service) ImportFile(
 		return "", fmt.Errorf("content is required")
 	}
 
+	if s.projectRepo == nil {
+		return "", fmt.Errorf("project repository is required")
+	}
+	project, err := s.projectRepo.FindByKey(ctx, projectKey)
+	if err != nil {
+		return "", fmt.Errorf("find project: %w", err)
+	}
+	if project == nil {
+		return "", fmt.Errorf("project not found")
+	}
+	repoName := strings.TrimSpace(project.RepoName)
+	if repoName == "" {
+		return "", fmt.Errorf("project repo name is required")
+	}
+
 	target := s.policy.Decide(size, mime)
 	storage, err := s.selectStorage(target)
 	if err != nil {
@@ -63,7 +82,7 @@ func (s *Service) ImportFile(
 	}
 
 	assetID := uuid.NewString()
-	stored, err := storage.Store(ctx, projectKey, assetID, filename, content)
+	stored, err := storage.Store(ctx, repoName, assetID, filename, content)
 	if err != nil {
 		return "", err
 	}
@@ -82,6 +101,7 @@ func (s *Service) ImportFile(
 		Size:        storedSize,
 		Mime:        storedMime,
 		StorageType: stored.StorageType,
+		GitRepo:     repoName,
 		GitTempPath: stored.GitTempPath,
 		Bucket:      stored.Bucket,
 		ObjectKey:   stored.ObjectKey,

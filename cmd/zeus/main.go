@@ -135,7 +135,14 @@ func main() {
 	assetMetaRoot := getenv("ZEUS_ASSET_META_ROOT", config.AppConfig.Asset.MetaRoot)
 	assetMetaStore := assetmeta.NewFileStore(assetMetaRoot)
 	assetReader := assetcontent.NewReader(s3Client)
-	assetSvc := svcasset.NewService(assetPolicy, gitTempStorage, objectStorage, assetMetaStore, assetReader)
+	assetSvc := svcasset.NewService(
+		assetPolicy,
+		gitTempStorage,
+		objectStorage,
+		assetMetaStore,
+		assetReader,
+		projectRepo,
+	)
 	openapiIndexSvc := svcopenapi.NewIndexService(assetMetaStore, assetReader)
 	projectSvc := svcproject.NewService(projectRepo, gitAdmin, gitClientManager)
 

@@ -5,7 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
+
+	"zeus/internal/config"
+	"zeus/internal/infra/gitclient"
+	"zeus/internal/infra/session"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -36,7 +41,17 @@ func (r *Reader) ReadHead(
 
 	switch meta.StorageType {
 	case domain.AssetStorageTypeGit:
-		return readHeadFromFile(meta.GitTempPath, maxBytes)
+		sessionInfo, ok := session.FromContext(ctx)
+		if !ok || sessionInfo == nil {
+			return nil, fmt.Errorf("session is required")
+		}
+		sessionID := strings.TrimSpace(sessionInfo.ID)
+		if sessionID == "" {
+			return nil, fmt.Errorf("session id is required")
+		}
+		gitKey := gitclient.GenGitKeyFromSession(sessionID, meta.GitRepo)
+		gitTempDir := filepath.Join(config.AppConfig.Git.RepoRoot, string(gitKey), meta.GitTempPath)
+		return readHeadFromFile(gitTempDir, maxBytes)
 	case domain.AssetStorageTypeObject:
 		return r.readHeadFromObject(ctx, meta, maxBytes)
 	default:
@@ -48,9 +63,19 @@ func (r *Reader) ReadAll(ctx context.Context, meta service.AssetMeta) ([]byte, e
 	if r == nil {
 		return nil, fmt.Errorf("asset reader is required")
 	}
+	sessionInfo, ok := session.FromContext(ctx)
+	if !ok || sessionInfo == nil {
+		return nil, fmt.Errorf("session is required")
+	}
+	sessionID := strings.TrimSpace(sessionInfo.ID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
 	switch meta.StorageType {
 	case domain.AssetStorageTypeGit:
-		return readAllFromFile(meta.GitTempPath)
+		gitKey := gitclient.GenGitKeyFromSession(sessionID, meta.GitRepo)
+		gitTempDir := filepath.Join(config.AppConfig.Git.RepoRoot, string(gitKey), meta.GitTempPath)
+		return readAllFromFile(gitTempDir)
 	case domain.AssetStorageTypeObject:
 		return r.readAllFromObject(ctx, meta)
 	default:
