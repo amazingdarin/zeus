@@ -27,8 +27,12 @@ const hasSessionCookie = () =>
   document.cookie.split(";").some((item) => item.trim().startsWith("zeus_session_id="));
 
 const sessionBootstrapKey = "zeus.session.bootstrap";
+let sessionBootstrapped = false;
 
 const hasSessionBootstrap = () => {
+  if (sessionBootstrapped) {
+    return true;
+  }
   try {
     return sessionStorage.getItem(sessionBootstrapKey) === "1";
   } catch {
@@ -37,6 +41,7 @@ const hasSessionBootstrap = () => {
 };
 
 const markSessionBootstrap = () => {
+  sessionBootstrapped = true;
   try {
     sessionStorage.setItem(sessionBootstrapKey, "1");
   } catch {

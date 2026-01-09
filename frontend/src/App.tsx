@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { HashRouter, Route, Routes } from "react-router-dom";
 
 import AppShell from "./layout/AppShell";
@@ -9,9 +9,25 @@ import { ensureSystemSession } from "./config/api";
 import "./App.css";
 
 function App() {
+  const [sessionReady, setSessionReady] = useState(false);
+
   useEffect(() => {
-    ensureSystemSession();
+    let mounted = true;
+    ensureSystemSession()
+      .catch(() => undefined)
+      .finally(() => {
+        if (mounted) {
+          setSessionReady(true);
+        }
+      });
+    return () => {
+      mounted = false;
+    };
   }, []);
+
+  if (!sessionReady) {
+    return null;
+  }
 
   return (
     <ProjectProvider>
