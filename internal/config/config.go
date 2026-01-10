@@ -14,6 +14,7 @@ type Config struct {
 	Asset         AssetConfig         `mapstructure:"asset"`
 	Git           GitConfig           `mapstructure:"git"`
 	Search        SearchConfig        `mapstructure:"search"`
+	Security      SecurityConfig      `mapstructure:"security"`
 }
 
 var AppConfig *Config
@@ -70,6 +71,10 @@ type SearchConfig struct {
 	IndexRoot string `mapstructure:"index_root"`
 }
 
+type SecurityConfig struct {
+	EncryptionKey string `mapstructure:"encryption_key"`
+}
+
 func Load(path string) (*Config, error) {
 	if path == "" {
 		return nil, fmt.Errorf("config path is required")
@@ -113,5 +118,8 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Search.IndexRoot == "" {
 		cfg.Search.IndexRoot = "/var/lib/zeus/index"
+	}
+	if cfg.Security.EncryptionKey == "" {
+		cfg.Security.EncryptionKey = "zeus-dev-key"
 	}
 }

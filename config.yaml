@@ -36,3 +36,6 @@ git:
 
 search:
   index_root: /Users/darin/mine/code/zeus/resources/zeus/index
+
+security:
+  encryption_key: zeus-dev-key

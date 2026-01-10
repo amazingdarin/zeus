@@ -15,6 +15,8 @@ func RegisterRoutes(
 	knowledgeSvc service.KnowledgeService,
 	searchSvc service.SearchService,
 	openapiIndexSvc svcopenapi.IndexService,
+	modelProviderSvc service.ModelProviderService,
+	modelScenarioSvc service.ModelScenarioService,
 ) {
 	storageObjectHandler := NewStorageObjectHandler(storageObjectSvc, projectSvc)
 	assetHandler := NewAssetHandler(assetSvc)
@@ -23,6 +25,7 @@ func RegisterRoutes(
 	searchHandler := NewSearchHandler(searchSvc)
 	openapiHandler := NewOpenAPIHandler(openapiIndexSvc)
 	systemHandler := NewSystemHandler()
+	modelHandler := NewModelProviderHandler(modelProviderSvc, modelScenarioSvc)
 
 	api := r.Group("/api")
 
@@ -54,4 +57,13 @@ func RegisterRoutes(
 
 	// Search
 	api.GET("/projects/:project_key/search", searchHandler.Search)
+
+	// Model Provider
+	api.POST("/model-providers", modelHandler.CreateProvider)
+	api.GET("/model-providers", modelHandler.ListProviders)
+	api.GET("/model-providers/:id/models", modelHandler.ListProviderModels)
+
+	// Model Scenario
+	api.POST("/model-scenarios", modelHandler.ConfigureScenario)
+	api.GET("/model-scenarios", modelHandler.ListScenarios)
 }

@@ -21,6 +21,7 @@ import (
 	"zeus/internal/infra/gittemp"
 	ingestions3 "zeus/internal/infra/ingestion/s3"
 	"zeus/internal/infra/logger"
+	"zeus/internal/infra/modelprovider"
 	"zeus/internal/infra/objectstorage"
 	"zeus/internal/infra/searchindex"
 	httpsession "zeus/internal/infra/session"
@@ -29,6 +30,7 @@ import (
 	"zeus/internal/repository/postgres"
 	svcasset "zeus/internal/service/asset"
 	svcknowledge "zeus/internal/service/knowledge"
+	svcmodel "zeus/internal/service/model"
 	svcopenapi "zeus/internal/service/openapi"
 	svcproject "zeus/internal/service/project"
 	svcsearch "zeus/internal/service/search"
@@ -121,6 +123,8 @@ func main() {
 	// Init Repositories
 	projectRepo := postgres.NewProjectRepository(db)
 	storageObjectRepo := postgres.NewStorageObjectRepository(db)
+	modelProviderRepo := postgres.NewModelProviderRepository(db)
+	modelScenarioRepo := postgres.NewModelScenarioRepository(db)
 	knowledgeRepo := gitrepo.NewKnowledgeRepository(gitClientManager)
 
 	// Init Services
@@ -145,6 +149,12 @@ func main() {
 	)
 	openapiIndexSvc := svcopenapi.NewIndexService(assetMetaStore, assetReader)
 	projectSvc := svcproject.NewService(projectRepo, gitAdmin, gitClientManager)
+	modelProviderSvc := svcmodel.NewProviderService(
+		modelProviderRepo,
+		modelprovider.DefaultAdapterFactory,
+		config.AppConfig.Security.EncryptionKey,
+	)
+	modelScenarioSvc := svcmodel.NewScenarioService(modelScenarioRepo, modelProviderRepo)
 
 	searchIndexRoot := getenv("ZEUS_SEARCH_INDEX_ROOT", config.AppConfig.Search.IndexRoot)
 	if searchIndexRoot == "" {
@@ -168,6 +178,8 @@ func main() {
 		knowledgeSvc,
 		searchSvc,
 		openapiIndexSvc,
+		modelProviderSvc,
+		modelScenarioSvc,
 	)
 
 	if err := router.Run(config.AppConfig.Server.Addr); err != nil {
