@@ -199,6 +199,13 @@ commit message 必须结构化：
 - `docs: create <doc_id>`
 - `docs: update <doc_id>`
 
+---
+
+## 9. Frontend UI Framework（必须）
+
+- 前端统一引入 **Ant Design** 作为 UI 框架。
+- 组件优先使用 Ant Design 提供的组件，避免重复造轮子。
+
 任何 git 冲突必须显式处理并返回错误（禁止 silent overwrite）。
 所有 git IO 必须封装在 infra/gitclient，业务层不得直接 exec。
 

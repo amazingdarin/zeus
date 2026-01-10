@@ -6,35 +6,26 @@ import (
 	"zeus/internal/domain"
 )
 
-type ModelProviderCreateInput struct {
-	Name        string
-	Type        string
-	BaseURL     string
-	AccessKey   string
-	ExtraConfig map[string]interface{}
-	IsEnabled   bool
-}
-
-type ModelScenarioConfigInput struct {
+type ModelRuntimeInput struct {
 	Scenario   string
-	ProviderID string
+	Name       string
+	BaseURL    string
+	APIKey     string
 	ModelName  string
 	Parameters map[string]interface{}
 	IsActive   bool
 }
 
-type ModelInfo struct {
-	ID   string
-	Name string
+type ModelRuntimeTestInput struct {
+	Scenario  string
+	BaseURL   string
+	APIKey    string
+	ModelName string
 }
 
-type ModelProviderService interface {
-	Create(ctx context.Context, input ModelProviderCreateInput) (*domain.ModelProvider, error)
-	List(ctx context.Context) ([]*domain.ModelProvider, error)
-	ListModels(ctx context.Context, id string) ([]ModelInfo, error)
-}
-
-type ModelScenarioService interface {
-	Configure(ctx context.Context, input ModelScenarioConfigInput) (*domain.ModelScenarioConfig, error)
-	List(ctx context.Context) ([]*domain.ModelScenarioConfig, error)
+type ModelRuntimeService interface {
+	Upsert(ctx context.Context, input ModelRuntimeInput) (*domain.ModelRuntime, error)
+	List(ctx context.Context) ([]*domain.ModelRuntime, error)
+	RefreshModels(ctx context.Context, baseURL, apiKey string) ([]string, error)
+	Test(ctx context.Context, input ModelRuntimeTestInput) error
 }

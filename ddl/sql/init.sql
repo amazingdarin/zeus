@@ -35,6 +35,19 @@ CREATE TABLE storage_object
     updated_at             TIMESTAMPTZ   DEFAULT now()
 );
 
+CREATE TABLE model_runtime
+(
+    id          TEXT PRIMARY KEY,
+    scenario    TEXT    NOT NULL UNIQUE,
+    name        TEXT    NOT NULL,
+    base_url    TEXT    NOT NULL,
+    api_key     TEXT,
+    model_name  TEXT    NOT NULL,
+    parameters  JSONB,
+    is_active   BOOLEAN NOT NULL DEFAULT true,
+    created_at  TIMESTAMPTZ       DEFAULT now(),
+    updated_at  TIMESTAMPTZ       DEFAULT now()
+);
 
 CREATE TABLE document
 (

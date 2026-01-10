@@ -6,10 +6,12 @@ import (
 	"gorm.io/datatypes"
 )
 
-type ModelScenarioConfig struct {
+type ModelRuntime struct {
 	ID         string         `gorm:"column:id;primaryKey"`
 	Scenario   string         `gorm:"column:scenario;not null;unique"`
-	ProviderID string         `gorm:"column:provider_id;not null"`
+	Name       string         `gorm:"column:name;not null"`
+	BaseURL    string         `gorm:"column:base_url;not null"`
+	APIKey     string         `gorm:"column:api_key"`
 	ModelName  string         `gorm:"column:model_name;not null"`
 	Parameters datatypes.JSON `gorm:"column:parameters;type:jsonb"`
 	IsActive   bool           `gorm:"column:is_active;not null"`
@@ -17,6 +19,6 @@ type ModelScenarioConfig struct {
 	UpdatedAt  time.Time      `gorm:"column:updated_at;autoUpdateTime"`
 }
 
-func (ModelScenarioConfig) TableName() string {
-	return "model_scenario_config"
+func (ModelRuntime) TableName() string {
+	return "model_runtime"
 }

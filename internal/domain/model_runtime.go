@@ -2,10 +2,14 @@ package domain
 
 import "time"
 
-type ModelScenarioConfig struct {
+// ModelRuntime represents a scenario-scoped runtime configuration.
+// It is pure domain data without IO or vendor-specific logic.
+type ModelRuntime struct {
 	ID         string                 `json:"id"`
 	Scenario   string                 `json:"scenario"`
-	ProviderID string                 `json:"provider_id"`
+	Name       string                 `json:"name"`
+	BaseURL    string                 `json:"base_url"`
+	APIKey     string                 `json:"api_key"`
 	ModelName  string                 `json:"model_name"`
 	Parameters map[string]interface{} `json:"parameters"`
 	IsActive   bool                   `json:"is_active"`
