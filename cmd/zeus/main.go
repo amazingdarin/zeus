@@ -16,6 +16,7 @@ import (
 	"zeus/internal/infra/assetcontent"
 	"zeus/internal/infra/assetmeta"
 	clients3 "zeus/internal/infra/client/s3"
+	"zeus/internal/infra/embedding"
 	"zeus/internal/infra/gitadmin"
 	"zeus/internal/infra/gitclient"
 	"zeus/internal/infra/gittemp"
@@ -28,11 +29,13 @@ import (
 	"zeus/internal/ingestion"
 	gitrepo "zeus/internal/repository/git"
 	"zeus/internal/repository/postgres"
+	"zeus/internal/repository/ragindex"
 	svcasset "zeus/internal/service/asset"
 	svcknowledge "zeus/internal/service/knowledge"
 	svcmodel "zeus/internal/service/model"
 	svcopenapi "zeus/internal/service/openapi"
 	svcproject "zeus/internal/service/project"
+	svcrag "zeus/internal/service/rag"
 	svcsearch "zeus/internal/service/search"
 	svcstorageobject "zeus/internal/service/storage_object"
 )
@@ -161,6 +164,12 @@ func main() {
 	indexBuilder := searchindex.NewIndexBuilder(knowledgeRepo, searchIndexRoot)
 	searchSvc := svcsearch.NewService(indexBuilder)
 	knowledgeSvc := svcknowledge.NewService(knowledgeRepo, projectRepo)
+	ragIndex := ragindex.NewMemoryIndex()
+	ragExtractor := svcrag.SimpleBlockExtractor{}
+	runtimeResolver := svcmodel.NewRuntimeResolver(modelRuntimeRepo, config.AppConfig.Security.EncryptionKey)
+	ragEmbedder := embedding.NewOpenAICompatibleEmbedder(runtimeResolver)
+	ragReader := gitrepo.NewGitDocumentReader(knowledgeRepo, projectRepo)
+	ragSvc := svcrag.NewService(ragReader, ragExtractor, ragEmbedder, ragIndex, svcrag.SimpleAssembler{})
 
 	sessionManager := httpsession.NewSessionManager(nil)
 
@@ -175,6 +184,7 @@ func main() {
 		projectSvc,
 		knowledgeSvc,
 		searchSvc,
+		ragSvc,
 		openapiIndexSvc,
 		modelRuntimeSvc,
 	)

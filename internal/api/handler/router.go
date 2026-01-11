@@ -14,6 +14,7 @@ func RegisterRoutes(
 	projectSvc service.ProjectService,
 	knowledgeSvc service.KnowledgeService,
 	searchSvc service.SearchService,
+	ragSvc service.RAGService,
 	openapiIndexSvc svcopenapi.IndexService,
 	modelRuntimeSvc service.ModelRuntimeService,
 ) {
@@ -22,6 +23,7 @@ func RegisterRoutes(
 	projectHandler := NewProjectHandler(projectSvc)
 	knowledgeHandler := NewKnowledgeHandler(knowledgeSvc)
 	searchHandler := NewSearchHandler(searchSvc)
+	ragHandler := NewRAGHandler(ragSvc)
 	openapiHandler := NewOpenAPIHandler(openapiIndexSvc)
 	systemHandler := NewSystemHandler()
 	modelHandler := NewModelRuntimeHandler(modelRuntimeSvc)
@@ -56,6 +58,10 @@ func RegisterRoutes(
 
 	// Search
 	api.GET("/projects/:project_key/search", searchHandler.Search)
+
+	// RAG
+	api.POST("/rag/rebuild/project/:project_id", ragHandler.RebuildProject)
+	api.POST("/rag/rebuild/document/:doc_id", ragHandler.RebuildDocument)
 
 	// Model Runtime
 	api.GET("/model-runtimes", modelHandler.ListRuntimes)
