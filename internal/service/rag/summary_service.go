@@ -134,6 +134,22 @@ func (s *SummaryService) GenerateDocumentSummary(
 	return summary, nil
 }
 
+func (s *SummaryService) GetDocumentSummary(
+	ctx context.Context,
+	projectID string,
+	docID string,
+) (*domainrag.DocumentSummary, bool, error) {
+	projectID = strings.TrimSpace(projectID)
+	docID = strings.TrimSpace(docID)
+	if projectID == "" {
+		return nil, false, fmt.Errorf("project id is required")
+	}
+	if docID == "" {
+		return nil, false, fmt.Errorf("doc id is required")
+	}
+	return s.repo.Get(ctx, projectID, docID)
+}
+
 func buildSummaryInput(units []domainrag.RAGUnit) string {
 	if len(units) == 0 {
 		return ""

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -12,15 +13,18 @@ import (
 
 type RAGHandler struct {
 	ragSvc     service.RAGService
+	summarySvc service.DocumentSummaryService
 	projectSvc service.ProjectService
 }
 
 func NewRAGHandler(
 	ragSvc service.RAGService,
+	summarySvc service.DocumentSummaryService,
 	projectSvc service.ProjectService,
 ) *RAGHandler {
 	return &RAGHandler{
 		ragSvc:     ragSvc,
+		summarySvc: summarySvc,
 		projectSvc: projectSvc,
 	}
 }
@@ -68,9 +72,29 @@ func (h *RAGHandler) RebuildDocument(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "RAG_REBUILD_DOC_FAILED", Message: err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
+
+	withSummary, _ := strconv.ParseBool(strings.TrimSpace(c.Query("with_summary")))
+	var summary interface{}
+	if withSummary {
+		if h.summarySvc == nil {
+			c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "SERVICE_NOT_READY", Message: "summary service is required"})
+			return
+		}
+		created, err := h.summarySvc.GenerateDocumentSummary(c.Request.Context(), project.ID, docID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "RAG_SUMMARY_FAILED", Message: err.Error()})
+			return
+		}
+		summary = created
+	}
+
+	response := gin.H{
 		"code":    "OK",
 		"message": "rebuild done",
 		"report":  report,
-	})
+	}
+	if summary != nil {
+		response["summary"] = summary
+	}
+	c.JSON(http.StatusOK, response)
 }

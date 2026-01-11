@@ -21,6 +21,7 @@ import (
 	"zeus/internal/infra/gitclient"
 	"zeus/internal/infra/gittemp"
 	ingestions3 "zeus/internal/infra/ingestion/s3"
+	"zeus/internal/infra/llm"
 	"zeus/internal/infra/logger"
 	"zeus/internal/infra/modelruntime"
 	"zeus/internal/infra/objectstorage"
@@ -127,6 +128,7 @@ func main() {
 	projectRepo := postgres.NewProjectRepository(db)
 	storageObjectRepo := postgres.NewStorageObjectRepository(db)
 	modelRuntimeRepo := postgres.NewModelRuntimeRepository(db)
+	summaryRepo := postgres.NewDocumentSummaryRepository(db)
 	knowledgeRepo := gitrepo.NewKnowledgeRepository(gitClientManager)
 
 	// Init Services
@@ -170,6 +172,14 @@ func main() {
 	ragEmbedder := embedding.NewOpenAICompatibleEmbedder(runtimeResolver)
 	ragReader := gitrepo.NewGitDocumentReader(knowledgeRepo, projectRepo)
 	ragSvc := svcrag.NewService(ragReader, ragExtractor, ragEmbedder, ragIndex, svcrag.SimpleAssembler{})
+	summaryLLM := llm.NewOpenAICompatibleClient()
+	summarySvc := svcrag.NewSummaryService(
+		ragReader,
+		ragExtractor,
+		summaryRepo,
+		summaryLLM,
+		runtimeResolver,
+	)
 
 	sessionManager := httpsession.NewSessionManager(nil)
 
@@ -185,6 +195,7 @@ func main() {
 		knowledgeSvc,
 		searchSvc,
 		ragSvc,
+		summarySvc,
 		openapiIndexSvc,
 		modelRuntimeSvc,
 	)
