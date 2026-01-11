@@ -18,7 +18,7 @@ type OpenAICompatibleClient struct {
 
 func NewOpenAICompatibleClient() *OpenAICompatibleClient {
 	return &OpenAICompatibleClient{
-		client: &http.Client{Timeout: 30 * time.Second},
+		client: &http.Client{Timeout: 3 * time.Minute},
 	}
 }
 
