@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 
 import ProjectSelector from "./ProjectSelector";
 
@@ -61,7 +62,7 @@ function Sidebar({
         onClick={onToggleCollapse}
         aria-label={collapsed ? "Expand menu" : "Collapse menu"}
       >
-        {collapsed ? ">" : "<"}
+        {collapsed ? <RightOutlined /> : <LeftOutlined />}
       </button>
     </aside>
   );

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { DownOutlined, RightOutlined } from "@ant-design/icons";
 
 import { type Project, useProjectContext } from "../context/ProjectContext";
 import CreateProjectModal from "./CreateProjectModal";
@@ -61,7 +62,9 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
             <span className="project-selector-label">
               {activeProject ? activeProject.name : "Select a project"}
             </span>
-            <span className="project-selector-caret">{open ? "v" : ">"}</span>
+            <span className="project-selector-caret">
+              {open ? <DownOutlined /> : <RightOutlined />}
+            </span>
           </>
         )}
       </button>

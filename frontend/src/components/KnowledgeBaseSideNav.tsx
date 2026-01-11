@@ -1,4 +1,5 @@
 import { useMemo, useState, type DragEvent } from "react";
+import { DownOutlined, RightOutlined } from "@ant-design/icons";
 
 export type KnowledgeBaseDocument = {
   id: string;
@@ -249,7 +250,7 @@ function KnowledgeBaseSideNav({
                       aria-label={isExpanded ? "Collapse" : "Expand"}
                       draggable={false}
                     >
-                      {isExpanded ? "v" : ">"}
+                      {isExpanded ? <DownOutlined /> : <RightOutlined />}
                     </button>
                   ) : (
                     <span className="kb-doc-dot" aria-hidden="true" />

@@ -169,6 +169,10 @@ body {
   opacity: 0.7;
 }
 
+.project-selector-caret .anticon {
+  font-size: 0.8em;
+}
+
 .project-selector-menu {
   position: absolute;
   top: calc(100% + 8px);
@@ -621,6 +625,10 @@ body {
   background: rgba(255, 255, 255, 0.16);
 }
 
+.sidebar-toggle .anticon {
+  font-size: 0.7em;
+}
+
 .sidebar-toggle.compact {
   align-self: center;
 }
@@ -807,6 +815,10 @@ body {
   font-weight: 400;
   color: var(--ink);
   padding: 0;
+}
+
+.kb-doc-toggle .anticon {
+  font-size: 0.7em;
 }
 
 .kb-doc-toggle:hover {
