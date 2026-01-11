@@ -23,7 +23,7 @@ func RegisterRoutes(
 	projectHandler := NewProjectHandler(projectSvc)
 	knowledgeHandler := NewKnowledgeHandler(knowledgeSvc)
 	searchHandler := NewSearchHandler(searchSvc)
-	ragHandler := NewRAGHandler(ragSvc)
+	ragHandler := NewRAGHandler(ragSvc, projectSvc)
 	openapiHandler := NewOpenAPIHandler(openapiIndexSvc)
 	systemHandler := NewSystemHandler()
 	modelHandler := NewModelRuntimeHandler(modelRuntimeSvc)
@@ -61,7 +61,7 @@ func RegisterRoutes(
 
 	// RAG
 	api.POST("/rag/rebuild/project/:project_id", ragHandler.RebuildProject)
-	api.POST("/rag/rebuild/document/:doc_id", ragHandler.RebuildDocument)
+	api.POST("/projects/:project_key/rag/rebuild/documents/:doc_id", ragHandler.RebuildDocument)
 
 	// Model Runtime
 	api.GET("/model-runtimes", modelHandler.ListRuntimes)

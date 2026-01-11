@@ -11,11 +11,18 @@ import (
 )
 
 type RAGHandler struct {
-	ragSvc service.RAGService
+	ragSvc     service.RAGService
+	projectSvc service.ProjectService
 }
 
-func NewRAGHandler(ragSvc service.RAGService) *RAGHandler {
-	return &RAGHandler{ragSvc: ragSvc}
+func NewRAGHandler(
+	ragSvc service.RAGService,
+	projectSvc service.ProjectService,
+) *RAGHandler {
+	return &RAGHandler{
+		ragSvc:     ragSvc,
+		projectSvc: projectSvc,
+	}
 }
 
 // RebuildProject
@@ -35,22 +42,35 @@ func (h *RAGHandler) RebuildProject(c *gin.Context) {
 }
 
 // RebuildDocument
-// @route POST /api/rag/rebuild/document/:doc_id
+// @route POST /api/projects/:project_key/rag/rebuild/documents/:doc_id
 func (h *RAGHandler) RebuildDocument(c *gin.Context) {
-	projectID := strings.TrimSpace(c.Query("project_id"))
+	projectKey := strings.TrimSpace(c.Param("project_key"))
 	docID := strings.TrimSpace(c.Param("doc_id"))
-	if projectID == "" {
-		c.JSON(http.StatusBadRequest, types.ErrorResponse{Code: "MISSING_PROJECT_ID", Message: "project_id is required"})
+	if projectKey == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{Code: "MISSING_PROJECT_KEY", Message: "project_key is required"})
 		return
 	}
 	if docID == "" {
 		c.JSON(http.StatusBadRequest, types.ErrorResponse{Code: "MISSING_DOC_ID", Message: "doc_id is required"})
 		return
 	}
-	report, err := h.ragSvc.RebuildDocument(c.Request.Context(), projectID, docID)
+	if h.ragSvc == nil || h.projectSvc == nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "SERVICE_NOT_READY", Message: "rag service is required"})
+		return
+	}
+	project, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "LOAD_PROJECT_FAILED", Message: err.Error()})
+		return
+	}
+	report, err := h.ragSvc.RebuildDocument(c.Request.Context(), project.ID, docID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "RAG_REBUILD_DOC_FAILED", Message: err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, report)
+	c.JSON(http.StatusOK, gin.H{
+		"code":    "OK",
+		"message": "rebuild done",
+		"report":  report,
+	})
 }

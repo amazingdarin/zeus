@@ -11,11 +11,14 @@ type DocumentHeaderProps = {
   mode: "view" | "edit";
   allowChildActions?: boolean;
   allowEdit?: boolean;
+  allowRebuild?: boolean;
+  rebuilding?: boolean;
   onEdit: () => void;
   onSave: () => void;
   onCancel: () => void;
   onNew: () => void;
   onImport: () => void;
+  onRebuild?: () => void;
 };
 
 function DocumentHeader({
@@ -23,11 +26,14 @@ function DocumentHeader({
   mode,
   allowChildActions = true,
   allowEdit = true,
+  allowRebuild = false,
+  rebuilding = false,
   onEdit,
   onSave,
   onCancel,
   onNew,
   onImport,
+  onRebuild,
 }: DocumentHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -64,6 +70,13 @@ function DocumentHeader({
     onCancel();
   };
 
+  const handleRebuild = () => {
+    if (!onRebuild) {
+      return;
+    }
+    onRebuild();
+  };
+
   return (
     <div className="kb-main-header">
       <div className="kb-breadcrumb">
@@ -81,6 +94,57 @@ function DocumentHeader({
         ))}
       </div>
       <div className="kb-header-menu">
+        {onRebuild ? (
+          <button
+            className="kb-rebuild-button"
+            type="button"
+            aria-label="Rebuild knowledge"
+            onClick={handleRebuild}
+            disabled={!allowRebuild || rebuilding}
+          >
+            {rebuilding ? (
+              <span className="kb-doc-spinner" aria-hidden="true" />
+            ) : (
+              <svg
+                className="kb-rebuild-icon"
+                viewBox="0 0 24 24"
+                role="presentation"
+                aria-hidden="true"
+              >
+                <path
+                  d="M4 12a8 8 0 0 1 13.66-5.66"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+                <path
+                  d="M17.5 3.8v4.2h4.2"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M20 12a8 8 0 0 1-13.66 5.66"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+                <path
+                  d="M6.5 20.2v-4.2H2.3"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            )}
+          </button>
+        ) : null}
         <button
           className="kb-menu-button"
           type="button"

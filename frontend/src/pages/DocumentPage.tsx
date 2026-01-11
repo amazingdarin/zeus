@@ -109,6 +109,7 @@ function DocumentPage({
   const [document, setDocument] = useState<DocumentData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rebuilding, setRebuilding] = useState(false);
   const [breadcrumbItems, setBreadcrumbItems] = useState<
     Array<{ label: string; to?: string }>
   >([]);
@@ -246,6 +247,32 @@ function DocumentPage({
       return;
     }
     navigate(`/documents/new?document_id=${encodeURIComponent(activeDocument.id)}`);
+  };
+
+  const handleRebuild = async () => {
+    if (!resolvedProjectKey || !activeDocument) {
+      return;
+    }
+    if (rebuilding) {
+      return;
+    }
+    setRebuilding(true);
+    try {
+      const response = await apiFetch(
+        `/api/projects/${encodeURIComponent(
+          resolvedProjectKey,
+        )}/rag/rebuild/documents/${encodeURIComponent(activeDocument.id)}`,
+        { method: "POST" },
+      );
+      if (!response.ok) {
+        throw new Error("rebuild failed");
+      }
+      console.log("rag_rebuild_done", activeDocument.id);
+    } catch (err) {
+      console.log("rag_rebuild_error", err);
+    } finally {
+      setRebuilding(false);
+    }
   };
 
   const handleOpenNew = () => {
@@ -500,11 +527,14 @@ function DocumentPage({
         mode="view"
         allowChildActions={allowChildActions}
         allowEdit={Boolean(activeDocument)}
+        allowRebuild={Boolean(activeDocument)}
+        rebuilding={rebuilding}
         onEdit={handleEdit}
         onSave={() => {}}
         onCancel={() => {}}
         onNew={handleOpenNew}
         onImport={() => handleOpenImportWithMode("file")}
+        onRebuild={handleRebuild}
       />
       <div className="doc-viewer-page">{bodyContent()}</div>
       {importModalOpen ? (

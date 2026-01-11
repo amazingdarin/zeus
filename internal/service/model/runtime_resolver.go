@@ -43,6 +43,7 @@ func (r *RuntimeResolver) Resolve(ctx context.Context, scenario string) (embeddi
 		apiKey = decoded
 	}
 	return embedding.ModelRuntime{
+		ID:        runtime.ID,
 		BaseURL:   runtime.BaseURL,
 		APIKey:    apiKey,
 		ModelName: runtime.ModelName,

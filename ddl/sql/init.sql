@@ -179,6 +179,18 @@ CREATE TABLE rag_chunk (
   created_at  TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE TABLE rag_document_summary (
+  id             TEXT PRIMARY KEY,
+  project_id     TEXT NOT NULL,
+  doc_id         TEXT NOT NULL,
+  summary_text   TEXT NOT NULL,
+  content_hash   TEXT NOT NULL,
+  model_runtime  TEXT NOT NULL,
+  created_at     TIMESTAMPTZ DEFAULT now(),
+  updated_at     TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (project_id, doc_id)
+);
+
 CREATE TABLE agent_run (
   id            BIGSERIAL PRIMARY KEY,
   agent_type    TEXT,      -- ui / code / test / ops

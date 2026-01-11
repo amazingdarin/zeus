@@ -3,6 +3,7 @@ package embedding
 import "context"
 
 type ModelRuntime struct {
+	ID        string
 	BaseURL   string
 	APIKey    string
 	ModelName string
