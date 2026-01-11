@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type { JSONContent } from "@tiptap/react";
 import { useNavigate, useParams } from "react-router-dom";
+import { Modal } from "antd";
 
 import DocumentHeader from "../components/DocumentHeader";
 import RichTextViewer from "../components/RichTextViewer";
@@ -110,6 +111,7 @@ function DocumentPage({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
+  const [summaryText, setSummaryText] = useState<string | null>(null);
   const [breadcrumbItems, setBreadcrumbItems] = useState<
     Array<{ label: string; to?: string }>
   >([]);
@@ -132,6 +134,8 @@ function DocumentPage({
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const inFlightRef = useRef<Map<string, Promise<DocumentData>>>(new Map());
   const currentRequestRef = useRef<string | null>(null);
+  const summaryInFlightRef = useRef<Map<string, Promise<string | null>>>(new Map());
+  const summaryRequestRef = useRef<string | null>(null);
 
   const activeDocument = document;
   const allowChildActions = activeDocument ? activeDocument.docType !== "overview" : true;
@@ -200,6 +204,66 @@ function DocumentPage({
   }, [resolvedDocumentId, resolvedProjectKey]);
 
   useEffect(() => {
+    if (!resolvedProjectKey || !resolvedDocumentId) {
+      setSummaryText(null);
+      summaryRequestRef.current = null;
+      return;
+    }
+
+    const requestKey = `${resolvedProjectKey}:${resolvedDocumentId}`;
+    summaryRequestRef.current = requestKey;
+    setSummaryText(null);
+    let isActive = true;
+
+    let promise = summaryInFlightRef.current.get(requestKey);
+    if (!promise) {
+      promise = (async () => {
+        const response = await apiFetch(
+          `/api/projects/${encodeURIComponent(
+            resolvedProjectKey,
+          )}/documents/${encodeURIComponent(resolvedDocumentId)}/summary`,
+        );
+        if (response.status === 404) {
+          return null;
+        }
+        if (!response.ok) {
+          throw new Error("failed to load summary");
+        }
+        const payload = await response.json();
+        const data = payload?.data ?? payload ?? {};
+        const text =
+          typeof data.summary_text === "string" ? data.summary_text.trim() : "";
+        return text || null;
+      })();
+      summaryInFlightRef.current.set(requestKey, promise);
+      promise.finally(() => {
+        if (summaryInFlightRef.current.get(requestKey) === promise) {
+          summaryInFlightRef.current.delete(requestKey);
+        }
+      });
+    }
+
+    promise
+      .then((text) => {
+        if (!isActive || summaryRequestRef.current !== requestKey) {
+          return;
+        }
+        setSummaryText(text);
+      })
+      .catch((err) => {
+        if (!isActive || summaryRequestRef.current !== requestKey) {
+          return;
+        }
+        console.log("summary_load_error", err);
+        setSummaryText(null);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [resolvedDocumentId, resolvedProjectKey]);
+
+  useEffect(() => {
     if (!onDocumentMetaLoaded) {
       return;
     }
@@ -249,7 +313,7 @@ function DocumentPage({
     navigate(`/documents/new?document_id=${encodeURIComponent(activeDocument.id)}`);
   };
 
-  const handleRebuild = async () => {
+  const requestRebuild = async (withSummary: boolean) => {
     if (!resolvedProjectKey || !activeDocument) {
       return;
     }
@@ -258,21 +322,39 @@ function DocumentPage({
     }
     setRebuilding(true);
     try {
+      const query = withSummary ? "?with_summary=true" : "";
       const response = await apiFetch(
         `/api/projects/${encodeURIComponent(
           resolvedProjectKey,
-        )}/rag/rebuild/documents/${encodeURIComponent(activeDocument.id)}`,
+        )}/rag/rebuild/documents/${encodeURIComponent(activeDocument.id)}${query}`,
         { method: "POST" },
       );
       if (!response.ok) {
         throw new Error("rebuild failed");
       }
-      console.log("rag_rebuild_done", activeDocument.id);
+      console.log("rag_rebuild_done", {
+        docId: activeDocument.id,
+        withSummary,
+      });
     } catch (err) {
       console.log("rag_rebuild_error", err);
     } finally {
       setRebuilding(false);
     }
+  };
+
+  const handleRebuild = () => {
+    if (!resolvedProjectKey || !activeDocument || rebuilding) {
+      return;
+    }
+    Modal.confirm({
+      title: "Rebuild knowledge",
+      content: "Generate a document summary as well?",
+      okText: "Rebuild + Summary",
+      cancelText: "Rebuild only",
+      onOk: () => requestRebuild(true),
+      onCancel: () => requestRebuild(false),
+    });
   };
 
   const handleOpenNew = () => {
@@ -508,6 +590,7 @@ function DocumentPage({
     return (
       <div className="doc-page-body">
         <div className="doc-page-title">{activeDocument.title}</div>
+        {summaryText ? <div className="doc-page-summary">{summaryText}</div> : null}
         {activeDocument.content ? (
           <RichTextViewer
             content={activeDocument.content}

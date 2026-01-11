@@ -1086,6 +1086,15 @@ body {
   color: var(--ink);
 }
 
+.doc-page-summary {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--muted);
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(31, 35, 40, 0.04);
+}
+
 .doc-viewer-title {
   font-family: var(--font-serif);
   font-size: 24px;
