@@ -179,6 +179,28 @@ CREATE TABLE rag_chunk (
   created_at  TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE TABLE task (
+  id              TEXT PRIMARY KEY,
+  type            TEXT NOT NULL,
+  project_id      TEXT NOT NULL,
+  payload         JSONB,
+  status          TEXT NOT NULL,
+  attempts        INT  NOT NULL DEFAULT 0,
+  max_attempts    INT  NOT NULL DEFAULT 3,
+  scheduled_at    TIMESTAMPTZ,
+  started_at      TIMESTAMPTZ,
+  finished_at     TIMESTAMPTZ,
+  last_heartbeat  TIMESTAMPTZ,
+  lock_owner      TEXT,
+  lock_expires_at TIMESTAMPTZ,
+  result          JSONB,
+  error_message   TEXT,
+  callback_url    TEXT,
+  callback_secret TEXT,
+  created_at      TIMESTAMPTZ DEFAULT now(),
+  updated_at      TIMESTAMPTZ DEFAULT now()
+);
+
 CREATE TABLE rag_document_summary (
   id             TEXT PRIMARY KEY,
   project_id     TEXT NOT NULL,

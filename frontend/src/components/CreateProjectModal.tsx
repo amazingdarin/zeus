@@ -59,8 +59,8 @@ function CreateProjectModal({ onClose, onCreated }: CreateProjectModalProps) {
   };
 
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true">
-      <div className="modal-card">
+    <div className="modal-overlay" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="modal-card" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
           <h2>Create Project</h2>
           <button className="modal-close" type="button" onClick={onClose}>

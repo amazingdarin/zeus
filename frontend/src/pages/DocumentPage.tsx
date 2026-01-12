@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type { JSONContent } from "@tiptap/react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Modal } from "antd";
 
 import DocumentHeader from "../components/DocumentHeader";
 import RichTextViewer from "../components/RichTextViewer";
@@ -115,6 +114,7 @@ function DocumentPage({
   const [breadcrumbItems, setBreadcrumbItems] = useState<
     Array<{ label: string; to?: string }>
   >([]);
+  const [rebuildModalOpen, setRebuildModalOpen] = useState(false);
 
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importMode, setImportMode] = useState<"file" | "folder">("file");
@@ -347,14 +347,12 @@ function DocumentPage({
     if (!resolvedProjectKey || !activeDocument || rebuilding) {
       return;
     }
-    Modal.confirm({
-      title: "Rebuild knowledge",
-      content: "Generate a document summary as well?",
-      okText: "Rebuild + Summary",
-      cancelText: "Rebuild only",
-      onOk: () => requestRebuild(true),
-      onCancel: () => requestRebuild(false),
-    });
+    setRebuildModalOpen(true);
+  };
+
+  const handleRebuildChoice = (withSummary: boolean) => {
+    setRebuildModalOpen(false);
+    requestRebuild(withSummary);
   };
 
   const handleOpenNew = () => {
@@ -621,8 +619,13 @@ function DocumentPage({
       />
       <div className="doc-viewer-page">{bodyContent()}</div>
       {importModalOpen ? (
-        <div className="modal-overlay" role="dialog" aria-modal="true">
-          <div className="modal-card">
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={handleCloseImport}
+        >
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h2>Upload Assets</h2>
               <button className="modal-close" type="button" onClick={handleCloseImport}>
@@ -749,6 +752,56 @@ function DocumentPage({
               >
                 {uploading ? <span className="kb-import-spinner" aria-hidden="true" /> : null}
                 {importMode === "folder" && uploading ? `Upload ${uploadProgress}%` : "Upload"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {rebuildModalOpen ? (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setRebuildModalOpen(false)}
+        >
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Rebuild knowledge</h2>
+              <button
+                className="modal-close"
+                type="button"
+                onClick={() => setRebuildModalOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="modal-body">
+              Generate a document summary as well?
+            </div>
+            <div className="modal-actions">
+              <button
+                className="btn ghost"
+                type="button"
+                onClick={() => setRebuildModalOpen(false)}
+                disabled={rebuilding}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn ghost"
+                type="button"
+                onClick={() => handleRebuildChoice(false)}
+                disabled={rebuilding}
+              >
+                Rebuild only
+              </button>
+              <button
+                className="btn primary"
+                type="button"
+                onClick={() => handleRebuildChoice(true)}
+                disabled={rebuilding}
+              >
+                Rebuild + Summary
               </button>
             </div>
           </div>

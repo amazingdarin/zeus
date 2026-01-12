@@ -189,8 +189,11 @@ function ModelSettingsModal({
     activeTab === "multimodal" || !activeDraft.modelName || saving || testing;
 
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true">
-      <div className="modal-card model-settings-modal">
+    <div className="modal-overlay" role="dialog" aria-modal="true" onClick={onClose}>
+      <div
+        className="modal-card model-settings-modal"
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="modal-header">
           <h2>Model Settings</h2>
           <button className="modal-close" type="button" onClick={onClose}>
@@ -248,6 +251,9 @@ function ModelSettingsModal({
         </div>
         {testStatus ? <div className="model-success">{testStatus}</div> : null}
         <div className="modal-actions">
+          <button className="btn ghost" type="button" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
           <button
             className="btn ghost"
             type="button"
@@ -255,9 +261,6 @@ function ModelSettingsModal({
             disabled={testDisabled}
           >
             {testing ? "Testing..." : "Test"}
-          </button>
-          <button className="btn ghost" type="button" onClick={onClose} disabled={saving}>
-            Cancel
           </button>
           <button className="btn primary" type="button" onClick={handleSave} disabled={saving}>
             {saving ? "Saving..." : "Save"}

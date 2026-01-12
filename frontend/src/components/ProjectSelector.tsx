@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { DownOutlined, RightOutlined } from "@ant-design/icons";
+import { DownOutlined, ReloadOutlined, RightOutlined } from "@ant-design/icons";
 
 import { type Project, useProjectContext } from "../context/ProjectContext";
 import CreateProjectModal from "./CreateProjectModal";
+import { apiFetch } from "../config/api";
 
 const mockProjects: Project[] = [
   { id: "project-atlas", key: "atlas", name: "Atlas" },
@@ -17,6 +18,8 @@ type ProjectSelectorProps = {
 function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
   const [open, setOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildModalOpen, setRebuildModalOpen] = useState(false);
   const { projects, currentProject, setCurrentProject, reloadProjects } = useProjectContext();
 
   useEffect(() => {
@@ -41,10 +44,61 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
     setShowModal(true);
   };
 
+  const requestRebuildProject = async (withSummary: boolean) => {
+    if (!activeProject || rebuilding) {
+      return;
+    }
+    setRebuilding(true);
+    try {
+      const query = withSummary ? "?with_summary=true" : "";
+      const response = await apiFetch(
+        `/api/projects/${encodeURIComponent(activeProject.key)}/rag/rebuild${query}`,
+        { method: "POST" },
+      );
+      if (!response.ok) {
+        throw new Error("rebuild failed");
+      }
+      console.log("rag_project_rebuild_done", {
+        projectKey: activeProject.key,
+        withSummary,
+      });
+    } catch (err) {
+      console.log("rag_project_rebuild_error", err);
+    } finally {
+      setRebuilding(false);
+    }
+  };
+
+  const handleRebuildProject = () => {
+    if (!activeProject || rebuilding) {
+      return;
+    }
+    setOpen(false);
+    setRebuildModalOpen(true);
+  };
+
+  const handleRebuildChoice = (withSummary: boolean) => {
+    setRebuildModalOpen(false);
+    requestRebuildProject(withSummary);
+  };
+
   return (
     <div className={`project-selector${collapsed ? " compact" : ""}`}>
-      <div className={`sidebar-title-wrap${collapsed ? " compact" : ""}`}>
-        <div className={`sidebar-title${collapsed ? " compact" : ""}`}>Project</div>
+      <div className={`sidebar-title-wrap project-title-wrap${collapsed ? " compact" : ""}`}>
+        <div className="project-title-row">
+          <div className={`sidebar-title${collapsed ? " compact" : ""}`}>Project</div>
+          {!collapsed ? (
+            <button
+              className="project-rebuild-button"
+              type="button"
+              aria-label="Rebuild project knowledge"
+              onClick={handleRebuildProject}
+              disabled={!activeProject || rebuilding}
+            >
+              <ReloadOutlined />
+            </button>
+          ) : null}
+        </div>
         {collapsed ? <div className="sidebar-divider" aria-hidden="true" /> : null}
       </div>
       <button
@@ -90,6 +144,56 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
               {project.name}
             </button>
           ))}
+        </div>
+      ) : null}
+      {rebuildModalOpen ? (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setRebuildModalOpen(false)}
+        >
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Rebuild project knowledge</h2>
+              <button
+                className="modal-close"
+                type="button"
+                onClick={() => setRebuildModalOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="modal-body">
+              Generate document summaries as well?
+            </div>
+            <div className="modal-actions">
+              <button
+                className="btn ghost"
+                type="button"
+                onClick={() => setRebuildModalOpen(false)}
+                disabled={rebuilding}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn ghost"
+                type="button"
+                onClick={() => handleRebuildChoice(false)}
+                disabled={rebuilding}
+              >
+                Rebuild only
+              </button>
+              <button
+                className="btn primary"
+                type="button"
+                onClick={() => handleRebuildChoice(true)}
+                disabled={rebuilding}
+              >
+                Rebuild + Summary
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
       {showModal ? (

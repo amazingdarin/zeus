@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	log "github.com/sirupsen/logrus"
+
 	domainrag "zeus/internal/domain/rag"
 	"zeus/internal/infra/embedding"
 	"zeus/internal/repository"
@@ -55,25 +57,61 @@ func (s *Service) RebuildProject(ctx context.Context, projectID string) (domainr
 	}
 	start := time.Now()
 	report := domainrag.RAGRebuildReport{ProjectID: projectID}
+	log.WithContext(ctx).WithFields(log.Fields{
+		"project_id": projectID,
+	}).Info("rag rebuild project start")
 
 	if err := s.index.DeleteByProject(ctx, projectID); err != nil {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"project_id": projectID,
+			"error":      err,
+		}).Error("rag rebuild project: delete index failed")
 		return report, fmt.Errorf("delete project index: %w", err)
 	}
 	refs, err := s.reader.ListDocuments(ctx, projectID)
 	if err != nil {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"project_id": projectID,
+			"error":      err,
+		}).Error("rag rebuild project: list documents failed")
 		return report, err
 	}
 	report.TotalDocs = len(refs)
+	log.WithContext(ctx).WithFields(log.Fields{
+		"project_id": projectID,
+		"total_docs": report.TotalDocs,
+	}).Info("rag rebuild project: documents loaded")
 	for _, ref := range refs {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"project_id": projectID,
+			"doc_id":     ref.DocID,
+		}).Info("rag rebuild document start")
 		units, err := s.rebuildDoc(ctx, projectID, ref.DocID)
 		if err != nil {
 			report.FailedDocs++
 			report.Errors = append(report.Errors, err.Error())
+			log.WithContext(ctx).WithFields(log.Fields{
+				"project_id": projectID,
+				"doc_id":     ref.DocID,
+				"error":      err,
+			}).Warn("rag rebuild document failed")
 			continue
 		}
 		report.IndexedUnits += units
+		log.WithContext(ctx).WithFields(log.Fields{
+			"project_id": projectID,
+			"doc_id":     ref.DocID,
+			"units":      units,
+		}).Info("rag rebuild document done")
 	}
 	report.Duration = time.Since(start)
+	log.WithContext(ctx).WithFields(log.Fields{
+		"project_id":    projectID,
+		"total_docs":    report.TotalDocs,
+		"failed_docs":   report.FailedDocs,
+		"indexed_units": report.IndexedUnits,
+		"duration_ms":   report.Duration.Milliseconds(),
+	}).Info("rag rebuild project done")
 	return report, nil
 }
 
@@ -89,15 +127,31 @@ func (s *Service) RebuildDocument(ctx context.Context, projectID, docID string) 
 	}
 	start := time.Now()
 	report := domainrag.RAGRebuildReport{ProjectID: projectID, DocID: docID, TotalDocs: 1}
+	log.WithContext(ctx).WithFields(log.Fields{
+		"project_id": projectID,
+		"doc_id":     docID,
+	}).Info("rag rebuild document start")
 	units, err := s.rebuildDoc(ctx, projectID, docID)
 	if err != nil {
 		report.FailedDocs = 1
 		report.Errors = append(report.Errors, err.Error())
 		report.Duration = time.Since(start)
+		log.WithContext(ctx).WithFields(log.Fields{
+			"project_id":  projectID,
+			"doc_id":      docID,
+			"duration_ms": report.Duration.Milliseconds(),
+			"error":       err,
+		}).Error("rag rebuild document failed")
 		return report, err
 	}
 	report.IndexedUnits = units
 	report.Duration = time.Since(start)
+	log.WithContext(ctx).WithFields(log.Fields{
+		"project_id":  projectID,
+		"doc_id":      docID,
+		"units":       units,
+		"duration_ms": report.Duration.Milliseconds(),
+	}).Info("rag rebuild document done")
 	return report, nil
 }
 
@@ -156,8 +210,17 @@ func (s *Service) rebuildDoc(ctx context.Context, projectID, docID string) (int,
 		return 0, fmt.Errorf("extract units: %w", err)
 	}
 	if len(units) == 0 {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"project_id": projectID,
+			"doc_id":     docID,
+		}).Info("rag rebuild document: no units extracted")
 		return 0, nil
 	}
+	log.WithContext(ctx).WithFields(log.Fields{
+		"project_id": projectID,
+		"doc_id":     docID,
+		"unit_count": len(units),
+	}).Info("rag rebuild document: units extracted")
 	indexed, err := s.embedUnits(ctx, units)
 	if err != nil {
 		return 0, err
@@ -180,20 +243,40 @@ func (s *Service) embedUnits(ctx context.Context, units []domainrag.RAGUnit) ([]
 			end = len(units)
 		}
 		batch := units[start:end]
+		log.WithContext(ctx).WithFields(log.Fields{
+			"batch_start": start,
+			"batch_end":   end,
+			"batch_size":  len(batch),
+		}).Info("rag embedding batch start")
 		inputs := make([]string, 0, len(batch))
 		for _, unit := range batch {
 			inputs = append(inputs, unit.Content)
 		}
 		vectors, err := s.embedder.Embed(ctx, inputs)
 		if err != nil {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"batch_start": start,
+				"batch_end":   end,
+				"error":       err,
+			}).Error("rag embedding batch failed")
 			return nil, err
 		}
 		if len(vectors) != len(batch) {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"batch_start": start,
+				"batch_end":   end,
+				"expected":    len(batch),
+				"actual":      len(vectors),
+			}).Error("rag embedding output mismatch")
 			return nil, fmt.Errorf("embedding output mismatch")
 		}
 		for i, unit := range batch {
 			items = append(items, ragindex.IndexedUnit{Unit: unit, Vector: vectors[i]})
 		}
+		log.WithContext(ctx).WithFields(log.Fields{
+			"batch_start": start,
+			"batch_end":   end,
+		}).Info("rag embedding batch done")
 	}
 	return items, nil
 }

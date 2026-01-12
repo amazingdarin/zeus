@@ -150,6 +150,38 @@ func (s *SummaryService) GetDocumentSummary(
 	return s.repo.Get(ctx, projectID, docID)
 }
 
+func (s *SummaryService) GenerateProjectSummaries(
+	ctx context.Context,
+	projectID string,
+) (int, error) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return 0, fmt.Errorf("project id is required")
+	}
+	refs, err := s.reader.ListDocuments(ctx, projectID)
+	if err != nil {
+		return 0, fmt.Errorf("list documents: %w", err)
+	}
+	success := 0
+	var firstErr error
+	failures := 0
+	for _, ref := range refs {
+		_, err := s.GenerateDocumentSummary(ctx, projectID, ref.DocID)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			failures++
+			continue
+		}
+		success++
+	}
+	if failures > 0 {
+		return success, fmt.Errorf("summary failed for %d documents: %w", failures, firstErr)
+	}
+	return success, nil
+}
+
 func buildSummaryInput(units []domainrag.RAGUnit) string {
 	if len(units) == 0 {
 		return ""

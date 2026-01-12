@@ -203,6 +203,22 @@ body {
   border-radius: 10px;
   cursor: pointer;
   font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-selector-item:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.project-selector-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
 }
 
 .project-selector-item:hover {
@@ -243,6 +259,7 @@ body {
   border: 1px solid var(--border);
   padding: 20px;
   box-shadow: var(--shadow);
+  transform: translateY(-6vh);
 }
 
 .modal-header {
@@ -530,6 +547,40 @@ body {
   align-items: flex-start;
   justify-content: center;
   width: 100%;
+}
+
+.project-title-wrap {
+  height: 24px;
+}
+
+.project-title-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.project-rebuild-button {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.project-rebuild-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.project-rebuild-button .anticon {
+  font-size: 0.8em;
 }
 
 .sidebar-title.compact {

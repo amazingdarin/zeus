@@ -9,4 +9,5 @@ import (
 type DocumentSummaryService interface {
 	GenerateDocumentSummary(ctx context.Context, projectID, docID string) (*domainrag.DocumentSummary, error)
 	GetDocumentSummary(ctx context.Context, projectID, docID string) (*domainrag.DocumentSummary, bool, error)
+	GenerateProjectSummaries(ctx context.Context, projectID string) (int, error)
 }

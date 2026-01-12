@@ -27,6 +27,7 @@ import (
 	"zeus/internal/infra/objectstorage"
 	"zeus/internal/infra/searchindex"
 	httpsession "zeus/internal/infra/session"
+	"zeus/internal/infra/taskcallback"
 	"zeus/internal/ingestion"
 	gitrepo "zeus/internal/repository/git"
 	"zeus/internal/repository/postgres"
@@ -39,6 +40,7 @@ import (
 	svcrag "zeus/internal/service/rag"
 	svcsearch "zeus/internal/service/search"
 	svcstorageobject "zeus/internal/service/storage_object"
+	svctask "zeus/internal/service/task"
 )
 
 func InitConfig(ctx context.Context) {
@@ -129,6 +131,7 @@ func main() {
 	storageObjectRepo := postgres.NewStorageObjectRepository(db)
 	modelRuntimeRepo := postgres.NewModelRuntimeRepository(db)
 	summaryRepo := postgres.NewDocumentSummaryRepository(db)
+	taskRepo := postgres.NewTaskRepository(db)
 	knowledgeRepo := gitrepo.NewKnowledgeRepository(gitClientManager)
 
 	// Init Services
@@ -180,6 +183,19 @@ func main() {
 		summaryLLM,
 		runtimeResolver,
 	)
+	taskSvc := svctask.NewService(taskRepo)
+
+	taskWorker := svctask.NewWorker(
+		taskRepo,
+		[]svctask.Handler{
+			svctask.NewRagRebuildProjectHandler(ragSvc, summarySvc),
+		},
+		taskcallback.NewHTTPSender(),
+		"worker-1",
+		3*time.Second,
+		2*time.Minute,
+	)
+	go taskWorker.Start(ctx)
 
 	sessionManager := httpsession.NewSessionManager(nil)
 
@@ -196,6 +212,7 @@ func main() {
 		searchSvc,
 		ragSvc,
 		summarySvc,
+		taskSvc,
 		openapiIndexSvc,
 		modelRuntimeSvc,
 	)
