@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 
 import Sidebar from "../components/Sidebar";
 import ModelSettingsModal from "../components/ModelSettingsModal";
 import TopBarModelButton from "../components/TopBarModelButton";
+import ChatDock from "../components/ChatDock";
 import type { ModelRuntimeInput } from "../api/model";
 import {
   fetchModelRuntimes,
@@ -26,6 +27,12 @@ function AppShell({ children }: AppShellProps) {
   const [modelRuntimes, setModelRuntimes] = useState<ModelRuntime[]>([]);
   const [modelSettingsLoading, setModelSettingsLoading] = useState(false);
   const [modelSettingsError, setModelSettingsError] = useState<string | null>(null);
+  const layoutStyle = useMemo(
+    () => ({
+      "--sidebar-width": collapsed ? "72px" : "240px",
+    }),
+    [collapsed],
+  );
 
   const loadModelSettings = useCallback(async () => {
     setModelSettingsLoading(true);
@@ -64,7 +71,7 @@ function AppShell({ children }: AppShellProps) {
   }, []);
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" style={layoutStyle as CSSProperties}>
       <header className="topbar">
         <div className="topbar-logo">Zeus</div>
         <div className="topbar-actions">
@@ -80,6 +87,7 @@ function AppShell({ children }: AppShellProps) {
         />
         <main className="content">{children}</main>
       </div>
+      <ChatDock />
       <ModelSettingsModal
         isOpen={modelSettingsOpen}
         loading={modelSettingsLoading}

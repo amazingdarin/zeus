@@ -33,6 +33,8 @@ import (
 	"zeus/internal/repository/postgres"
 	"zeus/internal/repository/ragindex"
 	svcasset "zeus/internal/service/asset"
+	"zeus/internal/service/chatrun"
+	"zeus/internal/service/chatstream"
 	svcknowledge "zeus/internal/service/knowledge"
 	svcmodel "zeus/internal/service/model"
 	svcopenapi "zeus/internal/service/openapi"
@@ -184,6 +186,8 @@ func main() {
 		runtimeResolver,
 	)
 	taskSvc := svctask.NewService(taskRepo)
+	chatRunRegistry := chatrun.NewMemoryRunRegistry()
+	chatStreamSvc := chatstream.NewService(ragSvc, runtimeResolver, llm.NewOpenAIStreamClient(3*time.Minute))
 
 	taskWorker := svctask.NewWorker(
 		taskRepo,
@@ -215,6 +219,8 @@ func main() {
 		taskSvc,
 		openapiIndexSvc,
 		modelRuntimeSvc,
+		chatRunRegistry,
+		chatStreamSvc,
 	)
 
 	if err := router.Run(config.AppConfig.Server.Addr); err != nil {

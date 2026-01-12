@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"zeus/internal/service"
+	"zeus/internal/service/chatrun"
 	svcopenapi "zeus/internal/service/openapi"
 )
 
@@ -19,6 +20,8 @@ func RegisterRoutes(
 	taskSvc service.TaskService,
 	openapiIndexSvc svcopenapi.IndexService,
 	modelRuntimeSvc service.ModelRuntimeService,
+	chatRunRegistry chatrun.RunRegistry,
+	chatStreamSvc ChatStreamRunner,
 ) {
 	storageObjectHandler := NewStorageObjectHandler(storageObjectSvc, projectSvc)
 	assetHandler := NewAssetHandler(assetSvc)
@@ -31,6 +34,8 @@ func RegisterRoutes(
 	openapiHandler := NewOpenAPIHandler(openapiIndexSvc)
 	systemHandler := NewSystemHandler()
 	modelHandler := NewModelRuntimeHandler(modelRuntimeSvc)
+	chatRunHandler := NewChatRunHandler(chatRunRegistry, projectSvc)
+	chatStreamHandler := NewChatStreamHandler(chatRunRegistry, chatStreamSvc, projectSvc)
 
 	api := r.Group("/api")
 
@@ -68,6 +73,10 @@ func RegisterRoutes(
 	api.POST("/projects/:project_key/rag/rebuild", ragHandler.RebuildProjectByKey)
 	api.POST("/rag/rebuild/project/:project_id", ragHandler.RebuildProject)
 	api.POST("/projects/:project_key/rag/rebuild/documents/:doc_id", ragHandler.RebuildDocument)
+
+	// Chat runs
+	api.POST("/projects/:project_key/chat/runs", chatRunHandler.Create)
+	api.GET("/projects/:project_key/chat/runs/:run_id/stream", chatStreamHandler.Stream)
 	// Task
 	api.GET("/tasks/:id", taskHandler.Get)
 
