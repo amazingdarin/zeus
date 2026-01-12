@@ -1,0 +1,13 @@
+{{- if .Values.postgres.extensions }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "postgres.fullname" . }}-initdb
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+data:
+  01-extensions.sql: |
+    {{- range .Values.postgres.extensions }}
+    CREATE EXTENSION IF NOT EXISTS {{ . }};
+    {{- end }}
+{{- end }}

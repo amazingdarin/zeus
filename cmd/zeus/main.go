@@ -171,7 +171,7 @@ func main() {
 	indexBuilder := searchindex.NewIndexBuilder(knowledgeRepo, searchIndexRoot)
 	searchSvc := svcsearch.NewService(indexBuilder)
 	knowledgeSvc := svcknowledge.NewService(knowledgeRepo, projectRepo)
-	ragIndex := ragindex.NewMemoryIndex()
+	ragIndex := ragindex.NewPostgresIndex(db)
 	ragExtractor := svcrag.SimpleBlockExtractor{}
 	runtimeResolver := svcmodel.NewRuntimeResolver(modelRuntimeRepo, config.AppConfig.Security.EncryptionKey)
 	ragEmbedder := embedding.NewOpenAICompatibleEmbedder(runtimeResolver)

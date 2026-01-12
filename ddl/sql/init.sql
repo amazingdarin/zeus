@@ -213,6 +213,25 @@ CREATE TABLE rag_document_summary (
   UNIQUE (project_id, doc_id)
 );
 
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE rag_index_unit (
+  unit_id      TEXT PRIMARY KEY,
+  project_id   TEXT NOT NULL,
+  doc_id       TEXT NOT NULL,
+  path         TEXT[] NOT NULL,
+  content      TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  source       JSONB NOT NULL,
+  embedding    vector(1536) NOT NULL,
+  created_at   TIMESTAMPTZ DEFAULT now(),
+  updated_at   TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_rag_index_unit_project_doc ON rag_index_unit(project_id, doc_id);
+CREATE INDEX idx_rag_index_unit_project ON rag_index_unit(project_id);
+CREATE INDEX idx_rag_index_unit_embedding ON rag_index_unit USING ivfflat (embedding vector_l2_ops);
+
 CREATE TABLE agent_run (
   id            BIGSERIAL PRIMARY KEY,
   agent_type    TEXT,      -- ui / code / test / ops

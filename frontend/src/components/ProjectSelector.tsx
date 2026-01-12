@@ -5,11 +5,6 @@ import { type Project, useProjectContext } from "../context/ProjectContext";
 import CreateProjectModal from "./CreateProjectModal";
 import { apiFetch } from "../config/api";
 
-const mockProjects: Project[] = [
-  { id: "project-atlas", key: "atlas", name: "Atlas" },
-  { id: "project-apollo", key: "apollo", name: "Apollo" },
-  { id: "project-orbit", key: "orbit", name: "Orbit" },
-];
 
 type ProjectSelectorProps = {
   collapsed?: boolean;
@@ -30,7 +25,7 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
     }
   }, [currentProject]);
 
-  const availableProjects = projects.length > 0 ? projects : mockProjects;
+  const availableProjects = projects;
   const activeProject = currentProject ?? availableProjects[0] ?? null;
 
   const toggleOpen = () => setOpen((prev) => !prev);

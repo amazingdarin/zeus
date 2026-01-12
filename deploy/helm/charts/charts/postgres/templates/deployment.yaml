@@ -39,6 +39,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            {{- if .Values.postgres.extensions }}
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
@@ -49,3 +53,8 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- if .Values.postgres.extensions }}
+        - name: initdb
+          configMap:
+            name: {{ include "postgres.fullname" . }}-initdb
+        {{- end }}

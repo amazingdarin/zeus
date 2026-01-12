@@ -1,6 +1,6 @@
 image:
-  repository: postgres
-  tag: "15"
+  repository: pgvector/pgvector
+  tag: "pg15"
   pullPolicy: IfNotPresent
 
 service:
@@ -18,3 +18,5 @@ postgres:
   database: zeus
   user: zeus
   password: zeus
+  extensions:
+    - vector
