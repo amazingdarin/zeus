@@ -20,6 +20,8 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
   const [showModal, setShowModal] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildModalOpen, setRebuildModalOpen] = useState(false);
+  const [rebuildTaskId, setRebuildTaskId] = useState<string | null>(null);
+  const [rebuildStatus, setRebuildStatus] = useState<string | null>(null);
   const { projects, currentProject, setCurrentProject, reloadProjects } = useProjectContext();
 
   useEffect(() => {
@@ -44,8 +46,73 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
     setShowModal(true);
   };
 
+  const rebuildStorageKey = (projectKey: string) => `zeus_project_rebuild_task_${projectKey}`;
+
+  const updateRebuildState = (projectKey: string, status: string | null, taskId: string | null) => {
+    setRebuildStatus(status);
+    setRebuildTaskId(taskId);
+    setRebuilding(status === "pending" || status === "running");
+    if (!taskId || !status || status === "success" || status === "failed" || status === "canceled") {
+      localStorage.removeItem(rebuildStorageKey(projectKey));
+    }
+  };
+
+  const fetchTaskStatus = async (projectKey: string, taskId: string) => {
+    try {
+      const response = await apiFetch(`/api/tasks/${encodeURIComponent(taskId)}`);
+      if (response.status === 404) {
+        updateRebuildState(projectKey, null, null);
+        return;
+      }
+      if (!response.ok) {
+        throw new Error("task status failed");
+      }
+      const payload = await response.json();
+      const data = payload?.data ?? payload ?? {};
+      const status = typeof data.status === "string" ? data.status : null;
+      updateRebuildState(projectKey, status, taskId);
+    } catch (err) {
+      console.log("rag_project_rebuild_status_error", err);
+    }
+  };
+
+  useEffect(() => {
+    if (!activeProject?.key) {
+      setRebuildTaskId(null);
+      setRebuildStatus(null);
+      setRebuilding(false);
+      return;
+    }
+    const key = rebuildStorageKey(activeProject.key);
+    const taskId = localStorage.getItem(key);
+    if (taskId) {
+      setRebuildTaskId(taskId);
+      void fetchTaskStatus(activeProject.key, taskId);
+    } else {
+      setRebuildTaskId(null);
+      setRebuildStatus(null);
+      setRebuilding(false);
+    }
+  }, [activeProject?.key]);
+
+  useEffect(() => {
+    if (!activeProject?.key || !rebuildTaskId) {
+      return;
+    }
+    if (rebuildStatus && rebuildStatus !== "pending" && rebuildStatus !== "running") {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void fetchTaskStatus(activeProject.key, rebuildTaskId);
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [activeProject?.key, rebuildStatus, rebuildTaskId]);
+
   const requestRebuildProject = async (withSummary: boolean) => {
     if (!activeProject || rebuilding) {
+      return;
+    }
+    if (rebuildTaskId && (rebuildStatus === "pending" || rebuildStatus === "running")) {
       return;
     }
     setRebuilding(true);
@@ -58,13 +125,18 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
       if (!response.ok) {
         throw new Error("rebuild failed");
       }
-      console.log("rag_project_rebuild_done", {
-        projectKey: activeProject.key,
-        withSummary,
-      });
+      const payload = await response.json();
+      const data = payload?.data ?? payload ?? {};
+      const taskId = typeof data.task_id === "string" ? data.task_id : "";
+      const status = typeof data.status === "string" ? data.status : "pending";
+      if (taskId) {
+        localStorage.setItem(rebuildStorageKey(activeProject.key), taskId);
+        updateRebuildState(activeProject.key, status, taskId);
+      } else {
+        setRebuilding(false);
+      }
     } catch (err) {
       console.log("rag_project_rebuild_error", err);
-    } finally {
       setRebuilding(false);
     }
   };
