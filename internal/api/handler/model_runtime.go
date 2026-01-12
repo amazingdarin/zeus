@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -135,11 +134,4 @@ func parseRawJSONMap(raw json.RawMessage) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("parse json: %w", err)
 	}
 	return payload, nil
-}
-
-func formatTime(value time.Time) string {
-	if value.IsZero() {
-		return ""
-	}
-	return value.Format(time.RFC3339)
 }

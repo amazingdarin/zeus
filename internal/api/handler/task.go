@@ -3,7 +3,6 @@ package handler
 import (
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -62,21 +61,14 @@ func (h *TaskHandler) Get(c *gin.Context) {
 			Status:       string(task.Status),
 			Attempts:     task.Attempts,
 			MaxAttempts:  task.MaxAttempts,
-			ScheduledAt:  formatTime(task.ScheduledAt),
-			StartedAt:    formatTime(task.StartedAt),
-			FinishedAt:   formatTime(task.FinishedAt),
+			ScheduledAt:  formatTimePtr(task.ScheduledAt),
+			StartedAt:    formatTimePtr(task.StartedAt),
+			FinishedAt:   formatTimePtr(task.FinishedAt),
 			Result:       task.Result,
 			ErrorMessage: task.ErrorMessage,
-			CreatedAt:    formatTime(&task.CreatedAt),
-			UpdatedAt:    formatTime(&task.UpdatedAt),
+			CreatedAt:    formatTimePtr(&task.CreatedAt),
+			UpdatedAt:    formatTimePtr(&task.UpdatedAt),
 		},
 	}
 	c.JSON(http.StatusOK, response)
-}
-
-func formatTime(value *time.Time) string {
-	if value == nil || value.IsZero() {
-		return ""
-	}
-	return value.UTC().Format(time.RFC3339)
 }
