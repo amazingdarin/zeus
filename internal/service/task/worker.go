@@ -9,6 +9,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"zeus/internal/domain"
+	"zeus/internal/infra/session"
 	"zeus/internal/infra/taskcallback"
 	"zeus/internal/repository"
 )
@@ -94,6 +95,16 @@ func (w *Worker) process(ctx context.Context, task *domain.Task) {
 	if task == nil {
 		return
 	}
+	now := time.Now()
+	taskID := strings.TrimSpace(task.ID)
+	if taskID == "" {
+		taskID = session.NewSessionID()
+	}
+	ctx = session.WithSession(ctx, &session.Session{
+		ID:        "task-" + taskID,
+		CreatedAt: now,
+		LastSeen:  now,
+	})
 	handler := w.handlers[task.Type]
 	if handler == nil {
 		err := fmt.Errorf("no handler for task type %s", task.Type)
