@@ -1,0 +1,136 @@
+package chatstream
+
+import (
+	"context"
+	"fmt"
+	"strings"
+)
+
+type SlashCommandType string
+
+const (
+	SlashCommandOperation SlashCommandType = "operation"
+	SlashCommandPrompt    SlashCommandType = "prompt"
+)
+
+type SlashCommand struct {
+	Name        string
+	Type        SlashCommandType
+	Template    string
+	Description string
+}
+
+type SlashRequest struct {
+	ProjectID  string
+	ProjectKey string
+	Input      string
+}
+
+type SlashResult struct {
+	Command        string
+	Mode           SlashCommandType
+	Message        string
+	ExpandedPrompt string
+	Artifacts      []ChatArtifact
+}
+
+type SlashToolResult struct {
+	Message   string
+	Artifacts []ChatArtifact
+}
+
+type SlashToolInvoker interface {
+	Invoke(ctx context.Context, projectKey, command, args string) (SlashToolResult, error)
+}
+
+type SlashRouter interface {
+	Handle(ctx context.Context, req SlashRequest) (SlashResult, bool, error)
+}
+
+type DefaultSlashRouter struct {
+	commands map[string]SlashCommand
+	tool     SlashToolInvoker
+}
+
+func NewDefaultSlashRouter(commands []SlashCommand, tool SlashToolInvoker) *DefaultSlashRouter {
+	index := make(map[string]SlashCommand, len(commands))
+	for _, cmd := range commands {
+		name := strings.TrimSpace(cmd.Name)
+		if name == "" {
+			continue
+		}
+		index[name] = cmd
+	}
+	return &DefaultSlashRouter{
+		commands: index,
+		tool:     tool,
+	}
+}
+
+func (r *DefaultSlashRouter) Handle(ctx context.Context, req SlashRequest) (SlashResult, bool, error) {
+	input := strings.TrimSpace(req.Input)
+	if input == "" || !strings.HasPrefix(input, "/") {
+		return SlashResult{}, false, nil
+	}
+	name, args := parseSlashInput(input)
+	if name == "" {
+		return SlashResult{}, false, nil
+	}
+	cmd, ok := r.commands[name]
+	if !ok {
+		return SlashResult{}, false, nil
+	}
+	switch cmd.Type {
+	case SlashCommandOperation:
+		if r.tool == nil {
+			return SlashResult{}, true, fmt.Errorf("slash command tool is not configured")
+		}
+		result, err := r.tool.Invoke(ctx, req.ProjectKey, cmd.Name, args)
+		if err != nil {
+			return SlashResult{}, true, err
+		}
+		return SlashResult{
+			Command:   cmd.Name,
+			Mode:      SlashCommandOperation,
+			Message:   result.Message,
+			Artifacts: result.Artifacts,
+		}, true, nil
+	case SlashCommandPrompt:
+		expanded := strings.TrimSpace(cmd.Template)
+		if expanded == "" {
+			expanded = strings.TrimSpace(args)
+		}
+		if expanded != "" {
+			expanded = strings.ReplaceAll(expanded, "{{input}}", strings.TrimSpace(args))
+			expanded = strings.ReplaceAll(expanded, "{{args}}", strings.TrimSpace(args))
+		}
+		return SlashResult{
+			Command:        cmd.Name,
+			Mode:           SlashCommandPrompt,
+			ExpandedPrompt: expanded,
+		}, true, nil
+	default:
+		return SlashResult{}, true, fmt.Errorf("unsupported slash command type")
+	}
+}
+
+func parseSlashInput(input string) (string, string) {
+	trimmed := strings.TrimSpace(input)
+	if !strings.HasPrefix(trimmed, "/") {
+		return "", ""
+	}
+	trimmed = strings.TrimPrefix(trimmed, "/")
+	if trimmed == "" {
+		return "", ""
+	}
+	parts := strings.Fields(trimmed)
+	if len(parts) == 0 {
+		return "", ""
+	}
+	name := strings.TrimSpace(parts[0])
+	if name == "" {
+		return "", ""
+	}
+	args := strings.TrimSpace(strings.TrimPrefix(trimmed, parts[0]))
+	return name, args
+}

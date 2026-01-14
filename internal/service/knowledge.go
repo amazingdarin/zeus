@@ -38,6 +38,16 @@ type KnowledgeMoveRequest struct {
 	AfterID     string
 }
 
+type KnowledgeChangeRequest struct {
+	Meta    *domain.DocumentMeta
+	Content *domain.DocumentContent
+}
+
+type KnowledgeChangeDiff struct {
+	MetaDiff    string
+	ContentDiff string
+}
+
 type KnowledgeService interface {
 	ListDocuments(ctx context.Context, projectKey string) ([]domain.DocumentMeta, error)
 	ListDocumentsByParent(
@@ -54,4 +64,17 @@ type KnowledgeService interface {
 	CreateDocument(ctx context.Context, projectKey string, req KnowledgeCreateRequest) (domain.DocumentMeta, domain.DocumentContent, error)
 	UpdateDocument(ctx context.Context, projectKey, docID string, req KnowledgeUpdateRequest) (domain.DocumentMeta, domain.DocumentContent, error)
 	MoveDocument(ctx context.Context, projectKey, docID string, req KnowledgeMoveRequest) (domain.DocumentMeta, error)
+	CreateChangeProposal(
+		ctx context.Context,
+		projectKey, docID string,
+		req KnowledgeChangeRequest,
+	) (domain.KnowledgeChangeProposal, error)
+	GetChangeProposalDiff(
+		ctx context.Context,
+		projectKey, docID, proposalID string,
+	) (KnowledgeChangeDiff, error)
+	ApplyChangeProposal(
+		ctx context.Context,
+		projectKey, docID, proposalID string,
+	) (domain.DocumentMeta, domain.DocumentContent, error)
 }

@@ -213,6 +213,17 @@ CREATE TABLE rag_document_summary (
   UNIQUE (project_id, doc_id)
 );
 
+CREATE TABLE knowledge_change_proposal (
+  id         TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  doc_id     TEXT NOT NULL,
+  status     TEXT NOT NULL,
+  meta       JSONB,
+  content    JSONB,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE rag_index_unit (

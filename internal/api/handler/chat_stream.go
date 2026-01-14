@@ -102,8 +102,9 @@ func (h *ChatStreamHandler) Stream(c *gin.Context) {
 	done := make(chan error, 1)
 	go func() {
 		err := h.streamer.Run(ctx, run, chatstream.ChatRequest{
-			ProjectID: project.ID,
-			Query:     strings.TrimSpace(run.Message),
+			ProjectID:  project.ID,
+			ProjectKey: projectKey,
+			Query:      strings.TrimSpace(run.Message),
 		}, func(event chatstream.ChatEvent) error {
 			return WriteEvent(writer, event)
 		})

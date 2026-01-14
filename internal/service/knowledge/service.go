@@ -19,15 +19,18 @@ import (
 type Service struct {
 	knowledgeRepo repository.KnowledgeRepository
 	projectRepo   repository.ProjectRepository
+	proposalRepo  repository.KnowledgeChangeProposalRepository
 }
 
 func NewService(
 	knowledgeRepo repository.KnowledgeRepository,
 	projectRepo repository.ProjectRepository,
+	proposalRepo repository.KnowledgeChangeProposalRepository,
 ) *Service {
 	return &Service{
 		knowledgeRepo: knowledgeRepo,
 		projectRepo:   projectRepo,
+		proposalRepo:  proposalRepo,
 	}
 }
 

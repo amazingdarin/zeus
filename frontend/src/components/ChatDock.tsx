@@ -1,12 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AutoComplete, Input } from "antd";
+import { useNavigate } from "react-router-dom";
 
 import { createChatRun, buildChatStreamUrl } from "../api/chat";
 import { useProjectContext } from "../context/ProjectContext";
+
+type ChatArtifact = {
+  type: string;
+  title?: string;
+  data?: Record<string, unknown>;
+};
 
 type ChatMessage = {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  artifacts?: ChatArtifact[];
 };
 
 const createId = () => {
@@ -19,6 +28,7 @@ const createId = () => {
 function ChatDock() {
   const { currentProject } = useProjectContext();
   const projectKey = currentProject?.key ?? "";
+  const navigate = useNavigate();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -33,6 +43,16 @@ function ChatDock() {
     return !isGenerating && input.trim().length > 0 && projectKey !== "";
   }, [isGenerating, input, projectKey]);
 
+  const slashOptions = useMemo(() => {
+    if (!input.trim().startsWith("/")) {
+      return [];
+    }
+    return [
+      { value: "/docs", label: "docs — list documents" },
+      { value: "/propose", label: "propose — create a change proposal (doc_id required)" },
+    ];
+  }, [input]);
+
   const closeStream = useCallback(() => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
@@ -41,15 +61,37 @@ function ChatDock() {
     hasCustomEventsRef.current = false;
   }, []);
 
+  const handleDocumentNavigate = useCallback(
+    (docId: string, proposalId?: string) => {
+      const trimmed = docId.trim();
+      if (!trimmed) {
+        return;
+      }
+      const params = new URLSearchParams();
+      params.set("document_id", trimmed);
+      if (proposalId) {
+        params.set("proposal_id", proposalId);
+      }
+      navigate(`/knowledge?${params.toString()}`);
+    },
+    [navigate],
+  );
+
   useEffect(() => {
     return () => {
       closeStream();
     };
   }, [closeStream]);
 
-  const appendMessage = useCallback((role: ChatMessage["role"], content: string) => {
-    setMessages((prev) => [...prev, { id: createId(), role, content }]);
-  }, []);
+  const appendMessage = useCallback(
+    (role: ChatMessage["role"], content: string, artifacts?: ChatArtifact[]) => {
+      setMessages((prev) => [
+        ...prev,
+        { id: createId(), role, content, artifacts },
+      ]);
+    },
+    [],
+  );
 
   const resetAssistantBuffer = useCallback(() => {
     assistantBufferRef.current = "";
@@ -66,13 +108,21 @@ function ChatDock() {
     [],
   );
 
-  const commitAssistantBuffer = useCallback(() => {
-    const content = assistantBufferRef.current;
-    if (content.trim()) {
-      appendMessage("assistant", content);
-    }
-    resetAssistantBuffer();
-  }, [appendMessage, resetAssistantBuffer]);
+  const commitAssistantBuffer = useCallback(
+    (artifacts?: ChatArtifact[], fallbackMessage?: string) => {
+      const content = assistantBufferRef.current;
+      const trimmed = content.trim();
+      if (trimmed) {
+        appendMessage("assistant", content, artifacts);
+      } else if (fallbackMessage && fallbackMessage.trim()) {
+        appendMessage("assistant", fallbackMessage, artifacts);
+      } else if (artifacts && artifacts.length > 0) {
+        appendMessage("assistant", "", artifacts);
+      }
+      resetAssistantBuffer();
+    },
+    [appendMessage, resetAssistantBuffer],
+  );
 
   const handleSend = useCallback(async () => {
     if (!canSend) {
@@ -101,10 +151,12 @@ function ChatDock() {
         }
       });
 
-      source.addEventListener("assistant.done", () => {
+      source.addEventListener("assistant.done", (event) => {
         hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        const { message, artifacts } = normalizeDonePayload(payload);
         setIsGenerating(false);
-        commitAssistantBuffer();
+        commitAssistantBuffer(artifacts, message);
         closeStream();
       });
 
@@ -140,6 +192,13 @@ function ChatDock() {
           closeStream();
           return;
         }
+        const donePayload = normalizeDonePayload(payload);
+        if (donePayload.message || donePayload.artifacts.length > 0) {
+          setIsGenerating(false);
+          commitAssistantBuffer(donePayload.artifacts, donePayload.message);
+          closeStream();
+          return;
+        }
         const delta = typeof payload === "string" ? payload : String(payload ?? "");
         if (delta) {
           handleDelta(delta);
@@ -172,6 +231,70 @@ function ChatDock() {
     resetAssistantBuffer,
   ]);
 
+  const renderArtifacts = (artifacts?: ChatArtifact[]) => {
+    if (!artifacts || artifacts.length === 0) {
+      return null;
+    }
+    return (
+      <div className="chat-dock-artifacts">
+        {artifacts.map((artifact, index) => {
+          if (artifact.type === "document.list") {
+            const items = Array.isArray(artifact.data?.items)
+              ? (artifact.data?.items as Array<{ id?: string; title?: string }>)
+              : [];
+            return (
+              <div key={`${artifact.type}-${index}`} className="chat-dock-artifact">
+                <div className="chat-dock-artifact-title">
+                  {artifact.title || "Documents"}
+                </div>
+                <div className="chat-dock-artifact-list">
+                  {items.map((item, itemIndex) => (
+                    <button
+                      key={`${item.id || itemIndex}`}
+                      type="button"
+                      className="chat-dock-artifact-link"
+                      onClick={() => handleDocumentNavigate(String(item.id ?? ""))}
+                    >
+                      {String(item.title ?? item.id ?? "Document")}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          }
+          if (artifact.type === "document.diff") {
+            const docId = String(artifact.data?.doc_id ?? "");
+            const proposalId = String(artifact.data?.proposal_id ?? "");
+            return (
+              <div key={`${artifact.type}-${index}`} className="chat-dock-artifact">
+                <div className="chat-dock-artifact-title">
+                  {artifact.title || "Change Proposal"}
+                </div>
+                <button
+                  type="button"
+                  className="chat-dock-artifact-link"
+                  onClick={() => handleDocumentNavigate(docId, proposalId)}
+                >
+                  View diff
+                </button>
+              </div>
+            );
+          }
+          return (
+            <div key={`${artifact.type}-${index}`} className="chat-dock-artifact">
+              <div className="chat-dock-artifact-title">
+                {artifact.title || artifact.type}
+              </div>
+              <pre className="chat-dock-artifact-json">
+                {JSON.stringify(artifact.data ?? {}, null, 2)}
+              </pre>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <section className="chat-dock">
       <div className="chat-dock-header">
@@ -187,6 +310,7 @@ function ChatDock() {
               <div key={message.id} className={`chat-dock-message ${message.role}`}>
                 <span className="chat-dock-role">{message.role}</span>
                 <span className="chat-dock-text">{message.content}</span>
+                {renderArtifacts(message.artifacts)}
               </div>
             ))}
             {assistantActive ? (
@@ -200,19 +324,30 @@ function ChatDock() {
       </div>
       {error ? <div className="chat-dock-error">{error}</div> : null}
       <div className="chat-dock-input">
-        <input
-          type="text"
-          placeholder={projectKey ? "Type a message" : "Select a project to chat"}
+        <AutoComplete
+          className="chat-dock-autocomplete"
+          options={slashOptions}
           value={input}
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              handleSend();
-            }
+          onChange={(value) => setInput(value)}
+          onSelect={(value) => {
+            const next = value.endsWith(" ") ? value : `${value} `;
+            setInput(next);
           }}
-          disabled={!projectKey || isGenerating}
-        />
+          filterOption={(value, option) =>
+            String(option?.value ?? "").toLowerCase().startsWith(value.toLowerCase())
+          }
+        >
+          <Input
+            placeholder={projectKey ? "Type a message" : "Select a project to chat"}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                handleSend();
+              }
+            }}
+            disabled={!projectKey || isGenerating}
+          />
+        </AutoComplete>
         <button type="button" onClick={handleSend} disabled={!canSend}>
           Send
         </button>
@@ -230,6 +365,23 @@ const parsePayload = (raw: string) => {
   } catch {
     return raw;
   }
+};
+
+const normalizeDonePayload = (
+  payload: unknown,
+): { message: string; artifacts: ChatArtifact[] } => {
+  if (!payload || typeof payload !== "object") {
+    return { message: "", artifacts: [] };
+  }
+  const data = payload as {
+    message?: unknown;
+    artifacts?: unknown;
+  };
+  const message = typeof data.message === "string" ? data.message : "";
+  const artifacts = Array.isArray(data.artifacts)
+    ? (data.artifacts as ChatArtifact[])
+    : [];
+  return { message, artifacts };
 };
 
 export default ChatDock;

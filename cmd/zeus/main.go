@@ -134,6 +134,7 @@ func main() {
 	modelRuntimeRepo := postgres.NewModelRuntimeRepository(db)
 	summaryRepo := postgres.NewDocumentSummaryRepository(db)
 	taskRepo := postgres.NewTaskRepository(db)
+	changeProposalRepo := postgres.NewKnowledgeChangeProposalRepository(db)
 	knowledgeRepo := gitrepo.NewKnowledgeRepository(gitClientManager)
 
 	// Init Services
@@ -170,7 +171,7 @@ func main() {
 	}
 	indexBuilder := searchindex.NewIndexBuilder(knowledgeRepo, searchIndexRoot)
 	searchSvc := svcsearch.NewService(indexBuilder)
-	knowledgeSvc := svcknowledge.NewService(knowledgeRepo, projectRepo)
+	knowledgeSvc := svcknowledge.NewService(knowledgeRepo, projectRepo, changeProposalRepo)
 	ragIndex := ragindex.NewPostgresIndex(db)
 	ragExtractor := svcrag.SimpleBlockExtractor{}
 	runtimeResolver := svcmodel.NewRuntimeResolver(modelRuntimeRepo, config.AppConfig.Security.EncryptionKey)
@@ -187,7 +188,36 @@ func main() {
 	)
 	taskSvc := svctask.NewService(taskRepo)
 	chatRunRegistry := chatrun.NewMemoryRunRegistry()
-	chatStreamSvc := chatstream.NewService(ragSvc, runtimeResolver, llm.NewOpenAIStreamClient(3*time.Minute))
+	slashRouter := chatstream.NewDefaultSlashRouter(
+		[]chatstream.SlashCommand{
+			{
+				Name:        "docs",
+				Type:        chatstream.SlashCommandOperation,
+				Description: "List knowledge base documents",
+			},
+			{
+				Name:        "propose",
+				Type:        chatstream.SlashCommandPrompt,
+				Description: "Create a knowledge change proposal",
+				Template: `You are preparing a change proposal for a knowledge base document.
+Return ONLY valid JSON with the following fields:
+- doc_id (string)
+- meta (optional, object)
+- content (TipTap JSON object, or {meta,content})
+
+User request:
+{{input}}`,
+			},
+		},
+		chatstream.NewKnowledgeToolInvoker(knowledgeSvc),
+	)
+	chatStreamSvc := chatstream.NewService(
+		ragSvc,
+		runtimeResolver,
+		llm.NewOpenAIStreamClient(3*time.Minute),
+		slashRouter,
+		knowledgeSvc,
+	)
 
 	taskWorker := svctask.NewWorker(
 		taskRepo,

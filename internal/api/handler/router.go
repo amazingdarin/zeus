@@ -62,6 +62,9 @@ func RegisterRoutes(
 	api.PATCH("/projects/:project_key/documents/:doc_id/move", knowledgeHandler.Move)
 	api.GET("/projects/:project_key/documents/:doc_id", knowledgeHandler.Get)
 	api.GET("/projects/:project_key/documents/:doc_id/summary", summaryHandler.Get)
+	api.POST("/projects/:project_key/documents/:doc_id/proposals", knowledgeHandler.CreateProposal)
+	api.GET("/projects/:project_key/documents/:doc_id/proposals/:proposal_id/diff", knowledgeHandler.DiffProposal)
+	api.POST("/projects/:project_key/documents/:doc_id/proposals/:proposal_id/apply", knowledgeHandler.ApplyProposal)
 
 	// OpenAPI
 	api.GET("/projects/:project_key/openapi/index", openapiHandler.Index)

@@ -761,6 +761,54 @@ body {
   word-break: break-word;
 }
 
+.chat-dock-artifacts {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-dock-artifact {
+  background: #f7f7f7;
+  border-radius: 8px;
+  padding: 8px 10px;
+  border: 1px solid #ececec;
+}
+
+.chat-dock-artifact-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+.chat-dock-artifact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-dock-artifact-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #2563eb;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-dock-artifact-link:hover {
+  text-decoration: underline;
+}
+
+.chat-dock-artifact-json {
+  white-space: pre-wrap;
+  font-size: 11px;
+  margin: 0;
+  color: var(--muted);
+}
+
 .chat-dock-error {
   font-size: 12px;
   color: #b42318;
@@ -771,7 +819,11 @@ body {
   gap: 8px;
 }
 
-.chat-dock-input input {
+.chat-dock-autocomplete {
+  flex: 1;
+}
+
+.chat-dock-input .ant-input {
   flex: 1;
   border-radius: 10px;
   border: 1px solid var(--border);
@@ -793,6 +845,89 @@ body {
 .chat-dock-input button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.doc-diff-panel {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: #f9fafb;
+}
+
+.doc-diff-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+
+.doc-diff-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.doc-diff-action {
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #1f2328;
+  color: #fff;
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.doc-diff-action.secondary {
+  background: #fff;
+  color: var(--ink);
+}
+
+.doc-diff-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.doc-diff-state,
+.doc-diff-error {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.doc-diff-error {
+  color: #b42318;
+}
+
+.doc-diff-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.doc-diff-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.doc-diff-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--muted);
+}
+
+.doc-diff-code {
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 8px;
+  padding: 10px;
+  overflow: auto;
+  max-height: 240px;
+  font-size: 11px;
+  margin: 0;
 }
 
 .content-inner {

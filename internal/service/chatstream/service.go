@@ -19,16 +19,28 @@ type ChatEvent struct {
 	Payload any
 }
 
+type ChatArtifact struct {
+	Type  string         `json:"type"`
+	Title string         `json:"title,omitempty"`
+	Data  map[string]any `json:"data,omitempty"`
+}
+
+type AssistantDonePayload struct {
+	Message   string         `json:"message"`
+	Artifacts []ChatArtifact `json:"artifacts,omitempty"`
+}
+
 type ChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
 type ChatRequest struct {
-	ProjectID string
-	Query     string
-	Messages  []ChatMessage
-	TopK      int
+	ProjectID  string
+	ProjectKey string
+	Query      string
+	Messages   []ChatMessage
+	TopK       int
 }
 
 type StreamClient interface {
@@ -50,17 +62,23 @@ type Service struct {
 	rag      ContextBuilder
 	resolver embedding.ModelRuntimeResolver
 	streamer StreamClient
+	slash    SlashRouter
+	proposal ChangeProposalCreator
 }
 
 func NewService(
 	rag ContextBuilder,
 	resolver embedding.ModelRuntimeResolver,
 	streamer StreamClient,
+	slash SlashRouter,
+	proposal ChangeProposalCreator,
 ) *Service {
 	return &Service{
 		rag:      rag,
 		resolver: resolver,
 		streamer: streamer,
+		slash:    slash,
+		proposal: proposal,
 	}
 }
 
@@ -115,6 +133,31 @@ func (s *Service) Run(
 	if query == "" && len(request.Messages) == 0 {
 		return fmt.Errorf("message is required")
 	}
+
+	var slashResult SlashResult
+	if s.slash != nil {
+		result, handled, err := s.slash.Handle(ctx, SlashRequest{
+			ProjectID:  request.ProjectID,
+			ProjectKey: request.ProjectKey,
+			Input:      query,
+		})
+		if err != nil {
+			_ = emit(nextEvent("run.error", map[string]string{"error": err.Error()}))
+			return err
+		}
+		if handled {
+			slashResult = result
+			if result.Mode == SlashCommandOperation {
+				return emit(nextEvent("assistant.done", AssistantDonePayload{
+					Message:   result.Message,
+					Artifacts: result.Artifacts,
+				}))
+			}
+			if result.Mode == SlashCommandPrompt && strings.TrimSpace(result.ExpandedPrompt) != "" {
+				query = strings.TrimSpace(result.ExpandedPrompt)
+			}
+		}
+	}
 	ragQuery := domainrag.RAGQuery{
 		ProjectID: request.ProjectID,
 		Text:      query,
@@ -142,7 +185,9 @@ func (s *Service) Run(
 		return err
 	}
 
+	var assistantBuilder strings.Builder
 	if err := s.streamer.StreamChat(ctx, runtime, messages, func(delta string) error {
+		assistantBuilder.WriteString(delta)
 		if err := waitWhilePaused(ctx, run); err != nil {
 			return err
 		}
@@ -155,7 +200,17 @@ func (s *Service) Run(
 		return err
 	}
 
-	return emit(nextEvent("assistant.done", nil))
+	artifacts := buildProposalArtifacts(
+		ctx,
+		s.proposal,
+		slashResult,
+		request.ProjectKey,
+		assistantBuilder.String(),
+	)
+	return emit(nextEvent("assistant.done", AssistantDonePayload{
+		Message:   assistantBuilder.String(),
+		Artifacts: artifacts,
+	}))
 }
 
 func buildPromptMessages(

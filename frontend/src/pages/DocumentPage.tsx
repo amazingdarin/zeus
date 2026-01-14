@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type { JSONContent } from "@tiptap/react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import DocumentHeader from "../components/DocumentHeader";
 import RichTextViewer from "../components/RichTextViewer";
@@ -105,12 +105,18 @@ function DocumentPage({
   const resolvedProjectKey = (params.projectKey || projectKey || "").trim();
   const resolvedDocumentId = (params.documentId || documentId || "").trim();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const proposalId = (searchParams.get("proposal_id") || "").trim();
 
   const [document, setDocument] = useState<DocumentData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
   const [summaryText, setSummaryText] = useState<string | null>(null);
+  const [diffData, setDiffData] = useState<{ metaDiff: string; contentDiff: string } | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [diffError, setDiffError] = useState<string | null>(null);
+  const [applyLoading, setApplyLoading] = useState(false);
   const [breadcrumbItems, setBreadcrumbItems] = useState<
     Array<{ label: string; to?: string }>
   >([]);
@@ -139,6 +145,7 @@ function DocumentPage({
 
   const activeDocument = document;
   const allowChildActions = activeDocument ? activeDocument.docType !== "overview" : true;
+  const hasProposal = Boolean(proposalId);
 
   useEffect(() => {
     if (!resolvedProjectKey || !resolvedDocumentId) {
@@ -264,6 +271,59 @@ function DocumentPage({
   }, [resolvedDocumentId, resolvedProjectKey]);
 
   useEffect(() => {
+    if (!proposalId || !resolvedProjectKey || !resolvedDocumentId) {
+      setDiffData(null);
+      setDiffError(null);
+      setDiffLoading(false);
+      return;
+    }
+    let isActive = true;
+    setDiffLoading(true);
+    setDiffError(null);
+    apiFetch(
+      `/api/projects/${encodeURIComponent(
+        resolvedProjectKey,
+      )}/documents/${encodeURIComponent(resolvedDocumentId)}/proposals/${encodeURIComponent(
+        proposalId,
+      )}/diff`,
+    )
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("failed to load diff");
+        }
+        const payload = await response.json();
+        const data = payload?.data ?? payload ?? {};
+        return {
+          metaDiff: String(data.meta_diff ?? ""),
+          contentDiff: String(data.content_diff ?? ""),
+        };
+      })
+      .then((diff) => {
+        if (!isActive) {
+          return;
+        }
+        setDiffData(diff);
+      })
+      .catch((err) => {
+        if (!isActive) {
+          return;
+        }
+        setDiffError((err as Error).message || "failed to load diff");
+        setDiffData(null);
+      })
+      .finally(() => {
+        if (!isActive) {
+          return;
+        }
+        setDiffLoading(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [proposalId, resolvedDocumentId, resolvedProjectKey]);
+
+  useEffect(() => {
     if (!onDocumentMetaLoaded) {
       return;
     }
@@ -311,6 +371,57 @@ function DocumentPage({
       return;
     }
     navigate(`/documents/new?document_id=${encodeURIComponent(activeDocument.id)}`);
+  };
+
+  const clearProposalParam = () => {
+    if (!proposalId) {
+      return;
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete("proposal_id");
+    setSearchParams(next);
+  };
+
+  const handleDismissProposal = () => {
+    clearProposalParam();
+    setDiffData(null);
+    setDiffError(null);
+  };
+
+  const handleApplyProposal = async () => {
+    if (!resolvedProjectKey || !resolvedDocumentId || !proposalId) {
+      return;
+    }
+    if (applyLoading) {
+      return;
+    }
+    setApplyLoading(true);
+    setDiffError(null);
+    try {
+      const response = await apiFetch(
+        `/api/projects/${encodeURIComponent(
+          resolvedProjectKey,
+        )}/documents/${encodeURIComponent(
+          resolvedDocumentId,
+        )}/proposals/${encodeURIComponent(proposalId)}/apply`,
+        { method: "POST" },
+      );
+      if (!response.ok) {
+        throw new Error("failed to apply proposal");
+      }
+      const payload = (await response.json()) as DocumentResponse;
+      const updated = mapDocumentDetail(payload?.data, resolvedDocumentId);
+      setDocument(updated);
+      if (onDocumentsChanged) {
+        onDocumentsChanged(updated.parentId || "");
+      }
+      clearProposalParam();
+      setDiffData(null);
+    } catch (err) {
+      setDiffError((err as Error).message || "failed to apply proposal");
+    } finally {
+      setApplyLoading(false);
+    }
   };
 
   const requestRebuild = async (withSummary: boolean) => {
@@ -589,6 +700,54 @@ function DocumentPage({
       <div className="doc-page-body">
         <div className="doc-page-title">{activeDocument.title}</div>
         {summaryText ? <div className="doc-page-summary">{summaryText}</div> : null}
+        {hasProposal ? (
+          <div className="doc-diff-panel">
+            <div className="doc-diff-header">
+              <span>Proposed Changes</span>
+              <div className="doc-diff-actions">
+                <button
+                  className="doc-diff-action"
+                  type="button"
+                  onClick={handleApplyProposal}
+                  disabled={applyLoading || diffLoading}
+                >
+                  {applyLoading ? "Applying..." : "Apply"}
+                </button>
+                <button
+                  className="doc-diff-action secondary"
+                  type="button"
+                  onClick={handleDismissProposal}
+                  disabled={applyLoading}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+            {diffLoading ? (
+              <div className="doc-diff-state">Loading diff...</div>
+            ) : diffError ? (
+              <div className="doc-diff-error">{diffError}</div>
+            ) : diffData ? (
+              <div className="doc-diff-body">
+                {diffData.metaDiff ? (
+                  <div className="doc-diff-section">
+                    <div className="doc-diff-label">Meta</div>
+                    <pre className="doc-diff-code">{diffData.metaDiff}</pre>
+                  </div>
+                ) : null}
+                {diffData.contentDiff ? (
+                  <div className="doc-diff-section">
+                    <div className="doc-diff-label">Content</div>
+                    <pre className="doc-diff-code">{diffData.contentDiff}</pre>
+                  </div>
+                ) : null}
+                {!diffData.metaDiff && !diffData.contentDiff ? (
+                  <div className="doc-diff-state">No changes detected.</div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         {activeDocument.content ? (
           <RichTextViewer
             content={activeDocument.content}

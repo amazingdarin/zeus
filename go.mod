@@ -10,6 +10,7 @@ require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/google/uuid v1.6.0
 	github.com/oapi-codegen/oapi-codegen/v2 v2.5.1
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/viper v1.21.0
 	gopkg.in/yaml.v3 v3.0.1
