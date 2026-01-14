@@ -40,6 +40,7 @@ function ChatDock() {
   const [historyHeight, setHistoryHeight] = useState(220);
   const [isResizing, setIsResizing] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
+  const [slashOpen, setSlashOpen] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
   const hasCustomEventsRef = useRef(false);
   const assistantBufferRef = useRef("");
@@ -385,15 +386,19 @@ function ChatDock() {
               <>
                 {messages.map((message) => (
                   <div key={message.id} className={`chat-dock-message ${message.role}`}>
-                    <span className="chat-dock-role">{message.role}</span>
-                    <span className="chat-dock-text">{message.content}</span>
+                    <div className="chat-dock-message-header">
+                      <span className="chat-dock-role">{message.role}</span>
+                      <span className="chat-dock-text">{message.content}</span>
+                    </div>
                     {renderArtifacts(message.artifacts)}
                   </div>
                 ))}
                 {assistantActive ? (
                   <div className="chat-dock-message assistant">
-                    <span className="chat-dock-role">assistant</span>
-                    <span className="chat-dock-text">{assistantBuffer}</span>
+                    <div className="chat-dock-message-header">
+                      <span className="chat-dock-role">assistant</span>
+                      <span className="chat-dock-text">{assistantBuffer}</span>
+                    </div>
                   </div>
                 ) : null}
               </>
@@ -413,10 +418,13 @@ function ChatDock() {
             onSelect={(value) => {
               const next = value.endsWith(" ") ? value : `${value} `;
               setInput(next);
+              setSlashOpen(false);
             }}
+            onDropdownVisibleChange={(open) => setSlashOpen(open)}
             filterOption={(value, option) =>
               String(option?.value ?? "").toLowerCase().startsWith(value.toLowerCase())
             }
+            defaultActiveFirstOption
           >
             <Input.TextArea
               autoSize={{ minRows: 1, maxRows: 4 }}
@@ -427,6 +435,17 @@ function ChatDock() {
                   return;
                 }
                 if (isComposing || event.nativeEvent.isComposing) {
+                  return;
+                }
+                if (
+                  slashOpen &&
+                  input.trim().startsWith("/") &&
+                  slashOptions.length > 0 &&
+                  !event.shiftKey &&
+                  !event.altKey &&
+                  !event.ctrlKey &&
+                  !event.metaKey
+                ) {
                   return;
                 }
                 if (event.altKey || event.getModifierState("Alt")) {

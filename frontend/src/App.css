@@ -767,6 +767,13 @@ body {
   display: flex;
   gap: 6px;
   align-items: flex-start;
+  flex-direction: column;
+}
+
+.chat-dock-message-header {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
 }
 
 .chat-dock-message.system {
