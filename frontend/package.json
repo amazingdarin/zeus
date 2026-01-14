@@ -33,6 +33,7 @@
     "@vue-office/excel": "^1.7.14",
     "@vue-office/pdf": "^2.0.10",
     "@vue-office/pptx": "^1.0.1",
+    "@ant-design/icons": "^5.6.1",
     "antd": "^6.1.4",
     "lodash.throttle": "^4.1.1",
     "lowlight": "^3.3.0",

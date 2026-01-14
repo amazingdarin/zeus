@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AutoComplete, Input } from "antd";
+import { DownOutlined, UpOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 
 import { createChatRun, buildChatStreamUrl } from "../api/chat";
@@ -35,21 +36,23 @@ function ChatDock() {
   const [error, setError] = useState<string | null>(null);
   const [assistantBuffer, setAssistantBuffer] = useState("");
   const [assistantActive, setAssistantActive] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyHeight, setHistoryHeight] = useState(220);
+  const [isResizing, setIsResizing] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
   const hasCustomEventsRef = useRef(false);
   const assistantBufferRef = useRef("");
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  const resizeStartRef = useRef<{ y: number; height: number } | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const canSend = useMemo(() => {
     return !isGenerating && input.trim().length > 0 && projectKey !== "";
   }, [isGenerating, input, projectKey]);
   const showPanel = useMemo(() => {
-    return (
-      messages.length > 0 ||
-      Boolean(error) ||
-      assistantActive ||
-      isGenerating
-    );
-  }, [assistantActive, error, isGenerating, messages.length]);
+    return historyOpen;
+  }, [historyOpen]);
 
   const slashOptions = useMemo(() => {
     if (!input.trim().startsWith("/")) {
@@ -90,6 +93,45 @@ function ChatDock() {
       closeStream();
     };
   }, [closeStream]);
+
+  useEffect(() => {
+    if (!historyOpen) {
+      return;
+    }
+    const container = messagesRef.current;
+    if (!container) {
+      return;
+    }
+    const handle = requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    });
+    return () => cancelAnimationFrame(handle);
+  }, [assistantActive, assistantBuffer, historyHeight, historyOpen, messages]);
+
+  useEffect(() => {
+    if (!isResizing) {
+      return;
+    }
+    const handleMove = (event: MouseEvent) => {
+      const start = resizeStartRef.current;
+      if (!start) {
+        return;
+      }
+      const delta = start.y - event.clientY;
+      const nextHeight = clampHistoryHeight(start.height + delta);
+      setHistoryHeight(nextHeight);
+    };
+    const handleUp = () => {
+      setIsResizing(false);
+      resizeStartRef.current = null;
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, [isResizing]);
 
   const appendMessage = useCallback(
     (role: ChatMessage["role"], content: string, artifacts?: ChatArtifact[]) => {
@@ -140,6 +182,7 @@ function ChatDock() {
     setInput("");
     setError(null);
     appendMessage("user", message);
+    setHistoryOpen(true);
     setIsGenerating(true);
     resetAssistantBuffer();
     closeStream();
@@ -303,17 +346,39 @@ function ChatDock() {
     );
   };
 
+  const insertNewline = useCallback(
+    (target: HTMLTextAreaElement) => {
+      const start = target.selectionStart ?? input.length;
+      const end = target.selectionEnd ?? input.length;
+      const next = `${input.slice(0, start)}\n${input.slice(end)}`;
+      setInput(next);
+      requestAnimationFrame(() => {
+        target.selectionStart = start + 1;
+        target.selectionEnd = start + 1;
+      });
+    },
+    [input],
+  );
+
   return (
     <section className="chat-dock">
       {showPanel ? (
-        <div className="chat-dock-panel">
+        <div className="chat-dock-panel" style={{ height: `${historyHeight}px` }}>
+          <div
+            className="chat-dock-resize-handle"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              resizeStartRef.current = { y: event.clientY, height: historyHeight };
+              setIsResizing(true);
+            }}
+          />
           <div className="chat-dock-header">
             <span>Chat</span>
             {isGenerating ? (
               <span className="chat-dock-status">Generating...</span>
             ) : null}
           </div>
-          <div className="chat-dock-messages">
+          <div className="chat-dock-messages" ref={messagesRef}>
             {messages.length === 0 ? (
               <div className="chat-dock-empty">Start a conversation</div>
             ) : (
@@ -338,8 +403,8 @@ function ChatDock() {
         </div>
       ) : null}
       <div className="chat-dock-bar">
-        {isGenerating ? <span className="chat-dock-bar-status">Generating...</span> : null}
-        <div className="chat-dock-input">
+          {isGenerating ? <span className="chat-dock-bar-status">Generating...</span> : null}
+          <div className="chat-dock-input">
           <AutoComplete
             className="chat-dock-autocomplete"
             options={slashOptions}
@@ -353,22 +418,51 @@ function ChatDock() {
               String(option?.value ?? "").toLowerCase().startsWith(value.toLowerCase())
             }
           >
-            <Input
+            <Input.TextArea
+              autoSize={{ minRows: 1, maxRows: 4 }}
               placeholder={projectKey ? "Type a message" : "Select a project to chat"}
+              ref={inputRef}
               onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  handleSend();
+                if (event.key !== "Enter") {
+                  return;
                 }
+                if (isComposing || event.nativeEvent.isComposing) {
+                  return;
+                }
+                if (event.altKey || event.getModifierState("Alt")) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  insertNewline(event.currentTarget);
+                  return;
+                }
+                const allowNewline =
+                  event.shiftKey ||
+                  event.ctrlKey ||
+                  event.metaKey ||
+                  event.getModifierState("AltGraph");
+                if (allowNewline) {
+                  return;
+                }
+                event.preventDefault();
+                handleSend();
               }}
+              onCompositionStart={() => setIsComposing(true)}
+              onCompositionEnd={() => setIsComposing(false)}
               disabled={!projectKey || isGenerating}
             />
           </AutoComplete>
-          <button type="button" onClick={handleSend} disabled={!canSend}>
-            Send
-          </button>
+            <button type="button" onClick={handleSend} disabled={!canSend}>
+              Send
+            </button>
+            <button
+              type="button"
+              className="chat-dock-toggle"
+              onClick={() => setHistoryOpen((prev) => !prev)}
+            >
+              {historyOpen ? <DownOutlined /> : <UpOutlined />}
+            </button>
+          </div>
         </div>
-      </div>
     </section>
   );
 }
@@ -399,6 +493,13 @@ const normalizeDonePayload = (
     ? (data.artifacts as ChatArtifact[])
     : [];
   return { message, artifacts };
+};
+
+const minHistoryHeight = 160;
+const maxHistoryHeight = 480;
+
+const clampHistoryHeight = (value: number) => {
+  return Math.min(maxHistoryHeight, Math.max(minHistoryHeight, value));
 };
 
 export default ChatDock;
