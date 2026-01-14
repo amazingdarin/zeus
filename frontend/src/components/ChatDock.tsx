@@ -42,6 +42,14 @@ function ChatDock() {
   const canSend = useMemo(() => {
     return !isGenerating && input.trim().length > 0 && projectKey !== "";
   }, [isGenerating, input, projectKey]);
+  const showPanel = useMemo(() => {
+    return (
+      messages.length > 0 ||
+      Boolean(error) ||
+      assistantActive ||
+      isGenerating
+    );
+  }, [assistantActive, error, isGenerating, messages.length]);
 
   const slashOptions = useMemo(() => {
     if (!input.trim().startsWith("/")) {
@@ -297,60 +305,69 @@ function ChatDock() {
 
   return (
     <section className="chat-dock">
-      <div className="chat-dock-header">
-        <span>Chat</span>
-        {isGenerating ? <span className="chat-dock-status">Generating...</span> : null}
-      </div>
-      <div className="chat-dock-messages">
-        {messages.length === 0 ? (
-          <div className="chat-dock-empty">Start a conversation</div>
-        ) : (
-          <>
-            {messages.map((message) => (
-              <div key={message.id} className={`chat-dock-message ${message.role}`}>
-                <span className="chat-dock-role">{message.role}</span>
-                <span className="chat-dock-text">{message.content}</span>
-                {renderArtifacts(message.artifacts)}
-              </div>
-            ))}
-            {assistantActive ? (
-              <div className="chat-dock-message assistant">
-                <span className="chat-dock-role">assistant</span>
-                <span className="chat-dock-text">{assistantBuffer}</span>
-              </div>
+      {showPanel ? (
+        <div className="chat-dock-panel">
+          <div className="chat-dock-header">
+            <span>Chat</span>
+            {isGenerating ? (
+              <span className="chat-dock-status">Generating...</span>
             ) : null}
-          </>
-        )}
-      </div>
-      {error ? <div className="chat-dock-error">{error}</div> : null}
-      <div className="chat-dock-input">
-        <AutoComplete
-          className="chat-dock-autocomplete"
-          options={slashOptions}
-          value={input}
-          onChange={(value) => setInput(value)}
-          onSelect={(value) => {
-            const next = value.endsWith(" ") ? value : `${value} `;
-            setInput(next);
-          }}
-          filterOption={(value, option) =>
-            String(option?.value ?? "").toLowerCase().startsWith(value.toLowerCase())
-          }
-        >
-          <Input
-            placeholder={projectKey ? "Type a message" : "Select a project to chat"}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                handleSend();
-              }
+          </div>
+          <div className="chat-dock-messages">
+            {messages.length === 0 ? (
+              <div className="chat-dock-empty">Start a conversation</div>
+            ) : (
+              <>
+                {messages.map((message) => (
+                  <div key={message.id} className={`chat-dock-message ${message.role}`}>
+                    <span className="chat-dock-role">{message.role}</span>
+                    <span className="chat-dock-text">{message.content}</span>
+                    {renderArtifacts(message.artifacts)}
+                  </div>
+                ))}
+                {assistantActive ? (
+                  <div className="chat-dock-message assistant">
+                    <span className="chat-dock-role">assistant</span>
+                    <span className="chat-dock-text">{assistantBuffer}</span>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+          {error ? <div className="chat-dock-error">{error}</div> : null}
+        </div>
+      ) : null}
+      <div className="chat-dock-bar">
+        {isGenerating ? <span className="chat-dock-bar-status">Generating...</span> : null}
+        <div className="chat-dock-input">
+          <AutoComplete
+            className="chat-dock-autocomplete"
+            options={slashOptions}
+            value={input}
+            onChange={(value) => setInput(value)}
+            onSelect={(value) => {
+              const next = value.endsWith(" ") ? value : `${value} `;
+              setInput(next);
             }}
-            disabled={!projectKey || isGenerating}
-          />
-        </AutoComplete>
-        <button type="button" onClick={handleSend} disabled={!canSend}>
-          Send
-        </button>
+            filterOption={(value, option) =>
+              String(option?.value ?? "").toLowerCase().startsWith(value.toLowerCase())
+            }
+          >
+            <Input
+              placeholder={projectKey ? "Type a message" : "Select a project to chat"}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  handleSend();
+                }
+              }}
+              disabled={!projectKey || isGenerating}
+            />
+          </AutoComplete>
+          <button type="button" onClick={handleSend} disabled={!canSend}>
+            Send
+          </button>
+        </div>
       </div>
     </section>
   );
