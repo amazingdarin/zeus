@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { DownOutlined, UpOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 
 import { createChatRun, buildChatStreamUrl } from "../api/chat";
 import { executeCommand } from "../api/commands";
 import { useProjectContext } from "../context/ProjectContext";
+import type { PromptTemplate } from "../lib/promptRegistry";
 import { filterPromptTemplates, findPromptTemplate } from "../lib/promptRegistry";
 import SlashCommandPanel from "./SlashCommandPanel";
 import PromptSlashPanel from "./PromptSlashPanel";
@@ -44,6 +46,7 @@ type InputState = {
   caret: number;
   mode: InputMode;
   isComposing: boolean;
+  activePrompt?: PromptTemplate;
 };
 
 type InputAction =
@@ -53,6 +56,8 @@ type InputAction =
   | { type: "RESET" }
   | { type: "SLASH_DETECTED"; active: boolean }
   | { type: "SELECT_SLASH"; kind: "op" | "prompt" | "plain" }
+  | { type: "SELECT_PROMPT"; prompt: PromptTemplate }
+  | { type: "REMOVE_PROMPT" }
   | { type: "OPEN_PICKER" }
   | { type: "PICK_ITEM" };
 
@@ -61,6 +66,7 @@ const initialInputState: InputState = {
   caret: 0,
   mode: "normal",
   isComposing: false,
+  activePrompt: undefined,
 };
 
 const inputReducer = (state: InputState, action: InputAction): InputState => {
@@ -100,6 +106,10 @@ const inputReducer = (state: InputState, action: InputAction): InputState => {
         return { ...state, mode: "prompt_sub" };
       }
       return { ...state, mode: "normal" };
+    case "SELECT_PROMPT":
+      return { ...state, activePrompt: action.prompt, mode: "normal" };
+    case "REMOVE_PROMPT":
+      return { ...state, activePrompt: undefined, mode: "normal" };
     case "OPEN_PICKER":
       return { ...state, mode: "picker" };
     case "PICK_ITEM":
@@ -109,7 +119,7 @@ const inputReducer = (state: InputState, action: InputAction): InputState => {
     case "ESCAPE":
       return { ...state, mode: "normal" };
     case "RESET":
-      return initialInputState;
+      return { ...initialInputState, activePrompt: state.activePrompt };
     default:
       return state;
   }
@@ -134,7 +144,7 @@ const computeSlashTokenState = (
     return { mode: "normal", token: "", start: -1, end: -1 };
   }
   const token = beforeCaret.slice(lastSlash);
-  if (!isComposing && /\s/.test(token)) {
+  if (!isComposing && /\s/.test(token) && !token.startsWith("/in:")) {
     return { mode: "normal", token: "", start: -1, end: -1 };
   }
   return { mode: "slash", token, start: lastSlash, end: safeCaret };
@@ -145,6 +155,27 @@ const createId = () => {
     return crypto.randomUUID();
   }
   return `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+const buildPromptMessage = (message: string, prompt?: PromptTemplate) => {
+  if (!prompt) {
+    return message;
+  }
+  if (prompt.id === "propose") {
+    const trimmed = message.trim();
+    return trimmed ? `/p:propose ${trimmed}` : "/p:propose";
+  }
+  const template = prompt.template?.trim();
+  if (!template) {
+    return message;
+  }
+  const replaced = template
+    .replaceAll("{{input}}", message)
+    .replaceAll("{{args}}", message);
+  if (replaced !== template) {
+    return replaced;
+  }
+  return `${template}\n${message}`;
 };
 
 function ChatDock() {
@@ -164,13 +195,15 @@ function ChatDock() {
   const [docOptions, setDocOptions] = useState<Array<{ id: string; title: string }>>(
     [],
   );
+  const [activeDropdownKey, setActiveDropdownKey] = useState<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const hasCustomEventsRef = useRef(false);
   const prevInputModeRef = useRef<InputMode>("normal");
   const assistantBufferRef = useRef("");
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const resizeStartRef = useRef<{ y: number; height: number } | null>(null);
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const inputRef = useRef<HTMLDivElement | null>(null);
+  const lastAppliedCaretRef = useRef<number | null>(null);
 
   const canSend = useMemo(() => {
     return !isGenerating && input.trim().length > 0 && projectKey !== "";
@@ -189,33 +222,34 @@ function ChatDock() {
     [inputState.caret, inputState.isComposing, inputState.rawText],
   );
 
-  const highlightedInput = useMemo(() => {
-    if (inputState.mode === "normal" || slashTokenState.mode !== "slash") {
-      return input;
-    }
-    if (slashTokenState.start < 0 || slashTokenState.end < 0) {
-      return input;
-    }
-    const before = input.slice(0, slashTokenState.start);
-    const token = input.slice(slashTokenState.start, slashTokenState.end);
-    const after = input.slice(slashTokenState.end);
-    return (
-      <>
-        {before}
-        <span className="chat-dock-input-highlight-token">{token}</span>
-        {after}
-      </>
-    );
-  }, [input, inputState.mode, slashTokenState.end, slashTokenState.mode, slashTokenState.start]);
+  const docTokenMatches = useMemo(() => extractDocTokenMatches(input), [input]);
+  const highlightSlash =
+    inputState.mode !== "normal" && slashTokenState.mode === "slash";
+  const inputHtml = useMemo(
+    () =>
+      buildInputHtml(
+        input,
+        docTokenMatches,
+        highlightSlash ? slashTokenState.start : -1,
+        highlightSlash ? slashTokenState.end : -1,
+      ),
+    [
+      docTokenMatches,
+      highlightSlash,
+      input,
+      slashTokenState.end,
+      slashTokenState.start,
+    ],
+  );
 
   const docSearchState = useMemo(() => {
     if (inputState.mode !== "slash" && inputState.mode !== "op_sub") {
       return { active: false, query: "", start: -1, end: -1 };
     }
-    if (!slashTokenState.token.startsWith("/docs.search:")) {
+    if (!slashTokenState.token.startsWith("/in:docs.search:")) {
       return { active: false, query: "", start: -1, end: -1 };
     }
-    const prefix = "/docs.search:";
+    const prefix = "/in:docs.search:";
     const query = slashTokenState.token.slice(prefix.length).trim();
     return {
       active: true,
@@ -241,16 +275,6 @@ function ChatDock() {
     };
   }, [inputState.mode, slashTokenState]);
 
-  const docsListState = useMemo(() => {
-    if (inputState.mode !== "slash" && inputState.mode !== "op_sub") {
-      return { active: false };
-    }
-    if (slashTokenState.token !== "/docs") {
-      return { active: false };
-    }
-    return { active: true };
-  }, [inputState.mode, slashTokenState.token]);
-
   const promptOptions = useMemo(() => {
     if (!promptSlashState.active) {
       return [];
@@ -265,17 +289,17 @@ function ChatDock() {
     if (inputState.mode !== "slash") {
       return [];
     }
-    if (slashTokenState.token.startsWith("/docs.search:")) {
+    if (slashTokenState.token.startsWith("/in:docs.search:")) {
       return [];
     }
     if (slashTokenState.token.startsWith("/p:")) {
       return [];
     }
     return [
-      { value: "/docs", label: "docs — list documents" },
-      { value: "/docs.search:", label: "docs.search: — find a document by name" },
+      { value: "/in:docs.search:", label: "in:docs.search: — insert a document reference" },
+      { value: "/op:docs.list", label: "op:docs.list — list documents" },
+      { value: "/op:docs.search", label: "op:docs.search — search documents" },
       { value: "/p:", label: "p: — insert a prompt template" },
-      { value: "/propose", label: "propose — create a change proposal (doc_id required)" },
     ];
   }, [inputState.mode, slashTokenState.token]);
 
@@ -283,7 +307,7 @@ function ChatDock() {
     if (promptSlashState.active) {
       return promptOptions;
     }
-    if (docSearchState.active || docsListState.active) {
+    if (docSearchState.active) {
       return [
         { value: "__cancel__", label: "Cancel" },
         ...docOptions.map((doc) => ({
@@ -296,27 +320,57 @@ function ChatDock() {
   }, [
     docOptions,
     docSearchState.active,
-    docsListState.active,
     promptOptions,
     promptSlashState.active,
     slashOptions,
   ]);
 
+  const optionFilter = useMemo(() => {
+    if (docSearchState.active || promptSlashState.active) {
+      return null;
+    }
+    return (option?: { value?: unknown }) => {
+      const query = slashTokenState.token || input;
+      return String(option?.value ?? "")
+        .toLowerCase()
+        .startsWith(query.toLowerCase());
+    };
+  }, [docSearchState.active, input, promptSlashState.active, slashTokenState.token]);
+
+  const visibleOptions = useMemo(() => {
+    if (!optionFilter) {
+      return dropdownOptions;
+    }
+    return dropdownOptions.filter((option) => optionFilter(option));
+  }, [dropdownOptions, optionFilter]);
+
   const pickerOpen = useMemo(() => {
     if (inputState.mode === "normal") {
       return false;
     }
-    if (promptSlashState.active || docSearchState.active || docsListState.active) {
+    if (promptSlashState.active || docSearchState.active) {
       return true;
     }
     return inputState.mode === "slash" && slashOptions.length > 0;
   }, [
     docSearchState.active,
-    docsListState.active,
     inputState.mode,
     promptSlashState.active,
     slashOptions.length,
   ]);
+
+  useEffect(() => {
+    if (!pickerOpen || visibleOptions.length === 0) {
+      setActiveDropdownKey(null);
+      return;
+    }
+    const keys = visibleOptions.map((option) =>
+      String(option.value ?? option.label ?? ""),
+    );
+    if (!activeDropdownKey || !keys.includes(activeDropdownKey)) {
+      setActiveDropdownKey(keys[0] ?? null);
+    }
+  }, [activeDropdownKey, pickerOpen, visibleOptions]);
 
   useEffect(() => {
     const nextMode = inputState.mode;
@@ -331,6 +385,79 @@ function ChatDock() {
       prevInputModeRef.current = nextMode;
     }
   }, [input, inputState.mode, slashTokenState.token]);
+
+  useLayoutEffect(() => {
+    if (inputState.isComposing) {
+      return;
+    }
+    const container = inputRef.current;
+    if (!container) {
+      return;
+    }
+    if (document.activeElement !== container) {
+      return;
+    }
+    if (lastAppliedCaretRef.current === inputState.caret) {
+      return;
+    }
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed) {
+      return;
+    }
+    const range = document.createRange();
+    let cursor = 0;
+    let positioned = false;
+    const placeCaret = (node: Node): boolean => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent ?? "";
+        const nextCursor = cursor + text.length;
+        if (inputState.caret <= nextCursor) {
+          const offset = Math.max(0, inputState.caret - cursor);
+          range.setStart(node, offset);
+          range.collapse(true);
+          positioned = true;
+          return true;
+        }
+        cursor = nextCursor;
+        return false;
+      }
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const element = node as HTMLElement;
+        const raw = element.dataset?.raw;
+        if (raw) {
+          const nextCursor = cursor + raw.length;
+          if (inputState.caret <= nextCursor) {
+            if (inputState.caret <= cursor) {
+              range.setStartBefore(element);
+            } else {
+              range.setStartAfter(element);
+            }
+            range.collapse(true);
+            positioned = true;
+            return true;
+          }
+          cursor = nextCursor;
+          return false;
+        }
+        for (const child of Array.from(element.childNodes)) {
+          if (placeCaret(child)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+    placeCaret(container);
+    if (!positioned) {
+      range.selectNodeContents(container);
+      range.collapse(false);
+    }
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    lastAppliedCaretRef.current = inputState.caret;
+  }, [inputState.caret, inputState.isComposing, inputState.rawText]);
 
   const updateInput = useCallback(
     (next: string, caret?: number) => {
@@ -348,13 +475,6 @@ function ChatDock() {
       if (nextSlashState.mode === "slash") {
         if (nextSlashState.token.startsWith("/p:") && inputState.mode !== "prompt_sub") {
           dispatchInput({ type: "SELECT_SLASH", kind: "prompt" });
-        }
-        if (
-          (nextSlashState.token === "/docs" ||
-            nextSlashState.token.startsWith("/docs.search:")) &&
-          inputState.mode !== "op_sub"
-        ) {
-          dispatchInput({ type: "SELECT_SLASH", kind: "op" });
         }
       }
     },
@@ -443,23 +563,19 @@ function ChatDock() {
   }, [isResizing]);
 
   useEffect(() => {
-    if ((!docSearchState.active && !docsListState.active) || inputState.isComposing) {
+    if (!docSearchState.active || inputState.isComposing) {
       return;
     }
     if (!projectKey) {
       setDocOptions([]);
       return;
     }
-    if (docSearchState.active && !docSearchState.query) {
-      setDocOptions([]);
-      return;
-    }
     let active = true;
     const handle = setTimeout(async () => {
       try {
-        const commandInput = docSearchState.active
-          ? `/docs.search:${docSearchState.query}`
-          : "/docs";
+        const commandInput = docSearchState.query
+          ? `/op:docs.search ${docSearchState.query}`
+          : "/op:docs.list";
         const result = await executeCommand(projectKey, commandInput);
         const docs = extractDocsFromArtifacts(result.artifacts);
         if (active) {
@@ -478,12 +594,9 @@ function ChatDock() {
   }, [
     docSearchState.active,
     docSearchState.query,
-    docsListState.active,
     inputState.isComposing,
     projectKey,
   ]);
-
-  const docRefs = useMemo(() => extractDocTokens(input), [input]);
 
   const appendMessage = useCallback(
     (role: ChatMessage["role"], content: string, artifacts?: ChatArtifact[]) => {
@@ -540,14 +653,15 @@ function ChatDock() {
     closeStream();
 
     try {
-      if (message.startsWith("/docs")) {
+      if (message.startsWith("/op:")) {
         const result = await executeCommand(projectKey, message);
         const reply = result.message || "Command completed.";
         appendMessage("assistant", reply, result.artifacts);
         setIsGenerating(false);
         return;
       }
-      const runId = await createChatRun(projectKey, message);
+      const outboundMessage = buildPromptMessage(message, inputState.activePrompt);
+      const runId = await createChatRun(projectKey, outboundMessage);
       const url = buildChatStreamUrl(projectKey, runId);
       const source = new EventSource(url, { withCredentials: true });
       eventSourceRef.current = source;
@@ -639,13 +753,31 @@ function ChatDock() {
     executeCommand,
     handleDelta,
     input,
+    inputState.activePrompt,
     projectKey,
     resetAssistantBuffer,
   ]);
 
+  const focusInputEnd = useCallback(() => {
+    const target = inputRef.current;
+    if (!target) {
+      return;
+    }
+    target.focus();
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    range.collapse(false);
+    const selection = window.getSelection();
+    if (!selection) {
+      return;
+    }
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, []);
+
   const handleDocSelect = useCallback(
     (docId: string, title: string) => {
-      const token = `{{doc:${docId}}}`;
+      const token = `{{doc:${docId}|title:${sanitizeDocTitle(title)}}}`;
       const prefix =
         docSearchState.start > -1 ? input.slice(0, docSearchState.start) : "";
       const suffix =
@@ -655,26 +787,32 @@ function ChatDock() {
       dispatchInput({ type: "PICK_ITEM" });
       setDocOptions([]);
       requestAnimationFrame(() => {
-        const target = inputRef.current;
-        if (target) {
-          target.selectionStart = target.value.length;
-          target.selectionEnd = target.value.length;
-        }
+        focusInputEnd();
       });
     },
-    [dispatchInput, docSearchState.end, docSearchState.start, input, updateInput],
+    [
+      dispatchInput,
+      docSearchState.end,
+      docSearchState.start,
+      focusInputEnd,
+      input,
+      updateInput,
+    ],
   );
 
   const handlePromptSelect = useCallback(
     (promptId: string) => {
-      const template = findPromptTemplate(promptId)?.template ?? promptId;
+      const template = findPromptTemplate(promptId);
+      if (!template) {
+        return;
+      }
       const before =
         promptSlashState.start > -1 ? input.slice(0, promptSlashState.start) : "";
       const after =
         promptSlashState.end > -1 ? input.slice(promptSlashState.end) : "";
-      const next = `${before}${template}${after}`.trim();
+      const next = `${before}${after}`.trim();
       updateInput(next, next.length);
-      dispatchInput({ type: "PICK_ITEM" });
+      dispatchInput({ type: "SELECT_PROMPT", prompt: template });
     },
     [dispatchInput, input, promptSlashState.end, promptSlashState.start, updateInput],
   );
@@ -703,6 +841,63 @@ function ChatDock() {
     slashTokenState.start,
     updateInput,
   ]);
+
+  const handleTokenDeletion = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.key !== "Backspace" && event.key !== "Delete") {
+        return false;
+      }
+      if (inputState.isComposing || event.nativeEvent.isComposing) {
+        return false;
+      }
+      const target = event.currentTarget;
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) {
+        return false;
+      }
+      const range = selection.getRangeAt(0);
+      if (!target.contains(range.startContainer) || !target.contains(range.endContainer)) {
+        return false;
+      }
+      const startRange = document.createRange();
+      startRange.selectNodeContents(target);
+      startRange.setEnd(range.startContainer, range.startOffset);
+      const endRange = document.createRange();
+      endRange.selectNodeContents(target);
+      endRange.setEnd(range.endContainer, range.endOffset);
+      const rangeStart = serializeNodeToRaw(startRange.cloneContents()).length;
+      const rangeEnd = serializeNodeToRaw(endRange.cloneContents()).length;
+      if (rangeStart === rangeEnd) {
+        if (event.key === "Backspace" && rangeStart > 0) {
+          const nextStart = rangeStart - 1;
+          const result = removeDocTokensInRange(input, nextStart, rangeStart);
+          if (!result.removed) {
+            return false;
+          }
+          event.preventDefault();
+          updateInput(result.next, result.caret);
+          return true;
+        }
+        if (event.key === "Delete") {
+          const result = removeDocTokensInRange(input, rangeStart, rangeStart + 1);
+          if (!result.removed) {
+            return false;
+          }
+          event.preventDefault();
+          updateInput(result.next, result.caret);
+          return true;
+        }
+      }
+      const result = removeDocTokensInRange(input, rangeStart, rangeEnd);
+      if (!result.removed) {
+        return false;
+      }
+      event.preventDefault();
+      updateInput(result.next, result.caret);
+      return true;
+    },
+    [input, inputState.isComposing, updateInput],
+  );
 
   const handleProposalAction = useCallback(
     async (action: string, docId: string, proposalId: string) => {
@@ -745,7 +940,7 @@ function ChatDock() {
         slashTokenState.start > -1 ? input.slice(0, slashTokenState.start) : "";
       const after =
         slashTokenState.end > -1 ? input.slice(slashTokenState.end) : "";
-      const keepToken = value === "/docs";
+      const keepToken = false;
       const next = value.endsWith(":") || keepToken
         ? value
         : value.endsWith(" ")
@@ -753,15 +948,45 @@ function ChatDock() {
           : `${value} `;
       const updated = `${before}${next}${after}`;
       updateInput(updated, updated.length);
-      const kind =
-        value === "/propose"
-          ? "prompt"
-          : value === "/docs.search:" || value === "/docs"
-            ? "op"
-            : "plain";
-      dispatchInput({ type: "SELECT_SLASH", kind });
+      if (value.startsWith("/p:")) {
+        dispatchInput({ type: "SELECT_SLASH", kind: "prompt" });
+        return;
+      }
+      if (value.startsWith("/in:")) {
+        return;
+      }
+      dispatchInput({ type: "SELECT_SLASH", kind: "plain" });
     },
     [dispatchInput, input, slashTokenState.end, slashTokenState.start, updateInput],
+  );
+
+  const handleOptionSelect = useCallback(
+    (value: string) => {
+      if (promptSlashState.active) {
+        handlePromptSelect(value);
+        return;
+      }
+      if (docSearchState.active) {
+        if (value === "__cancel__") {
+          handleDocSearchCancel();
+          return;
+        }
+        const selected = docOptions.find((doc) => doc.id === value);
+        const title = selected?.title ?? value;
+        handleDocSelect(value, title);
+        return;
+      }
+      applySlashSelection(value);
+    },
+    [
+      applySlashSelection,
+      docOptions,
+      docSearchState.active,
+      handleDocSearchCancel,
+      handleDocSelect,
+      handlePromptSelect,
+      promptSlashState.active,
+    ],
   );
 
   const renderArtifacts = (artifacts?: ChatArtifact[]) => {
@@ -885,17 +1110,32 @@ function ChatDock() {
   };
 
   const insertNewline = useCallback(
-    (target: HTMLTextAreaElement) => {
-      const start = target.selectionStart ?? input.length;
-      const end = target.selectionEnd ?? input.length;
-      const next = `${input.slice(0, start)}\n${input.slice(end)}`;
-      updateInput(next, start + 1);
+    (target: HTMLDivElement) => {
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) {
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      if (!target.contains(range.startContainer)) {
+        return;
+      }
+      range.deleteContents();
+      const br = document.createElement("br");
+      range.insertNode(br);
+      range.setStartAfter(br);
+      range.setEndAfter(br);
+      selection.removeAllRanges();
+      selection.addRange(range);
       requestAnimationFrame(() => {
-        target.selectionStart = start + 1;
-        target.selectionEnd = start + 1;
+        const rawText = serializeNodeToRaw(target);
+        const caretRange = document.createRange();
+        caretRange.selectNodeContents(target);
+        caretRange.setEnd(range.endContainer, range.endOffset);
+        const caret = serializeNodeToRaw(caretRange.cloneContents()).length;
+        updateInput(rawText, caret);
       });
     },
-    [input, updateInput],
+    [updateInput],
   );
 
   const ActiveSlashPanel = promptSlashState.active ? PromptSlashPanel : SlashCommandPanel;
@@ -954,78 +1194,72 @@ function ChatDock() {
         {isGenerating ? <span className="chat-dock-bar-status">Generating...</span> : null}
         <div className="chat-dock-input">
           <div className="chat-dock-input-body">
-            {docRefs.length > 0 ? (
-              <div className="chat-dock-doc-chips">
-                {docRefs.map((doc) => (
-                  <span key={doc.id} className="chat-dock-doc-chip">
-                    {doc.title}
-                    <button
-                      type="button"
-                      className="chat-dock-doc-remove"
-                      onClick={() => {
-                        const token = `{{doc:${doc.id}}}`;
-                        const next = input
-                          .replace(token, "")
-                          .replace(/\s{2,}/g, " ")
-                          .trim();
-                        updateInput(next);
-                      }}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
+            {inputState.activePrompt ? (
+              <div className="chat-dock-prompt-chip">
+                <span className="chat-dock-prompt-label">
+                  {inputState.activePrompt.title}
+                </span>
+                <button
+                  type="button"
+                  className="chat-dock-prompt-remove"
+                  onClick={() => dispatchInput({ type: "REMOVE_PROMPT" })}
+                >
+                  ×
+                </button>
               </div>
             ) : null}
-            <ActiveSlashPanel
-              value={input}
-              options={dropdownOptions}
+            <div className="chat-dock-input-row">
+              <ActiveSlashPanel
+                value={input}
+              options={visibleOptions}
               open={pickerOpen}
               placeholder={projectKey ? "Type a message" : "Select a project to chat"}
               inputRef={inputRef}
-              highlightActive={inputState.mode !== "normal" && slashTokenState.mode === "slash"}
-              highlightContent={highlightedInput}
+              renderHtml={inputHtml}
               onChange={(value, caret) => updateInput(value, caret)}
-              onSelect={(value) => {
-                if (promptSlashState.active) {
-                  handlePromptSelect(String(value));
-                  return;
-                }
-                if (docSearchState.active || docsListState.active) {
-                  if (value === "__cancel__") {
-                    handleDocSearchCancel();
-                    return;
-                  }
-                  const selected = docOptions.find((doc) => doc.id === value);
-                  const title = selected?.title ?? String(value);
-                  handleDocSelect(String(value), title);
-                  return;
-                }
-                applySlashSelection(String(value));
-              }}
+              onSelect={(value) => handleOptionSelect(String(value))}
               onDropdownVisibleChange={(open) => {
                 if (!open) {
-                  dispatchInput({ type: "ESCAPE" });
-                }
-              }}
-              filterOption={
-                docSearchState.active || docsListState.active || promptSlashState.active
-                  ? false
-                  : (_, option) => {
-                      const query = slashTokenState.token || input;
-                      return String(option?.value ?? "")
-                        .toLowerCase()
-                        .startsWith(query.toLowerCase());
-                    }
-              }
+                  if (!slashTokenState.token.startsWith("/in:")) {
+                    dispatchInput({ type: "ESCAPE" });
+                  }
+                  }
+                }}
+              filterOption={false}
               notFoundContent={
                 promptSlashState.active
                   ? "No matching prompts"
-                  : (docSearchState.active && docSearchState.query) || docsListState.active
+                  : docSearchState.active
                     ? "No matching documents"
                     : null
               }
               onKeyDown={(event) => {
+                if (
+                  pickerOpen &&
+                  visibleOptions.length > 0 &&
+                  (event.key === "ArrowDown" || event.key === "ArrowUp")
+                ) {
+                  event.preventDefault();
+                  const keys = visibleOptions.map((option) =>
+                    String(option.value ?? option.label ?? ""),
+                  );
+                  if (keys.length === 0) {
+                    return;
+                  }
+                  const currentIndex = activeDropdownKey
+                    ? keys.indexOf(activeDropdownKey)
+                    : -1;
+                  const direction = event.key === "ArrowDown" ? 1 : -1;
+                  const nextIndex =
+                    currentIndex === -1
+                      ? 0
+                      : (currentIndex + direction + keys.length) % keys.length;
+                  setActiveDropdownKey(keys[nextIndex]);
+                  return;
+                }
+                if (handleTokenDeletion(event)) {
+                  return;
+                }
                 if (event.key !== "Enter") {
                   return;
                 }
@@ -1034,15 +1268,27 @@ function ChatDock() {
                 }
                 if (
                   pickerOpen &&
-                  dropdownOptions.length > 0 &&
+                  visibleOptions.length > 0 &&
+                  activeDropdownKey &&
+                  !input.trim().startsWith("/op:")
+                ) {
+                  event.preventDefault();
+                  handleOptionSelect(activeDropdownKey);
+                  return;
+                }
+                if (
+                  pickerOpen &&
+                  visibleOptions.length > 0 &&
                   (docSearchState.active || inputState.mode === "slash") &&
                   !event.shiftKey &&
                   !event.altKey &&
                   !event.ctrlKey &&
                   !event.metaKey
                 ) {
-                  event.preventDefault();
-                  return;
+                  if (!input.trim().startsWith("/op:")) {
+                    event.preventDefault();
+                    return;
+                  }
                 }
                 if (
                   docSearchState.active &&
@@ -1054,40 +1300,44 @@ function ChatDock() {
                   event.preventDefault();
                   return;
                 }
-                if (event.altKey || event.getModifierState("Alt")) {
+                  if (event.altKey || event.getModifierState("Alt")) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    insertNewline(event.currentTarget);
+                    return;
+                  }
+                  const allowNewline =
+                    event.shiftKey ||
+                    event.ctrlKey ||
+                    event.metaKey ||
+                    event.getModifierState("AltGraph");
+                  if (allowNewline) {
+                    return;
+                  }
                   event.preventDefault();
-                  event.stopPropagation();
-                  insertNewline(event.currentTarget);
-                  return;
-                }
-                const allowNewline =
-                  event.shiftKey ||
-                  event.ctrlKey ||
-                  event.metaKey ||
-                  event.getModifierState("AltGraph");
-                if (allowNewline) {
-                  return;
-                }
-                event.preventDefault();
-                handleSend();
-              }}
+                  handleSend();
+                }}
               onCompositionStart={() => setComposing(true)}
               onCompositionEnd={() => setComposing(false)}
               disabled={!projectKey || isGenerating}
+              activeKey={activeDropdownKey}
             />
-          </div>
-          <button type="button" onClick={handleSend} disabled={!canSend}>
-            Send
-          </button>
-            <button
-              type="button"
-              className="chat-dock-toggle"
-              onClick={() => setHistoryOpen((prev) => !prev)}
-            >
-              {historyOpen ? <DownOutlined /> : <UpOutlined />}
-            </button>
+              <div className="chat-dock-actions">
+                <button type="button" onClick={handleSend} disabled={!canSend}>
+                  Send
+                </button>
+                <button
+                  type="button"
+                  className="chat-dock-toggle"
+                  onClick={() => setHistoryOpen((prev) => !prev)}
+                >
+                  {historyOpen ? <DownOutlined /> : <UpOutlined />}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
+      </div>
     </section>
   );
 }
@@ -1127,21 +1377,164 @@ const clampHistoryHeight = (value: number) => {
   return Math.min(maxHistoryHeight, Math.max(minHistoryHeight, value));
 };
 
-const docTokenRegex = /\{\{doc:([^}]+)\}\}/g;
+const docTokenRegex = /\{\{doc:([^}|]+)(?:\|title:([^}]+))?\}\}/g;
 
-const extractDocTokens = (input: string) => {
-  const refs: Array<{ id: string; title: string }> = [];
-  const seen = new Set<string>();
+const sanitizeDocTitle = (value: string) => {
+  return value.replace(/\|/g, " ").replace(/\}\}/g, "").replace(/\s+/g, " ").trim();
+};
+
+type DocTokenMatch = {
+  id: string;
+  title: string;
+  start: number;
+  end: number;
+  raw: string;
+};
+
+const extractDocTokenMatches = (input: string): DocTokenMatch[] => {
+  const tokens: DocTokenMatch[] = [];
+  docTokenRegex.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = docTokenRegex.exec(input)) !== null) {
-    const id = match[1]?.trim();
-    if (!id || seen.has(id)) {
+    const id = match[1]?.trim() ?? "";
+    if (!id) {
       continue;
     }
-    seen.add(id);
-    refs.push({ id, title: id });
+    const title = match[2]?.trim() ?? "";
+    tokens.push({
+      id,
+      title: title || id,
+      start: match.index,
+      end: match.index + match[0].length,
+      raw: match[0],
+    });
   }
-  return refs;
+  return tokens;
+};
+
+const escapeHtml = (value: string) => {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+};
+
+const formatHtmlText = (value: string) => {
+  if (!value) {
+    return "";
+  }
+  return escapeHtml(value).replace(/\n/g, "<br/>");
+};
+
+const buildInputHtml = (
+  input: string,
+  tokens: DocTokenMatch[],
+  slashStart: number,
+  slashEnd: number,
+): string => {
+  if (!input && tokens.length === 0) {
+    return "";
+  }
+  let html = "";
+  let cursor = 0;
+  const highlightSlash = slashStart >= 0 && slashEnd > slashStart;
+
+  const pushText = (value: string, start: number, end: number) => {
+    if (!value) {
+      return;
+    }
+    if (!highlightSlash || slashEnd <= start || slashStart >= end) {
+      html += formatHtmlText(value);
+      return;
+    }
+    const localStart = Math.max(slashStart, start);
+    const localEnd = Math.min(slashEnd, end);
+    const before = value.slice(0, localStart - start);
+    const mid = value.slice(localStart - start, localEnd - start);
+    const after = value.slice(localEnd - start);
+    html += formatHtmlText(before);
+    if (mid) {
+      html += `<span class="chat-dock-input-highlight-token">${formatHtmlText(mid)}</span>`;
+    }
+    html += formatHtmlText(after);
+  };
+
+  tokens.forEach((token) => {
+    if (token.start > cursor) {
+      pushText(input.slice(cursor, token.start), cursor, token.start);
+    }
+    html += `<span class="chat-dock-doc-token" data-raw="${escapeHtml(
+      token.raw,
+    )}" contenteditable="false">${escapeHtml(token.title)}</span>`;
+    cursor = token.end;
+  });
+
+  if (cursor < input.length) {
+    pushText(input.slice(cursor), cursor, input.length);
+  }
+
+  return html;
+};
+
+const serializeNodeToRaw = (node: Node): string => {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent ?? "";
+  }
+  if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+    return Array.from(node.childNodes).map(serializeNodeToRaw).join("");
+  }
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    const element = node as HTMLElement;
+    if (element.tagName === "BR") {
+      return "\n";
+    }
+    const raw = element.dataset?.raw;
+    if (raw) {
+      return raw;
+    }
+    return Array.from(element.childNodes).map(serializeNodeToRaw).join("");
+  }
+  return "";
+};
+
+const removeDocTokensInRange = (
+  input: string,
+  rangeStart: number,
+  rangeEnd: number,
+): { next: string; caret: number; removed: boolean } => {
+  if (rangeEnd < rangeStart) {
+    return { next: input, caret: rangeStart, removed: false };
+  }
+  const matches = extractDocTokenMatches(input);
+  if (matches.length === 0) {
+    return { next: input, caret: rangeStart, removed: false };
+  }
+  let removed = false;
+  let caret = rangeStart;
+  let cursor = 0;
+  let output = "";
+  for (const token of matches) {
+    if (token.start > cursor) {
+      output += input.slice(cursor, token.start);
+    }
+    const intersects = token.start < rangeEnd && token.end > rangeStart;
+    if (intersects) {
+      removed = true;
+      caret = Math.min(caret, token.start);
+    } else {
+      output += input.slice(token.start, token.end);
+    }
+    cursor = token.end;
+  }
+  if (cursor < input.length) {
+    output += input.slice(cursor);
+  }
+  if (!removed) {
+    return { next: input, caret: rangeStart, removed: false };
+  }
+  return { next: output.replace(/\s{2,}/g, " ").trim(), caret, removed: true };
 };
 
 export default ChatDock;

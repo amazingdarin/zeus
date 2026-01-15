@@ -7,11 +7,17 @@ export type PromptTemplate = {
 
 const promptTemplates: PromptTemplate[] = [
   {
+    id: "propose",
+    title: "Propose knowledge base changes",
+    description: "Draft a change proposal for a document",
+    template: "Propose updates for the referenced document:\n{{doc:ID|title:TITLE}}\n{{input}}",
+  },
+  {
     id: "kb-refactor",
     title: "Refactor knowledge base content",
     description: "Rewrite a document for clarity and structure",
     template:
-      "Refactor this knowledge base document for clarity and structure:\n{{doc:ID}}",
+      "Refactor this knowledge base document for clarity and structure:\n{{doc:ID|title:TITLE}}",
   },
   {
     id: "api-summary",
