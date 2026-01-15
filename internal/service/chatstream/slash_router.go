@@ -123,6 +123,18 @@ func parseSlashInput(input string) (string, string) {
 	if trimmed == "" {
 		return "", ""
 	}
+	colonIndex := strings.Index(trimmed, ":")
+	spaceIndex := strings.IndexFunc(trimmed, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\n'
+	})
+	if colonIndex >= 0 && (spaceIndex == -1 || colonIndex < spaceIndex) {
+		name := strings.TrimSpace(trimmed[:colonIndex])
+		if name == "" {
+			return "", ""
+		}
+		args := strings.TrimSpace(trimmed[colonIndex+1:])
+		return name, args
+	}
 	parts := strings.Fields(trimmed)
 	if len(parts) == 0 {
 		return "", ""

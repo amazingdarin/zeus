@@ -456,6 +456,17 @@ func (c *GitClient) status(ctx context.Context) (string, error) {
 	return stdout, err
 }
 
+func (c *GitClient) HeadRevision(ctx context.Context) (string, error) {
+	stdout, _, err := c.exec(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		if exitCode(err) == 1 {
+			return "", nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(stdout), nil
+}
+
 func (c *GitClient) hasCommit(ctx context.Context) (bool, error) {
 	_, _, err := c.exec(ctx, "show-ref", "--head", "--quiet")
 	if err == nil {

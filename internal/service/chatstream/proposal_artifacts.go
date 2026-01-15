@@ -41,6 +41,28 @@ func buildProposalArtifacts(
 	if err != nil {
 		return artifacts
 	}
+	title := payload.DocID
+	if payload.Meta != nil && strings.TrimSpace(payload.Meta.Title) != "" {
+		title = strings.TrimSpace(payload.Meta.Title)
+	}
+	artifacts = append(artifacts, ChatArtifact{
+		Type:  "diff_list",
+		Title: "Change Proposals",
+		Data: map[string]any{
+			"items": []map[string]string{
+				{
+					"doc_id":      proposal.DocID,
+					"title":       title,
+					"proposal_id": proposal.ID,
+				},
+			},
+			"actions": []map[string]string{
+				{"type": "open", "label": "View diff"},
+				{"type": "apply", "label": "Apply"},
+				{"type": "reject", "label": "Reject"},
+			},
+		},
+	})
 	artifacts = append(artifacts, ChatArtifact{
 		Type:  "document.diff",
 		Title: "Change Proposal",

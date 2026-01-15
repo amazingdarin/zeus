@@ -196,6 +196,21 @@ func main() {
 				Description: "List knowledge base documents",
 			},
 			{
+				Name:        "docs.list",
+				Type:        chatstream.SlashCommandOperation,
+				Description: "List knowledge base documents",
+			},
+			{
+				Name:        "docs/search",
+				Type:        chatstream.SlashCommandOperation,
+				Description: "Search knowledge base documents",
+			},
+			{
+				Name:        "docs.search",
+				Type:        chatstream.SlashCommandOperation,
+				Description: "Search knowledge base documents",
+			},
+			{
 				Name:        "propose",
 				Type:        chatstream.SlashCommandPrompt,
 				Description: "Create a knowledge change proposal",
@@ -209,7 +224,7 @@ User request:
 {{input}}`,
 			},
 		},
-		chatstream.NewKnowledgeToolInvoker(knowledgeSvc),
+		chatstream.NewKnowledgeToolInvoker(knowledgeSvc, searchSvc),
 	)
 	chatStreamSvc := chatstream.NewService(
 		ragSvc,
@@ -251,6 +266,7 @@ User request:
 		modelRuntimeSvc,
 		chatRunRegistry,
 		chatStreamSvc,
+		slashRouter,
 	)
 
 	if err := router.Run(config.AppConfig.Server.Addr); err != nil {

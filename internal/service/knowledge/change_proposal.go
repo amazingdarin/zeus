@@ -124,6 +124,15 @@ func (s *Service) GetChangeProposalDiff(
 		proposedContent = *proposal.Content
 	}
 
+	baseRevision := ""
+	if s.knowledgeRepo != nil {
+		revision, err := s.knowledgeRepo.CurrentRevision(ctx, project.RepoName)
+		if err != nil {
+			return service.KnowledgeChangeDiff{}, err
+		}
+		baseRevision = revision
+	}
+
 	metaDiff, err := diffJSON(baseMeta, proposedMeta, "meta.json", "proposal.meta.json")
 	if err != nil {
 		return service.KnowledgeChangeDiff{}, err
@@ -139,8 +148,10 @@ func (s *Service) GetChangeProposalDiff(
 	}
 
 	return service.KnowledgeChangeDiff{
-		MetaDiff:    metaDiff,
-		ContentDiff: contentDiff,
+		TargetDocID:  docID,
+		BaseRevision: baseRevision,
+		MetaDiff:     metaDiff,
+		ContentDiff:  contentDiff,
 	}, nil
 }
 
@@ -233,6 +244,48 @@ func (s *Service) ApplyChangeProposal(
 		updatedContent = *contentPatch
 	}
 	return updatedMeta, updatedContent, nil
+}
+
+func (s *Service) RejectChangeProposal(
+	ctx context.Context,
+	projectKey, docID, proposalID string,
+) error {
+	projectKey = strings.TrimSpace(projectKey)
+	docID = strings.TrimSpace(docID)
+	proposalID = strings.TrimSpace(proposalID)
+	if projectKey == "" {
+		return fmt.Errorf("project key is required")
+	}
+	if docID == "" {
+		return fmt.Errorf("doc id is required")
+	}
+	if proposalID == "" {
+		return fmt.Errorf("proposal id is required")
+	}
+	if s.proposalRepo == nil {
+		return fmt.Errorf("proposal repo is required")
+	}
+
+	project, err := s.projectRepo.FindByKey(ctx, projectKey)
+	if err != nil {
+		return fmt.Errorf("find project: %w", err)
+	}
+	if project == nil {
+		return fmt.Errorf("project not found")
+	}
+
+	proposal, ok, err := s.proposalRepo.Get(ctx, proposalID)
+	if err != nil {
+		return err
+	}
+	if !ok || proposal == nil {
+		return repository.ErrKnowledgeChangeProposalNotFound
+	}
+	if proposal.ProjectID != project.ID || proposal.DocID != docID {
+		return repository.ErrKnowledgeChangeProposalNotFound
+	}
+
+	return s.proposalRepo.UpdateStatus(ctx, proposalID, domain.KnowledgeChangeRejected)
 }
 
 func sanitizeMetaPatch(

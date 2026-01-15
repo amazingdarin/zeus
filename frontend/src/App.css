@@ -821,6 +821,34 @@ body {
   gap: 4px;
 }
 
+.chat-dock-artifact-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-dock-artifact-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-dock-artifact-action {
+  border: 1px solid #d0d7de;
+  background: #fff;
+  color: #1f2933;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.chat-dock-artifact-action:hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
 .chat-dock-artifact-link {
   background: none;
   border: none;
@@ -871,8 +899,55 @@ body {
   align-items: center;
 }
 
+.chat-dock-input-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .chat-dock-autocomplete {
   flex: 1;
+}
+
+.chat-dock-input-field {
+  position: relative;
+  flex: 1;
+  display: flex;
+}
+
+.chat-dock-input-field .chat-dock-autocomplete {
+  width: 100%;
+}
+
+.chat-dock-input-highlight {
+  position: absolute;
+  inset: 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.chat-dock-input-highlight-token {
+  background: #e3f2ff;
+  border-radius: 6px;
+  padding: 1px 3px;
+}
+
+.chat-dock-input-textarea.ghost {
+  color: transparent;
+  caret-color: var(--ink);
+  background: transparent;
+}
+
+.chat-dock-input-textarea {
+  position: relative;
+  z-index: 1;
 }
 
 .chat-dock-input .ant-input,
@@ -887,6 +962,41 @@ body {
 
 .chat-dock-input textarea {
   resize: none;
+}
+
+.chat-dock-doc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-dock-doc-chip {
+  background: #1f2937;
+  color: #fff;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-dock-doc-remove {
+  border: none;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.chat-dock-doc-remove:hover {
+  background: rgba(255, 255, 255, 0.35);
 }
 
 .chat-dock-input button {

@@ -306,6 +306,24 @@ func (r *KnowledgeRepository) Commit(ctx context.Context, repo, message string) 
 	return nil
 }
 
+func (r *KnowledgeRepository) CurrentRevision(ctx context.Context, repo string) (string, error) {
+	handle, err := r.sessionGit(ctx, repo)
+	if err != nil {
+		return "", err
+	}
+	defer handle.Close()
+	if !skipRepoPull(ctx) {
+		if err := handle.Client().Pull(ctx, "", ""); err != nil {
+			return "", fmt.Errorf("git pull: %w", err)
+		}
+	}
+	revision, err := handle.Client().HeadRevision(ctx)
+	if err != nil {
+		return "", fmt.Errorf("git head revision: %w", err)
+	}
+	return revision, nil
+}
+
 func (r *KnowledgeRepository) repoPath(ctx context.Context, repo string) (string, error) {
 	handle, err := r.sessionGit(ctx, repo)
 	if err != nil {

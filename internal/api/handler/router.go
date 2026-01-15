@@ -5,6 +5,7 @@ import (
 
 	"zeus/internal/service"
 	"zeus/internal/service/chatrun"
+	"zeus/internal/service/chatstream"
 	svcopenapi "zeus/internal/service/openapi"
 )
 
@@ -22,6 +23,7 @@ func RegisterRoutes(
 	modelRuntimeSvc service.ModelRuntimeService,
 	chatRunRegistry chatrun.RunRegistry,
 	chatStreamSvc ChatStreamRunner,
+	commandRouter chatstream.SlashRouter,
 ) {
 	storageObjectHandler := NewStorageObjectHandler(storageObjectSvc, projectSvc)
 	assetHandler := NewAssetHandler(assetSvc)
@@ -36,6 +38,7 @@ func RegisterRoutes(
 	modelHandler := NewModelRuntimeHandler(modelRuntimeSvc)
 	chatRunHandler := NewChatRunHandler(chatRunRegistry, projectSvc)
 	chatStreamHandler := NewChatStreamHandler(chatRunRegistry, chatStreamSvc, projectSvc)
+	commandHandler := NewCommandHandler(commandRouter, projectSvc)
 
 	api := r.Group("/api")
 
@@ -65,6 +68,7 @@ func RegisterRoutes(
 	api.POST("/projects/:project_key/documents/:doc_id/proposals", knowledgeHandler.CreateProposal)
 	api.GET("/projects/:project_key/documents/:doc_id/proposals/:proposal_id/diff", knowledgeHandler.DiffProposal)
 	api.POST("/projects/:project_key/documents/:doc_id/proposals/:proposal_id/apply", knowledgeHandler.ApplyProposal)
+	api.POST("/projects/:project_key/documents/:doc_id/proposals/:proposal_id/reject", knowledgeHandler.RejectProposal)
 
 	// OpenAPI
 	api.GET("/projects/:project_key/openapi/index", openapiHandler.Index)
@@ -80,6 +84,9 @@ func RegisterRoutes(
 	// Chat runs
 	api.POST("/projects/:project_key/chat/runs", chatRunHandler.Create)
 	api.GET("/projects/:project_key/chat/runs/:run_id/stream", chatStreamHandler.Stream)
+
+	// Commands
+	api.POST("/projects/:project_key/commands", commandHandler.Execute)
 	// Task
 	api.GET("/tasks/:id", taskHandler.Get)
 

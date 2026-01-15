@@ -44,8 +44,10 @@ type KnowledgeChangeRequest struct {
 }
 
 type KnowledgeChangeDiff struct {
-	MetaDiff    string
-	ContentDiff string
+	TargetDocID  string
+	BaseRevision string
+	MetaDiff     string
+	ContentDiff  string
 }
 
 type KnowledgeService interface {
@@ -77,4 +79,5 @@ type KnowledgeService interface {
 		ctx context.Context,
 		projectKey, docID, proposalID string,
 	) (domain.DocumentMeta, domain.DocumentContent, error)
+	RejectChangeProposal(ctx context.Context, projectKey, docID, proposalID string) error
 }

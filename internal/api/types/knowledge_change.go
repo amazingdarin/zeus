@@ -22,8 +22,10 @@ type KnowledgeChangeProposalResponse struct {
 }
 
 type KnowledgeChangeDiffDTO struct {
-	MetaDiff    string `json:"meta_diff"`
-	ContentDiff string `json:"content_diff"`
+	TargetDocID  string `json:"target_doc_id"`
+	BaseRevision string `json:"base_revision"`
+	MetaDiff     string `json:"meta_diff"`
+	ContentDiff  string `json:"content_diff"`
 }
 
 type KnowledgeChangeDiffResponse struct {

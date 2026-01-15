@@ -160,8 +160,10 @@ func (h *KnowledgeHandler) DiffProposal(c *gin.Context) {
 		Code:    "OK",
 		Message: "success",
 		Data: types.KnowledgeChangeDiffDTO{
-			MetaDiff:    diff.MetaDiff,
-			ContentDiff: diff.ContentDiff,
+			TargetDocID:  diff.TargetDocID,
+			BaseRevision: diff.BaseRevision,
+			MetaDiff:     diff.MetaDiff,
+			ContentDiff:  diff.ContentDiff,
 		},
 	})
 }
@@ -243,5 +245,51 @@ func (h *KnowledgeHandler) ApplyProposal(c *gin.Context) {
 		Code:    "OK",
 		Message: "success",
 		Data:    mapDocumentDTOWithHierarchy(meta, content, hierarchy),
+	})
+}
+
+// RejectProposal
+// @route POST /api/projects/:project_key/documents/:doc_id/proposals/:proposal_id/reject
+func (h *KnowledgeHandler) RejectProposal(c *gin.Context) {
+	projectKey := strings.TrimSpace(c.Param("project_key"))
+	docID := strings.TrimSpace(c.Param("doc_id"))
+	proposalID := strings.TrimSpace(c.Param("proposal_id"))
+	if projectKey == "" || docID == "" || proposalID == "" {
+		c.JSON(http.StatusBadRequest, types.SimpleResponse{
+			Code:    "INVALID_REQUEST",
+			Message: "project_key, doc_id, proposal_id are required",
+		})
+		return
+	}
+	if h.knowledgeSvc == nil {
+		c.JSON(http.StatusInternalServerError, types.SimpleResponse{
+			Code:    "SERVICE_NOT_READY",
+			Message: "knowledge service is required",
+		})
+		return
+	}
+	if err := h.knowledgeSvc.RejectChangeProposal(
+		c.Request.Context(),
+		projectKey,
+		docID,
+		proposalID,
+	); err != nil {
+		if errors.Is(err, repository.ErrKnowledgeChangeProposalNotFound) {
+			c.JSON(http.StatusNotFound, types.SimpleResponse{
+				Code:    "PROPOSAL_NOT_FOUND",
+				Message: "proposal not found",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, types.SimpleResponse{
+			Code:    "REJECT_PROPOSAL_FAILED",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.SimpleResponse{
+		Code:    "OK",
+		Message: "proposal rejected",
 	})
 }
