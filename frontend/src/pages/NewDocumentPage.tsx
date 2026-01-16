@@ -3,6 +3,7 @@ import type { JSONContent } from "@tiptap/react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import RichTextEditor from "../components/RichTextEditor";
+import RichTextViewer from "../components/RichTextViewer";
 import { apiFetch } from "../config/api";
 import { useProjectContext } from "../context/ProjectContext";
 import {
@@ -26,6 +27,8 @@ function NewDocumentPage() {
   const [jsonMode, setJsonMode] = useState(false);
   const [jsonDraft, setJsonDraft] = useState("");
   const [jsonError, setJsonError] = useState<string | null>(null);
+  const [diffMode, setDiffMode] = useState(false);
+  const [baselineContent, setBaselineContent] = useState<JSONContent | null>(null);
   const inFlightRef = useRef<Map<string, Promise<Awaited<ReturnType<typeof fetchDocumentDetail>>>>>(
     new Map(),
   );
@@ -45,6 +48,34 @@ function NewDocumentPage() {
     );
   }, [content, contentMeta]);
 
+  const parsedJsonDraft = useMemo(() => {
+    if (!jsonMode) {
+      return null;
+    }
+    return parseContentJson(jsonDraft);
+  }, [jsonDraft, jsonMode]);
+
+  const diffContent = useMemo(() => {
+    if (jsonMode) {
+      return parsedJsonDraft?.content ?? null;
+    }
+    return content;
+  }, [content, jsonMode, parsedJsonDraft]);
+
+  const diffContentError = useMemo(() => {
+    if (!jsonMode) {
+      return null;
+    }
+    if (!jsonDraft.trim()) {
+      return null;
+    }
+    return parsedJsonDraft ? null : "Invalid JSON content.";
+  }, [jsonDraft, jsonMode, parsedJsonDraft]);
+
+  const diffEntries = useMemo(() => {
+    return buildBlockDiff(baselineContent, diffContent);
+  }, [baselineContent, diffContent]);
+
   useEffect(() => {
     if (jsonMode) {
       setJsonDraft(JSON.stringify(contentPayload, null, 2));
@@ -60,6 +91,8 @@ function NewDocumentPage() {
       setContent(null);
       setContentMeta(null);
       setSaveError(null);
+      setDiffMode(false);
+      setBaselineContent(null);
       currentRequestRef.current = null;
       return;
     }
@@ -103,6 +136,9 @@ function NewDocumentPage() {
           const documentContent = contentValue.content;
           if (documentContent && typeof documentContent === "object") {
             setContent(documentContent);
+            setBaselineContent(documentContent);
+          } else {
+            setBaselineContent(null);
           }
           setContentMeta(contentMetaValue);
           setStorageObjectID("");
@@ -156,6 +192,7 @@ function NewDocumentPage() {
         if (parsed) {
           setContent(parsed.content);
           setContentMeta(parsed.meta ?? null);
+          setBaselineContent(parsed.content);
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
@@ -250,11 +287,42 @@ function NewDocumentPage() {
     setJsonMode(false);
   };
 
+  const handleToggleDiffMode = () => {
+    setDiffMode((prev) => !prev);
+  };
+
+  useEffect(() => {
+    if (!diffMode) {
+      return;
+    }
+    const changes = diffEntries
+      .filter((entry) => entry.status !== "unchanged")
+      .map((entry) => ({
+        status: entry.status,
+        before: entry.originalContent,
+        after: entry.editedContent,
+        fields: diffFieldChanges(entry.originalContent, entry.editedContent),
+      }));
+    console.log("document_diff", {
+      documentId,
+      changes,
+    });
+  }, [diffEntries, diffMode, documentId]);
+
   return (
     <div className="new-doc-page">
       <div className="new-doc-header">
         <button className="btn primary" type="button" onClick={handleSave} disabled={saving}>
           {saving ? "Saving..." : "Save"}
+        </button>
+        <button
+          className="btn ghost"
+          type="button"
+          onClick={handleToggleDiffMode}
+          disabled={!baselineContent || Boolean(diffContentError)}
+          title={diffContentError ?? ""}
+        >
+          {diffMode ? "Exit Diff" : "Diff"}
         </button>
         <button className="btn ghost" type="button" onClick={handleToggleJsonMode}>
           {jsonMode ? "Editor" : "JSON"}
@@ -264,6 +332,7 @@ function NewDocumentPage() {
       {loadingDocument ? (
         <div className="doc-viewer-state">Loading document...</div>
       ) : null}
+      {diffContentError ? <div className="doc-viewer-error">{diffContentError}</div> : null}
       <div className="new-doc-metadata">
         <input
           className="kb-title-input new-doc-title-input"
@@ -274,7 +343,55 @@ function NewDocumentPage() {
         />
       </div>
       <div className="new-doc-body">
-        {jsonMode ? (
+        {diffMode ? (
+          <div className="doc-diff-view">
+            {diffEntries.length === 0 ? (
+              <div className="doc-viewer-state">No changes detected.</div>
+            ) : (
+              diffEntries.map((entry, index) =>
+                entry.status === "unchanged" ? (
+                  <div key={`${entry.status}-${index}`} className="doc-diff-plain">
+                    {entry.content ? (
+                      <RichTextViewer
+                        content={entry.content}
+                        projectKey={currentProject?.key ?? ""}
+                      />
+                    ) : (
+                      <div className="doc-viewer-state">No content</div>
+                    )}
+                  </div>
+                ) : (
+                  <div
+                    key={`${entry.status}-${index}`}
+                    className={`doc-diff-block doc-diff-${entry.status}`}
+                  >
+                    <div className="doc-diff-label">{renderDiffLabel(entry.status)}</div>
+                    <div className="doc-diff-change">
+                      {entry.originalContent ? (
+                        <div className="doc-diff-change-item">
+                          <div className="doc-diff-change-title">Before</div>
+                          <RichTextViewer
+                            content={entry.originalContent}
+                            projectKey={currentProject?.key ?? ""}
+                          />
+                        </div>
+                      ) : null}
+                      {entry.editedContent ? (
+                        <div className="doc-diff-change-item">
+                          <div className="doc-diff-change-title">After</div>
+                          <RichTextViewer
+                            content={entry.editedContent}
+                            projectKey={currentProject?.key ?? ""}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ),
+              )
+            )}
+          </div>
+        ) : jsonMode ? (
           <div className="new-doc-json">
             <div className="new-doc-json-title">Document JSON</div>
             <textarea
@@ -490,4 +607,197 @@ const parseContentJson = (raw: string) => {
   } catch {
     return null;
   }
+};
+
+type BlockDiffStatus = "added" | "removed" | "modified" | "unchanged";
+
+type BlockDiffEntry = {
+  status: BlockDiffStatus;
+  content: JSONContent | null;
+  originalContent?: JSONContent | null;
+  editedContent?: JSONContent | null;
+};
+
+const renderDiffLabel = (status: BlockDiffStatus) => {
+  switch (status) {
+    case "added":
+      return "Added";
+    case "removed":
+      return "Removed";
+    case "modified":
+      return "Modified";
+    default:
+      return "Unchanged";
+  }
+};
+
+const buildBlockDiff = (
+  original: JSONContent | null,
+  edited: JSONContent | null,
+): BlockDiffEntry[] => {
+  const originalBlocks = extractBlocks(original);
+  const editedBlocks = extractBlocks(edited);
+  if (originalBlocks.length === 0 && editedBlocks.length === 0) {
+    return [];
+  }
+  const maxLength = Math.max(originalBlocks.length, editedBlocks.length);
+  const results: BlockDiffEntry[] = [];
+  for (let index = 0; index < maxLength; index += 1) {
+    const originalBlock = originalBlocks[index];
+    const editedBlock = editedBlocks[index];
+    if (!originalBlock && editedBlock) {
+      appendDiffBlock(results, "added", null, editedBlock);
+      continue;
+    }
+    if (originalBlock && !editedBlock) {
+      appendDiffBlock(results, "removed", originalBlock, null);
+      continue;
+    }
+    if (!originalBlock || !editedBlock) {
+      continue;
+    }
+    if (blocksEqual(originalBlock, editedBlock)) {
+      appendDiffBlock(results, "unchanged", originalBlock, originalBlock);
+    } else {
+      appendDiffBlock(results, "modified", originalBlock, editedBlock);
+    }
+  }
+  return results;
+};
+
+const appendDiffBlock = (
+  results: BlockDiffEntry[],
+  status: BlockDiffStatus,
+  originalBlock: JSONContent | null,
+  editedBlock: JSONContent | null,
+) => {
+  const last = results.at(-1);
+  if (last && last.status === status) {
+    if (originalBlock && last.originalContent?.content) {
+      last.originalContent.content.push(originalBlock);
+    }
+    if (editedBlock && last.editedContent?.content) {
+      last.editedContent.content.push(editedBlock);
+    }
+    if (last.status === "unchanged" && originalBlock && last.content?.content) {
+      last.content.content.push(originalBlock);
+    }
+    return;
+  }
+  const entry: BlockDiffEntry = {
+    status,
+    originalContent: originalBlock ? wrapDoc(originalBlock) : null,
+    editedContent: editedBlock ? wrapDoc(editedBlock) : null,
+  };
+  if (status === "unchanged" && originalBlock) {
+    entry.content = wrapDoc(originalBlock);
+  }
+  results.push(entry);
+};
+
+const extractBlocks = (content: JSONContent | null): JSONContent[] => {
+  if (!content || !Array.isArray(content.content)) {
+    return [];
+  }
+  return content.content.filter((block) => block && typeof block === "object");
+};
+
+const wrapDoc = (block: JSONContent): JSONContent => ({
+  type: "doc",
+  content: [block],
+});
+
+const blocksEqual = (left: JSONContent, right: JSONContent): boolean => {
+  return normalizeBlock(left) === normalizeBlock(right);
+};
+
+const normalizeBlock = (block: JSONContent): string => {
+  const clone = JSON.parse(JSON.stringify(block)) as JSONContent;
+  const cleaned = stripNullFields(clone);
+  if (cleaned.attrs && typeof cleaned.attrs === "object") {
+    delete cleaned.attrs.id;
+  }
+  return JSON.stringify(cleaned);
+};
+
+const stripNullFields = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map(stripNullFields);
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value).flatMap(([key, val]) => {
+      if (val === null || val === undefined) {
+        return [];
+      }
+      return [[key, stripNullFields(val)]] as Array<[string, unknown]>;
+    });
+    return Object.fromEntries(entries);
+  }
+  return value;
+};
+
+const diffFieldChanges = (
+  before: JSONContent | null | undefined,
+  after: JSONContent | null | undefined,
+) => {
+  const beforeValue = before ? stripNullFields(before) : null;
+  const afterValue = after ? stripNullFields(after) : null;
+  const differences: Array<{ path: string; before: unknown; after: unknown }> = [];
+  const seen = new Set<string>();
+
+  const walk = (left: unknown, right: unknown, path: string) => {
+    if (left === right) {
+      return;
+    }
+    const leftType = getValueType(left);
+    const rightType = getValueType(right);
+    if (leftType !== rightType) {
+      differences.push({ path, before: left, after: right });
+      return;
+    }
+    if (leftType === "array") {
+      const leftArray = left as unknown[];
+      const rightArray = right as unknown[];
+      const maxLength = Math.max(leftArray.length, rightArray.length);
+      for (let index = 0; index < maxLength; index += 1) {
+        walk(leftArray[index], rightArray[index], `${path}[${index}]`);
+      }
+      return;
+    }
+    if (leftType === "object") {
+      const leftObject = left as Record<string, unknown>;
+      const rightObject = right as Record<string, unknown>;
+      const keys = new Set([...Object.keys(leftObject), ...Object.keys(rightObject)]);
+      keys.forEach((key) => {
+        walk(leftObject[key], rightObject[key], path ? `${path}.${key}` : key);
+      });
+      return;
+    }
+    differences.push({ path, before: left, after: right });
+  };
+
+  walk(beforeValue, afterValue, "");
+  const unique = differences.filter((diff) => {
+    const key = `${diff.path}:${String(diff.before)}:${String(diff.after)}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+
+  return unique;
+};
+
+const getValueType = (value: unknown) => {
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  if (value && typeof value === "object") {
+    return "object";
+  }
+  if (value === null || value === undefined) {
+    return "null";
+  }
+  return "primitive";
 };

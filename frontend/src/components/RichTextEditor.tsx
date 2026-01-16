@@ -1,6 +1,6 @@
 import type { JSONContent } from "@tiptap/react";
 
-import { SimpleEditor } from "@/components/tiptap-templates/simple/simple-editor";
+import { SimpleEditor } from "DocEditor/templates/simple/simple-editor";
 
 interface RichTextEditorProps {
   onChange?: (content: JSONContent) => void;

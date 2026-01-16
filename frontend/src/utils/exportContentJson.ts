@@ -1,5 +1,5 @@
 import type { JSONContent } from "@tiptap/react"
-import { ensureBlockIds } from "@/components/tiptap-extension/BlockIdExtension"
+import { ensureBlockIds } from "DocEditor/extensions/BlockIdExtension"
 
 export type ContentMeta = {
   zeus: true

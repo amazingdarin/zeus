@@ -3,9 +3,9 @@ import type { JSONContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { createLowlight, common } from "lowlight";
-import { BlockIdExtension } from "@/components/tiptap-extension/BlockIdExtension";
-import { OpenApiNode } from "@/components/tiptap-node/openapi-node/openapi-node-extension";
-import { OpenApiRefNode } from "@/components/tiptap-node/openapi-ref-node/openapi-ref-node-extension";
+import { BlockIdExtension } from "DocEditor/extensions/BlockIdExtension";
+import { OpenApiNode } from "DocEditor/nodes/openapi-node/openapi-node-extension";
+import { OpenApiRefNode } from "DocEditor/nodes/openapi-ref-node/openapi-ref-node-extension";
 
 const lowlight = createLowlight(common);
 
