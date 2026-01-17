@@ -25,10 +25,12 @@ const openApiExtensions = (
 
 function RichTextViewer({ content, projectKey }: RichTextViewerProps) {
   return (
-    <DocViewer
-      content={content}
-      extensions={openApiExtensions(projectKey)}
-    />
+    <div className="rich-text-viewer">
+      <DocViewer
+        content={content}
+        extensions={openApiExtensions(projectKey)}
+      />
+    </div>
   );
 }
 

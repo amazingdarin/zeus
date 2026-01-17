@@ -1894,72 +1894,391 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
   overflow: auto;
-  padding: 4px 2px;
+  padding: 32px 40px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
 }
 
 .doc-diff-block {
-  border-radius: 16px;
-  border: 1px solid var(--border);
-  padding: 12px 16px;
-  background: var(--surface);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.doc-diff-block .rich-viewer {
-  padding: 6px 0;
+  position: relative;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 4px;
+  border: none;
 }
 
 .doc-diff-plain {
-  border-radius: 16px;
-  border: 1px solid transparent;
-  padding: 12px 16px;
-}
-
-.doc-diff-block.doc-diff-added {
-  border-color: rgba(34, 197, 94, 0.5);
-  background: rgba(34, 197, 94, 0.1);
-}
-
-.doc-diff-block.doc-diff-removed {
-  border-color: rgba(239, 68, 68, 0.5);
-  background: rgba(239, 68, 68, 0.08);
-}
-
-.doc-diff-block.doc-diff-modified {
-  border-color: rgba(59, 130, 246, 0.5);
-  background: rgba(59, 130, 246, 0.08);
+  padding: 4px 12px;
+  margin-bottom: 4px;
 }
 
 .doc-diff-label {
   font-weight: 700;
-  font-size: 12px;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: rgba(15, 23, 42, 0.7);
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 2px;
+  user-select: none;
+}
+
+.doc-diff-block.doc-diff-added {
+  background: #f0f9ff;
+  border-left: 2px solid #0ea5e9;
+}
+
+.doc-diff-block.doc-diff-added .doc-diff-label {
+  color: #0369a1;
+}
+
+.doc-diff-block.doc-diff-removed {
+  background: #fef2f2;
+  border-left: 2px solid #ef4444;
+  opacity: 1;
+}
+
+.doc-diff-block.doc-diff-removed .doc-diff-label {
+  color: #b91c1c;
+}
+
+.doc-diff-block.doc-diff-removed .doc-diff-change {
+  text-decoration: line-through;
+  text-decoration-color: #ef4444;
+}
+
+.doc-diff-block.doc-diff-modified {
+  background: #fffbeb;
+  border-left: 2px solid #f59e0b;
+  display: flex;
+  flex-direction: column;
+}
+
+.doc-diff-block.doc-diff-modified .doc-diff-label {
+  color: #b45309;
+}
+
+.doc-diff-block.doc-diff-added .doc-diff-label {
+  color: #096dd9;
+}
+
+.doc-diff-block.doc-diff-removed {
+  background: transparent;
+  opacity: 0.7;
+}
+
+.doc-diff-block.doc-diff-removed .doc-diff-label {
+  color: #cf1322;
+}
+
+.doc-diff-block.doc-diff-removed .doc-diff-change {
+  text-decoration: line-through;
+  text-decoration-color: #cf1322;
+}
+
+.doc-diff-block.doc-diff-modified {
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+}
+
+.doc-diff-block.doc-diff-modified .doc-diff-label {
+  color: #d48806;
 }
 
 .doc-diff-change {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
 }
 
 .doc-diff-change-item {
-  border-radius: 12px;
-  padding: 10px 12px;
-  border: 1px dashed rgba(15, 23, 42, 0.2);
-  background: rgba(255, 255, 255, 0.6);
+  border-radius: 4px;
+  padding: 0 8px 4px;
+  background: transparent;
+  border: none;
+}
+
+.doc-diff-block.doc-diff-modified .doc-diff-change-item:first-child {
+  background: transparent;
+  text-decoration: line-through;
+  opacity: 0.7;
+  color: var(--muted);
+  padding-bottom: 0;
+  margin-bottom: 0;
+}
+
+.doc-diff-block.doc-diff-modified .doc-diff-change-item:last-child {
+  background: #f0f9ff;
+  color: var(--ink);
+  padding-top: 4px;
 }
 
 .doc-diff-change-title {
-  font-weight: 600;
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.7);
-  margin-bottom: 6px;
+  display: none;
+}
+
+.doc-diff-block .ProseMirror,
+.doc-diff-block .tiptap {
+  min-height: unset !important;
+  height: auto !important;
+  overflow: visible !important;
+  line-height: 1.4;
+}
+
+.doc-diff-block .ProseMirror ul[data-type="taskList"] li,
+.doc-diff-block .tiptap ul[data-type="taskList"] li {
+  margin: 0;
+  display: flex;
+}
+
+.doc-diff-block .ProseMirror ul[data-type="taskList"] li label,
+.doc-diff-block .tiptap ul[data-type="taskList"] li label {
+  margin-right: 0.5em;
+  padding-top: 0.2em;
+}
+
+.doc-diff-block .ProseMirror ul:not([data-type="taskList"]),
+.doc-diff-block .tiptap ul:not([data-type="taskList"]),
+.doc-diff-block .ProseMirror ol,
+.doc-diff-block .tiptap ol {
+  padding-left: 24px;
+  margin: 8px 0;
+}
+
+.doc-diff-block .ProseMirror ul ul,
+.doc-diff-block .tiptap ul ul,
+.doc-diff-block .ProseMirror ol ul,
+.doc-diff-block .tiptap ol ul,
+.doc-diff-block .ProseMirror ul ol,
+.doc-diff-block .tiptap ul ol,
+.doc-diff-block .ProseMirror ol ol,
+.doc-diff-block .tiptap ol ol {
+  margin: 0;
+}
+
+.doc-diff-block .ProseMirror img,
+.doc-diff-block .tiptap img {
+  margin: 8px 0 !important;
+  max-width: 100%;
+}
+
+.doc-diff-block .ProseMirror blockquote,
+.doc-diff-block .tiptap blockquote {
+  margin: 8px 0 !important;
+}
+
+.doc-diff-block .ProseMirror pre,
+.doc-diff-block .tiptap pre {
+  margin: 8px 0 !important;
+}
+
+.doc-diff-block.doc-diff-removed .ProseMirror pre,
+.doc-diff-block.doc-diff-removed .tiptap pre {
+  background: rgba(180, 35, 24, 0.08) !important;
+  text-decoration: none !important;
+}
+
+.doc-diff-block.doc-diff-removed .ProseMirror pre code,
+.doc-diff-block.doc-diff-removed .tiptap pre code {
+  text-decoration: none !important;
+}
+
+.doc-diff-block .ProseMirror > *:first-child,
+.doc-diff-block .tiptap > *:first-child {
+  margin-top: 0 !important;
+}
+
+.doc-diff-block .ProseMirror > *:last-child,
+.doc-diff-block .tiptap > *:last-child {
+  margin-bottom: 0 !important;
+}
+
+/* Ensure no borders on inner editor components in diff view */
+.doc-diff-view .tiptap-editor,
+.doc-diff-view .ProseMirror,
+.doc-diff-view .doc-editor-wrapper {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  min-height: unset !important;
+}
+
+.doc-diff-view .doc-diff-plain .tiptap-editor {
+  padding: 0 !important;
+}
+
+.doc-diff-plain {
+  padding: 4px 12px;
+  margin-bottom: 8px;
+}
+
+.doc-diff-label {
+  font-weight: 700;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 4px;
+  user-select: none;
+}
+
+.doc-diff-block.doc-diff-added {
+  background: #e6f7ff;
+  border-left: 2px solid #1890ff;
+}
+
+.doc-diff-block.doc-diff-added .doc-diff-label {
+  color: #096dd9;
+}
+
+.doc-diff-block.doc-diff-removed {
+  background: transparent;
+  opacity: 0.7;
+}
+
+.doc-diff-block.doc-diff-removed .doc-diff-label {
+  color: #cf1322;
+}
+
+.doc-diff-block.doc-diff-removed .doc-diff-change {
+  text-decoration: line-through;
+  text-decoration-color: #cf1322;
+}
+
+.doc-diff-block.doc-diff-modified {
+  background: transparent;
+  border-left: 2px solid #faad14;
+  display: flex;
+  flex-direction: column;
+}
+
+.doc-diff-block.doc-diff-modified .doc-diff-label {
+  color: #d48806;
+}
+
+.doc-diff-change {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.doc-diff-change-item {
+  border-radius: 4px;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+}
+
+.doc-diff-block.doc-diff-modified .doc-diff-change-item:first-child {
+  background: transparent;
+  text-decoration: line-through;
+  opacity: 0.7;
+  color: var(--muted);
+}
+
+.doc-diff-block.doc-diff-modified .doc-diff-change-item:last-child {
+  background: #e6f7ff;
+  color: var(--ink);
+}
+
+
+.doc-diff-block {
+  position: relative;
+  border-radius: 4px;
+  padding: 16px 12px 12px;
+  margin-bottom: 8px;
+  border: 1px solid transparent;
+}
+
+.doc-diff-plain {
+  padding: 4px 12px;
+  margin-bottom: 8px;
+}
+
+.doc-diff-label {
+  font-weight: 700;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 4px;
+  user-select: none;
+}
+
+.doc-diff-block.doc-diff-added {
+  background: #e6f7ff;
+  border-left: 2px solid #1890ff;
+}
+
+.doc-diff-block.doc-diff-added .doc-diff-label {
+  color: #096dd9;
+}
+
+.doc-diff-block.doc-diff-removed {
+  background: transparent;
+  opacity: 0.7;
+}
+
+.doc-diff-block.doc-diff-removed .doc-diff-label {
+  color: #cf1322;
+}
+
+.doc-diff-block.doc-diff-removed .doc-diff-change {
+  text-decoration: line-through;
+  text-decoration-color: #cf1322;
+}
+
+.doc-diff-block.doc-diff-modified {
+  background: transparent;
+  border-left: 2px solid #faad14;
+  display: flex;
+  flex-direction: column;
+}
+
+.doc-diff-block.doc-diff-modified .doc-diff-label {
+  color: #d48806;
+}
+
+.doc-diff-change {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.doc-diff-change-item {
+  border-radius: 4px;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+}
+
+.doc-diff-block.doc-diff-modified .doc-diff-change-item:first-child {
+  background: transparent;
+  text-decoration: line-through;
+  opacity: 0.7;
+  color: var(--muted);
+}
+
+.doc-diff-block.doc-diff-modified .doc-diff-change-item:last-child {
+  background: #e6f7ff;
+  color: var(--ink);
+}
+
+.doc-diff-change-title {
+  display: none;
+}
+
+.doc-diff-block .ProseMirror,
+.doc-diff-block .tiptap {
+  min-height: unset !important;
+  height: auto !important;
+  overflow: visible !important;
 }
 
 .new-doc-title-input,
@@ -1968,6 +2287,13 @@ body {
   border-radius: 16px;
   background: var(--surface);
   overflow: hidden;
+}
+
+.rich-text-viewer .tiptap-editor,
+.rich-text-viewer .doc-editor-wrapper {
+  border: none;
+  border-radius: 0;
+  background: transparent;
 }
 
 .tiptap-menu {
