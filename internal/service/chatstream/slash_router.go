@@ -72,13 +72,23 @@ func (r *DefaultSlashRouter) Handle(ctx context.Context, req SlashRequest) (Slas
 	if input == "" || !strings.HasPrefix(input, "/") {
 		return SlashResult{}, false, nil
 	}
-	name, args := parseSlashInput(input)
+	prefix, body := trimSlashPrefix(input)
+	if prefix == "" {
+		return SlashResult{}, false, nil
+	}
+	name, args := parseSlashBody(body)
 	if name == "" {
 		return SlashResult{}, false, nil
 	}
 	cmd, ok := r.commands[name]
 	if !ok {
 		return SlashResult{}, false, nil
+	}
+	if prefix == "op" && cmd.Type != SlashCommandOperation {
+		return SlashResult{}, true, fmt.Errorf("command %s requires /p: prefix", name)
+	}
+	if prefix == "p" && cmd.Type != SlashCommandPrompt {
+		return SlashResult{}, true, fmt.Errorf("command %s requires /op: prefix", name)
 	}
 	switch cmd.Type {
 	case SlashCommandOperation:
@@ -114,12 +124,25 @@ func (r *DefaultSlashRouter) Handle(ctx context.Context, req SlashRequest) (Slas
 	}
 }
 
-func parseSlashInput(input string) (string, string) {
+func trimSlashPrefix(input string) (string, string) {
 	trimmed := strings.TrimSpace(input)
 	if !strings.HasPrefix(trimmed, "/") {
 		return "", ""
 	}
-	trimmed = strings.TrimPrefix(trimmed, "/")
+	if strings.HasPrefix(trimmed, "/in:") {
+		return "", ""
+	}
+	if strings.HasPrefix(trimmed, "/op:") {
+		return "op", strings.TrimPrefix(trimmed, "/op:")
+	}
+	if strings.HasPrefix(trimmed, "/p:") {
+		return "p", strings.TrimPrefix(trimmed, "/p:")
+	}
+	return "", ""
+}
+
+func parseSlashBody(body string) (string, string) {
+	trimmed := strings.TrimSpace(body)
 	if trimmed == "" {
 		return "", ""
 	}

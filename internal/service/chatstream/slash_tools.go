@@ -30,7 +30,7 @@ func (i *KnowledgeToolInvoker) Invoke(
 	args string,
 ) (SlashToolResult, error) {
 	switch command {
-	case "docs", "docs.list":
+	case "docs.list":
 		if i.knowledgeSvc == nil {
 			return SlashToolResult{}, fmt.Errorf("knowledge service is required")
 		}
@@ -60,7 +60,7 @@ func (i *KnowledgeToolInvoker) Invoke(
 			Message:   fmt.Sprintf("Found %d documents.", len(items)),
 			Artifacts: []ChatArtifact{artifact},
 		}, nil
-	case "docs/search", "docs.search":
+	case "docs.search":
 		if i.searchSvc == nil {
 			return SlashToolResult{}, fmt.Errorf("search service is required")
 		}

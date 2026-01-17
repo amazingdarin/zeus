@@ -191,19 +191,9 @@ func main() {
 	slashRouter := chatstream.NewDefaultSlashRouter(
 		[]chatstream.SlashCommand{
 			{
-				Name:        "docs",
-				Type:        chatstream.SlashCommandOperation,
-				Description: "List knowledge base documents",
-			},
-			{
 				Name:        "docs.list",
 				Type:        chatstream.SlashCommandOperation,
 				Description: "List knowledge base documents",
-			},
-			{
-				Name:        "docs/search",
-				Type:        chatstream.SlashCommandOperation,
-				Description: "Search knowledge base documents",
 			},
 			{
 				Name:        "docs.search",
