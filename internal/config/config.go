@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -15,6 +16,7 @@ type Config struct {
 	Git           GitConfig           `mapstructure:"git"`
 	Search        SearchConfig        `mapstructure:"search"`
 	Security      SecurityConfig      `mapstructure:"security"`
+	Providers     ProvidersConfig     `mapstructure:"providers"`
 }
 
 var AppConfig *Config
@@ -72,7 +74,25 @@ type SearchConfig struct {
 }
 
 type SecurityConfig struct {
-	EncryptionKey string `mapstructure:"encryption_key"`
+	EncryptionKey    string          `mapstructure:"encryption_key"`
+	EncryptionKeys   []EncryptionKey `mapstructure:"encryption_keys"`
+	ActiveKeyID      string          `mapstructure:"active_key_id"`
+	ActiveKeyVersion int             `mapstructure:"active_key_version"`
+}
+
+type EncryptionKey struct {
+	ID      string `mapstructure:"id"`
+	Version int    `mapstructure:"version"`
+	Key     string `mapstructure:"key"`
+}
+
+type ProvidersConfig struct {
+	Copilot CopilotConfig `mapstructure:"copilot"`
+}
+
+type CopilotConfig struct {
+	ClientID string   `mapstructure:"client_id"`
+	Scopes   []string `mapstructure:"scopes"`
 }
 
 func Load(path string) (*Config, error) {
@@ -121,5 +141,12 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Security.EncryptionKey == "" {
 		cfg.Security.EncryptionKey = "zeus-dev-key"
+	}
+	if len(cfg.Security.EncryptionKeys) == 0 {
+		return
+	}
+	if strings.TrimSpace(cfg.Security.ActiveKeyID) == "" || cfg.Security.ActiveKeyVersion == 0 {
+		cfg.Security.ActiveKeyID = strings.TrimSpace(cfg.Security.EncryptionKeys[0].ID)
+		cfg.Security.ActiveKeyVersion = cfg.Security.EncryptionKeys[0].Version
 	}
 }

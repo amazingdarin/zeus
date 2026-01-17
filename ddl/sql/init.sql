@@ -44,9 +44,50 @@ CREATE TABLE model_runtime
     api_key     TEXT,
     model_name  TEXT    NOT NULL,
     parameters  JSONB,
+    provider_connection_id TEXT,
     is_active   BOOLEAN NOT NULL DEFAULT true,
     created_at  TIMESTAMPTZ       DEFAULT now(),
     updated_at  TIMESTAMPTZ       DEFAULT now()
+);
+
+CREATE TABLE provider_connection
+(
+    id            TEXT PRIMARY KEY,
+    provider_id   TEXT NOT NULL,
+    display_name  TEXT NOT NULL,
+    base_url      TEXT,
+    model_name    TEXT NOT NULL,
+    credential_id TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    last_error    TEXT,
+    last_used_at  TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ DEFAULT now(),
+    updated_at    TIMESTAMPTZ DEFAULT now(),
+    created_by    TEXT,
+    updated_by    TEXT
+);
+
+CREATE TABLE provider_credential
+(
+    id            TEXT PRIMARY KEY,
+    provider_id   TEXT NOT NULL,
+    scope_type    TEXT NOT NULL,
+    scope_id      TEXT,
+    type          TEXT NOT NULL,
+    ciphertext    TEXT NOT NULL,
+    nonce         TEXT NOT NULL,
+    encrypted_key TEXT NOT NULL,
+    key_id        TEXT NOT NULL,
+    key_version   INT  NOT NULL,
+    expires_at    TIMESTAMPTZ,
+    scopes        TEXT,
+    metadata      JSONB,
+    created_at    TIMESTAMPTZ DEFAULT now(),
+    updated_at    TIMESTAMPTZ DEFAULT now(),
+    created_by    TEXT,
+    updated_by    TEXT,
+    last_used_at  TIMESTAMPTZ,
+    last_used_by  TEXT
 );
 
 CREATE TABLE document

@@ -30,8 +30,18 @@ This document defines the design and implementation plan for adding multi-provid
 
 - Provider definitions are static for phase 1.
 - Each provider specifies:
-  - `ID`, `Name`, `AuthType`, `BaseURL`, `Capabilities`.
+  - `ID`, `Name`, `AuthType`, `DefaultBaseURL`, `Capabilities`.
   - Protocol adapter (OpenAI-compatible).
+  - Routing rules (endpoint selection by capability or model name).
+
+### Provider Connections (Runtime Bindings)
+
+- Introduce `provider_connection` to bind provider definitions to runtime settings.
+- A connection includes:
+  - `ProviderID`, `BaseURL` override, `ModelName`, `CredentialID`.
+  - `Status`/`LastError`/`LastUsedAt` to surface health in UI.
+- `model_runtime` can reference a connection for scenario routing.
+- Backward compatible: if no connection is set, fall back to existing `model_runtime` fields.
 
 ### Credential Store
 
@@ -48,11 +58,12 @@ This document defines the design and implementation plan for adding multi-provid
 ### Runtime Routing
 
 - Keep existing `model_runtime` behavior for default scenario runtime.
-- Provider-specific runtime is resolved using `provider_id` and `model_id`.
-- Codex routing rule:
-  - `model_id` contains `codex` -> use `responses` endpoint.
-  - Otherwise use `chat/completions`.
-
+- Scenario can target a `provider_connection` when set.
+- Endpoint selection based on provider capabilities:
+  - `responses_endpoint` for models that require Responses API.
+  - `chat_endpoint` for standard chat completions.
+  - `embeddings_endpoint` for embeddings.
+- Avoid hard-coded model name checks; use provider routing rules instead.
 ## Config Changes
 
 Extend `config.yaml`:
@@ -78,6 +89,20 @@ Rules:
 
 ## Database Schema
 
+New table `provider_connection`:
+
+- `id` (text, PK)
+- `provider_id` (text)
+- `display_name` (text)
+- `base_url` (text, nullable)
+- `model_name` (text)
+- `credential_id` (text)
+- `status` (text: active|invalid|expired|revoked)
+- `last_error` (text, nullable)
+- `last_used_at` (timestamptz, nullable)
+- `created_at`, `updated_at` (timestamptz)
+- `created_by`, `updated_by` (text, nullable)
+
 New table `provider_credential`:
 
 - `id` (text, PK)
@@ -87,7 +112,6 @@ New table `provider_credential`:
 - `type` (text: api|device|oauth)
 - `ciphertext` (text)
 - `nonce` (text)
-- `cipher` (text)
 - `encrypted_key` (text)
 - `key_id` (text)
 - `key_version` (int)
@@ -109,6 +133,10 @@ New table `provider_credential`:
 
 - `GET /api/providers`
   - List providers and connection status.
+- `GET /api/provider-connections`
+  - List configured connections with health state.
+- `POST /api/provider-connections`
+  - Create/update a provider connection.
 - `POST /api/providers/:id/auth/api`
   - Store API key (OpenAI).
 - `POST /api/providers/:id/auth/start`
@@ -116,14 +144,15 @@ New table `provider_credential`:
 - `POST /api/providers/:id/auth/poll`
   - Poll Device Code to exchange token.
 - `POST /api/providers/test`
-  - Validate connectivity for provider + model.
+  - Validate connectivity for provider + model (updates connection status).
 
 ## Copilot Device Code Flow
 
 - Server requests device code from GitHub.
-- Server returns `verification_uri`, `user_code`, `interval` to frontend.
+- Server returns `verification_uri`, `user_code`, `interval`, `expires_in` to frontend.
 - Frontend instructs user to complete login.
-- Server polls GitHub and stores token on success.
+- Server polls GitHub (respecting `interval` and `slow_down`).
+- Server stores token on success and updates connection status.
 
 ## Integration Points (Zeus)
 
@@ -131,13 +160,14 @@ New table `provider_credential`:
 - `internal/util`: add envelope encryption helpers and key manager.
 - `internal/repository`: add provider credential repository + mapper.
 - `internal/service`: add provider registry + auth services.
-- `internal/api/handler`: add provider endpoints.
+- `internal/api/handler`: add provider + connection endpoints.
 - `cmd/zeus/main.go`: wire services into router.
-- `ddl/sql/init.sql`: add new table.
+- `ddl/sql/init.sql`: add new tables (`provider_connection`, `provider_credential`).
 
 ## Backward Compatibility
 
 - Existing `model_runtime` usage remains unchanged.
+- If a scenario has no `provider_connection`, use legacy `model_runtime` fields.
 - API key encryption for `model_runtime` continues to use existing `EncryptString`.
 - New provider credentials use the envelope scheme.
 
@@ -149,8 +179,18 @@ New table `provider_credential`:
   - Re-encrypt with active master key.
   - Update `key_id/version`.
 
+## Implementation Steps (Phase 1)
+
+1. Add `provider_connection` + `provider_credential` tables and mappers.
+2. Introduce provider registry definitions (static list) and routing rules.
+3. Implement envelope encryption with `KeyManager` (local master keys).
+4. Add provider credential repository and service for API key/device code flows.
+5. Add provider connection CRUD + health test endpoint.
+6. Wire scenario runtime to use connection when set; fallback to existing `model_runtime`.
+7. Add audit updates (`last_used_at`, `last_error`, `status`) on test/call.
+
 ## Testing
 
 - Unit tests for key manager and envelope encrypt/decrypt.
 - Repository tests for credential CRUD.
-- API integration tests for auth flows and provider listing.
+- API integration tests for auth flows, provider listing, and connection health.

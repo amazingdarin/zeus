@@ -10,16 +10,17 @@ func ModelRuntimeFromDomain(runtime *domain.ModelRuntime) *model.ModelRuntime {
 		return nil
 	}
 	return &model.ModelRuntime{
-		ID:         runtime.ID,
-		Scenario:   runtime.Scenario,
-		Name:       runtime.Name,
-		BaseURL:    runtime.BaseURL,
-		APIKey:     runtime.APIKey,
-		ModelName:  runtime.ModelName,
-		Parameters: encodeJSON(runtime.Parameters),
-		IsActive:   runtime.IsActive,
-		CreatedAt:  runtime.CreatedAt,
-		UpdatedAt:  runtime.UpdatedAt,
+		ID:                   runtime.ID,
+		Scenario:             runtime.Scenario,
+		Name:                 runtime.Name,
+		BaseURL:              runtime.BaseURL,
+		APIKey:               runtime.APIKey,
+		ModelName:            runtime.ModelName,
+		Parameters:           encodeJSON(runtime.Parameters),
+		ProviderConnectionID: runtime.ProviderConnectionID,
+		IsActive:             runtime.IsActive,
+		CreatedAt:            runtime.CreatedAt,
+		UpdatedAt:            runtime.UpdatedAt,
 	}
 }
 
@@ -28,15 +29,16 @@ func ModelRuntimeToDomain(runtime *model.ModelRuntime) *domain.ModelRuntime {
 		return nil
 	}
 	return &domain.ModelRuntime{
-		ID:         runtime.ID,
-		Scenario:   runtime.Scenario,
-		Name:       runtime.Name,
-		BaseURL:    runtime.BaseURL,
-		APIKey:     runtime.APIKey,
-		ModelName:  runtime.ModelName,
-		Parameters: decodeJSON(runtime.Parameters),
-		IsActive:   runtime.IsActive,
-		CreatedAt:  runtime.CreatedAt,
-		UpdatedAt:  runtime.UpdatedAt,
+		ID:                   runtime.ID,
+		Scenario:             runtime.Scenario,
+		Name:                 runtime.Name,
+		BaseURL:              runtime.BaseURL,
+		APIKey:               runtime.APIKey,
+		ModelName:            runtime.ModelName,
+		Parameters:           decodeJSON(runtime.Parameters),
+		ProviderConnectionID: runtime.ProviderConnectionID,
+		IsActive:             runtime.IsActive,
+		CreatedAt:            runtime.CreatedAt,
+		UpdatedAt:            runtime.UpdatedAt,
 	}
 }

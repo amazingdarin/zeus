@@ -39,3 +39,11 @@ search:
 
 security:
   encryption_key: zeus-dev-key
+  encryption_keys: []
+  active_key_id: ""
+  active_key_version: 0
+
+providers:
+  copilot:
+    client_id: ""
+    scopes: []
