@@ -21,34 +21,36 @@ export default defineConfig(async ({ mode }) => {
       : undefined;
 
   return {
-  plugins: [react()],
+    plugins: [react()],
 
-  // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
-  //
-  // 1. prevent Vite from obscuring rust errors
-  clearScreen: false,
-  // 2. tauri expects a fixed port, fail if that port is not available
-  server: {
-    port: 1420,
-    strictPort: true,
-    host: host || false,
-    hmr: host
-      ? {
-          protocol: "ws",
-          host,
-          port: 1421,
-        }
-      : undefined,
-    watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+    // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
+    //
+    // 1. prevent Vite from obscuring rust errors
+    clearScreen: false,
+    // 2. tauri expects a fixed port, fail if that port is not available
+    server: {
+      port: 1420,
+      strictPort: true,
+      host: host || false,
+      hmr: host
+        ? {
+            protocol: "ws",
+            host,
+            port: 1421,
+          }
+        : undefined,
+      watch: {
+        // 3. tell Vite to ignore watching `src-tauri`
+        ignored: ["**/src-tauri/**"],
+      },
+      proxy,
     },
-    proxy,
-  },
-  resolve: {
-    alias: {
-      DocEditor: path.resolve(__dirname, "src/components/DocEditor"),
+    resolve: {
+      alias: {
+        "@": path.resolve(__dirname, "zeus/src"),
+      },
     },
-  },
+    root: path.resolve(__dirname, "zeus"),
+    publicDir: path.resolve(__dirname, "zeus/public"),
   };
 });

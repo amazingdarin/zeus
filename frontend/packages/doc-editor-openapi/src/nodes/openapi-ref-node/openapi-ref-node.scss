@@ -1,0 +1,55 @@
+.openapi-ref-node {
+  margin: 12px 0;
+}
+
+.openapi-ref-card {
+  border: 1px dashed rgba(31, 35, 40, 0.3);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: rgba(31, 35, 40, 0.04);
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.openapi-ref-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.openapi-ref-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.openapi-ref-row:last-child {
+  margin-bottom: 0;
+}
+
+.openapi-ref-label {
+  color: var(--muted);
+  min-width: 72px;
+}
+
+.openapi-ref-value {
+  color: var(--ink);
+  word-break: break-all;
+}
+
+.openapi-viewer-state {
+  border: 1px dashed rgba(31, 35, 40, 0.2);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: rgba(31, 35, 40, 0.02);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.openapi-viewer-error {
+  border: 1px solid rgba(255, 99, 71, 0.4);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: rgba(255, 99, 71, 0.08);
+  font-size: 13px;
+  color: #b42318;
+}

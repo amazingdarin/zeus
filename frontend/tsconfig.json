@@ -15,7 +15,7 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "paths": {
-      "DocEditor/*": ["src/components/DocEditor/*"]
+      "@/*": ["zeus/src/*"]
     },
 
     /* Linting */
@@ -24,6 +24,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"],
+  "include": ["zeus/src"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

@@ -1,0 +1,34 @@
+.doc-editor-wrapper {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.doc-editor-content {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.doc-editor-content .tiptap.ProseMirror.doc-editor {
+  flex: 1;
+  padding: 16px;
+  min-height: 280px;
+  font-family: var(--font-sans);
+  color: var(--ink);
+}
+
+@media screen and (max-width: 480px) {
+  .doc-editor-content .tiptap.ProseMirror.doc-editor {
+    padding: 12px;
+  }
+}
