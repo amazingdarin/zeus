@@ -637,53 +637,77 @@ const buildBlockDiff = (
 ): BlockDiffEntry[] => {
   const originalBlocks = extractBlocks(original);
   const editedBlocks = extractBlocks(edited);
-  if (originalBlocks.length === 0 && editedBlocks.length === 0) {
-    return [];
+
+  // LCS-based diffing logic for block lists
+  const m = originalBlocks.length;
+  const n = editedBlocks.length;
+  const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const oldId = originalBlocks[i - 1].attrs?.id;
+      const newId = editedBlocks[j - 1].attrs?.id;
+
+      if (oldId && newId && oldId === newId) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
   }
-  const maxLength = Math.max(originalBlocks.length, editedBlocks.length);
+
   const results: BlockDiffEntry[] = [];
-  for (let index = 0; index < maxLength; index += 1) {
-    const originalBlock = originalBlocks[index];
-    const editedBlock = editedBlocks[index];
-    if (!originalBlock && editedBlock) {
-      appendDiffBlock(results, "added", null, editedBlock);
-      continue;
-    }
-    if (originalBlock && !editedBlock) {
-      appendDiffBlock(results, "removed", originalBlock, null);
-      continue;
-    }
-    if (!originalBlock || !editedBlock) {
-      continue;
-    }
-    if (blocksEqual(originalBlock, editedBlock)) {
-      appendDiffBlock(results, "unchanged", originalBlock, originalBlock);
+  let i = m;
+  let j = n;
+
+  // Backtracking to find the diff path (raw unmerged)
+  const rawPath: BlockDiffEntry[] = [];
+  while (i > 0 || j > 0) {
+    const originalBlock = i > 0 ? originalBlocks[i - 1] : null;
+    const editedBlock = j > 0 ? editedBlocks[j - 1] : null;
+    const oldId = originalBlock?.attrs?.id;
+    const newId = editedBlock?.attrs?.id;
+
+    if (i > 0 && j > 0 && oldId && newId && oldId === newId) {
+      if (originalBlock && editedBlock) {
+        if (blocksEqual(originalBlock, editedBlock)) {
+          appendRawDiffBlock(rawPath, "unchanged", originalBlock, originalBlock);
+        } else {
+          appendRawDiffBlock(rawPath, "modified", originalBlock, editedBlock);
+        }
+      }
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      if (editedBlock && !isPureEmptyBlock(editedBlock)) {
+        appendRawDiffBlock(rawPath, "added", null, editedBlock);
+      }
+      j--;
     } else {
-      appendDiffBlock(results, "modified", originalBlock, editedBlock);
+      if (originalBlock && !isPureEmptyBlock(originalBlock)) {
+        appendRawDiffBlock(rawPath, "removed", originalBlock, null);
+      }
+      i--;
     }
   }
-  return results;
+
+  // Reverse to get chronological order, then merge
+  const chronOrder = rawPath.reverse();
+  const mergedResults: BlockDiffEntry[] = [];
+  
+  for (const entry of chronOrder) {
+      mergeDiffBlock(mergedResults, entry);
+  }
+
+  return mergedResults;
 };
 
-const appendDiffBlock = (
+const appendRawDiffBlock = (
   results: BlockDiffEntry[],
   status: BlockDiffStatus,
   originalBlock: JSONContent | null,
   editedBlock: JSONContent | null,
 ) => {
-  const last = results.at(-1);
-  if (last && last.status === status) {
-    if (originalBlock && last.originalContent?.content) {
-      last.originalContent.content.push(originalBlock);
-    }
-    if (editedBlock && last.editedContent?.content) {
-      last.editedContent.content.push(editedBlock);
-    }
-    if (last.status === "unchanged" && originalBlock && last.content?.content) {
-      last.content.content.push(originalBlock);
-    }
-    return;
-  }
   const entry: BlockDiffEntry = {
     status,
     originalContent: originalBlock ? wrapDoc(originalBlock) : null,
@@ -694,6 +718,55 @@ const appendDiffBlock = (
   }
   results.push(entry);
 };
+
+const mergeDiffBlock = (
+    results: BlockDiffEntry[],
+    entry: BlockDiffEntry
+) => {
+  const last = results.at(-1);
+  if (last && last.status === entry.status) {
+    // Merge logic
+    if (entry.originalContent?.content && last.originalContent?.content) {
+      last.originalContent.content.push(...entry.originalContent.content);
+    }
+    if (entry.editedContent?.content && last.editedContent?.content) {
+        last.editedContent.content.push(...entry.editedContent.content);
+    }
+    if (entry.content?.content && last.content?.content) {
+        last.content.content.push(...entry.content.content);
+    }
+    return;
+  }
+  results.push(entry);
+};
+
+
+const isPureEmptyBlock = (block: JSONContent): boolean => {
+  // A block is considered "pure empty" if it has no content array
+  // AND no meaningful attributes (other than ID)
+  // AND is a basic paragraph (usually default empty state)
+  if (block.type !== "paragraph") {
+    return false;
+  }
+  if (block.content && block.content.length > 0) {
+    return false;
+  }
+  // Check attrs
+  if (block.attrs) {
+    const attrs = { ...block.attrs };
+    delete attrs.id;
+    // If it has other attributes (like textAlign, class), it's not "pure empty"
+    // However, stripNullFields logic might leave empty objects, so we check keys
+    const validKeys = Object.keys(attrs).filter(
+      (k) => attrs[k] !== null && attrs[k] !== undefined,
+    );
+    if (validKeys.length > 0) {
+      return false;
+    }
+  }
+  return true;
+};
+
 
 const extractBlocks = (content: JSONContent | null): JSONContent[] => {
   if (!content || !Array.isArray(content.content)) {
@@ -713,11 +786,31 @@ const blocksEqual = (left: JSONContent, right: JSONContent): boolean => {
 
 const normalizeBlock = (block: JSONContent): string => {
   const clone = JSON.parse(JSON.stringify(block)) as JSONContent;
-  const cleaned = stripNullFields(clone);
+  const cleaned = stripNullFields(clone) as JSONContent;
   if (cleaned.attrs && typeof cleaned.attrs === "object") {
     delete cleaned.attrs.id;
+    if (Object.keys(cleaned.attrs).length === 0) {
+      delete cleaned.attrs;
+    }
   }
-  return JSON.stringify(cleaned);
+  return stableStringify(cleaned);
+};
+
+const stableStringify = (obj: unknown): string => {
+  if (obj !== null && typeof obj === "object") {
+    if (Array.isArray(obj)) {
+      return "[" + obj.map(stableStringify).join(",") + "]";
+    }
+    return (
+      "{" +
+      Object.keys(obj)
+        .sort()
+        .map((key) => JSON.stringify(key) + ":" + stableStringify((obj as Record<string, unknown>)[key]))
+        .join(",") +
+      "}"
+    );
+  }
+  return JSON.stringify(obj);
 };
 
 const stripNullFields = (value: unknown): unknown => {
