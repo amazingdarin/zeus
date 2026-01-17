@@ -4,6 +4,7 @@ import { HashRouter, Route, Routes } from "react-router-dom";
 import AppShell from "./layout/AppShell";
 import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 import NewDocumentPage from "./pages/NewDocumentPage";
+import SettingsPage from "./pages/SettingsPage";
 import { ProjectProvider } from "./context/ProjectContext";
 import { ensureSystemSession } from "./config/api";
 import "./App.css";
@@ -37,6 +38,7 @@ function App() {
             <Route path="/" element={<KnowledgeBasePage />} />
             <Route path="/knowledge" element={<KnowledgeBasePage />} />
             <Route path="/documents/new" element={<NewDocumentPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </AppShell>
       </HashRouter>
