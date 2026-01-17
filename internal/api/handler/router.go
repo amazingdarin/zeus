@@ -21,6 +21,9 @@ func RegisterRoutes(
 	taskSvc service.TaskService,
 	openapiIndexSvc svcopenapi.IndexService,
 	modelRuntimeSvc service.ModelRuntimeService,
+	providerRegistry service.ProviderRegistry,
+	providerCredentialSvc service.ProviderCredentialService,
+	providerConnectionSvc service.ProviderConnectionService,
 	chatRunRegistry chatrun.RunRegistry,
 	chatStreamSvc ChatStreamRunner,
 	commandRouter chatstream.SlashRouter,
@@ -36,6 +39,7 @@ func RegisterRoutes(
 	openapiHandler := NewOpenAPIHandler(openapiIndexSvc)
 	systemHandler := NewSystemHandler()
 	modelHandler := NewModelRuntimeHandler(modelRuntimeSvc)
+	providerHandler := NewProviderHandler(providerRegistry, providerCredentialSvc, providerConnectionSvc)
 	chatRunHandler := NewChatRunHandler(chatRunRegistry, projectSvc)
 	chatStreamHandler := NewChatStreamHandler(chatRunRegistry, chatStreamSvc, projectSvc)
 	commandHandler := NewCommandHandler(commandRouter, projectSvc)
@@ -90,9 +94,16 @@ func RegisterRoutes(
 	// Task
 	api.GET("/tasks/:id", taskHandler.Get)
 
-	// Model Runtime
 	api.GET("/model-runtimes", modelHandler.ListRuntimes)
 	api.POST("/model-runtimes", modelHandler.UpsertRuntime)
 	api.POST("/model-runtimes/models:refresh", modelHandler.RefreshModels)
 	api.POST("/model-runtimes/test", modelHandler.TestRuntime)
+
+	api.GET("/providers", providerHandler.ListProviders)
+	api.POST("/providers/test", providerHandler.TestProvider)
+	api.GET("/provider-connections", providerHandler.ListConnections)
+	api.POST("/provider-connections", providerHandler.UpsertConnection)
+	api.POST("/providers/:id/auth/api", providerHandler.StoreAPIKey)
+	api.POST("/providers/:id/auth/start", providerHandler.StartDeviceCode)
+	api.POST("/providers/:id/auth/poll", providerHandler.PollDeviceCode)
 }

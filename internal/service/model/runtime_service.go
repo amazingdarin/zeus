@@ -79,16 +79,17 @@ func (s *RuntimeService) Upsert(
 	now := s.now()
 	if existing == nil {
 		runtime := &domain.ModelRuntime{
-			ID:         uuid.NewString(),
-			Scenario:   scenario,
-			Name:       name,
-			BaseURL:    baseURL,
-			APIKey:     encryptedKey,
-			ModelName:  modelName,
-			Parameters: input.Parameters,
-			IsActive:   input.IsActive,
-			CreatedAt:  now,
-			UpdatedAt:  now,
+			ID:                   uuid.NewString(),
+			Scenario:             scenario,
+			Name:                 name,
+			BaseURL:              baseURL,
+			APIKey:               encryptedKey,
+			ModelName:            modelName,
+			Parameters:           input.Parameters,
+			ProviderConnectionID: strings.TrimSpace(input.ProviderConnectionID),
+			IsActive:             input.IsActive,
+			CreatedAt:            now,
+			UpdatedAt:            now,
 		}
 		if err := s.repo.Insert(ctx, runtime); err != nil {
 			return nil, err
@@ -101,6 +102,7 @@ func (s *RuntimeService) Upsert(
 	existing.APIKey = encryptedKey
 	existing.ModelName = modelName
 	existing.Parameters = input.Parameters
+	existing.ProviderConnectionID = strings.TrimSpace(input.ProviderConnectionID)
 	existing.IsActive = input.IsActive
 	existing.UpdatedAt = now
 	if err := s.repo.Update(ctx, existing); err != nil {

@@ -51,13 +51,14 @@ func (h *ModelRuntimeHandler) UpsertRuntime(c *gin.Context) {
 	}
 
 	runtime, err := h.runtimeSvc.Upsert(c.Request.Context(), service.ModelRuntimeInput{
-		Scenario:   strings.TrimSpace(req.Scenario),
-		Name:       strings.TrimSpace(req.Name),
-		BaseURL:    strings.TrimSpace(req.BaseURL),
-		APIKey:     strings.TrimSpace(req.APIKey),
-		ModelName:  strings.TrimSpace(req.ModelName),
-		Parameters: params,
-		IsActive:   req.IsActive,
+		Scenario:             strings.TrimSpace(req.Scenario),
+		Name:                 strings.TrimSpace(req.Name),
+		BaseURL:              strings.TrimSpace(req.BaseURL),
+		APIKey:               strings.TrimSpace(req.APIKey),
+		ModelName:            strings.TrimSpace(req.ModelName),
+		Parameters:           params,
+		ProviderConnectionID: strings.TrimSpace(req.ProviderConnectionID),
+		IsActive:             req.IsActive,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "UPSERT_MODEL_RUNTIME_FAILED", Message: err.Error()})
@@ -113,15 +114,16 @@ func mapRuntimeDTO(runtime *domain.ModelRuntime) types.ModelRuntimeDTO {
 		return types.ModelRuntimeDTO{}
 	}
 	return types.ModelRuntimeDTO{
-		ID:         runtime.ID,
-		Scenario:   runtime.Scenario,
-		Name:       runtime.Name,
-		BaseURL:    runtime.BaseURL,
-		ModelName:  runtime.ModelName,
-		Parameters: runtime.Parameters,
-		IsActive:   runtime.IsActive,
-		CreatedAt:  formatTime(runtime.CreatedAt),
-		UpdatedAt:  formatTime(runtime.UpdatedAt),
+		ID:                   runtime.ID,
+		Scenario:             runtime.Scenario,
+		Name:                 runtime.Name,
+		BaseURL:              runtime.BaseURL,
+		ModelName:            runtime.ModelName,
+		Parameters:           runtime.Parameters,
+		ProviderConnectionID: runtime.ProviderConnectionID,
+		IsActive:             runtime.IsActive,
+		CreatedAt:            formatTime(runtime.CreatedAt),
+		UpdatedAt:            formatTime(runtime.UpdatedAt),
 	}
 }
 

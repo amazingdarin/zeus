@@ -25,6 +25,7 @@ import (
 	"zeus/internal/infra/logger"
 	"zeus/internal/infra/modelruntime"
 	"zeus/internal/infra/objectstorage"
+	providerinfra "zeus/internal/infra/provider"
 	"zeus/internal/infra/searchindex"
 	httpsession "zeus/internal/infra/session"
 	"zeus/internal/infra/taskcallback"
@@ -39,10 +40,12 @@ import (
 	svcmodel "zeus/internal/service/model"
 	svcopenapi "zeus/internal/service/openapi"
 	svcproject "zeus/internal/service/project"
+	svcprovider "zeus/internal/service/provider"
 	svcrag "zeus/internal/service/rag"
 	svcsearch "zeus/internal/service/search"
 	svcstorageobject "zeus/internal/service/storage_object"
 	svctask "zeus/internal/service/task"
+	"zeus/internal/util"
 )
 
 func InitConfig(ctx context.Context) {
@@ -132,6 +135,8 @@ func main() {
 	projectRepo := postgres.NewProjectRepository(db)
 	storageObjectRepo := postgres.NewStorageObjectRepository(db)
 	modelRuntimeRepo := postgres.NewModelRuntimeRepository(db)
+	providerConnectionRepo := postgres.NewProviderConnectionRepository(db)
+	providerCredentialRepo := postgres.NewProviderCredentialRepository(db)
 	summaryRepo := postgres.NewDocumentSummaryRepository(db)
 	taskRepo := postgres.NewTaskRepository(db)
 	changeProposalRepo := postgres.NewKnowledgeChangeProposalRepository(db)
@@ -159,6 +164,23 @@ func main() {
 	)
 	openapiIndexSvc := svcopenapi.NewIndexService(assetMetaStore, assetReader)
 	projectSvc := svcproject.NewService(projectRepo, gitAdmin, gitClientManager)
+	keyManager, err := util.NewLocalKeyManager(config.AppConfig.Security)
+	if err != nil {
+		log.WithContext(ctx).Fatalf("init key manager: %v", err)
+	}
+	copilotClient := providerinfra.NewCopilotDeviceClient(
+		config.AppConfig.Providers.Copilot.ClientID,
+		config.AppConfig.Providers.Copilot.Scopes,
+	)
+	providerRegistry := svcprovider.NewRegistry()
+	providerCredentialSvc := svcprovider.NewCredentialService(providerCredentialRepo, keyManager, copilotClient)
+	providerConnectionSvc := svcprovider.NewConnectionService(
+		providerConnectionRepo,
+		providerCredentialRepo,
+		providerRegistry,
+		modelruntime.DefaultClientFactory,
+		keyManager,
+	)
 	modelRuntimeSvc := svcmodel.NewRuntimeService(
 		modelRuntimeRepo,
 		modelruntime.DefaultClientFactory,
@@ -174,7 +196,13 @@ func main() {
 	knowledgeSvc := svcknowledge.NewService(knowledgeRepo, projectRepo, changeProposalRepo)
 	ragIndex := ragindex.NewPostgresIndex(db)
 	ragExtractor := svcrag.SimpleBlockExtractor{}
-	runtimeResolver := svcmodel.NewRuntimeResolver(modelRuntimeRepo, config.AppConfig.Security.EncryptionKey)
+	runtimeResolver := svcmodel.NewRuntimeResolver(
+		modelRuntimeRepo,
+		providerConnectionRepo,
+		providerCredentialRepo,
+		keyManager,
+		config.AppConfig.Security.EncryptionKey,
+	)
 	ragEmbedder := embedding.NewOpenAICompatibleEmbedder(runtimeResolver)
 	ragReader := gitrepo.NewGitDocumentReader(knowledgeRepo, projectRepo)
 	ragSvc := svcrag.NewService(ragReader, ragExtractor, ragEmbedder, ragIndex, svcrag.SimpleAssembler{})
@@ -254,6 +282,9 @@ User request:
 		taskSvc,
 		openapiIndexSvc,
 		modelRuntimeSvc,
+		providerRegistry,
+		providerCredentialSvc,
+		providerConnectionSvc,
 		chatRunRegistry,
 		chatStreamSvc,
 		slashRouter,

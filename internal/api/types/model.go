@@ -3,25 +3,27 @@ package types
 import "encoding/json"
 
 type ModelRuntimeRequest struct {
-	Scenario   string          `json:"scenario"`
-	Name       string          `json:"name"`
-	BaseURL    string          `json:"base_url"`
-	APIKey     string          `json:"api_key"`
-	ModelName  string          `json:"model_name"`
-	Parameters json.RawMessage `json:"parameters"`
-	IsActive   bool            `json:"is_active"`
+	Scenario             string          `json:"scenario"`
+	Name                 string          `json:"name"`
+	BaseURL              string          `json:"base_url"`
+	APIKey               string          `json:"api_key"`
+	ModelName            string          `json:"model_name"`
+	Parameters           json.RawMessage `json:"parameters"`
+	ProviderConnectionID string          `json:"provider_connection_id"`
+	IsActive             bool            `json:"is_active"`
 }
 
 type ModelRuntimeDTO struct {
-	ID         string                 `json:"id"`
-	Scenario   string                 `json:"scenario"`
-	Name       string                 `json:"name"`
-	BaseURL    string                 `json:"base_url"`
-	ModelName  string                 `json:"model_name"`
-	Parameters map[string]interface{} `json:"parameters"`
-	IsActive   bool                   `json:"is_active"`
-	CreatedAt  string                 `json:"created_at"`
-	UpdatedAt  string                 `json:"updated_at"`
+	ID                   string                 `json:"id"`
+	Scenario             string                 `json:"scenario"`
+	Name                 string                 `json:"name"`
+	BaseURL              string                 `json:"base_url"`
+	ModelName            string                 `json:"model_name"`
+	Parameters           map[string]interface{} `json:"parameters"`
+	ProviderConnectionID string                 `json:"provider_connection_id"`
+	IsActive             bool                   `json:"is_active"`
+	CreatedAt            string                 `json:"created_at"`
+	UpdatedAt            string                 `json:"updated_at"`
 }
 
 type ModelRuntimeListResponse struct {

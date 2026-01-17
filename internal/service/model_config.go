@@ -7,13 +7,14 @@ import (
 )
 
 type ModelRuntimeInput struct {
-	Scenario   string
-	Name       string
-	BaseURL    string
-	APIKey     string
-	ModelName  string
-	Parameters map[string]interface{}
-	IsActive   bool
+	Scenario             string
+	Name                 string
+	BaseURL              string
+	APIKey               string
+	ModelName            string
+	Parameters           map[string]interface{}
+	ProviderConnectionID string
+	IsActive             bool
 }
 
 type ModelRuntimeTestInput struct {
