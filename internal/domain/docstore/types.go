@@ -33,3 +33,16 @@ type TreeItem struct {
 	Kind     string     `json:"kind"` // "file" | "dir"
 	Children []TreeItem `json:"children,omitempty"`
 }
+
+type HookContext struct {
+	ProjectID string
+}
+
+type Hooks struct {
+	BeforeSave   func(ctx HookContext, doc *Document) error
+	AfterSave    func(ctx HookContext, doc *Document) error
+	BeforeDelete func(ctx HookContext, docID string) error
+	AfterDelete  func(ctx HookContext, docID string) error
+	BeforeMove   func(ctx HookContext, docID, targetParentID string) error
+	AfterMove    func(ctx HookContext, docID, targetParentID string) error
+}

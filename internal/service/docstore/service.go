@@ -20,11 +20,13 @@ type Service interface {
 	Delete(ctx context.Context, projectID, docID string) error
 	Move(ctx context.Context, projectID, docID, targetParentID string, targetIndex int) error
 	GetChildren(ctx context.Context, projectID, parentID string) ([]docstore.TreeItem, error)
+	RegisterHooks(hooks docstore.Hooks)
 }
 
 type impl struct {
 	rootDir string
 	index   *IndexManager
+	hooks   docstore.Hooks
 }
 
 func NewService(rootDir string) Service {
@@ -35,6 +37,10 @@ func NewService(rootDir string) Service {
 	// Initial rebuild (blocking for simplicity, should be async in prod)
 	svc.index.Rebuild(rootDir)
 	return svc
+}
+
+func (s *impl) RegisterHooks(hooks docstore.Hooks) {
+	s.hooks = hooks
 }
 
 // --- Index Manager ---

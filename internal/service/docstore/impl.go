@@ -42,6 +42,13 @@ func (s *impl) Get(ctx context.Context, projectID, docID string) (*docstore.Docu
 }
 
 func (s *impl) Save(ctx context.Context, projectID string, doc *docstore.Document) error {
+	hookCtx := docstore.HookContext{ProjectID: projectID}
+	if s.hooks.BeforeSave != nil {
+		if err := s.hooks.BeforeSave(hookCtx, doc); err != nil {
+			return err
+		}
+	}
+
 	cache, exists := s.index.Get(doc.Meta.ID)
 
 	var targetDir string
@@ -118,10 +125,23 @@ func (s *impl) Save(ctx context.Context, projectID string, doc *docstore.Documen
 		ParentID: doc.Meta.ParentID,
 	})
 
+	if s.hooks.AfterSave != nil {
+		if err := s.hooks.AfterSave(hookCtx, doc); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
 func (s *impl) Delete(ctx context.Context, projectID, docID string) error {
+	hookCtx := docstore.HookContext{ProjectID: projectID}
+	if s.hooks.BeforeDelete != nil {
+		if err := s.hooks.BeforeDelete(hookCtx, docID); err != nil {
+			return err
+		}
+	}
+
 	cache, ok := s.index.Get(docID)
 	if !ok {
 		return ErrNotFound
@@ -143,10 +163,23 @@ func (s *impl) Delete(ctx context.Context, projectID, docID string) error {
 
 	s.index.Remove(docID)
 
+	if s.hooks.AfterDelete != nil {
+		if err := s.hooks.AfterDelete(hookCtx, docID); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
 func (s *impl) Move(ctx context.Context, projectID, docID, targetParentID string, targetIndex int) error {
+	hookCtx := docstore.HookContext{ProjectID: projectID}
+	if s.hooks.BeforeMove != nil {
+		if err := s.hooks.BeforeMove(hookCtx, docID, targetParentID); err != nil {
+			return err
+		}
+	}
+
 	cache, ok := s.index.Get(docID)
 	if !ok {
 		return ErrNotFound
@@ -213,7 +246,17 @@ func (s *impl) Move(ctx context.Context, projectID, docID, targetParentID string
 	}
 
 	slug := strings.TrimSuffix(filepath.Base(newPath), filepath.Ext(newPath))
-	return s.reorderIndexFile(targetDir, slug, targetIndex)
+	if err := s.reorderIndexFile(targetDir, slug, targetIndex); err != nil {
+		return err
+	}
+
+	if s.hooks.AfterMove != nil {
+		if err := s.hooks.AfterMove(hookCtx, docID, targetParentID); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s *impl) GetChildren(ctx context.Context, projectID, parentID string) ([]docstore.TreeItem, error) {

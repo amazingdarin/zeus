@@ -197,3 +197,56 @@ func TestService_Restart_RebuildIndex(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Persistent Doc", loaded.Meta.Title)
 }
+
+func TestService_Hooks(t *testing.T) {
+	svc, _ := setup(t)
+	ctx := context.Background()
+
+	var callLog []string
+
+	hooks := docstore.Hooks{
+		BeforeSave: func(ctx docstore.HookContext, doc *docstore.Document) error {
+			callLog = append(callLog, "BeforeSave:"+doc.Meta.Title)
+			return nil
+		},
+		AfterSave: func(ctx docstore.HookContext, doc *docstore.Document) error {
+			callLog = append(callLog, "AfterSave:"+doc.Meta.Title)
+			return nil
+		},
+		BeforeDelete: func(ctx docstore.HookContext, docID string) error {
+			callLog = append(callLog, "BeforeDelete:"+docID)
+			return nil
+		},
+		AfterDelete: func(ctx docstore.HookContext, docID string) error {
+			callLog = append(callLog, "AfterDelete:"+docID)
+			return nil
+		},
+		BeforeMove: func(ctx docstore.HookContext, docID, targetParentID string) error {
+			callLog = append(callLog, "BeforeMove:"+docID)
+			return nil
+		},
+		AfterMove: func(ctx docstore.HookContext, docID, targetParentID string) error {
+			callLog = append(callLog, "AfterMove:"+docID)
+			return nil
+		},
+	}
+
+	svc.RegisterHooks(hooks)
+
+	doc := newDoc("h1", "Hook Doc")
+	require.NoError(t, svc.Save(ctx, testProjectID, doc))
+
+	doc2 := newDoc("h2", "Parent")
+	require.NoError(t, svc.Save(ctx, testProjectID, doc2))
+	require.NoError(t, svc.Move(ctx, testProjectID, "h1", "h2", 0))
+
+	require.NoError(t, svc.Delete(ctx, testProjectID, "h1"))
+
+	expected := []string{
+		"BeforeSave:Hook Doc", "AfterSave:Hook Doc",
+		"BeforeSave:Parent", "AfterSave:Parent",
+		"BeforeMove:h1", "AfterMove:h1",
+		"BeforeDelete:h1", "AfterDelete:h1",
+	}
+	assert.Equal(t, expected, callLog)
+}
