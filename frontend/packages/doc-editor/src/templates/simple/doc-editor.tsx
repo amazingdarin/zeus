@@ -43,6 +43,7 @@ import { ImageUploadButton } from "../../ui/image-upload-button"
 import { ListDropdownMenu } from "../../ui/list-dropdown-menu"
 import { BlockquoteButton } from "../../ui/blockquote-button"
 import { CodeBlockButton } from "../../ui/code-block-button"
+import { OpenApiDropdownMenu } from "../../ui/openapi-dropdown-menu"
 import {
   ColorHighlightPopover,
   ColorHighlightPopoverContent,
@@ -123,6 +124,7 @@ const MainToolbarContent = ({
         />
         <BlockquoteButton />
         <CodeBlockButton />
+        <OpenApiDropdownMenu portal={isMobile} hideWhenUnavailable />
       </ToolbarGroup>
 
       <ToolbarSeparator />

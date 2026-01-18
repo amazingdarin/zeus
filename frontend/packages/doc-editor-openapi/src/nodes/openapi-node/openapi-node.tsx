@@ -28,16 +28,16 @@ export function OpenApiNodeView({ node, editor, extension }: NodeViewProps) {
   return (
     <NodeViewWrapper className="openapi-node">
       {isEditable ? (
-        canRender ? (
-          <OpenApiSourcePreview
-            sourceType={sourceType}
-            source={source}
-            fetcher={fetcher}
-            projectKey={projectKey}
-          />
-        ) : (
-          <OpenApiNodeCard source={source} renderer={renderer} showStatus />
-        )
+        <OpenApiNodeEditor
+          editor={editor}
+          node={node}
+          canRender={canRender}
+          sourceType={sourceType}
+          source={source}
+          renderer={renderer}
+          fetcher={fetcher}
+          projectKey={projectKey}
+        />
       ) : canRender ? (
         <OpenApiSpecViewer
           sourceType={sourceType}
@@ -78,6 +78,17 @@ type OpenApiSourceState = {
   jsonText: string | null
 }
 
+type OpenApiNodeEditorProps = {
+  editor: NodeViewProps["editor"]
+  node: NodeViewProps["node"]
+  canRender: boolean
+  sourceType: OpenApiSourceType
+  source: string
+  renderer: string
+  fetcher: (url: string, init?: RequestInit) => Promise<Response>
+  projectKey: string
+}
+
 const initialState: OpenApiSourceState = {
   loading: false,
   error: null,
@@ -94,7 +105,7 @@ const parseSpec = (raw: string): Record<string, unknown> | null => {
       return parsed
     }
   } catch {
-    // fall through to YAML
+    return null
   }
   try {
     const parsed = parseYaml(raw) as Record<string, unknown>
@@ -140,6 +151,81 @@ async function resolveSource(
     throw new Error("OpenAPI 资源加载失败")
   }
   return response.text()
+}
+
+function OpenApiNodeEditor({
+  editor,
+  node,
+  canRender,
+  sourceType,
+  source,
+  renderer,
+  fetcher,
+  projectKey,
+}: OpenApiNodeEditorProps) {
+  const [draft, setDraft] = useState(source)
+
+  useEffect(() => {
+    setDraft(source)
+  }, [source])
+
+  const handleChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setDraft(event.target.value)
+  }
+
+  const handleBlur = () => {
+    if (draft === source) {
+      return
+    }
+    editor
+      .chain()
+      .focus()
+      .command(({ tr }) => {
+        const { selection } = tr
+        const position = selection?.$anchor?.before() ?? selection?.from
+        if (typeof position !== "number") {
+          return false
+        }
+        tr.setNodeMarkup(position, undefined, {
+          ...node.attrs,
+          source: draft,
+          source_type: "yaml",
+        })
+        return true
+      })
+      .run()
+  }
+
+  if (canRender) {
+    return (
+      <OpenApiSourcePreview
+        sourceType={sourceType}
+        source={source}
+        fetcher={fetcher}
+        projectKey={projectKey}
+      />
+    )
+  }
+
+  return (
+    <div className="openapi-node-card">
+      <div className="openapi-node-title">OpenAPI Spec</div>
+      <div className="openapi-node-row">
+        <span className="openapi-node-label">Paste YAML or JSON</span>
+      </div>
+      <textarea
+        className="openapi-node-editor"
+        value={draft}
+        onChange={handleChange}
+        onBlur={handleBlur}
+        placeholder="Paste OpenAPI YAML or JSON here"
+      />
+      <div className="openapi-node-row">
+        <span className="openapi-node-label">Renderer</span>
+        <span className="openapi-node-value">{renderer}</span>
+      </div>
+    </div>
+  )
 }
 
 function OpenApiSourcePreview({
