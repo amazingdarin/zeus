@@ -40,7 +40,12 @@ func NewService(rootDir string) Service {
 }
 
 func (s *impl) RegisterHooks(hooks docstore.Hooks) {
-	s.hooks = hooks
+	s.hooks.BeforeSave = append(s.hooks.BeforeSave, hooks.BeforeSave...)
+	s.hooks.AfterSave = append(s.hooks.AfterSave, hooks.AfterSave...)
+	s.hooks.BeforeDelete = append(s.hooks.BeforeDelete, hooks.BeforeDelete...)
+	s.hooks.AfterDelete = append(s.hooks.AfterDelete, hooks.AfterDelete...)
+	s.hooks.BeforeMove = append(s.hooks.BeforeMove, hooks.BeforeMove...)
+	s.hooks.AfterMove = append(s.hooks.AfterMove, hooks.AfterMove...)
 }
 
 // --- Index Manager ---

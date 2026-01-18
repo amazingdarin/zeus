@@ -43,8 +43,8 @@ func (s *impl) Get(ctx context.Context, projectID, docID string) (*docstore.Docu
 
 func (s *impl) Save(ctx context.Context, projectID string, doc *docstore.Document) error {
 	hookCtx := docstore.HookContext{ProjectID: projectID}
-	if s.hooks.BeforeSave != nil {
-		if err := s.hooks.BeforeSave(hookCtx, doc); err != nil {
+	for _, hook := range s.hooks.BeforeSave {
+		if err := hook(hookCtx, doc); err != nil {
 			return err
 		}
 	}
@@ -125,8 +125,8 @@ func (s *impl) Save(ctx context.Context, projectID string, doc *docstore.Documen
 		ParentID: doc.Meta.ParentID,
 	})
 
-	if s.hooks.AfterSave != nil {
-		if err := s.hooks.AfterSave(hookCtx, doc); err != nil {
+	for _, hook := range s.hooks.AfterSave {
+		if err := hook(hookCtx, doc); err != nil {
 			return err
 		}
 	}
@@ -136,8 +136,8 @@ func (s *impl) Save(ctx context.Context, projectID string, doc *docstore.Documen
 
 func (s *impl) Delete(ctx context.Context, projectID, docID string) error {
 	hookCtx := docstore.HookContext{ProjectID: projectID}
-	if s.hooks.BeforeDelete != nil {
-		if err := s.hooks.BeforeDelete(hookCtx, docID); err != nil {
+	for _, hook := range s.hooks.BeforeDelete {
+		if err := hook(hookCtx, docID); err != nil {
 			return err
 		}
 	}
@@ -163,8 +163,8 @@ func (s *impl) Delete(ctx context.Context, projectID, docID string) error {
 
 	s.index.Remove(docID)
 
-	if s.hooks.AfterDelete != nil {
-		if err := s.hooks.AfterDelete(hookCtx, docID); err != nil {
+	for _, hook := range s.hooks.AfterDelete {
+		if err := hook(hookCtx, docID); err != nil {
 			return err
 		}
 	}
@@ -174,8 +174,8 @@ func (s *impl) Delete(ctx context.Context, projectID, docID string) error {
 
 func (s *impl) Move(ctx context.Context, projectID, docID, targetParentID string, targetIndex int) error {
 	hookCtx := docstore.HookContext{ProjectID: projectID}
-	if s.hooks.BeforeMove != nil {
-		if err := s.hooks.BeforeMove(hookCtx, docID, targetParentID); err != nil {
+	for _, hook := range s.hooks.BeforeMove {
+		if err := hook(hookCtx, docID, targetParentID); err != nil {
 			return err
 		}
 	}
@@ -250,8 +250,8 @@ func (s *impl) Move(ctx context.Context, projectID, docID, targetParentID string
 		return err
 	}
 
-	if s.hooks.AfterMove != nil {
-		if err := s.hooks.AfterMove(hookCtx, docID, targetParentID); err != nil {
+	for _, hook := range s.hooks.AfterMove {
+		if err := hook(hookCtx, docID, targetParentID); err != nil {
 			return err
 		}
 	}

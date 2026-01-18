@@ -205,33 +205,55 @@ func TestService_Hooks(t *testing.T) {
 	var callLog []string
 
 	hooks := docstore.Hooks{
-		BeforeSave: func(ctx docstore.HookContext, doc *docstore.Document) error {
-			callLog = append(callLog, "BeforeSave:"+doc.Meta.Title)
-			return nil
+		BeforeSave: []func(ctx docstore.HookContext, doc *docstore.Document) error{
+			func(ctx docstore.HookContext, doc *docstore.Document) error {
+				callLog = append(callLog, "BeforeSave1:"+doc.Meta.Title)
+				return nil
+			},
 		},
-		AfterSave: func(ctx docstore.HookContext, doc *docstore.Document) error {
-			callLog = append(callLog, "AfterSave:"+doc.Meta.Title)
-			return nil
+		AfterSave: []func(ctx docstore.HookContext, doc *docstore.Document) error{
+			func(ctx docstore.HookContext, doc *docstore.Document) error {
+				callLog = append(callLog, "AfterSave1:"+doc.Meta.Title)
+				return nil
+			},
 		},
-		BeforeDelete: func(ctx docstore.HookContext, docID string) error {
-			callLog = append(callLog, "BeforeDelete:"+docID)
-			return nil
+		BeforeDelete: []func(ctx docstore.HookContext, docID string) error{
+			func(ctx docstore.HookContext, docID string) error {
+				callLog = append(callLog, "BeforeDelete1:"+docID)
+				return nil
+			},
 		},
-		AfterDelete: func(ctx docstore.HookContext, docID string) error {
-			callLog = append(callLog, "AfterDelete:"+docID)
-			return nil
+		AfterDelete: []func(ctx docstore.HookContext, docID string) error{
+			func(ctx docstore.HookContext, docID string) error {
+				callLog = append(callLog, "AfterDelete1:"+docID)
+				return nil
+			},
 		},
-		BeforeMove: func(ctx docstore.HookContext, docID, targetParentID string) error {
-			callLog = append(callLog, "BeforeMove:"+docID)
-			return nil
+		BeforeMove: []func(ctx docstore.HookContext, docID, targetParentID string) error{
+			func(ctx docstore.HookContext, docID, targetParentID string) error {
+				callLog = append(callLog, "BeforeMove1:"+docID)
+				return nil
+			},
 		},
-		AfterMove: func(ctx docstore.HookContext, docID, targetParentID string) error {
-			callLog = append(callLog, "AfterMove:"+docID)
-			return nil
+		AfterMove: []func(ctx docstore.HookContext, docID, targetParentID string) error{
+			func(ctx docstore.HookContext, docID, targetParentID string) error {
+				callLog = append(callLog, "AfterMove1:"+docID)
+				return nil
+			},
+		},
+	}
+
+	hooks2 := docstore.Hooks{
+		BeforeSave: []func(ctx docstore.HookContext, doc *docstore.Document) error{
+			func(ctx docstore.HookContext, doc *docstore.Document) error {
+				callLog = append(callLog, "BeforeSave2:"+doc.Meta.Title)
+				return nil
+			},
 		},
 	}
 
 	svc.RegisterHooks(hooks)
+	svc.RegisterHooks(hooks2)
 
 	doc := newDoc("h1", "Hook Doc")
 	require.NoError(t, svc.Save(ctx, testProjectID, doc))
@@ -243,10 +265,10 @@ func TestService_Hooks(t *testing.T) {
 	require.NoError(t, svc.Delete(ctx, testProjectID, "h1"))
 
 	expected := []string{
-		"BeforeSave:Hook Doc", "AfterSave:Hook Doc",
-		"BeforeSave:Parent", "AfterSave:Parent",
-		"BeforeMove:h1", "AfterMove:h1",
-		"BeforeDelete:h1", "AfterDelete:h1",
+		"BeforeSave1:Hook Doc", "BeforeSave2:Hook Doc", "AfterSave1:Hook Doc",
+		"BeforeSave1:Parent", "BeforeSave2:Parent", "AfterSave1:Parent",
+		"BeforeMove1:h1", "AfterMove1:h1",
+		"BeforeDelete1:h1", "AfterDelete1:h1",
 	}
 	assert.Equal(t, expected, callLog)
 }
