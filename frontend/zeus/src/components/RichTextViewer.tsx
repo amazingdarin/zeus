@@ -1,6 +1,6 @@
 import type { JSONContent } from "@tiptap/react";
 
-import { DocViewer } from "@zeus/doc-editor";
+import { BlockRefNode, DocViewer } from "@zeus/doc-editor";
 import { OpenApiNode, OpenApiRefNode } from "@zeus/doc-editor-openapi";
 
 import { apiFetch } from "../config/api";
@@ -10,9 +10,7 @@ interface RichTextViewerProps {
   projectKey?: string;
 }
 
-const openApiExtensions = (
-  projectKey?: string
-) => [
+const openApiExtensions = (projectKey?: string) => [
   OpenApiNode.configure({
     projectKey,
     fetcher: apiFetch,
@@ -24,12 +22,19 @@ const openApiExtensions = (
 ];
 
 function RichTextViewer({ content, projectKey }: RichTextViewerProps) {
+  const openapi = openApiExtensions(projectKey);
+  const extensions = [
+    ...openapi,
+    BlockRefNode.configure({
+      projectKey,
+      fetcher: apiFetch,
+      viewerExtensions: openapi,
+    }),
+  ];
+
   return (
     <div className="rich-text-viewer">
-      <DocViewer
-        content={content}
-        extensions={openApiExtensions(projectKey)}
-      />
+      <DocViewer content={content} extensions={extensions} />
     </div>
   );
 }

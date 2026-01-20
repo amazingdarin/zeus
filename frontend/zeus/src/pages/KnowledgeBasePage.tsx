@@ -12,15 +12,13 @@ import { useProjectContext } from "../context/ProjectContext";
 
 type DocumentResponse = {
   id?: string;
+  slug?: string;
+  title?: string;
+  kind?: string;
   type?: string;
   doc_type?: string;
-  title?: string;
   parent?: string;
   parent_id?: string;
-  has_child?: boolean;
-  order?: number;
-  index?: number;
-  storage_object_id?: string;
   meta?: {
     id?: string;
     title?: string;
@@ -76,7 +74,8 @@ function KnowledgeBasePage() {
     return map;
   }, [childrenByParent, rootDocuments]);
 
-  const mapDocument = useCallback((item: DocumentResponse): KnowledgeBaseDocument => {
+  const mapDocument = useCallback(
+    (item: DocumentResponse, parentId: string): KnowledgeBaseDocument => {
     const rawType = String(
       item.doc_type ?? item.meta?.doc_type ?? item.type ?? "",
     ).toLowerCase();
@@ -85,16 +84,17 @@ function KnowledgeBasePage() {
     if (!normalizedType) {
       normalizedType = "document";
     }
+    const kind = String(item.kind ?? "").toLowerCase();
+    const hasChild =
+      kind === "dir" || Boolean((item as { has_child?: boolean }).has_child);
     return {
       id: String(item.meta?.id ?? item.id ?? ""),
-      title: String(item.meta?.title ?? item.title ?? ""),
+      title: String(item.meta?.title ?? item.title ?? item.slug ?? ""),
       type: normalizedType,
-      parentId: String(
-        item.meta?.parent_id ?? item.meta?.parent ?? item.parent ?? item.parent_id ?? "",
-      ),
-      hasChild: Boolean(item.has_child),
-      order: Number(item.index ?? item.order ?? 0),
-      storageObjectId: String(item.storage_object_id ?? ""),
+      parentId,
+      hasChild,
+      order: 0,
+      storageObjectId: "",
     };
   }, []);
 
@@ -123,7 +123,10 @@ function KnowledgeBasePage() {
       }
       const payload = await response.json();
       const items = Array.isArray(payload?.data) ? payload.data : [];
-      return items.map(mapDocument).filter((doc: KnowledgeBaseDocument) => doc.id);
+      const normalizedParent = parentId ? parentId.trim() : "";
+      return items
+        .map((item: DocumentResponse) => mapDocument(item, normalizedParent))
+        .filter((doc: KnowledgeBaseDocument) => doc.id);
     },
     [mapDocument],
   );

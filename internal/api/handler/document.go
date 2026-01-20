@@ -113,6 +113,46 @@ func (h *DocumentHandler) Get(c *gin.Context) {
 	})
 }
 
+func (h *DocumentHandler) GetBlock(c *gin.Context) {
+	projectKey := c.Param("project_key")
+	docID := c.Param("doc_id")
+	blockID := c.Param("block_id")
+	if projectKey == "" || docID == "" || blockID == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{Code: "INVALID_PARAMS", Message: "project_key, doc_id, and block_id are required"})
+		return
+	}
+
+	project, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey)
+	if err != nil {
+		c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "PROJECT_NOT_FOUND", Message: err.Error()})
+		return
+	}
+
+	docSvc := h.ensureStore(projectKey)
+	doc, err := docSvc.GetBlockByID(c.Request.Context(), project.ID, docID, blockID)
+	if err != nil {
+		if err == svc.ErrNotFound {
+			c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "NOT_FOUND", Message: "document not found"})
+			return
+		}
+		if err == svc.ErrBlockNotFound {
+			c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "BLOCK_NOT_FOUND", Message: "block not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "GET_BLOCK_FAILED", Message: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.GetDocumentResponse{
+		Code:    "OK",
+		Message: "success",
+		Data: types.DocumentDTO{
+			Meta: doc.Meta,
+			Body: doc.Body,
+		},
+	})
+}
+
 func (h *DocumentHandler) Create(c *gin.Context) {
 	projectKey := c.Param("project_key")
 	if projectKey == "" {

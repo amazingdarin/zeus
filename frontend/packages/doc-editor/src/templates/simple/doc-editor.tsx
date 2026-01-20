@@ -3,7 +3,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import type { JSONContent } from "@tiptap/react"
+import type { Editor, JSONContent } from "@tiptap/react"
 import { EditorContent, EditorContext, type Extension, useEditor } from "@tiptap/react"
 
 // --- Tiptap Core Extensions ---
@@ -87,6 +87,7 @@ type DocEditorProps = {
   mode?: "edit" | "view"
   docId?: string
   onLoadDocument?: (id: string) => Promise<JSONContent>
+  onEditorReady?: (editor: Editor | null) => void
 }
 
 const defaultContent: JSONContent = {
@@ -204,7 +205,15 @@ const MobileToolbarContent = ({
   </>
 )
 
-export function DocEditor({ onChange, content, mode = "edit", extensions = [], docId, onLoadDocument }: DocEditorProps) {
+export function DocEditor({
+  onChange,
+  content,
+  mode = "edit",
+  extensions = [],
+  docId,
+  onLoadDocument,
+  onEditorReady,
+}: DocEditorProps) {
   const isEditable = mode === "edit"
   const isMobile = useIsBreakpoint()
   const { height } = useWindowSize()
@@ -269,6 +278,10 @@ export function DocEditor({ onChange, content, mode = "edit", extensions = [], d
     content: initialContent,
     editable: isEditable,
   })
+
+  useEffect(() => {
+    onEditorReady?.(editor)
+  }, [editor, onEditorReady])
 
   const rect = useCursorVisibility({
     editor,

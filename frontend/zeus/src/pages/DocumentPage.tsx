@@ -119,7 +119,6 @@ function DocumentPage({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
-  const [summaryText, setSummaryText] = useState<string | null>(null);
   const [diffData, setDiffData] = useState<{ metaDiff: string; contentDiff: string } | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
@@ -147,8 +146,6 @@ function DocumentPage({
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const inFlightRef = useRef<Map<string, Promise<DocumentData>>>(new Map());
   const currentRequestRef = useRef<string | null>(null);
-  const summaryInFlightRef = useRef<Map<string, Promise<string | null>>>(new Map());
-  const summaryRequestRef = useRef<string | null>(null);
 
   const activeDocument = document;
   const allowChildActions = activeDocument ? activeDocument.docType !== "overview" : true;
@@ -210,66 +207,6 @@ function DocumentPage({
           return;
         }
         setLoading(false);
-      });
-
-    return () => {
-      isActive = false;
-    };
-  }, [resolvedDocumentId, resolvedProjectKey]);
-
-  useEffect(() => {
-    if (!resolvedProjectKey || !resolvedDocumentId) {
-      setSummaryText(null);
-      summaryRequestRef.current = null;
-      return;
-    }
-
-    const requestKey = `${resolvedProjectKey}:${resolvedDocumentId}`;
-    summaryRequestRef.current = requestKey;
-    setSummaryText(null);
-    let isActive = true;
-
-    let promise = summaryInFlightRef.current.get(requestKey);
-    if (!promise) {
-      promise = (async () => {
-        const response = await apiFetch(
-          `/api/projects/${encodeURIComponent(
-            resolvedProjectKey,
-          )}/documents/${encodeURIComponent(resolvedDocumentId)}/summary`,
-        );
-        if (response.status === 404) {
-          return null;
-        }
-        if (!response.ok) {
-          throw new Error("failed to load summary");
-        }
-        const payload = await response.json();
-        const data = payload?.data ?? payload ?? {};
-        const text =
-          typeof data.summary_text === "string" ? data.summary_text.trim() : "";
-        return text || null;
-      })();
-      summaryInFlightRef.current.set(requestKey, promise);
-      promise.finally(() => {
-        if (summaryInFlightRef.current.get(requestKey) === promise) {
-          summaryInFlightRef.current.delete(requestKey);
-        }
-      });
-    }
-
-    promise
-      .then((text) => {
-        if (!isActive || summaryRequestRef.current !== requestKey) {
-          return;
-        }
-        setSummaryText(text);
-      })
-      .catch((err) => {
-        if (!isActive || summaryRequestRef.current !== requestKey) {
-          return;
-        }
-        console.log("summary_load_error", err);
-        setSummaryText(null);
       });
 
     return () => {
@@ -706,7 +643,6 @@ function DocumentPage({
     return (
       <div className="doc-page-body">
         <div className="doc-page-title">{activeDocument.title}</div>
-        {summaryText ? <div className="doc-page-summary">{summaryText}</div> : null}
         {hasProposal ? (
           <div className="doc-diff-panel">
             <div className="doc-diff-header">

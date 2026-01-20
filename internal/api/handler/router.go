@@ -75,6 +75,7 @@ func RegisterRoutes(
 	api.POST("/projects/:project_key/documents", documentHandler.Create)
 	api.PATCH("/projects/:project_key/documents/:doc_id/move", documentHandler.Move)
 	api.GET("/projects/:project_key/documents/:doc_id", documentHandler.Get)
+	api.GET("/projects/:project_key/documents/:doc_id/blocks/:block_id", documentHandler.GetBlock)
 
 	api.GET("/projects/:project_key/documents/:doc_id/summary", summaryHandler.Get)
 	api.POST("/projects/:project_key/documents/:doc_id/proposals", knowledgeHandler.CreateProposal)
