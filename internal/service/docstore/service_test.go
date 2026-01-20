@@ -181,6 +181,68 @@ func TestService_Delete(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestService_GetBlockByID(t *testing.T) {
+	svc, _ := setup(t)
+	ctx := context.Background()
+
+	doc := &docstore.Document{
+		Meta: docstore.DocumentMeta{
+			ID:    "block-doc",
+			Title: "Block Doc",
+		},
+		Body: docstore.DocumentBody{
+			Type: "tiptap",
+			Content: map[string]interface{}{
+				"meta": map[string]interface{}{
+					"zeus": true,
+				},
+				"content": map[string]interface{}{
+					"type": "doc",
+					"content": []interface{}{
+						map[string]interface{}{
+							"type": "paragraph",
+							"attrs": map[string]interface{}{
+								"id": "block-1",
+							},
+							"content": []interface{}{
+								map[string]interface{}{
+									"type": "text",
+									"text": "hello",
+								},
+							},
+						},
+						map[string]interface{}{
+							"type": "heading",
+							"attrs": map[string]interface{}{
+								"id": "block-2",
+							},
+							"content": []interface{}{
+								map[string]interface{}{
+									"type": "text",
+									"text": "world",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	require.NoError(t, svc.Save(ctx, testProjectID, doc))
+
+	block, err := svc.GetBlockByID(ctx, testProjectID, "block-doc", "block-2")
+	require.NoError(t, err)
+	require.NotNil(t, block)
+	assert.Equal(t, "heading", block["type"])
+
+	attrs, ok := block["attrs"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "block-2", attrs["id"])
+
+	_, err = svc.GetBlockByID(ctx, testProjectID, "block-doc", "missing")
+	assert.ErrorIs(t, err, ErrBlockNotFound)
+}
+
 // Helpers for testing persistence between Service restarts
 func TestService_Restart_RebuildIndex(t *testing.T) {
 	tmpDir := t.TempDir()

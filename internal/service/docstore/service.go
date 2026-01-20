@@ -20,6 +20,7 @@ type Service interface {
 	Delete(ctx context.Context, projectID, docID string) error
 	Move(ctx context.Context, projectID, docID, targetParentID string, targetIndex int) error
 	GetChildren(ctx context.Context, projectID, parentID string) ([]docstore.TreeItem, error)
+	GetBlockByID(ctx context.Context, projectID, docID, blockID string) (map[string]interface{}, error)
 	RegisterHooks(hooks docstore.Hooks)
 }
 

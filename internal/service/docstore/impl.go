@@ -15,6 +15,7 @@ import (
 
 var (
 	ErrNotFound = errors.New("document not found")
+	ErrBlockNotFound = errors.New("block not found")
 	slugRegexp  = regexp.MustCompile(`[^a-z0-9\-]`)
 )
 
