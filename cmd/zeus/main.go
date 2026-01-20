@@ -288,6 +288,7 @@ User request:
 		chatRunRegistry,
 		chatStreamSvc,
 		slashRouter,
+		config.AppConfig.Git.RepoRoot,
 	)
 
 	if err := router.Run(config.AppConfig.Server.Addr); err != nil {

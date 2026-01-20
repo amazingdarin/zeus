@@ -27,11 +27,13 @@ func RegisterRoutes(
 	chatRunRegistry chatrun.RunRegistry,
 	chatStreamSvc ChatStreamRunner,
 	commandRouter chatstream.SlashRouter,
+	repoRoot string,
 ) {
 	storageObjectHandler := NewStorageObjectHandler(storageObjectSvc, projectSvc)
 	assetHandler := NewAssetHandler(assetSvc)
 	projectHandler := NewProjectHandler(projectSvc)
 	knowledgeHandler := NewKnowledgeHandler(knowledgeSvc)
+	documentHandler := NewDocumentHandler(projectSvc, repoRoot)
 	searchHandler := NewSearchHandler(searchSvc)
 	ragHandler := NewRAGHandler(ragSvc, summarySvc, projectSvc, taskSvc)
 	taskHandler := NewTaskHandler(taskSvc)
@@ -63,11 +65,18 @@ func RegisterRoutes(
 	api.GET("/projects", projectHandler.List)
 
 	// Knowledge
-	api.GET("/projects/:project_key/documents", knowledgeHandler.List)
-	api.POST("/projects/:project_key/documents", knowledgeHandler.Create)
-	api.PATCH("/projects/:project_key/documents/:doc_id", knowledgeHandler.Update)
-	api.PATCH("/projects/:project_key/documents/:doc_id/move", knowledgeHandler.Move)
-	api.GET("/projects/:project_key/documents/:doc_id", knowledgeHandler.Get)
+	// api.GET("/projects/:project_key/documents", knowledgeHandler.List)
+	// api.POST("/projects/:project_key/documents", knowledgeHandler.Create)
+	// api.PATCH("/projects/:project_key/documents/:doc_id", knowledgeHandler.Update)
+	// api.PATCH("/projects/:project_key/documents/:doc_id/move", knowledgeHandler.Move)
+	// api.GET("/projects/:project_key/documents/:doc_id", knowledgeHandler.Get)
+
+	api.GET("/projects/:project_key/documents", documentHandler.List)
+	api.POST("/projects/:project_key/documents", documentHandler.Create)
+	api.PUT("/projects/:project_key/documents/:doc_id", documentHandler.Update)
+	api.PATCH("/projects/:project_key/documents/:doc_id/move", documentHandler.Move)
+	api.GET("/projects/:project_key/documents/:doc_id", documentHandler.Get)
+
 	api.GET("/projects/:project_key/documents/:doc_id/summary", summaryHandler.Get)
 	api.POST("/projects/:project_key/documents/:doc_id/proposals", knowledgeHandler.CreateProposal)
 	api.GET("/projects/:project_key/documents/:doc_id/proposals/:proposal_id/diff", knowledgeHandler.DiffProposal)
@@ -103,6 +112,7 @@ func RegisterRoutes(
 	api.POST("/providers/test", providerHandler.TestProvider)
 	api.GET("/provider-connections", providerHandler.ListConnections)
 	api.POST("/provider-connections", providerHandler.UpsertConnection)
+	api.GET("/provider-connections/:id/models", providerHandler.ListConnectionModels)
 	api.POST("/providers/:id/auth/api", providerHandler.StoreAPIKey)
 	api.POST("/providers/:id/auth/start", providerHandler.StartDeviceCode)
 	api.POST("/providers/:id/auth/poll", providerHandler.PollDeviceCode)
