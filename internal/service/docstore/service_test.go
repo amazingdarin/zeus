@@ -6,9 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"zeus/internal/domain/docstore"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"zeus/internal/domain/docstore"
 )
 
 const testProjectID = "proj-1"
