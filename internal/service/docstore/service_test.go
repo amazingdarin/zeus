@@ -230,9 +230,20 @@ func TestService_GetBlockByID(t *testing.T) {
 	}
 	require.NoError(t, svc.Save(ctx, testProjectID, doc))
 
-	block, err := svc.GetBlockByID(ctx, testProjectID, "block-doc", "block-2")
+	blockDoc, err := svc.GetBlockByID(ctx, testProjectID, "block-doc", "block-2")
 	require.NoError(t, err)
-	require.NotNil(t, block)
+	require.NotNil(t, blockDoc)
+	assert.Equal(t, "block-doc", blockDoc.Meta.ID)
+
+	bodyContent, ok := blockDoc.Body.Content.(map[string]interface{})
+	require.True(t, ok)
+	contentRoot, ok := bodyContent["content"].(map[string]interface{})
+	require.True(t, ok)
+	children, ok := contentRoot["content"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, children, 1)
+	block, ok := children[0].(map[string]interface{})
+	require.True(t, ok)
 	assert.Equal(t, "heading", block["type"])
 
 	attrs, ok := block["attrs"].(map[string]interface{})

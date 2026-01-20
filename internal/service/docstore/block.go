@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"zeus/internal/domain/docstore"
 )
 
 func (s *impl) GetBlockByID(
@@ -11,7 +13,7 @@ func (s *impl) GetBlockByID(
 	projectID,
 	docID,
 	blockID string,
-) (map[string]interface{}, error) {
+) (*docstore.Document, error) {
 	blockID = strings.TrimSpace(blockID)
 	if blockID == "" {
 		return nil, fmt.Errorf("block id is required")
@@ -26,7 +28,13 @@ func (s *impl) GetBlockByID(
 	if !ok {
 		return nil, ErrBlockNotFound
 	}
-	return block, nil
+
+	filtered := *doc
+	filtered.Body = docstore.DocumentBody{
+		Type:    doc.Body.Type,
+		Content: buildBlockContent(doc.Body.Content, block),
+	}
+	return &filtered, nil
 }
 
 func findBlockByID(blockID string, node interface{}) (map[string]interface{}, bool) {
@@ -64,4 +72,41 @@ func matchesBlockID(blockID string, node map[string]interface{}) bool {
 	}
 	id, _ := attrs["id"].(string)
 	return strings.TrimSpace(id) == blockID
+}
+
+func buildBlockContent(content interface{}, block map[string]interface{}) interface{} {
+	switch typed := content.(type) {
+	case map[string]interface{}:
+		if meta, ok := typed["meta"]; ok {
+			return map[string]interface{}{
+				"meta":    meta,
+				"content": buildDocRoot(typed["content"], block),
+			}
+		}
+		return buildDocRoot(typed, block)
+	default:
+		return buildDocRoot(nil, block)
+	}
+}
+
+func buildDocRoot(root interface{}, block map[string]interface{}) map[string]interface{} {
+	rootMap, ok := root.(map[string]interface{})
+	if !ok {
+		return map[string]interface{}{
+			"type":    "doc",
+			"content": []interface{}{block},
+		}
+	}
+	next := make(map[string]interface{}, len(rootMap)+1)
+	for key, value := range rootMap {
+		if key == "content" {
+			continue
+		}
+		next[key] = value
+	}
+	next["content"] = []interface{}{block}
+	if _, ok := next["type"]; !ok {
+		next["type"] = "doc"
+	}
+	return next
 }
