@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zeus Dev Environment & Skills</title>
+    <style>
+        :root {
+            --bg-dark: #1A1A1A;
+            --bg-card: #242424;
+            --bg-panel: #111111;
+            --text-primary: #F5F5F5;
+            --text-secondary: #9CA3AF;
+            --accent-blue: #007AFF;
+            --accent-green: #34D399;
+            --accent-amber: #F59E0B;
+            --accent-red: #F43F5E;
+            --border: #333333;
+            --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 240px;
+            background-color: var(--bg-panel);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+
+        .logo {
+            font-family: var(--font-mono);
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: var(--text-primary);
+            margin-bottom: 40px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .logo::before {
+            content: "⚡"; 
+            color: var(--accent-amber);
+        }
+
+        .nav-item {
+            padding: 12px 16px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .nav-item:hover { background-color: rgba(255,255,255,0.05); color: var(--text-primary); }
+        .nav-item.active { background-color: rgba(0, 122, 255, 0.15); color: var(--accent-blue); border-left: 3px solid var(--accent-blue); }
+
+        /* Main Content */
+        .main {
+            flex: 1;
+            padding: 30px 40px;
+            overflow-y: auto;
+            background-image: radial-gradient(#333 1px, transparent 1px);
+            background-size: 40px 40px; /* Technical Grid */
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .page-title { font-size: 1.5rem; font-weight: 600; }
+        .status-badge { 
+            font-family: var(--font-mono);
+            font-size: 0.8rem; 
+            padding: 6px 12px; 
+            background: rgba(52, 211, 153, 0.1); 
+            color: var(--accent-green); 
+            border: 1px solid rgba(52, 211, 153, 0.2);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .dot { width: 8px; height: 8px; background: currentColor; border-radius: 50%; display: inline-block; }
+        .dot.pulse { animation: pulse 2s infinite; }
+
+        @keyframes pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        /* Cards */
+        .card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            padding-bottom: 12px;
+        }
+
+        .card-title { font-weight: 600; color: var(--text-primary); display: flex; align-items: center; gap: 10px; }
+
+        .btn-sm {
+            padding: 4px 12px;
+            font-size: 0.8rem;
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .btn-sm:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+
+        /* Forms */
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+
+        .form-group { margin-bottom: 15px; }
+        .label { display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 8px; }
+        .input {
+            width: 100%;
+            background: #111;
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 10px;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+        }
+        .input:focus { outline: none; border-color: var(--accent-blue); }
+
+        /* Automation Items */
+        .skill-item {
+            background: #1a1a1a;
+            border: 1px solid var(--border);
+            padding: 16px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .skill-info h4 { margin-bottom: 6px; display: flex; align-items: center; gap: 10px; }
+        .skill-desc { font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 10px; line-height: 1.4; }
+        .skill-meta { font-family: var(--font-mono); font-size: 0.75rem; color: #666; display: flex; gap: 15px; }
+        .skill-meta span { display: flex; align-items: center; gap: 4px; }
+
+        /* Toggle Switch */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #444;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider { background-color: var(--accent-blue); }
+        input:checked + .slider:before { transform: translateX(20px); }
+
+        /* Right Panel - Activity */
+        .right-panel {
+            width: 300px;
+            background-color: var(--bg-panel);
+            border-left: 1px solid var(--border);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-header { font-size: 0.9rem; font-weight: 600; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-secondary); }
+
+        .log-list { flex: 1; overflow-y: auto; }
+        .log-item {
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 0.85rem;
+        }
+        .log-time { font-family: var(--font-mono); font-size: 0.7rem; color: #666; margin-bottom: 4px; }
+        .log-msg { color: var(--text-secondary); margin-bottom: 4px; }
+        .log-status { font-size: 0.75rem; font-weight: 600; }
+        .status-success { color: var(--accent-green); }
+        .status-error { color: var(--accent-red); }
+        .status-warn { color: var(--accent-amber); }
+
+        /* Buttons */
+        .btn-primary {
+            background: var(--accent-blue);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .btn-action {
+            background: #333;
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            margin-top: 10px;
+        }
+        .btn-action:hover { background: #444; }
+
+    </style>
+</head>
+<body>
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="logo">ZEUS DEV</div>
+        <div class="nav-item">
+            <span>⚙️</span> Environment
+        </div>
+        <div class="nav-item active">
+            <span>🤖</span> Automation Skills
+        </div>
+        <div class="nav-item">
+            <span>📜</span> Logs
+        </div>
+    </div>
+
+    <!-- Main Area -->
+    <div class="main">
+        <div class="header">
+            <h1 class="page-title">Automation Skills</h1>
+            <div class="status-badge"><span class="dot pulse"></span> System Active</div>
+        </div>
+
+        <!-- Master Control -->
+        <div class="card" style="border-left: 4px solid var(--accent-blue);">
+            <div class="card-header" style="border:none; margin-bottom:0; padding-bottom:0; align-items:center;">
+                <div class="card-title">
+                    <span>GLOBAL AUTOMATION</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span style="font-size:0.8rem; color:var(--text-secondary);">MASTER SWITCH</span>
+                    <label class="switch">
+                        <input type="checkbox" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Environment Summary (Read only) -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">📡 Active Context</div>
+                <button class="btn-sm">Edit Config</button>
+            </div>
+            <div style="display:flex; gap: 20px; font-size: 0.85rem; color: var(--text-secondary);">
+                <div>Backend: <span style="color:var(--text-primary); font-family:var(--font-mono);">:8080</span></div>
+                <div>Frontend: <span style="color:var(--text-primary); font-family:var(--font-mono);">:5173</span></div>
+                <div>DB: <span style="color:var(--accent-green);">● Connected</span> (localhost:5432)</div>
+            </div>
+        </div>
+
+        <!-- Triggers -->
+        <h3 style="margin-bottom: 15px; font-weight: 500;">Active Triggers</h3>
+
+        <!-- SQL Trigger -->
+        <div class="skill-item">
+            <div class="skill-info">
+                <h4>🗄️ SQL Auto-Migrate <span style="font-size:0.7rem; background:#333; padding:2px 6px; border-radius:4px; color:#aaa;">ddl/sql/*.sql</span></h4>
+                <div class="skill-desc">Watches for changes in SQL files. Automatically runs `make db-migrate` against the local Postgres instance.</div>
+                <div class="skill-meta">
+                    <span>⚡ Debounce: 2s</span>
+                    <span>📂 Path: ddl/sql/</span>
+                    <span class="status-success">✓ Last run: 2m ago</span>
+                </div>
+                <button class="btn-action">Test Run</button>
+                <button class="btn-action">Logs</button>
+            </div>
+            <label class="switch">
+                <input type="checkbox" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <!-- Code Trigger -->
+        <div class="skill-item">
+            <div class="skill-info">
+                <h4>🚀 Code Auto-Deploy <span style="font-size:0.7rem; background:#333; padding:2px 6px; border-radius:4px; color:#aaa;">Go + React</span></h4>
+                <div class="skill-desc">Watches `cmd/`, `internal/` and `frontend/`. Recompiles Go backend and triggers frontend HMR/Build.</div>
+                <div class="skill-meta">
+                    <span>⚡ Debounce: 3s</span>
+                    <span>🛠️ Action: make run-backend</span>
+                    <span class="status-error">✗ Last run: 15m ago (Build Failed)</span>
+                </div>
+                <button class="btn-action">Test Run</button>
+                <button class="btn-action">View Error</button>
+            </div>
+            <label class="switch">
+                <input type="checkbox" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <!-- Add New -->
+        <div style="text-align: center; padding: 20px; border: 2px dashed #333; border-radius: 8px; color: #666; cursor: pointer;">
+            + Add New Trigger
+        </div>
+
+    </div>
+
+    <!-- Right Panel -->
+    <div class="right-panel">
+        <div class="panel-header">Live Activity</div>
+        
+        <div class="log-list">
+            <div class="log-item">
+                <div class="log-time">10:48:22</div>
+                <div class="log-msg">SQL File Changed: user.sql</div>
+                <div class="log-status status-success">✓ Migration Success (120ms)</div>
+            </div>
+            <div class="log-item">
+                <div class="log-time">10:45:10</div>
+                <div class="log-msg">Backend Source Changed</div>
+                <div class="log-status status-error">✗ Build Failed</div>
+                <div style="font-family:var(--font-mono); font-size:0.7rem; color:#f43f5e; margin-top:4px; background:#220000; padding:4px;">main.go:42: syntax error...</div>
+            </div>
+            <div class="log-item">
+                <div class="log-time">10:30:00</div>
+                <div class="log-msg">System Startup</div>
+                <div class="log-status status-success">✓ Ready</div>
+            </div>
+            <div class="log-item">
+                <div class="log-time">10:29:55</div>
+                <div class="log-msg">Connecting to Postgres...</div>
+                <div class="log-status status-warn">⚠ Retry 1/3</div>
+            </div>
+        </div>
+
+        <div style="margin-top: 20px;">
+            <button class="btn-action" style="width: 100%">Clear Logs</button>
+        </div>
+    </div>
+
+</body>
+</html>
