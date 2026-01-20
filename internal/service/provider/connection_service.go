@@ -53,9 +53,6 @@ func (s *ConnectionService) Upsert(ctx context.Context, input service.ProviderCo
 		return nil, fmt.Errorf("provider id is required")
 	}
 	modelName := strings.TrimSpace(input.ModelName)
-	if modelName == "" {
-		return nil, fmt.Errorf("model_name is required")
-	}
 	credentialID := strings.TrimSpace(input.CredentialID)
 	if credentialID == "" {
 		return nil, fmt.Errorf("credential id is required")
@@ -156,7 +153,7 @@ func (s *ConnectionService) Test(ctx context.Context, input service.ProviderTest
 	client := s.clientFactory(conn.BaseURL, strings.TrimSpace(string(plaintext)))
 	modelName := strings.TrimSpace(conn.ModelName)
 	if modelName == "" {
-		return fmt.Errorf("model_name is required")
+		return s.updateStatus(ctx, conn, domain.ProviderConnectionInvalid, fmt.Errorf("model_name is required"))
 	}
 	scenario := strings.TrimSpace(input.Scenario)
 	if scenario == "" {
@@ -197,6 +194,14 @@ func (s *ConnectionService) updateStatus(ctx context.Context, conn *domain.Provi
 		return updateErr
 	}
 	return err
+}
+
+func (s *ConnectionService) ListModels(ctx context.Context, connectionID string) ([]string, error) {
+	if s == nil {
+		return nil, fmt.Errorf("provider connection service not initialized")
+	}
+	modelsSvc := NewConnectionModelsService(s.repo, s.credentialRepo, s.clientFactory, s.keyManager)
+	return modelsSvc.ListModels(ctx, connectionID)
 }
 
 var _ service.ProviderConnectionService = (*ConnectionService)(nil)

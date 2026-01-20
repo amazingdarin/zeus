@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -116,7 +115,10 @@ func (s *CredentialService) PollDeviceCode(ctx context.Context, input service.Pr
 		return nil, err
 	}
 	if resp.Error != "" {
-		return nil, errors.New("device code error")
+		return nil, domain.ProviderDevicePollError{
+			Status:      domain.ProviderDevicePollStatus(resp.Error),
+			Description: strings.TrimSpace(resp.ErrorDesc),
+		}
 	}
 	if resp.AccessToken == "" {
 		return nil, fmt.Errorf("access token missing")

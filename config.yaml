@@ -45,5 +45,6 @@ security:
 
 providers:
   copilot:
-    client_id: ""
+    client_id: "Ov23liPsn9jEM8DUvp3I"
+    # client_secret 55fd5a33e9692426693f704d7f1b8b08250c44aa
     scopes: []

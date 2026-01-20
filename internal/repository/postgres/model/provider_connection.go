@@ -7,7 +7,7 @@ type ProviderConnection struct {
 	ProviderID   string     `gorm:"column:provider_id;not null"`
 	DisplayName  string     `gorm:"column:display_name;not null"`
 	BaseURL      string     `gorm:"column:base_url"`
-	ModelName    string     `gorm:"column:model_name;not null"`
+	ModelName    string     `gorm:"column:model_name"`
 	CredentialID string     `gorm:"column:credential_id;not null"`
 	Status       string     `gorm:"column:status;not null"`
 	LastError    string     `gorm:"column:last_error"`

@@ -55,4 +55,5 @@ type ProviderConnectionService interface {
 	Upsert(ctx context.Context, input ProviderConnectionInput) (*domain.ProviderConnection, error)
 	List(ctx context.Context) ([]*domain.ProviderConnection, error)
 	Test(ctx context.Context, input ProviderTestInput) error
+	ListModels(ctx context.Context, connectionID string) ([]string, error)
 }

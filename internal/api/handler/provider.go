@@ -130,6 +130,17 @@ func (h *ProviderHandler) PollDeviceCode(c *gin.Context) {
 		ScopeID:    strings.TrimSpace(req.ScopeID),
 	})
 	if err != nil {
+		if pollErr, ok := err.(domain.ProviderDevicePollError); ok {
+			c.JSON(http.StatusAccepted, types.ProviderDevicePollErrorResponse{
+				Code:    "DEVICE_POLL_PENDING",
+				Message: pollErr.Error(),
+				Data: types.ProviderDevicePollErrorDTO{
+					Status:      string(pollErr.Status),
+					Description: pollErr.Description,
+				},
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "POLL_DEVICE_CODE_FAILED", Message: err.Error()})
 		return
 	}
@@ -153,6 +164,16 @@ func (h *ProviderHandler) TestProvider(c *gin.Context) {
 	c.JSON(http.StatusOK, types.ProviderTestResponse{Code: "OK", Message: "success", Data: struct {
 		Success bool `json:"success"`
 	}{Success: true}})
+}
+
+func (h *ProviderHandler) ListConnectionModels(c *gin.Context) {
+	connectionID := strings.TrimSpace(c.Param("id"))
+	models, err := h.connectionSvc.ListModels(c.Request.Context(), connectionID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "LIST_PROVIDER_MODELS_FAILED", Message: err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, types.ProviderConnectionModelsResponse{Code: "OK", Message: "success", Data: models})
 }
 
 func mapProviderConnection(conn *domain.ProviderConnection) types.ProviderConnectionDTO {

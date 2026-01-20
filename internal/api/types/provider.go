@@ -22,6 +22,12 @@ type ProviderConnectionRequest struct {
 	CredentialID string `json:"credential_id"`
 }
 
+type ProviderConnectionModelsResponse struct {
+	Code    string   `json:"code"`
+	Message string   `json:"message"`
+	Data    []string `json:"data"`
+}
+
 type ProviderConnectionDTO struct {
 	ID           string `json:"id"`
 	ProviderID   string `json:"provider_id"`
@@ -66,6 +72,17 @@ type ProviderDevicePollRequest struct {
 	DeviceCode string `json:"device_code"`
 	ScopeType  string `json:"scope_type"`
 	ScopeID    string `json:"scope_id"`
+}
+
+type ProviderDevicePollErrorDTO struct {
+	Status      string `json:"status"`
+	Description string `json:"description"`
+}
+
+type ProviderDevicePollErrorResponse struct {
+	Code    string                     `json:"code"`
+	Message string                     `json:"message"`
+	Data    ProviderDevicePollErrorDTO `json:"data"`
 }
 
 type ProviderCredentialDTO struct {

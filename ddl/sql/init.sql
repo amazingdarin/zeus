@@ -56,7 +56,7 @@ CREATE TABLE provider_connection
     provider_id   TEXT NOT NULL,
     display_name  TEXT NOT NULL,
     base_url      TEXT,
-    model_name    TEXT NOT NULL,
+    model_name    TEXT,
     credential_id TEXT NOT NULL,
     status        TEXT NOT NULL,
     last_error    TEXT,
