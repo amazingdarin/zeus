@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { LeftOutlined, RightOutlined } from "@ant-design/icons";
+import { LeftOutlined, RightOutlined, SettingOutlined } from "@ant-design/icons";
 
 import ProjectSelector from "./ProjectSelector";
 
@@ -12,6 +12,7 @@ type SidebarItem = {
 type SidebarProps = {
   items: SidebarItem[];
   activeIndex?: number;
+  settingsActive?: boolean;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
 };
@@ -19,6 +20,7 @@ type SidebarProps = {
 function Sidebar({
   items,
   activeIndex = 0,
+  settingsActive = false,
   collapsed = false,
   onToggleCollapse,
 }: SidebarProps) {
@@ -56,6 +58,13 @@ function Sidebar({
           );
         })}
       </nav>
+      <Link
+        className={`sidebar-config${settingsActive ? " active" : ""}`}
+        to="/settings/providers"
+      >
+        <SettingOutlined />
+        <span className="sidebar-label">Settings</span>
+      </Link>
       <button
         className={`sidebar-toggle${collapsed ? " compact" : ""}`}
         type="button"

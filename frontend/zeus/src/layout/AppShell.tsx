@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 
 import Sidebar from "../components/Sidebar";
 import ModelSettingsModal from "../components/ModelSettingsModal";
@@ -22,6 +23,7 @@ const navItems = [
 ];
 
 function AppShell({ children }: AppShellProps) {
+  const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const [modelRuntimes, setModelRuntimes] = useState<ModelRuntime[]>([]);
@@ -33,6 +35,16 @@ function AppShell({ children }: AppShellProps) {
     }),
     [collapsed],
   );
+
+  const activeIndex = useMemo(() => {
+    const path = location.pathname;
+    const index = navItems.findIndex((item) => item.to && path === item.to);
+    return index === -1 ? -1 : index;
+  }, [location.pathname]);
+
+  const settingsActive = useMemo(() => {
+    return location.pathname.startsWith("/settings");
+  }, [location.pathname]);
 
   const loadModelSettings = useCallback(async () => {
     setModelSettingsLoading(true);
@@ -81,7 +93,8 @@ function AppShell({ children }: AppShellProps) {
       <div className={`app-body${collapsed ? " compact" : ""}`}>
         <Sidebar
           items={navItems}
-          activeIndex={0}
+          activeIndex={activeIndex}
+          settingsActive={settingsActive}
           collapsed={collapsed}
           onToggleCollapse={() => setCollapsed((prev) => !prev)}
         />

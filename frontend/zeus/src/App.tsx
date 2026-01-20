@@ -38,7 +38,7 @@ function App() {
             <Route path="/" element={<KnowledgeBasePage />} />
             <Route path="/knowledge" element={<KnowledgeBasePage />} />
             <Route path="/documents/new" element={<NewDocumentPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/settings/providers" element={<SettingsPage />} />
           </Routes>
         </AppShell>
       </HashRouter>
