@@ -28,9 +28,11 @@ type DocumentResponse = {
     meta?: {
       id?: string;
       title?: string;
-      parent?: string;
+      parent_id?: string;
+      extra?: Record<string, unknown>;
       doc_type?: string;
     };
+    body?: DocumentBody;
     content?: DocumentContentPayload;
     hierarchy?: Array<{
       id?: string;
@@ -50,6 +52,11 @@ type DocumentContentPayload =
     }
   | JSONContent
   | null;
+
+type DocumentBody = {
+  type?: string;
+  content?: DocumentContentPayload;
+};
 
 type DocumentPageProps = {
   projectKey: string;
@@ -1015,10 +1022,25 @@ const trimBreadcrumbItems = (items: Array<{ label: string; to?: string }>) => {
 
 function mapDocumentMeta(data: DocumentResponse["data"], fallbackId: string): DocumentMetaInfo {
   const meta = data?.meta ?? {};
+  const extra =
+    meta.extra && typeof meta.extra === "object"
+      ? (meta.extra as Record<string, unknown>)
+      : {};
+  const extraDocType =
+    typeof extra.doc_type === "string"
+      ? extra.doc_type
+      : typeof extra.type === "string"
+        ? extra.type
+        : "";
+  const bodyType = typeof data?.body?.type === "string" ? data?.body?.type : "";
   const id = String(meta.id ?? data?.id ?? fallbackId ?? "").trim();
   const title = String(meta.title ?? data?.title ?? "").trim();
-  const docType = String(meta.doc_type ?? data?.doc_type ?? "").trim() || "document";
-  const parentId = String(meta.parent ?? data?.parent_id ?? "").trim();
+  const docType =
+    String(extraDocType || bodyType || meta.doc_type || data?.doc_type || "").trim() ||
+    "document";
+  const parentId = String(
+    meta.parent_id ?? (meta as { parent?: string }).parent ?? data?.parent_id ?? "",
+  ).trim();
   return {
     id,
     title,
@@ -1029,7 +1051,7 @@ function mapDocumentMeta(data: DocumentResponse["data"], fallbackId: string): Do
 
 function mapDocumentDetail(data: DocumentResponse["data"], fallbackId: string): DocumentData {
   const meta = mapDocumentMeta(data, fallbackId);
-  const content = extractContentNode(data?.content);
+  const content = extractContentNode(data?.body ?? data?.content);
   const hierarchy =
     data?.hierarchy?.map((item) => ({
       id: String(item?.id ?? "").trim(),
@@ -1042,15 +1064,27 @@ function mapDocumentDetail(data: DocumentResponse["data"], fallbackId: string): 
   };
 }
 
-function extractContentNode(content?: DocumentContentPayload): JSONContent | null {
+function extractContentNode(content?: DocumentBody | DocumentContentPayload): JSONContent | null {
   if (!content || typeof content !== "object") {
     return null;
   }
-  const maybeContent = (content as { content?: JSONContent }).content;
-  if (maybeContent && typeof maybeContent === "object") {
+  const bodyContent =
+    "type" in content && "content" in content
+      ? (content as DocumentBody).content
+      : content;
+  if (!bodyContent || typeof bodyContent !== "object") {
+    return null;
+  }
+  const maybeContent = (bodyContent as { content?: unknown }).content;
+  if (
+    maybeContent &&
+    typeof maybeContent === "object" &&
+    !Array.isArray(maybeContent) &&
+    "type" in (maybeContent as Record<string, unknown>)
+  ) {
     return maybeContent as JSONContent;
   }
-  const direct = content as JSONContent;
+  const direct = bodyContent as JSONContent;
   if (direct && typeof direct === "object" && "type" in direct) {
     return direct as JSONContent;
   }
@@ -1121,12 +1155,17 @@ async function createOpenApiDocument(
   const payload = {
     meta: {
       title,
-      parent: parentId,
-      doc_type: "openapi",
+      parent_id: parentId,
+      extra: {
+        doc_type: "openapi",
+      },
     },
-    openapi: {
-      source: `storage://${assetId}`,
-      renderer: "swagger",
+    body: {
+      type: "openapi",
+      content: {
+        source: `storage://${assetId}`,
+        renderer: "swagger",
+      },
     },
   };
 

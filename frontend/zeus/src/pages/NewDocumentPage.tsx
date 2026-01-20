@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSONContent } from "@tiptap/react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
@@ -22,7 +22,6 @@ function NewDocumentPage() {
   const [loadingDocument, setLoadingDocument] = useState(false);
   const [documentId, setDocumentId] = useState("");
   const [parentID, setParentID] = useState("");
-  const [storageObjectID, setStorageObjectID] = useState("");
   const [contentMeta, setContentMeta] = useState<ContentMetaInput>(null);
   const [jsonMode, setJsonMode] = useState(false);
   const [jsonDraft, setJsonDraft] = useState("");
@@ -83,11 +82,101 @@ function NewDocumentPage() {
     }
   }, [contentPayload, jsonMode]);
 
+  const handleLoadDocument = useCallback(async (id: string) => {
+    if (!currentProject?.key) return { type: "doc", content: [] };
+    
+    setLoadingDocument(true);
+    try {
+      const detail = await fetchDocumentDetail(currentProject.key, id);
+      
+      const metaValue = detail?.meta;
+      let contentToReturn: JSONContent | null = null;
+      
+      if (metaValue) {
+        setTitle(String(metaValue.title ?? "Untitled Document"));
+        setParentID(String(metaValue.parent_id ?? metaValue.parent ?? "").trim());
+
+        const bodyValue = detail?.body ?? detail?.content ?? {};
+        const contentValue =
+          bodyValue &&
+          typeof bodyValue === "object" &&
+          "type" in bodyValue &&
+          "content" in bodyValue
+            ? (bodyValue as { content?: unknown }).content
+            : bodyValue;
+        const contentMetaValue =
+          contentValue &&
+          typeof contentValue === "object" &&
+          "meta" in contentValue &&
+          typeof (contentValue as { meta?: unknown }).meta === "object"
+            ? ((contentValue as { meta?: EditorMeta }).meta ?? null)
+            : null;
+        setContentMeta(contentMetaValue);
+
+        const nestedContent =
+          contentValue &&
+          typeof contentValue === "object" &&
+          "content" in contentValue
+            ? (contentValue as { content?: unknown }).content
+            : null;
+        if (
+          nestedContent &&
+          typeof nestedContent === "object" &&
+          !Array.isArray(nestedContent) &&
+          "type" in (nestedContent as Record<string, unknown>)
+        ) {
+          contentToReturn = nestedContent as JSONContent;
+        } else if (
+          contentValue &&
+          typeof contentValue === "object" &&
+          "type" in contentValue
+        ) {
+          contentToReturn = contentValue as JSONContent;
+        }
+      } else {
+        setTitle(String(detail?.title ?? "Untitled Document"));
+        setParentID(String(detail?.parent_id ?? "").trim());
+        
+        const storageId = String(detail?.storage_object_id ?? "").trim();
+        if (storageId) {
+           // We create a one-off controller just for this fetch
+           const controller = new AbortController();
+           const download = await fetchStorageDownload(
+             currentProject.key,
+             storageId,
+             controller.signal
+           );
+           if (download) {
+             const response = await fetch(download, { signal: controller.signal });
+             if (response.ok) {
+               const text = await response.text();
+               const parsed = parseEditorPayload(text);
+               if (parsed) {
+                 contentToReturn = parsed.content;
+                 setContentMeta(parsed.meta ?? null);
+               }
+             }
+           }
+        }
+      }
+      
+      if (contentToReturn) {
+        setBaselineContent(contentToReturn);
+      }
+      
+      return contentToReturn || { type: "doc", content: [] };
+    } catch (err) {
+      setSaveError("Failed to load document.");
+      throw err;
+    } finally {
+      setLoadingDocument(false);
+    }
+  }, [currentProject?.key]);
+
   useEffect(() => {
     setDocumentId(documentIdParam);
     if (!documentIdParam) {
       setParentID(parentIdParam);
-      setStorageObjectID("");
       setContent(null);
       setContentMeta(null);
       setSaveError(null);
@@ -96,115 +185,10 @@ function NewDocumentPage() {
       currentRequestRef.current = null;
       return;
     }
-    if (!currentProject?.key) {
-      currentRequestRef.current = null;
-      return;
-    }
+  }, [documentIdParam, parentIdParam]);
 
-    const requestKey = `${currentProject.key}:${documentIdParam}`;
-    currentRequestRef.current = requestKey;
-    let isActive = true;
-    setLoadingDocument(true);
-
-    let promise = inFlightRef.current.get(requestKey);
-    if (!promise) {
-      promise = fetchDocumentDetail(currentProject.key, documentIdParam);
-      inFlightRef.current.set(requestKey, promise);
-      promise.finally(() => {
-        if (inFlightRef.current.get(requestKey) === promise) {
-          inFlightRef.current.delete(requestKey);
-        }
-      });
-    }
-
-    promise
-      .then((detail) => {
-        if (!isActive || currentRequestRef.current !== requestKey) {
-          return;
-        }
-        if (!detail) {
-          return;
-        }
-        const metaValue = detail?.meta;
-        if (metaValue) {
-          const contentValue = detail?.content ?? {};
-          setTitle(String(metaValue.title ?? "Untitled Document"));
-          const parentId = String(metaValue.parent ?? "").trim();
-          setParentID(parentId);
-          const contentMetaValue =
-            typeof contentValue.meta === "object" ? contentValue.meta : null;
-          const documentContent = contentValue.content;
-          if (documentContent && typeof documentContent === "object") {
-            setContent(documentContent);
-            setBaselineContent(documentContent);
-          } else {
-            setBaselineContent(null);
-          }
-          setContentMeta(contentMetaValue);
-          setStorageObjectID("");
-        } else {
-          setTitle(String(detail?.title ?? "Untitled Document"));
-          const parentId = String(detail?.parent_id ?? "").trim();
-          setParentID(parentId);
-          const storageId = String(detail?.storage_object_id ?? "").trim();
-          setStorageObjectID(storageId);
-        }
-      })
-      .catch(() => {
-        if (!isActive || currentRequestRef.current !== requestKey) {
-          return;
-        }
-        setSaveError("Failed to load document.");
-      })
-      .finally(() => {
-        if (!isActive || currentRequestRef.current !== requestKey) {
-          return;
-        }
-        setLoadingDocument(false);
-      });
-
-    return () => {
-      isActive = false;
-    };
-  }, [currentProject?.key, documentIdParam, parentIdParam]);
-
-  useEffect(() => {
-    if (!currentProject?.key || !storageObjectID) {
-      return;
-    }
-    const controller = new AbortController();
-    const loadContent = async () => {
-      try {
-        const download = await fetchStorageDownload(
-          currentProject.key,
-          storageObjectID,
-          controller.signal,
-        );
-        if (!download) {
-          return;
-        }
-        const response = await fetch(download, { signal: controller.signal });
-        if (!response.ok) {
-          throw new Error("failed to load document content");
-        }
-        const text = await response.text();
-        const parsed = parseEditorPayload(text);
-        if (parsed) {
-          setContent(parsed.content);
-          setContentMeta(parsed.meta ?? null);
-          setBaselineContent(parsed.content);
-        }
-      } catch (err) {
-        if ((err as Error).name !== "AbortError") {
-          setSaveError("Failed to load document content.");
-        }
-      }
-    };
-
-    loadContent();
-    return () => controller.abort();
-  }, [currentProject?.key, storageObjectID]);
   const handleSave = async () => {
+
     const projectKey = currentProject?.key ?? "";
     if (!projectKey) {
       setSaveError("Project is required before saving.");
@@ -235,25 +219,16 @@ function NewDocumentPage() {
         id: documentId || undefined,
         slug: safeSlug || undefined,
         title: title.trim(),
-        parent: (parentID || parentIdParam || "root").trim(),
-        path: safeSlug ? `/${safeSlug}` : "",
-        status: "draft",
-        tags: [],
+        parent_id: (parentID || parentIdParam || "root").trim(),
+        extra: {
+          status: "draft",
+          tags: [],
+        },
       };
-      if (documentId) {
-        documentPayload = await updateDocumentRecord(
-          projectKey,
-          documentId,
-          meta,
-          payloadForSave,
-        );
-      } else {
-        documentPayload = await createDocumentRecord(
-          projectKey,
-          meta,
-          payloadForSave,
-        );
-      }
+      documentPayload = await saveDocumentRecord(projectKey, meta, {
+        type: "tiptap",
+        content: payloadForSave,
+      });
       const targetID = String(
         documentPayload?.data?.meta?.id ?? documentPayload?.data?.id ?? documentId ?? "",
       );
@@ -408,6 +383,8 @@ function NewDocumentPage() {
               content={content}
               onChange={setContent}
               projectKey={currentProject?.key ?? ""}
+              docId={documentIdParam || undefined}
+              onLoadDocument={handleLoadDocument}
             />
           </div>
         )}
@@ -418,18 +395,22 @@ function NewDocumentPage() {
 
 export default NewDocumentPage;
 
-const createDocumentRecord = async (
+const saveDocumentRecord = async (
   projectKey: string,
   meta: {
     id?: string;
     slug?: string;
     title: string;
-    parent: string;
-    path?: string;
-    status?: string;
-    tags?: string[];
+    parent_id: string;
+    extra?: {
+      status?: string;
+      tags?: string[];
+    };
   },
-  content: { meta: EditorMeta; content: JSONContent },
+  body: {
+    type: string;
+    content: { meta: EditorMeta; content: JSONContent } | JSONContent;
+  },
 ) => {
   const response = await apiFetch(
     `/api/projects/${encodeURIComponent(projectKey)}/documents`,
@@ -440,45 +421,12 @@ const createDocumentRecord = async (
       },
       body: JSON.stringify({
         meta,
-        content,
+        body,
       }),
     },
   );
   if (!response.ok) {
-    throw new Error("create document failed");
-  }
-  return response.json();
-};
-
-const updateDocumentRecord = async (
-  projectKey: string,
-  documentId: string,
-  meta: {
-    title: string;
-    parent: string;
-    path?: string;
-    status?: string;
-    tags?: string[];
-  },
-  content: { meta: EditorMeta; content: JSONContent },
-) => {
-  const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
-      documentId,
-    )}`,
-    {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        meta,
-        content,
-      }),
-    },
-  );
-  if (!response.ok) {
-    throw new Error("update document failed");
+    throw new Error("save document failed");
   }
   return response.json();
 };
@@ -507,10 +455,18 @@ const fetchDocumentDetail = async (
         id?: string;
         slug?: string;
         title?: string;
-        parent?: string;
-        path?: string;
-        status?: string;
-        tags?: string[];
+        parent_id?: string;
+        extra?: {
+          status?: string;
+          tags?: string[];
+        };
+      };
+      body?: {
+        type?: string;
+        content?: {
+          meta?: EditorMeta;
+          content?: JSONContent;
+        };
       };
       content?: {
         meta?: EditorMeta;

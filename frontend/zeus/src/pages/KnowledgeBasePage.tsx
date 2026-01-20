@@ -24,6 +24,7 @@ type DocumentResponse = {
   meta?: {
     id?: string;
     title?: string;
+    parent_id?: string;
     parent?: string;
     doc_type?: string;
   };
@@ -88,7 +89,9 @@ function KnowledgeBasePage() {
       id: String(item.meta?.id ?? item.id ?? ""),
       title: String(item.meta?.title ?? item.title ?? ""),
       type: normalizedType,
-      parentId: String(item.meta?.parent ?? item.parent ?? item.parent_id ?? ""),
+      parentId: String(
+        item.meta?.parent_id ?? item.meta?.parent ?? item.parent ?? item.parent_id ?? "",
+      ),
       hasChild: Boolean(item.has_child),
       order: Number(item.index ?? item.order ?? 0),
       storageObjectId: String(item.storage_object_id ?? ""),
@@ -204,7 +207,11 @@ function KnowledgeBasePage() {
             break;
           }
           const parentId = String(
-            detail.meta?.parent ?? detail.parent ?? detail.parent_id ?? "",
+            detail.meta?.parent_id ??
+              detail.meta?.parent ??
+              detail.parent ??
+              detail.parent_id ??
+              "",
           ).trim();
           if (!parentId || isRootDocumentId(parentId)) {
             break;
@@ -224,7 +231,13 @@ function KnowledgeBasePage() {
         if (!detail) {
           break;
         }
-        const parentId = String(detail.meta?.parent ?? detail.parent ?? detail.parent_id ?? "").trim();
+        const parentId = String(
+          detail.meta?.parent_id ??
+            detail.meta?.parent ??
+            detail.parent ??
+            detail.parent_id ??
+            "",
+        ).trim();
         if (!parentId || isRootDocumentId(parentId)) {
           break;
         }

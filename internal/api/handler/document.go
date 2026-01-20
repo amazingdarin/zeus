@@ -162,50 +162,6 @@ func (h *DocumentHandler) Create(c *gin.Context) {
 	})
 }
 
-func (h *DocumentHandler) Update(c *gin.Context) {
-	projectKey := c.Param("project_key")
-	docID := c.Param("doc_id")
-	if projectKey == "" || docID == "" {
-		c.JSON(http.StatusBadRequest, types.ErrorResponse{Code: "INVALID_PARAMS", Message: "project_key and doc_id are required"})
-		return
-	}
-
-	var req types.UpdateDocumentRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, types.ErrorResponse{Code: "INVALID_REQUEST", Message: err.Error()})
-		return
-	}
-
-	project, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey)
-	if err != nil {
-		c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "PROJECT_NOT_FOUND", Message: err.Error()})
-		return
-	}
-
-	docSvc := h.ensureStore(projectKey)
-
-	req.Meta.ID = docID
-
-	doc := &docstore.Document{
-		Meta: req.Meta,
-		Body: req.Body,
-	}
-
-	if err := docSvc.Save(c.Request.Context(), project.ID, doc); err != nil {
-		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "SAVE_FAILED", Message: err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, types.UpdateDocumentResponse{
-		Code:    "OK",
-		Message: "success",
-		Data: types.DocumentDTO{
-			Meta: doc.Meta,
-			Body: doc.Body,
-		},
-	})
-}
-
 func (h *DocumentHandler) Delete(c *gin.Context) {
 	projectKey := c.Param("project_key")
 	docID := c.Param("doc_id")

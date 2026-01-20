@@ -85,6 +85,8 @@ type DocEditorProps = {
   content?: JSONContent | null
   extensions?: Extension[]
   mode?: "edit" | "view"
+  docId?: string
+  onLoadDocument?: (id: string) => Promise<JSONContent>
 }
 
 const defaultContent: JSONContent = {
@@ -202,7 +204,7 @@ const MobileToolbarContent = ({
   </>
 )
 
-export function DocEditor({ onChange, content, mode = "edit", extensions = [] }: DocEditorProps) {
+export function DocEditor({ onChange, content, mode = "edit", extensions = [], docId, onLoadDocument }: DocEditorProps) {
   const isEditable = mode === "edit"
   const isMobile = useIsBreakpoint()
   const { height } = useWindowSize()
@@ -303,6 +305,7 @@ export function DocEditor({ onChange, content, mode = "edit", extensions = [] }:
     if (!editor || !content) {
       return
     }
+    
     const nextContent = ensureBlockIds(content)
     const serialized = JSON.stringify(nextContent)
     if (serialized === lastContentRef.current) {
@@ -311,6 +314,31 @@ export function DocEditor({ onChange, content, mode = "edit", extensions = [] }:
     editor.commands.setContent(nextContent)
     lastContentRef.current = serialized
   }, [content, editor])
+
+  useEffect(() => {
+    if (!editor || !docId || !onLoadDocument) {
+      return
+    }
+
+    let isMounted = true
+    const load = async () => {
+      try {
+        const loadedContent = await onLoadDocument(docId)
+        if (isMounted && loadedContent) {
+          const nextContent = ensureBlockIds(loadedContent)
+          editor.commands.setContent(nextContent)
+          lastContentRef.current = JSON.stringify(nextContent)
+        }
+      } catch (error) {
+        console.error("Failed to load document content:", error)
+      }
+    }
+    load()
+
+    return () => {
+      isMounted = false
+    }
+  }, [docId, onLoadDocument, editor])
 
   return (
     <div className="doc-editor-wrapper">

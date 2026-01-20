@@ -9,6 +9,8 @@ interface RichTextEditorProps {
   onChange?: (content: JSONContent) => void;
   content?: JSONContent | null;
   projectKey?: string;
+  docId?: string;
+  onLoadDocument?: (id: string) => Promise<JSONContent>;
 }
 
 const openApiExtensions = (
@@ -24,13 +26,15 @@ const openApiExtensions = (
   }),
 ];
 
-function RichTextEditor({ onChange, content, projectKey }: RichTextEditorProps) {
+function RichTextEditor({ onChange, content, projectKey, docId, onLoadDocument }: RichTextEditorProps) {
   return (
     <DocEditor
       onChange={onChange}
       content={content}
       extensions={openApiExtensions(projectKey)}
       mode="edit"
+      docId={docId}
+      onLoadDocument={onLoadDocument}
     />
   );
 }

@@ -33,17 +33,6 @@ type CreateDocumentResponse struct {
 	Data    DocumentDTO `json:"data"`
 }
 
-type UpdateDocumentRequest struct {
-	Meta docstore.DocumentMeta `json:"meta"`
-	Body docstore.DocumentBody `json:"body"`
-}
-
-type UpdateDocumentResponse struct {
-	Code    string      `json:"code"`
-	Message string      `json:"message"`
-	Data    DocumentDTO `json:"data"`
-}
-
 type MoveDocumentRequest struct {
 	TargetParentID string `json:"target_parent_id"`
 	Index          int    `json:"index"`

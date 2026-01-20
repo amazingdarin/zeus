@@ -73,7 +73,6 @@ func RegisterRoutes(
 
 	api.GET("/projects/:project_key/documents", documentHandler.List)
 	api.POST("/projects/:project_key/documents", documentHandler.Create)
-	api.PUT("/projects/:project_key/documents/:doc_id", documentHandler.Update)
 	api.PATCH("/projects/:project_key/documents/:doc_id/move", documentHandler.Move)
 	api.GET("/projects/:project_key/documents/:doc_id", documentHandler.Get)
 
