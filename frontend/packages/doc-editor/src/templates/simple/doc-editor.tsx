@@ -30,6 +30,7 @@ import {
 // --- Tiptap Node ---
 import { ImageUploadNode } from "../../nodes/image-upload-node/image-upload-node-extension"
 import { HorizontalRule } from "../../nodes/horizontal-rule-node/horizontal-rule-node-extension"
+import { CodeBlockNode } from "../../nodes/code-block-node/code-block-node-extension"
 import "../../nodes/blockquote-node/blockquote-node.scss"
 import "../../nodes/code-block-node/code-block-node.scss"
 import "../../nodes/horizontal-rule-node/horizontal-rule-node.scss"
@@ -252,11 +253,13 @@ export function DocEditor({
       BlockIdExtension,
       StarterKit.configure({
         horizontalRule: false,
+        codeBlock: false,
         link: {
           openOnClick: false,
           enableClickSelection: true,
         },
       }),
+      CodeBlockNode,
       HorizontalRule,
       TextAlign.configure({ types: ["heading", "paragraph"] }),
       TaskList,
