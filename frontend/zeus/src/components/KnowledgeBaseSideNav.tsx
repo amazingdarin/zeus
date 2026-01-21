@@ -6,6 +6,7 @@ export type KnowledgeBaseDocument = {
   title: string;
   type: string;
   parentId: string;
+  kind?: string;
   hasChild: boolean;
   order: number;
   storageObjectId: string;
@@ -27,7 +28,7 @@ type KnowledgeBaseSideNavProps = {
   activeId: string | null;
   loadingIds: Record<string, boolean>;
   rootLoading: boolean;
-  onSelect: (id: string) => void;
+  onSelect: (doc: KnowledgeBaseDocument) => void;
   onToggle: (doc: KnowledgeBaseDocument) => void;
   onMove: (request: KnowledgeBaseMoveRequest) => void;
 };
@@ -259,7 +260,7 @@ function KnowledgeBaseSideNav({
                 <button
                   className="kb-doc-item"
                   type="button"
-                  onClick={() => onSelect(doc.id)}
+                  onClick={() => onSelect(doc)}
                   draggable={false}
                 >
                   {doc.title || "Untitled"}

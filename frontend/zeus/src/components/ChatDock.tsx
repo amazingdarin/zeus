@@ -512,7 +512,7 @@ function ChatDock() {
       if (proposalId) {
         params.set("proposal_id", proposalId);
       }
-      navigate(`/knowledge?${params.toString()}`);
+      navigate(`/documents?${params.toString()}`);
     },
     [navigate],
   );

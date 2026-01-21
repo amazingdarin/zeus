@@ -28,8 +28,14 @@ type DocumentResponse = {
   };
 };
 
-type DocumentDetailResponse = {
-  data?: DocumentResponse;
+type DocumentHierarchyItem = {
+  id?: string;
+  title?: string;
+  parent_id?: string;
+};
+
+type DocumentHierarchyResponse = {
+  data?: DocumentHierarchyItem[];
 };
 
 function KnowledgeBasePage() {
@@ -92,22 +98,25 @@ function KnowledgeBasePage() {
       title: String(item.meta?.title ?? item.title ?? item.slug ?? ""),
       type: normalizedType,
       parentId,
+      kind,
       hasChild,
       order: 0,
       storageObjectId: "",
     };
   }, []);
 
-  const fetchDocumentDetail = useCallback(
+  const fetchDocumentHierarchy = useCallback(
     async (projectKey: string, documentId: string) => {
       const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(documentId)}`,
+        `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
+          documentId,
+        )}/hierarchy`,
       );
       if (!response.ok) {
-        throw new Error("Failed to load document detail");
+        throw new Error("Failed to load document hierarchy");
       }
-      const payload = (await response.json()) as DocumentDetailResponse;
-      return payload?.data ?? null;
+      const payload = (await response.json()) as DocumentHierarchyResponse;
+      return Array.isArray(payload?.data) ? payload.data : [];
     },
     [],
   );
@@ -190,66 +199,17 @@ function KnowledgeBasePage() {
   const refreshChildren = loadChildren;
 
   const loadAncestorChain = useCallback(
-    async (projectKey: string, documentId: string, initialParentId?: string) => {
-      const ancestors: string[] = [];
-      const visited = new Set<string>();
-      const initialParent = initialParentId?.trim();
-      if (initialParent !== undefined) {
-        if (!initialParent || isRootDocumentId(initialParent)) {
-          return [];
-        }
-        ancestors.push(initialParent);
-        let currentId = initialParent;
-        while (currentId && !visited.has(currentId)) {
-          if (isRootDocumentId(currentId)) {
-            break;
-          }
-          visited.add(currentId);
-          const detail = await fetchDocumentDetail(projectKey, currentId);
-          if (!detail) {
-            break;
-          }
-          const parentId = String(
-            detail.meta?.parent_id ??
-              detail.meta?.parent ??
-              detail.parent ??
-              detail.parent_id ??
-              "",
-          ).trim();
-          if (!parentId || isRootDocumentId(parentId)) {
-            break;
-          }
-          ancestors.push(parentId);
-          currentId = parentId;
-        }
-        return ancestors.reverse();
+    async (projectKey: string, documentId: string) => {
+      const items = await fetchDocumentHierarchy(projectKey, documentId);
+      const ids = items
+        .map((item) => String(item.id ?? "").trim())
+        .filter((id) => id);
+      if (ids.length > 0 && ids[ids.length - 1] !== documentId) {
+        ids.push(documentId);
       }
-      let currentId = documentId;
-      while (currentId && !visited.has(currentId)) {
-        if (isRootDocumentId(currentId)) {
-          break;
-        }
-        visited.add(currentId);
-        const detail = await fetchDocumentDetail(projectKey, currentId);
-        if (!detail) {
-          break;
-        }
-        const parentId = String(
-          detail.meta?.parent_id ??
-            detail.meta?.parent ??
-            detail.parent ??
-            detail.parent_id ??
-            "",
-        ).trim();
-        if (!parentId || isRootDocumentId(parentId)) {
-          break;
-        }
-        ancestors.push(parentId);
-        currentId = parentId;
-      }
-      return ancestors.reverse();
+      return ids;
     },
-    [fetchDocumentDetail],
+    [fetchDocumentHierarchy],
   );
 
   const buildAncestorsFromMap = useCallback(
@@ -331,9 +291,25 @@ function KnowledgeBasePage() {
             return;
           }
         }
-        if (!activeDocumentMeta || activeDocumentMeta.id !== documentIdParam) {
+        try {
+          const hierarchyIds = await loadAncestorChain(projectKey, documentIdParam);
+          const ancestors = hierarchyIds
+            .slice(0, -1)
+            .filter((id) => id && id !== documentIdParam && !isRootDocumentId(id));
+          if (ancestors.length > 0) {
+            const expanded: Record<string, boolean> = {};
+            ancestors.forEach((id) => {
+              expanded[id] = true;
+            });
+            setExpandedIds((prev) => ({ ...prev, ...expanded }));
+            for (const ancestorId of ancestors) {
+              await loadChildren(projectKey, ancestorId);
+            }
+          }
+        } catch {
           return;
         }
+        return;
       }
       if (parentIdParam) {
         setExpandedIds((prev) => ({ ...prev, [parentIdParam]: true }));
@@ -385,14 +361,13 @@ function KnowledgeBasePage() {
   );
 
   const handleSelectDocument = useCallback(
-    (id: string) => {
-      setActiveDocumentId(id);
-      const params = new URLSearchParams(searchParams);
-      if (id) {
-        params.set("document_id", id);
-      } else {
-        params.delete("document_id");
+    (doc: KnowledgeBaseDocument) => {
+      if (!doc.id) {
+        return;
       }
+      setActiveDocumentId(doc.id);
+      const params = new URLSearchParams(searchParams);
+      params.set("document_id", doc.id);
       params.delete("parent_id");
       setSearchParams(params);
     },

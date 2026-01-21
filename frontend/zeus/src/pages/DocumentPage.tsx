@@ -45,6 +45,16 @@ type DocumentResponse = {
   };
 };
 
+type DocumentHierarchyItem = {
+  id?: string;
+  title?: string;
+  parent_id?: string;
+};
+
+type DocumentHierarchyResponse = {
+  data?: DocumentHierarchyItem[];
+};
+
 type DocumentContentPayload =
   | {
       meta?: Record<string, unknown>;
@@ -57,6 +67,14 @@ type DocumentBody = {
   type?: string;
   content?: DocumentContentPayload;
 };
+
+const documentCache = new Map<string, DocumentData>();
+const documentPromiseCache = new Map<string, Promise<DocumentData>>();
+const documentHierarchyCache = new Map<string, Array<{ id: string; name: string }>>();
+const documentHierarchyPromiseCache = new Map<
+  string,
+  Promise<Array<{ id: string; name: string }>>
+>();
 
 type DocumentPageProps = {
   projectKey: string;
@@ -161,12 +179,20 @@ function DocumentPage({
     }
 
     const requestKey = `${resolvedProjectKey}:${resolvedDocumentId}`;
+    const cached = documentCache.get(requestKey);
+    if (cached) {
+      setDocument(cached);
+      setLoading(false);
+      setError(null);
+      currentRequestRef.current = requestKey;
+      return;
+    }
     currentRequestRef.current = requestKey;
     let isActive = true;
     setLoading(true);
     setError(null);
 
-    let promise = inFlightRef.current.get(requestKey);
+    let promise = inFlightRef.current.get(requestKey) ?? documentPromiseCache.get(requestKey);
     if (!promise) {
       promise = (async () => {
         const response = await apiFetch(
@@ -178,12 +204,21 @@ function DocumentPage({
           throw new Error("failed to load document");
         }
         const payload = (await response.json()) as DocumentResponse;
-        return mapDocumentDetail(payload?.data, resolvedDocumentId);
+        const mapped = mapDocumentDetail(payload?.data, resolvedDocumentId);
+        const cachedHierarchy = documentHierarchyCache.get(requestKey);
+        if (cachedHierarchy) {
+          mapped.hierarchy = cachedHierarchy;
+        }
+        return mapped;
       })();
       inFlightRef.current.set(requestKey, promise);
+      documentPromiseCache.set(requestKey, promise);
       promise.finally(() => {
         if (inFlightRef.current.get(requestKey) === promise) {
           inFlightRef.current.delete(requestKey);
+        }
+        if (documentPromiseCache.get(requestKey) === promise) {
+          documentPromiseCache.delete(requestKey);
         }
       });
     }
@@ -193,6 +228,7 @@ function DocumentPage({
         if (!isActive || currentRequestRef.current !== requestKey) {
           return;
         }
+        documentCache.set(requestKey, mapped);
         setDocument(mapped);
       })
       .catch((err) => {
@@ -207,6 +243,74 @@ function DocumentPage({
           return;
         }
         setLoading(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [resolvedDocumentId, resolvedProjectKey]);
+
+  useEffect(() => {
+    if (!resolvedProjectKey || !resolvedDocumentId) {
+      return;
+    }
+    const requestKey = `${resolvedProjectKey}:${resolvedDocumentId}`;
+    const cachedHierarchy = documentHierarchyCache.get(requestKey);
+    const applyHierarchy = (hierarchy: Array<{ id: string; name: string }>) => {
+      setDocument((prev) => {
+        if (!prev || prev.id !== resolvedDocumentId) {
+          return prev;
+        }
+        const updated = { ...prev, hierarchy };
+        documentCache.set(requestKey, updated);
+        return updated;
+      });
+    };
+
+    if (cachedHierarchy) {
+      applyHierarchy(cachedHierarchy);
+      return;
+    }
+
+    let promise = documentHierarchyPromiseCache.get(requestKey);
+    if (!promise) {
+      promise = (async () => {
+        const response = await apiFetch(
+          `/api/projects/${encodeURIComponent(
+            resolvedProjectKey,
+          )}/documents/${encodeURIComponent(resolvedDocumentId)}/hierarchy`,
+        );
+        if (!response.ok) {
+          throw new Error("failed to load document hierarchy");
+        }
+        const payload = (await response.json()) as DocumentHierarchyResponse;
+        const items = Array.isArray(payload?.data) ? payload.data : [];
+        return items
+          .map((item) => ({
+            id: String(item.id ?? "").trim(),
+            name: String(item.title ?? "").trim(),
+          }))
+          .filter((item) => item.id);
+      })();
+      documentHierarchyPromiseCache.set(requestKey, promise);
+      promise.finally(() => {
+        if (documentHierarchyPromiseCache.get(requestKey) === promise) {
+          documentHierarchyPromiseCache.delete(requestKey);
+        }
+      });
+    }
+
+    let isActive = true;
+    promise
+      .then((hierarchy) => {
+        if (!isActive) {
+          return;
+        }
+        documentHierarchyCache.set(requestKey, hierarchy);
+        applyHierarchy(hierarchy);
+      })
+      .catch(() => {
+        // ignore hierarchy failures, fallback to document-only breadcrumb
       });
 
     return () => {
@@ -937,13 +1041,13 @@ const mapHierarchyToBreadcrumb = (
     return [
       {
         label: fallbackTitle || "Document",
-        to: `/knowledge?document_id=${encodeURIComponent(fallbackId)}`,
+        to: `/documents?document_id=${encodeURIComponent(fallbackId)}`,
       },
     ];
   }
   return hierarchy.map((item) => ({
     label: item.name || "Document",
-    to: `/knowledge?document_id=${encodeURIComponent(item.id)}`,
+    to: `/documents?document_id=${encodeURIComponent(item.id)}`,
   }));
 };
 

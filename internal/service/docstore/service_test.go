@@ -52,6 +52,22 @@ func TestService_Save_New(t *testing.T) {
 	assert.Equal(t, "docs/my-first-doc.json", savedDoc.Meta.Path)
 }
 
+func TestService_Save_UnicodeSlug(t *testing.T) {
+	svc, root := setup(t)
+	ctx := context.Background()
+
+	doc := newDoc("doc-cn", "中文 文档")
+	err := svc.Save(ctx, testProjectID, doc)
+	require.NoError(t, err)
+
+	expectedSlug := "中文-文档"
+	assert.FileExists(t, filepath.Join(root, "docs", expectedSlug+".json"))
+
+	savedDoc, err := svc.Get(ctx, testProjectID, "doc-cn")
+	require.NoError(t, err)
+	assert.Equal(t, expectedSlug, savedDoc.Meta.Slug)
+}
+
 func TestService_Save_Rename(t *testing.T) {
 	svc, root := setup(t)
 	ctx := context.Background()
@@ -158,6 +174,35 @@ func TestService_GetChildren_Ordering(t *testing.T) {
 	assert.Equal(t, "d3", items[0].ID) // C
 	// We didn't strictly force d1 to pos 1, so it might be 2 depending on default append.
 	// But d3 SHOULD be first.
+}
+
+func TestService_GetHierarchy(t *testing.T) {
+	svc, _ := setup(t)
+	ctx := context.Background()
+
+	parent := newDoc("parent-doc", "Parent")
+	require.NoError(t, svc.Save(ctx, testProjectID, parent))
+
+	child := newDoc("child-doc", "Child")
+	child.Meta.ParentID = "parent-doc"
+	require.NoError(t, svc.Save(ctx, testProjectID, child))
+
+	grand := newDoc("grand-doc", "Grand")
+	grand.Meta.ParentID = "child-doc"
+	require.NoError(t, svc.Save(ctx, testProjectID, grand))
+
+	hierarchy, err := svc.GetHierarchy(ctx, testProjectID, "grand-doc")
+	require.NoError(t, err)
+	require.Len(t, hierarchy, 3)
+	assert.Equal(t, "parent-doc", hierarchy[0].ID)
+	assert.Equal(t, "child-doc", hierarchy[1].ID)
+	assert.Equal(t, "grand-doc", hierarchy[2].ID)
+	assert.Equal(t, "", hierarchy[0].ParentID)
+	assert.Equal(t, "parent-doc", hierarchy[1].ParentID)
+	assert.Equal(t, "child-doc", hierarchy[2].ParentID)
+
+	_, err = svc.GetHierarchy(ctx, testProjectID, "missing")
+	assert.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestService_Delete(t *testing.T) {

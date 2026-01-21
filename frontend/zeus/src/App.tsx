@@ -36,6 +36,7 @@ function App() {
         <AppShell>
           <Routes>
             <Route path="/" element={<KnowledgeBasePage />} />
+            <Route path="/documents" element={<KnowledgeBasePage />} />
             <Route path="/knowledge" element={<KnowledgeBasePage />} />
             <Route path="/documents/new" element={<NewDocumentPage />} />
             <Route path="/settings/providers" element={<SettingsPage />} />

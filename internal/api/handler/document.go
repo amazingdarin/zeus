@@ -113,6 +113,47 @@ func (h *DocumentHandler) Get(c *gin.Context) {
 	})
 }
 
+func (h *DocumentHandler) GetHierarchy(c *gin.Context) {
+	projectKey := c.Param("project_key")
+	docID := c.Param("doc_id")
+	if projectKey == "" || docID == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{Code: "INVALID_PARAMS", Message: "project_key and doc_id are required"})
+		return
+	}
+
+	project, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey)
+	if err != nil {
+		c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "PROJECT_NOT_FOUND", Message: err.Error()})
+		return
+	}
+
+	docSvc := h.ensureStore(projectKey)
+	chain, err := docSvc.GetHierarchy(c.Request.Context(), project.ID, docID)
+	if err != nil {
+		if err == svc.ErrNotFound {
+			c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "NOT_FOUND", Message: "document not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "GET_HIERARCHY_FAILED", Message: err.Error()})
+		return
+	}
+
+	items := make([]types.DocumentHierarchyItem, 0, len(chain))
+	for _, item := range chain {
+		items = append(items, types.DocumentHierarchyItem{
+			ID:       item.ID,
+			Title:    item.Title,
+			ParentID: item.ParentID,
+		})
+	}
+
+	c.JSON(http.StatusOK, types.DocumentHierarchyResponse{
+		Code:    "OK",
+		Message: "success",
+		Data:    items,
+	})
+}
+
 func (h *DocumentHandler) GetBlock(c *gin.Context) {
 	projectKey := c.Param("project_key")
 	docID := c.Param("doc_id")

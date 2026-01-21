@@ -7,16 +7,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
+	"unicode"
 
 	"zeus/internal/domain/docstore"
 )
 
 var (
-	ErrNotFound = errors.New("document not found")
+	ErrNotFound      = errors.New("document not found")
 	ErrBlockNotFound = errors.New("block not found")
-	slugRegexp  = regexp.MustCompile(`[^a-z0-9\-]`)
 )
 
 func (s *impl) Get(ctx context.Context, projectID, docID string) (*docstore.Document, error) {
@@ -72,6 +71,9 @@ func (s *impl) Save(ctx context.Context, projectID string, doc *docstore.Documen
 
 	if doc.Meta.Slug == "" {
 		doc.Meta.Slug = normalizeSlug(doc.Meta.Title)
+		if doc.Meta.Slug == "" {
+			doc.Meta.Slug = strings.TrimSpace(doc.Meta.ID)
+		}
 	}
 
 	var finalSlug string
@@ -315,10 +317,78 @@ func (s *impl) GetChildren(ctx context.Context, projectID, parentID string) ([]d
 	return items, nil
 }
 
+func (s *impl) GetHierarchy(ctx context.Context, projectID, docID string) ([]docstore.DocumentMeta, error) {
+	docID = strings.TrimSpace(docID)
+	if docID == "" {
+		return nil, ErrNotFound
+	}
+	if _, ok := s.index.Get(docID); !ok {
+		return nil, ErrNotFound
+	}
+
+	chain := []docstore.DocumentMeta{}
+	visited := map[string]struct{}{}
+	currentID := docID
+	for currentID != "" {
+		if _, seen := visited[currentID]; seen {
+			break
+		}
+		visited[currentID] = struct{}{}
+		cache, ok := s.index.Get(currentID)
+		if !ok {
+			break
+		}
+		chain = append(chain, docstore.DocumentMeta{
+			ID:       currentID,
+			Title:    cache.Title,
+			ParentID: cache.ParentID,
+		})
+		parentID := strings.TrimSpace(cache.ParentID)
+		if parentID == "" || parentID == "root" {
+			break
+		}
+		currentID = parentID
+	}
+
+	reverseDocumentMeta(chain)
+	return chain, nil
+}
+
 func normalizeSlug(s string) string {
-	s = strings.ToLower(s)
-	s = slugRegexp.ReplaceAllString(s, "-")
-	return strings.Trim(s, "-")
+	s = strings.TrimSpace(strings.ToLower(s))
+	if s == "" {
+		return ""
+	}
+	var out strings.Builder
+	out.Grow(len(s))
+	prevDash := false
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			out.WriteRune(r)
+			prevDash = false
+			continue
+		}
+		if r == '-' || r == '_' || unicode.IsSpace(r) {
+			if prevDash || out.Len() == 0 {
+				continue
+			}
+			out.WriteByte('-')
+			prevDash = true
+			continue
+		}
+		if prevDash || out.Len() == 0 {
+			continue
+		}
+		out.WriteByte('-')
+		prevDash = true
+	}
+	return strings.Trim(out.String(), "-")
+}
+
+func reverseDocumentMeta(items []docstore.DocumentMeta) {
+	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
+		items[i], items[j] = items[j], items[i]
+	}
 }
 
 func (s *impl) ensureUniqueSlug(dir, slug, myID string) string {

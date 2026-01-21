@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // SlugifyFilename returns a slug derived from the filename:
@@ -27,7 +28,7 @@ func SlugifyFilename(filename string) string {
 	return Slugify(filename)
 }
 
-// Slugify converts a string to a lowercase ASCII slug.
+// Slugify converts a string to a lowercase slug, preserving unicode letters and digits.
 func Slugify(value string) string {
 	value = strings.TrimSpace(strings.ToLower(value))
 	if value == "" {
@@ -37,18 +38,24 @@ func Slugify(value string) string {
 	out.Grow(len(value))
 	prevDash := false
 	for _, r := range value {
-		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			out.WriteRune(r)
 			prevDash = false
 			continue
 		}
-		if r == '-' || r == '_' || r == ' ' {
+		if r == '-' || r == '_' || unicode.IsSpace(r) {
 			if prevDash || out.Len() == 0 {
 				continue
 			}
 			out.WriteByte('-')
 			prevDash = true
+			continue
 		}
+		if prevDash || out.Len() == 0 {
+			continue
+		}
+		out.WriteByte('-')
+		prevDash = true
 	}
 	return strings.Trim(out.String(), "-")
 }

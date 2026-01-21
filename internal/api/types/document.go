@@ -16,6 +16,18 @@ type GetDocumentResponse struct {
 	Data    DocumentDTO `json:"data"`
 }
 
+type DocumentHierarchyItem struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	ParentID string `json:"parent_id"`
+}
+
+type DocumentHierarchyResponse struct {
+	Code    string                  `json:"code"`
+	Message string                  `json:"message"`
+	Data    []DocumentHierarchyItem `json:"data"`
+}
+
 type ListDocumentsResponse struct {
 	Code    string              `json:"code"`
 	Message string              `json:"message"`

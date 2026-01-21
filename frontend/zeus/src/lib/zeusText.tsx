@@ -87,7 +87,7 @@ export const renderZeusText = (ast: ZeusText): ReactNode => {
     }
     if (node.kind === "doc") {
       const title = typeof node.meta?.title === "string" ? node.meta.title : "";
-      const href = `#/knowledge?document_id=${encodeURIComponent(node.id)}`;
+      const href = `#/documents?document_id=${encodeURIComponent(node.id)}`;
       return (
         <a key={`doc-${node.id}-${index}`} className="zeus-text-link" href={href}>
           {title || node.id}

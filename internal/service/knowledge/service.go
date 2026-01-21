@@ -552,29 +552,7 @@ func firstMetaString(meta map[string]interface{}, key string) string {
 }
 
 func slugify(value string) string {
-	value = strings.TrimSpace(strings.ToLower(value))
-	if value == "" {
-		return ""
-	}
-	var out strings.Builder
-	out.Grow(len(value))
-	prevDash := false
-	for _, r := range value {
-		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
-			out.WriteRune(r)
-			prevDash = false
-			continue
-		}
-		if r == '-' || r == '_' || r == ' ' {
-			if prevDash || out.Len() == 0 {
-				continue
-			}
-			out.WriteByte('-')
-			prevDash = true
-		}
-	}
-	result := strings.Trim(out.String(), "-")
-	return result
+	return util.Slugify(value)
 }
 
 func (s *Service) resolveOpenAPISlug(

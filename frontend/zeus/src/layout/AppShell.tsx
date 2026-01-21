@@ -19,7 +19,7 @@ type AppShellProps = {
 };
 
 const navItems = [
-  { label: "Knowledge Base", to: "/knowledge", icon: "K" },
+  { label: "Document", to: "/documents", icon: "D" },
 ];
 
 function AppShell({ children }: AppShellProps) {
@@ -38,7 +38,7 @@ function AppShell({ children }: AppShellProps) {
 
   const activeIndex = useMemo(() => {
     const path = location.pathname;
-    const index = navItems.findIndex((item) => item.to && path === item.to);
+    const index = navItems.findIndex((item) => item.to && path.startsWith(item.to));
     return index === -1 ? -1 : index;
   }, [location.pathname]);
 

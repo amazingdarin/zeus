@@ -16,7 +16,7 @@ function NewDocumentPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [content, setContent] = useState<JSONContent | null>(null);
-  const [title, setTitle] = useState("Untitled Document");
+  const [title, setTitle] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [loadingDocument, setLoadingDocument] = useState(false);
@@ -93,7 +93,7 @@ function NewDocumentPage() {
       let contentToReturn: JSONContent | null = null;
       
       if (metaValue) {
-        setTitle(String(metaValue.title ?? "Untitled Document"));
+        setTitle(String(metaValue.title ?? ""));
         setParentID(String(metaValue.parent_id ?? metaValue.parent ?? "").trim());
 
         const bodyValue = detail?.body ?? detail?.content ?? {};
@@ -134,7 +134,7 @@ function NewDocumentPage() {
           contentToReturn = contentValue as JSONContent;
         }
       } else {
-        setTitle(String(detail?.title ?? "Untitled Document"));
+        setTitle(String(detail?.title ?? ""));
         setParentID(String(detail?.parent_id ?? "").trim());
         
         const storageId = String(detail?.storage_object_id ?? "").trim();
@@ -214,11 +214,12 @@ function NewDocumentPage() {
         setContentMeta(parsed.meta ?? null);
       }
       let documentPayload;
-      const safeSlug = sanitizeFileName(title);
+      const normalizedTitle = title.trim() || "Untitled Document";
+      const safeSlug = sanitizeFileName(normalizedTitle);
       const meta = {
         id: documentId || undefined,
         slug: safeSlug || undefined,
-        title: title.trim(),
+        title: normalizedTitle,
         parent_id: (parentID || parentIdParam || "root").trim(),
         extra: {
           status: "draft",
@@ -233,7 +234,7 @@ function NewDocumentPage() {
         documentPayload?.data?.meta?.id ?? documentPayload?.data?.id ?? documentId ?? "",
       );
       if (targetID) {
-        navigate(`/knowledge?document_id=${encodeURIComponent(targetID)}`);
+        navigate(`/documents?document_id=${encodeURIComponent(targetID)}`);
       }
       setContentMeta(payloadForSave.meta);
       console.log("document_saved", documentPayload);
@@ -313,7 +314,7 @@ function NewDocumentPage() {
           className="kb-title-input new-doc-title-input"
           type="text"
           value={title}
-          placeholder="Document title"
+          placeholder="Untitled Document"
           onChange={(event) => setTitle(event.target.value)}
         />
       </div>
