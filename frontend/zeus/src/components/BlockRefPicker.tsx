@@ -206,10 +206,8 @@ function BlockRefPicker({ open, projectKey, onCancel, onSelect }: BlockRefPicker
             className="block-ref-picker-item"
             onClick={() => onSelect(selectedDocId, item.id)}
           >
-            <div className="block-ref-picker-item-title">{item.text || item.type}</div>
-            <div className="block-ref-picker-item-meta">
-              <span>{item.type}</span>
-              <span>{item.id}</span>
+            <div className="block-ref-picker-item-title">
+              {item.text || "Untitled block"}
             </div>
           </List.Item>
         )}

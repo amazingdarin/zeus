@@ -234,7 +234,9 @@ function NewDocumentPage() {
         documentPayload?.data?.meta?.id ?? documentPayload?.data?.id ?? documentId ?? "",
       );
       if (targetID) {
-        navigate(`/documents?document_id=${encodeURIComponent(targetID)}`);
+        navigate(`/documents?document_id=${encodeURIComponent(targetID)}`, {
+          state: { refreshToken: Date.now() },
+        });
       }
       setContentMeta(payloadForSave.meta);
       console.log("document_saved", documentPayload);

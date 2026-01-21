@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import type { Extension, JSONContent, NodeViewProps } from "@tiptap/react"
+import { useEffect, useState } from "react"
+import type { Editor, Extension, JSONContent, NodeViewProps } from "@tiptap/react"
 import { NodeViewWrapper } from "@tiptap/react"
 
 import { DocViewer } from "../../templates/doc-viewer"
@@ -11,6 +11,7 @@ type BlockRefState = {
   loading: boolean
   error: string | null
   content: JSONContent | null
+  sourceTitle: string
 }
 
 const DEFAULT_FETCHER: (url: string, init?: RequestInit) => Promise<Response> = (
@@ -18,7 +19,13 @@ const DEFAULT_FETCHER: (url: string, init?: RequestInit) => Promise<Response> = 
   init
 ) => fetch(url, init)
 
-export function BlockRefNodeView({ node, editor, extension }: NodeViewProps) {
+export function BlockRefNodeView({
+  node,
+  editor,
+  extension,
+  getPos,
+  selected,
+}: NodeViewProps) {
   const docID = String(node.attrs?.doc_id ?? "")
   const blockID = String(node.attrs?.block_id ?? "")
   const isEditable = editor.isEditable
@@ -27,16 +34,38 @@ export function BlockRefNodeView({ node, editor, extension }: NodeViewProps) {
         projectKey?: string
         fetcher?: (url: string, init?: RequestInit) => Promise<Response>
         viewerExtensions?: Extension[]
+        onSelect?: (payload: {
+          editor: Editor
+          range: { from: number; to: number }
+          attrs: { doc_id?: string; block_id?: string }
+        }) => void
       }
     | undefined
   const projectKey = String(options?.projectKey ?? "")
   const fetcher = options?.fetcher ?? DEFAULT_FETCHER
   const viewerExtensions = options?.viewerExtensions ?? []
+  const handleOpenPicker = () => {
+    if (!isEditable || !options?.onSelect) {
+      return
+    }
+    if (typeof getPos !== "function") {
+      return
+    }
+    const pos = getPos()
+    const range = { from: pos, to: pos + node.nodeSize }
+    options.onSelect({
+      editor,
+      range,
+      attrs: { doc_id: docID, block_id: blockID },
+    })
+  }
   const [state, setState] = useState<BlockRefState>({
     loading: false,
     error: null,
     content: null,
+    sourceTitle: "",
   })
+  const refLabel = `Ref: ${state.sourceTitle || "Untitled Document"}`
 
   const canFetch = Boolean(projectKey && docID && blockID)
 
@@ -46,6 +75,7 @@ export function BlockRefNodeView({ node, editor, extension }: NodeViewProps) {
         loading: false,
         error: "Missing document or block reference.",
         content: null,
+        sourceTitle: "",
       })
       return
     }
@@ -53,7 +83,7 @@ export function BlockRefNodeView({ node, editor, extension }: NodeViewProps) {
     let isActive = true
     const controller = new AbortController()
     const load = async () => {
-      setState({ loading: true, error: null, content: null })
+      setState({ loading: true, error: null, content: null, sourceTitle: "" })
       try {
         const response = await fetcher(
           `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
@@ -66,11 +96,12 @@ export function BlockRefNodeView({ node, editor, extension }: NodeViewProps) {
         }
         const payload = await response.json()
         const content = extractBodyContent(payload?.data)
+        const sourceTitle = extractMetaTitle(payload?.data)
         if (!content) {
           throw new Error("Referenced block content missing.")
         }
         if (isActive) {
-          setState({ loading: false, error: null, content })
+          setState({ loading: false, error: null, content, sourceTitle })
         }
       } catch (error) {
         if ((error as Error).name === "AbortError") {
@@ -81,6 +112,7 @@ export function BlockRefNodeView({ node, editor, extension }: NodeViewProps) {
             loading: false,
             error: (error as Error).message || "Failed to load block.",
             content: null,
+            sourceTitle: "",
           })
         }
       }
@@ -93,28 +125,34 @@ export function BlockRefNodeView({ node, editor, extension }: NodeViewProps) {
     }
   }, [blockID, canFetch, docID, fetcher, projectKey])
 
-  const refLabel = useMemo(() => {
-    if (docID && blockID) {
-      return `${docID} · ${blockID}`
-    }
-    return docID || blockID || "Missing reference"
-  }, [blockID, docID])
-
   return (
     <NodeViewWrapper className="block-ref-node">
-      <div className={`block-ref-card${isEditable ? " is-editable" : ""}`}>
+      <div
+        className={`block-ref-card${isEditable ? " is-editable" : ""}`}
+        onClick={handleOpenPicker}
+      >
         <div className="block-ref-header">
-          <span className="block-ref-title">Block Reference</span>
-          <span className="block-ref-meta">{refLabel}</span>
+          {!isEditable && docID ? (
+            <a
+              className="block-ref-link"
+              href={`#/documents?document_id=${encodeURIComponent(docID)}`}
+            >
+              {refLabel}
+            </a>
+          ) : (
+            <span className="block-ref-title">{refLabel}</span>
+          )}
         </div>
         {state.loading ? (
           <div className="block-ref-state">Loading block...</div>
         ) : state.error ? (
           <div className="block-ref-error">{state.error}</div>
         ) : state.content ? (
-          <div className="block-ref-content">
-            <DocViewer content={state.content} extensions={viewerExtensions} />
-          </div>
+          <>
+            <div className="block-ref-content">
+              <DocViewer content={state.content} extensions={viewerExtensions} />
+            </div>
+          </>
         ) : (
           <div className="block-ref-state">No block selected.</div>
         )}
@@ -126,6 +164,9 @@ export function BlockRefNodeView({ node, editor, extension }: NodeViewProps) {
 export default BlockRefNodeView
 
 type BlockRefPayload = {
+  meta?: {
+    title?: string
+  }
   body?: {
     type?: string
     content?: unknown
@@ -158,4 +199,8 @@ const resolveDocContent = (value: unknown): JSONContent | null => {
     return direct
   }
   return null
+}
+
+const extractMetaTitle = (data?: BlockRefPayload | null): string => {
+  return typeof data?.meta?.title === "string" ? data?.meta?.title : ""
 }

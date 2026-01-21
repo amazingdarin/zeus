@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type { JSONContent } from "@tiptap/react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import DocumentHeader from "../components/DocumentHeader";
 import RichTextViewer from "../components/RichTextViewer";
@@ -130,8 +130,16 @@ function DocumentPage({
   const resolvedProjectKey = (params.projectKey || projectKey || "").trim();
   const resolvedDocumentId = (params.documentId || documentId || "").trim();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const proposalId = (searchParams.get("proposal_id") || "").trim();
+  const refreshKey = (() => {
+    const state = location.state as { refreshToken?: number | string } | null;
+    if (!state?.refreshToken) {
+      return "";
+    }
+    return String(state.refreshToken);
+  })();
 
   const [document, setDocument] = useState<DocumentData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -164,6 +172,7 @@ function DocumentPage({
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const inFlightRef = useRef<Map<string, Promise<DocumentData>>>(new Map());
   const currentRequestRef = useRef<string | null>(null);
+  const refreshKeyRef = useRef<string>("");
 
   const activeDocument = document;
   const allowChildActions = activeDocument ? activeDocument.docType !== "overview" : true;
@@ -179,7 +188,14 @@ function DocumentPage({
     }
 
     const requestKey = `${resolvedProjectKey}:${resolvedDocumentId}`;
-    const cached = documentCache.get(requestKey);
+    const shouldBypassCache =
+      Boolean(refreshKey) && refreshKeyRef.current !== refreshKey;
+    if (refreshKey) {
+      refreshKeyRef.current = refreshKey;
+    } else {
+      refreshKeyRef.current = "";
+    }
+    const cached = shouldBypassCache ? null : documentCache.get(requestKey);
     if (cached) {
       setDocument(cached);
       setLoading(false);
@@ -248,7 +264,7 @@ function DocumentPage({
     return () => {
       isActive = false;
     };
-  }, [resolvedDocumentId, resolvedProjectKey]);
+  }, [refreshKey, resolvedDocumentId, resolvedProjectKey]);
 
   useEffect(() => {
     if (!resolvedProjectKey || !resolvedDocumentId) {

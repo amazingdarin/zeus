@@ -8,10 +8,16 @@
   background: #f7f9fc;
   padding: 12px 14px;
   box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+  transition: border-color 0.2s ease;
 }
 
 .block-ref-card.is-editable {
   border-style: dashed;
+  cursor: pointer;
+}
+
+.block-ref-card.is-editable:hover {
+  border-color: #94a3b8;
 }
 
 .block-ref-header {
@@ -19,7 +25,7 @@
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   color: #1f2937;
 }
 
@@ -45,7 +51,34 @@
 }
 
 .block-ref-content {
-  background: #ffffff;
-  border-radius: 10px;
-  padding: 10px;
+  margin-top: 6px;
+}
+
+.block-ref-content .doc-editor-wrapper {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.block-ref-content .doc-editor-content {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.block-ref-content .doc-editor-content .tiptap.ProseMirror.doc-editor {
+  min-height: 0;
+  padding: 0;
+}
+
+.block-ref-link {
+  display: inline-flex;
+  margin-bottom: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.block-ref-link:hover {
+  text-decoration: underline;
 }

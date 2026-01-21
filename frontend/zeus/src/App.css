@@ -736,17 +736,13 @@ body {
 }
 
 .block-ref-picker-item-title {
-  font-weight: 600;
+  font-weight: 500;
   font-size: 13px;
   color: #111827;
-}
-
-.block-ref-picker-item-meta {
-  display: flex;
-  justify-content: space-between;
-  font-size: 11px;
-  color: #6b7280;
-  margin-top: 2px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .sidebar-toggle {

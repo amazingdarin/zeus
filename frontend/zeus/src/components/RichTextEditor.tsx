@@ -38,15 +38,33 @@ function RichTextEditor({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [triggerRange, setTriggerRange] = useState<Range | null>(null);
 
-  const handleTrigger = useCallback(
-    (payload: { editor: Editor; range: Range }) => {
+  const openPickerAtRange = useCallback(
+    (range: Range) => {
       if (!projectKey) {
         return;
       }
-      setTriggerRange(payload.range);
+      setTriggerRange(range);
       setPickerOpen(true);
     },
     [projectKey],
+  );
+
+  const handleTrigger = useCallback(
+    (payload: { editor: Editor; range: Range }) => {
+      openPickerAtRange(payload.range);
+    },
+    [openPickerAtRange],
+  );
+
+  const handleBlockSelect = useCallback(
+    (payload: {
+      editor: Editor;
+      range: Range;
+      attrs?: { doc_id?: string; block_id?: string };
+    }) => {
+      openPickerAtRange(payload.range);
+    },
+    [openPickerAtRange],
   );
 
   const handleCancel = useCallback(() => {
@@ -82,6 +100,7 @@ function RichTextEditor({
       fetcher: apiFetch,
       viewerExtensions: openapi,
       onTrigger: handleTrigger,
+      onSelect: handleBlockSelect,
     });
     return [...openapi, blockRef];
   }, [handleTrigger, projectKey]);

@@ -16,6 +16,11 @@ export type BlockRefOptions = {
   fetcher?: (url: string, init?: RequestInit) => Promise<Response>
   viewerExtensions?: Extension[]
   onTrigger?: (payload: { editor: Editor; range: Range }) => void
+  onSelect?: (payload: {
+    editor: Editor
+    range: Range
+    attrs: BlockRefAttrs
+  }) => void
 }
 
 declare module "@tiptap/react" {
@@ -46,6 +51,7 @@ export const BlockRefNode = Node.create<BlockRefOptions>({
       fetcher: undefined,
       viewerExtensions: [],
       onTrigger: undefined,
+      onSelect: undefined,
     }
   },
 
