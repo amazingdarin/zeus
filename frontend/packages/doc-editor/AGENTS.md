@@ -19,6 +19,7 @@ frontend/packages/doc-editor/src/
 | Editor template | src/templates | main editor composition |
 | Hooks | src/hooks | editor state helpers |
 | Node types | src/nodes | tiptap nodes |
+| OpenAPI nodes | src/nodes/openapi-* | Swagger UI viewer + filters |
 | UI controls | src/ui | toolbar controls |
 
 ## CONVENTIONS

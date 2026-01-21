@@ -33,7 +33,7 @@ Go backend (Gin/GORM/Postgres) + React/Vite/Tauri frontend in a monorepo. Doc-ed
 | DB schema | ddl/sql/init.sql | table definitions |
 | Frontend entry | frontend/zeus/src/main.tsx | React bootstrap |
 | Tauri entry | frontend/src-tauri/src/main.rs | desktop bootstrap |
-| Doc editor libs | frontend/packages/doc-editor* | Tiptap + OpenAPI viewer |
+| Doc editor libs | frontend/packages/doc-editor | Tiptap + OpenAPI nodes |
 
 ## CONVENTIONS (project-specific)
 - Clean architecture: `api → service → domain → repository/infra` only.

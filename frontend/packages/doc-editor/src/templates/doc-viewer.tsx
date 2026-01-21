@@ -1,10 +1,11 @@
-import type { Extension, JSONContent } from "@tiptap/react"
+import type { JSONContent } from "@tiptap/react"
+import type { Extensions } from "@tiptap/core"
 
 import { DocEditor } from "./simple/doc-editor"
 
 export interface DocViewerProps {
   content?: JSONContent | null
-  extensions?: Extension[]
+  extensions?: Extensions
 }
 
 export function DocViewer({ content, extensions = [] }: DocViewerProps) {

@@ -1,9 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { Editor, JSONContent } from "@tiptap/react";
-import type { Range } from "@tiptap/core";
+import type { Extensions, Range } from "@tiptap/core";
 
-import { BlockRefNode, DocEditor } from "@zeus/doc-editor";
-import { OpenApiNode, OpenApiRefNode } from "@zeus/doc-editor-openapi";
+import { BlockRefNode, DocEditor, OpenApiNode, OpenApiRefNode } from "@zeus/doc-editor";
 
 import { apiFetch } from "../config/api";
 import BlockRefPicker from "./BlockRefPicker";
@@ -16,7 +15,7 @@ interface RichTextEditorProps {
   onLoadDocument?: (id: string) => Promise<JSONContent>;
 }
 
-const openApiExtensions = (projectKey?: string) => [
+const openApiExtensions = (projectKey?: string): Extensions => [
   OpenApiNode.configure({
     projectKey,
     fetcher: apiFetch,
@@ -93,7 +92,7 @@ function RichTextEditor({
     [handleCancel, triggerRange],
   );
 
-  const extensions = useMemo(() => {
+  const extensions = useMemo<Extensions>(() => {
     const openapi = openApiExtensions(projectKey);
     const blockRef = BlockRefNode.configure({
       projectKey,

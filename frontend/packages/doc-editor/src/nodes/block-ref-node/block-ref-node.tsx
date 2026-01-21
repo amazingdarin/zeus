@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import type { Editor, Extension, JSONContent, NodeViewProps } from "@tiptap/react"
+import type { Editor, JSONContent, NodeViewProps } from "@tiptap/react"
+import type { Extensions } from "@tiptap/core"
 import { NodeViewWrapper } from "@tiptap/react"
 
 import { DocViewer } from "../../templates/doc-viewer"
@@ -24,7 +25,6 @@ export function BlockRefNodeView({
   editor,
   extension,
   getPos,
-  selected,
 }: NodeViewProps) {
   const docID = String(node.attrs?.doc_id ?? "")
   const blockID = String(node.attrs?.block_id ?? "")
@@ -33,7 +33,7 @@ export function BlockRefNodeView({
     | {
         projectKey?: string
         fetcher?: (url: string, init?: RequestInit) => Promise<Response>
-        viewerExtensions?: Extension[]
+        viewerExtensions?: Extensions
         onSelect?: (payload: {
           editor: Editor
           range: { from: number; to: number }
@@ -51,8 +51,14 @@ export function BlockRefNodeView({
     if (typeof getPos !== "function") {
       return
     }
-    const pos = getPos()
-    const range = { from: pos, to: pos + node.nodeSize }
+    const resolvedPos = getPos()
+    if (resolvedPos === undefined) {
+      return
+    }
+    const range = {
+      from: resolvedPos,
+      to: resolvedPos + node.nodeSize,
+    }
     options.onSelect({
       editor,
       range,

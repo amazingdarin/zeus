@@ -1,4 +1,4 @@
-import type { Extension, Range } from "@tiptap/core"
+import type { Extensions, Range } from "@tiptap/core"
 import { mergeAttributes, Node } from "@tiptap/react"
 import type { Editor } from "@tiptap/react"
 import { ReactNodeViewRenderer } from "@tiptap/react"
@@ -14,7 +14,7 @@ export type BlockRefAttrs = {
 export type BlockRefOptions = {
   projectKey?: string
   fetcher?: (url: string, init?: RequestInit) => Promise<Response>
-  viewerExtensions?: Extension[]
+  viewerExtensions?: Extensions
   onTrigger?: (payload: { editor: Editor; range: Range }) => void
   onSelect?: (payload: {
     editor: Editor

@@ -20,7 +20,7 @@ frontend/
 | UI components | frontend/zeus/src/components | Ant Design usage |
 | API clients | frontend/zeus/src/api | backend calls |
 | Doc editor | frontend/packages/doc-editor | Tiptap editor |
-| OpenAPI viewer | frontend/packages/doc-editor-openapi | Swagger UI viewer |
+| OpenAPI nodes | frontend/packages/doc-editor/src/nodes/openapi-* | Swagger UI viewer |
 | Tauri shell | frontend/src-tauri/src/main.rs | DO NOT REMOVE windows flag |
 
 ## CONVENTIONS

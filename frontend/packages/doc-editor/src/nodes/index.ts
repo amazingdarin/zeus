@@ -1,3 +1,5 @@
 export * from "./horizontal-rule-node/horizontal-rule-node-extension"
 export * from "./image-upload-node/image-upload-node-extension"
 export * from "./block-ref-node/block-ref-node-extension"
+export * from "./openapi-node/openapi-node-extension"
+export * from "./openapi-ref-node/openapi-ref-node-extension"

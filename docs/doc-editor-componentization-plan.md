@@ -27,11 +27,10 @@
   - 对外暴露 `DocEditor`、`DocViewer`、`useDocEditor`、基础 primitives/hooks/utils/extensions
   - 样式入口：`@zeus/doc-editor/styles`
 
-### 插件包
+### OpenAPI 功能
 
-- `frontend/packages/doc-editor-openapi`
-  - 对外入口：`@zeus/doc-editor-openapi`
-  - 暴露 OpenAPI nodes/extensions + viewer
+- OpenAPI nodes/extensions + viewer 合并进 `frontend/packages/doc-editor`
+  - 对外入口：`@zeus/doc-editor`
   - 支持 `source_type: "url" | "json" | "yaml"`
   - 支持 `fetcher` 自定义请求（默认 `window.fetch`）
 

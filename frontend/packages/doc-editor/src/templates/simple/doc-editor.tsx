@@ -4,7 +4,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { Editor, JSONContent } from "@tiptap/react"
-import { EditorContent, EditorContext, type Extension, useEditor } from "@tiptap/react"
+import { EditorContent, EditorContext, useEditor } from "@tiptap/react"
+import type { Extensions } from "@tiptap/core"
 
 // --- Tiptap Core Extensions ---
 import { StarterKit } from "@tiptap/starter-kit"
@@ -83,7 +84,7 @@ import "./doc-editor.scss"
 type DocEditorProps = {
   onChange?: (content: JSONContent) => void
   content?: JSONContent | null
-  extensions?: Extension[]
+  extensions?: Extensions
   mode?: "edit" | "view"
   docId?: string
   onLoadDocument?: (id: string) => Promise<JSONContent>

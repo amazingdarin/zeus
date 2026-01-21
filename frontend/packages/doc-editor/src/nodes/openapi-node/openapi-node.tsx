@@ -123,7 +123,6 @@ function OpenApiNodeEditor({
   )
 }
 
-
 type OpenApiNodeEditorProps = {
   editor: NodeViewProps["editor"]
   node: NodeViewProps["node"]
@@ -131,5 +130,3 @@ type OpenApiNodeEditorProps = {
   source: string
   renderer: string
 }
-
-
