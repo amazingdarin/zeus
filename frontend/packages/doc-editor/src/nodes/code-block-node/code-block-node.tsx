@@ -6,12 +6,17 @@ import { NodeViewContent, NodeViewWrapper } from "@tiptap/react"
 import type { NodeViewProps } from "@tiptap/react"
 
 import OpenApiSpecViewer from "../../viewer/OpenApiSpecViewer"
+import { ChevronDownIcon } from "../../icons/chevron-down-icon"
+import { ViewPreviewIcon } from "../../icons/view-preview-icon"
+import { ViewSplitIcon } from "../../icons/view-split-icon"
+import { ViewTextIcon } from "../../icons/view-text-icon"
 import type { OpenApiSourceType } from "../openapi-node/openapi-node-extension"
 import type { CodeBlockNodeOptions, CodeBlockRenderer } from "./code-block-node-extension"
 
 const LANGUAGE_OPTIONS = [
   { value: "", label: "Auto" },
   { value: "openapi", label: "OpenAPI" },
+  { value: "html", label: "HTML" },
   { value: "json", label: "JSON" },
   { value: "yaml", label: "YAML" },
   { value: "typescript", label: "TypeScript" },
@@ -46,7 +51,28 @@ const DEFAULT_RENDERERS: CodeBlockRenderer[] = [
       />
     ),
   },
+  {
+    id: "html",
+    label: "HTML",
+    match: ({ language }) => language === "html",
+    render: ({ code }) => (
+      <iframe
+        title="HTML preview"
+        sandbox=""
+        className="code-block-html-preview"
+        srcDoc={code}
+        loading="lazy"
+      />
+    ),
+  },
 ]
+
+type ViewMode = "text" | "preview" | "split"
+
+const VIEW_MODES: ViewMode[] = ["text", "preview", "split"]
+
+const isViewMode = (value: string): value is ViewMode =>
+  VIEW_MODES.includes(value as ViewMode)
 
 const resolveRenderer = (args: {
   renderers: CodeBlockRenderer[]
@@ -66,6 +92,9 @@ const resolveRenderer = (args: {
 
   if (explicitRenderer) {
     if (explicitRenderer.id === "openapi" && language !== "openapi") {
+      return null
+    }
+    if (explicitRenderer.id === "html" && language !== "html") {
       return null
     }
     return explicitRenderer
@@ -89,6 +118,16 @@ export function CodeBlockNodeView({ node, editor, extension, getPos }: NodeViewP
   const language = typeof node.attrs.language === "string" ? node.attrs.language : ""
   const rendererAttr = typeof node.attrs.renderer === "string" ? node.attrs.renderer : "auto"
   const preview = Boolean(node.attrs.preview)
+  const collapsed = Boolean(node.attrs.collapsed)
+  const supportsPreview = language === "openapi" || language === "html"
+  const rawViewMode = typeof node.attrs.view_mode === "string" ? node.attrs.view_mode : ""
+  const viewMode: ViewMode = supportsPreview
+    ? isViewMode(rawViewMode)
+      ? rawViewMode
+      : preview
+        ? "preview"
+        : "text"
+    : "text"
   const code = node.textContent
   const attrs = node.attrs as Record<string, unknown>
   const renderers = options?.renderers?.length ? options.renderers : DEFAULT_RENDERERS
@@ -127,17 +166,27 @@ export function CodeBlockNodeView({ node, editor, extension, getPos }: NodeViewP
 
   const handleLanguageChange = (event: ChangeEvent<HTMLSelectElement>) => {
     const nextLanguage = event.target.value
-    const nextRenderer = nextLanguage === "openapi" ? "openapi" : "auto"
-    const nextPreview = nextLanguage === "openapi" ? preview : false
+    const supportsPreview = nextLanguage === "openapi" || nextLanguage === "html"
+    const nextRenderer = supportsPreview ? nextLanguage : "auto"
+    const nextViewMode: ViewMode = supportsPreview ? viewMode : "text"
+    const nextPreview = supportsPreview ? nextViewMode !== "text" : false
     updateNodeAttrs({
       language: nextLanguage || null,
       renderer: nextRenderer,
       preview: nextPreview,
+      view_mode: nextViewMode,
     })
   }
 
-  const handleTogglePreview = () => {
-    updateNodeAttrs({ preview: !preview })
+  const handleSetViewMode = (mode: ViewMode) => {
+    if (!supportsPreview) {
+      return
+    }
+    updateNodeAttrs({ preview: mode !== "text", view_mode: mode })
+  }
+
+  const handleToggleCollapsed = () => {
+    updateNodeAttrs({ collapsed: !collapsed })
   }
 
   const renderedPreview = renderer
@@ -151,9 +200,16 @@ export function CodeBlockNodeView({ node, editor, extension, getPos }: NodeViewP
       })
     : null
 
-  const shouldShowPreview = Boolean(isEditable && preview && renderedPreview)
   const shouldRenderViewer = Boolean(!isEditable && renderedPreview)
-  const showPreviewToggle = isEditable && language === "openapi"
+  const showPreviewToggle = isEditable && supportsPreview
+  const viewFrameClass = shouldRenderViewer
+    ? "code-block-viewer code-block-viewer--framed"
+    : "code-block-viewer"
+  const languageLabel =
+    LANGUAGE_OPTIONS.find((option) => option.value === language)?.label ||
+    (language ? language : "Auto")
+  const shouldShowViewerBar = shouldRenderViewer
+  const shouldShowContent = shouldRenderViewer ? !collapsed : true
 
   return (
     <NodeViewWrapper className="code-block-node">
@@ -174,29 +230,95 @@ export function CodeBlockNodeView({ node, editor, extension, getPos }: NodeViewP
               ))}
             </select>
             {showPreviewToggle ? (
-              <button
-                type="button"
-                className="code-block-preview-toggle"
-                data-active={preview}
-                onClick={handleTogglePreview}
-              >
-                Preview
-              </button>
+              <div className="code-block-view-modes" role="group" aria-label="Code block view">
+                <button
+                  type="button"
+                  className="code-block-view-button"
+                  data-active={viewMode === "text"}
+                  onClick={() => handleSetViewMode("text")}
+                  aria-label="Text"
+                >
+                  <ViewTextIcon className="code-block-view-icon" />
+                </button>
+                <button
+                  type="button"
+                  className="code-block-view-button"
+                  data-active={viewMode === "preview"}
+                  onClick={() => handleSetViewMode("preview")}
+                  aria-label="Preview"
+                >
+                  <ViewPreviewIcon className="code-block-view-icon" />
+                </button>
+                <button
+                  type="button"
+                  className="code-block-view-button"
+                  data-active={viewMode === "split"}
+                  onClick={() => handleSetViewMode("split")}
+                  aria-label="Split view"
+                >
+                  <ViewSplitIcon className="code-block-view-icon" />
+                </button>
+              </div>
             ) : null}
           </div>
-          <pre className="code-block-pre">
-            <NodeViewContent className={languageClass} />
-          </pre>
-          {shouldShowPreview ? (
-            <div className="code-block-preview">{renderedPreview}</div>
+          {supportsPreview ? (
+            viewMode === "split" ? (
+              <div className="code-block-edit-split">
+                <div className="code-block-edit-pane code-block-edit-pane--code">
+                  <pre className="code-block-pre">
+                    <NodeViewContent className={languageClass} />
+                  </pre>
+                </div>
+                <div className="code-block-edit-pane code-block-edit-pane--preview">
+                  <div className="code-block-preview code-block-preview--inline">
+                    {renderedPreview}
+                  </div>
+                </div>
+              </div>
+            ) : viewMode === "preview" ? (
+              <div className="code-block-preview code-block-preview--inline">
+                {renderedPreview}
+              </div>
+            ) : (
+              <pre className="code-block-pre">
+                <NodeViewContent className={languageClass} />
+              </pre>
+            )
+          ) : (
+            <pre className="code-block-pre">
+              <NodeViewContent className={languageClass} />
+            </pre>
+          )}
+        </div>
+      ) : (
+        <div className={viewFrameClass}>
+          {shouldShowViewerBar ? (
+            <div className="code-block-viewer-bar" contentEditable={false}>
+              <button
+                type="button"
+                className="code-block-collapse"
+                data-collapsed={collapsed}
+                onClick={handleToggleCollapsed}
+                aria-label={collapsed ? "Expand code block" : "Collapse code block"}
+              >
+                <ChevronDownIcon className="code-block-collapse-icon" />
+              </button>
+              <span className="code-block-viewer-language">{languageLabel}</span>
+            </div>
+          ) : null}
+          {shouldShowContent ? (
+            shouldRenderViewer ? (
+              <div className="code-block-preview">{renderedPreview}</div>
+            ) : (
+              <pre className="code-block-pre">
+                {!shouldShowViewerBar ? (
+                  <div className="code-block-plain-label">{languageLabel}</div>
+                ) : null}
+                <NodeViewContent className={languageClass} />
+              </pre>
+            )
           ) : null}
         </div>
-      ) : shouldRenderViewer ? (
-        <div className="code-block-preview">{renderedPreview}</div>
-      ) : (
-        <pre className="code-block-pre">
-          <NodeViewContent className={languageClass} />
-        </pre>
       )}
     </NodeViewWrapper>
   )

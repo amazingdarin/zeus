@@ -58,6 +58,12 @@ export const CodeBlockNode = CodeBlockLowlight.extend<CodeBlockNodeOptions>({
       preview: {
         default: false,
       },
+      view_mode: {
+        default: "text",
+      },
+      collapsed: {
+        default: false,
+      },
     }
   },
 
