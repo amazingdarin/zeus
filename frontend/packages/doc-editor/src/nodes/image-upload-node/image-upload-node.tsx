@@ -434,6 +434,11 @@ const DropZoneContent: React.FC<{ maxSize: number; limit: number }> = ({
 )
 
 export const ImageUploadNode: React.FC<NodeViewProps> = (props) => {
+  if (!props.editor.isEditable) {
+    return (
+      <NodeViewWrapper className="tiptap-image-upload" style={{ display: "none" }} />
+    )
+  }
   const { accept, limit, maxSize } = props.node.attrs
   const inputRef = useRef<HTMLInputElement>(null)
   const extension = props.extension
