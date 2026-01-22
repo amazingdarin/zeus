@@ -167,6 +167,16 @@ const UPLOAD_FILTER_PRESETS: UploadFilterPreset[] = [
 ];
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg"]);
+const TEXT_EXTENSIONS = new Set(["md", "txt", "csv", "json", "yaml", "yml", "log"]);
+const TEXT_MIME_PREFIX = "text/";
+const TEXT_MIME_VALUES = new Set([
+  "application/json",
+  "application/x-yaml",
+  "application/yaml",
+  "application/xml",
+  "application/x-www-form-urlencoded",
+]);
+const TEXT_SNIFF_BYTES = 16 * 1024;
 
 function DocumentPage() {
   const { currentProject } = useProjectContext();
@@ -1027,10 +1037,11 @@ function DocumentPage() {
       for (const entry of files) {
         const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
         const docTitle = stripExtension(entry.name) || entry.name;
+        const isText = await isLikelyTextFile(entry.file, uploaded);
         const parentId = entry.parentPath
           ? directoryIds.get(entry.parentPath) ?? baseParentId
           : baseParentId;
-        const block = buildAssetBlock(resolvedProjectKey, uploaded, docTitle);
+        const block = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, isText);
         await createDocumentRecord(
           resolvedProjectKey,
           {
@@ -1665,7 +1676,12 @@ function buildUploadEntries(files: File[]): { directories: DirectoryEntry[]; fil
   return { directories, files: sortedFiles };
 }
 
-function buildAssetBlock(projectKey: string, asset: UploadedAsset, title: string): JSONContent {
+function buildAssetBlock(
+  projectKey: string,
+  asset: UploadedAsset,
+  title: string,
+  isText: boolean,
+): JSONContent {
   if (isImageAsset(asset.mime, asset.filename)) {
     const src = buildAssetContentUrl(projectKey, asset.asset_id);
     return {
@@ -1684,6 +1700,7 @@ function buildAssetBlock(projectKey: string, asset: UploadedAsset, title: string
       file_name: asset.filename,
       mime: asset.mime,
       size: asset.size,
+      file_type: isText ? "text" : "",
     },
   };
 }
@@ -1720,6 +1737,71 @@ function getFileExtension(filename: string): string {
     return "";
   }
   return trimmed.slice(lastDot + 1);
+}
+
+async function isLikelyTextFile(file: File, asset: UploadedAsset): Promise<boolean> {
+  const normalizedMime = asset.mime.toLowerCase();
+  if (normalizedMime.startsWith(TEXT_MIME_PREFIX) || TEXT_MIME_VALUES.has(normalizedMime)) {
+    return true;
+  }
+  const extension = getFileExtension(asset.filename);
+  if (extension && TEXT_EXTENSIONS.has(extension)) {
+    return true;
+  }
+  if (normalizedMime && normalizedMime !== "application/octet-stream") {
+    return false;
+  }
+  return sniffTextContent(file);
+}
+
+async function sniffTextContent(file: File): Promise<boolean> {
+  try {
+    const slice = file.slice(0, TEXT_SNIFF_BYTES);
+    const buffer = await slice.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    if (bytes.length === 0) {
+      return false;
+    }
+    let suspicious = 0;
+    let printable = 0;
+    for (let i = 0; i < bytes.length; i += 1) {
+      const value = bytes[i];
+      if (value === 0) {
+        return false;
+      }
+      if (value === 9 || value === 10 || value === 13) {
+        printable += 1;
+        continue;
+      }
+      if (value >= 32 && value <= 126) {
+        printable += 1;
+        continue;
+      }
+      suspicious += 1;
+    }
+    const printableRatio = printable / bytes.length;
+    if (printableRatio >= 0.9) {
+      return true;
+    }
+    const decoder = new TextDecoder("utf-8", { fatal: false });
+    const decoded = decoder.decode(bytes);
+    if (!decoded) {
+      return false;
+    }
+    let control = 0;
+    for (let i = 0; i < decoded.length; i += 1) {
+      const code = decoded.charCodeAt(i);
+      if (code === 9 || code === 10 || code === 13) {
+        continue;
+      }
+      if (code < 32 || code === 65533) {
+        control += 1;
+      }
+    }
+    return control / decoded.length < 0.1;
+  } catch {
+    return false;
+  }
 }
 
 function sanitizeFileName(value: string): string {
