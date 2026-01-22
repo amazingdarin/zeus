@@ -47,7 +47,8 @@ type CreateDocumentResponse struct {
 
 type MoveDocumentRequest struct {
 	TargetParentID string `json:"target_parent_id"`
-	Index          int    `json:"index"`
+	BeforeDocID    string `json:"before_doc_id"`
+	AfterDocID     string `json:"after_doc_id"`
 }
 
 type MoveDocumentResponse struct {

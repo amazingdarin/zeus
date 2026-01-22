@@ -15,6 +15,14 @@ type BlockRefState = {
   sourceTitle: string
 }
 
+type BlockRefCacheEntry = {
+  content: JSONContent
+  sourceTitle: string
+}
+
+const blockRefCache = new Map<string, BlockRefCacheEntry>()
+const blockRefPromiseCache = new Map<string, Promise<BlockRefCacheEntry>>()
+
 const DEFAULT_FETCHER: (url: string, init?: RequestInit) => Promise<Response> = (
   url,
   init
@@ -87,32 +95,61 @@ export function BlockRefNodeView({
     }
 
     let isActive = true
-    const controller = new AbortController()
+    const cacheKey = `${projectKey}:${docID}:${blockID}`
+    const cached = blockRefCache.get(cacheKey)
+    if (cached) {
+      setState({
+        loading: false,
+        error: null,
+        content: cached.content,
+        sourceTitle: cached.sourceTitle,
+      })
+      return () => {
+        isActive = false
+      }
+    }
+
     const load = async () => {
       setState({ loading: true, error: null, content: null, sourceTitle: "" })
       try {
-        const response = await fetcher(
-          `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
-            docID
-          )}/blocks/${encodeURIComponent(blockID)}`,
-          { signal: controller.signal }
-        )
-        if (!response.ok) {
-          throw new Error("Failed to load referenced block.")
+        let promise = blockRefPromiseCache.get(cacheKey)
+        if (!promise) {
+          promise = (async () => {
+            const response = await fetcher(
+              `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
+                docID
+              )}/blocks/${encodeURIComponent(blockID)}`
+            )
+            if (!response.ok) {
+              throw new Error("Failed to load referenced block.")
+            }
+            const payload = await response.json()
+            const content = extractBodyContent(payload?.data)
+            const sourceTitle = extractMetaTitle(payload?.data)
+            if (!content) {
+              throw new Error("Referenced block content missing.")
+            }
+            return { content, sourceTitle }
+          })()
+          blockRefPromiseCache.set(cacheKey, promise)
+          promise.finally(() => {
+            if (blockRefPromiseCache.get(cacheKey) === promise) {
+              blockRefPromiseCache.delete(cacheKey)
+            }
+          })
         }
-        const payload = await response.json()
-        const content = extractBodyContent(payload?.data)
-        const sourceTitle = extractMetaTitle(payload?.data)
-        if (!content) {
-          throw new Error("Referenced block content missing.")
-        }
+
+        const result = await promise
+        blockRefCache.set(cacheKey, result)
         if (isActive) {
-          setState({ loading: false, error: null, content, sourceTitle })
+          setState({
+            loading: false,
+            error: null,
+            content: result.content,
+            sourceTitle: result.sourceTitle,
+          })
         }
       } catch (error) {
-        if ((error as Error).name === "AbortError") {
-          return
-        }
         if (isActive) {
           setState({
             loading: false,
@@ -127,7 +164,6 @@ export function BlockRefNodeView({
     load()
     return () => {
       isActive = false
-      controller.abort()
     }
   }, [blockID, canFetch, docID, fetcher, projectKey])
 
@@ -141,7 +177,7 @@ export function BlockRefNodeView({
           {!isEditable && docID ? (
             <a
               className="block-ref-link"
-              href={`#/documents?document_id=${encodeURIComponent(docID)}`}
+              href={`#/documents/${encodeURIComponent(docID)}`}
             >
               {refLabel}
             </a>

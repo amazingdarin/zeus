@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { HashRouter, Route, Routes } from "react-router-dom";
+import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import AppShell from "./layout/AppShell";
-import KnowledgeBasePage from "./pages/KnowledgeBasePage";
+import DocumentPage from "./pages/DocumentPage";
 import NewDocumentPage from "./pages/NewDocumentPage";
 import SettingsPage from "./pages/SettingsPage";
 import { ProjectProvider } from "./context/ProjectContext";
@@ -35,9 +35,10 @@ function App() {
       <HashRouter>
         <AppShell>
           <Routes>
-            <Route path="/" element={<KnowledgeBasePage />} />
-            <Route path="/documents" element={<KnowledgeBasePage />} />
-            <Route path="/knowledge" element={<KnowledgeBasePage />} />
+            <Route path="/" element={<Navigate to="/documents" replace />} />
+            <Route path="/documents" element={<DocumentPage />} />
+            <Route path="/documents/:documentId" element={<DocumentPage />} />
+            <Route path="/knowledge" element={<Navigate to="/documents" replace />} />
             <Route path="/documents/new" element={<NewDocumentPage />} />
             <Route path="/settings/providers" element={<SettingsPage />} />
           </Routes>

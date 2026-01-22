@@ -18,7 +18,7 @@ type Service interface {
 	Get(ctx context.Context, projectID, docID string) (*docstore.Document, error)
 	Save(ctx context.Context, projectID string, doc *docstore.Document) error
 	Delete(ctx context.Context, projectID, docID string) error
-	Move(ctx context.Context, projectID, docID, targetParentID string, targetIndex int) error
+	Move(ctx context.Context, projectID, docID, targetParentID, beforeDocID, afterDocID string) error
 	GetChildren(ctx context.Context, projectID, parentID string) ([]docstore.TreeItem, error)
 	GetHierarchy(ctx context.Context, projectID, docID string) ([]docstore.DocumentMeta, error)
 	GetBlockByID(ctx context.Context, projectID, docID, blockID string) (*docstore.Document, error)

@@ -234,7 +234,7 @@ function NewDocumentPage() {
         documentPayload?.data?.meta?.id ?? documentPayload?.data?.id ?? documentId ?? "",
       );
       if (targetID) {
-        navigate(`/documents?document_id=${encodeURIComponent(targetID)}`, {
+        navigate(`/documents/${encodeURIComponent(targetID)}`, {
           state: { refreshToken: Date.now() },
         });
       }

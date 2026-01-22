@@ -293,7 +293,14 @@ func (h *DocumentHandler) Move(c *gin.Context) {
 
 	docSvc := h.ensureStore(projectKey)
 
-	if err := docSvc.Move(c.Request.Context(), project.ID, docID, req.TargetParentID, req.Index); err != nil {
+	if err := docSvc.Move(
+		c.Request.Context(),
+		project.ID,
+		docID,
+		req.TargetParentID,
+		req.BeforeDocID,
+		req.AfterDocID,
+	); err != nil {
 		if err == svc.ErrNotFound {
 			c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "NOT_FOUND", Message: "document or target parent not found"})
 			return

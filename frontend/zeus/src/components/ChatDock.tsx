@@ -507,12 +507,10 @@ function ChatDock() {
       if (!trimmed) {
         return;
       }
-      const params = new URLSearchParams();
-      params.set("document_id", trimmed);
-      if (proposalId) {
-        params.set("proposal_id", proposalId);
-      }
-      navigate(`/documents?${params.toString()}`);
+      const query = proposalId
+        ? `?proposal_id=${encodeURIComponent(proposalId)}`
+        : "";
+      navigate(`/documents/${encodeURIComponent(trimmed)}${query}`);
     },
     [navigate],
   );

@@ -101,11 +101,13 @@ func (s *impl) Save(ctx context.Context, projectID string, doc *docstore.Documen
 			if err := s.renameFileAndDir(oldFullPath, fullPath); err != nil {
 				return err
 			}
-			s.updateIndexSlug(targetDir, filepath.Base(oldFullPath), filename)
+			oldDir := filepath.Dir(oldFullPath)
+			if oldDir != targetDir {
+				s.removeFromIndexFile(oldDir, doc.Meta.ID)
+			}
 		}
-	} else {
-		s.addToIndexFile(targetDir, finalSlug)
 	}
+	s.addToIndexFile(targetDir, doc.Meta.ID)
 
 	doc.Meta.Path, _ = filepath.Rel(s.rootDir, fullPath)
 	doc.Meta.UpdatedAt = now()
@@ -161,8 +163,7 @@ func (s *impl) Delete(ctx context.Context, projectID, docID string) error {
 	_ = os.RemoveAll(companionDir)
 
 	parentDir := filepath.Dir(fullPath)
-	slug := strings.TrimSuffix(filepath.Base(fullPath), ext)
-	s.removeFromIndexFile(parentDir, slug)
+	s.removeFromIndexFile(parentDir, docID)
 
 	s.index.Remove(docID)
 
@@ -175,7 +176,7 @@ func (s *impl) Delete(ctx context.Context, projectID, docID string) error {
 	return nil
 }
 
-func (s *impl) Move(ctx context.Context, projectID, docID, targetParentID string, targetIndex int) error {
+func (s *impl) Move(ctx context.Context, projectID, docID, targetParentID, beforeDocID, afterDocID string) error {
 	hookCtx := docstore.HookContext{ProjectID: projectID}
 	for _, hook := range s.hooks.BeforeMove {
 		if err := hook(hookCtx, docID, targetParentID); err != nil {
@@ -217,9 +218,6 @@ func (s *impl) Move(ctx context.Context, projectID, docID, targetParentID string
 			return err
 		}
 
-		s.removeFromIndexFile(oldDir, slug)
-		s.addToIndexFile(targetDir, newSlug)
-
 		relPath, _ := filepath.Rel(s.rootDir, newPath)
 		s.index.Update(docID, CachedDoc{
 			Path:     relPath,
@@ -248,8 +246,12 @@ func (s *impl) Move(ctx context.Context, projectID, docID, targetParentID string
 		}
 	}
 
-	slug := strings.TrimSuffix(filepath.Base(newPath), filepath.Ext(newPath))
-	if err := s.reorderIndexFile(targetDir, slug, targetIndex); err != nil {
+	if oldDir != targetDir {
+		if err := s.reorderIndexFile(oldDir, docID, "", "", false); err != nil {
+			return err
+		}
+	}
+	if err := s.reorderIndexFile(targetDir, docID, beforeDocID, afterDocID, true); err != nil {
 		return err
 	}
 
@@ -281,25 +283,25 @@ func (s *impl) GetChildren(ctx context.Context, projectID, parentID string) ([]d
 		entries, _ := os.ReadDir(targetDir)
 		for _, e := range entries {
 			if strings.HasSuffix(e.Name(), ".json") {
-				order = append(order, strings.TrimSuffix(e.Name(), ".json"))
+				relPath, _ := filepath.Rel(s.rootDir, filepath.Join(targetDir, e.Name()))
+				id, _ := s.index.FindIDByPath(relPath)
+				if id != "" {
+					order = append(order, id)
+				}
 			}
+		}
+		if len(order) > 0 {
+			_ = s.writeIndexFile(targetDir, order)
 		}
 	}
 
 	items := make([]docstore.TreeItem, 0, len(order))
-	for _, slug := range order {
-		relPath, _ := filepath.Rel(s.rootDir, filepath.Join(targetDir, slug+".json"))
-
-		var matchedID, title string
-		matchedID = s.findIDByPath(relPath)
-
-		if matchedID != "" {
-			cache, _ := s.index.Get(matchedID)
-			title = cache.Title
-		} else {
-			title = slug
+	for _, docID := range order {
+		cache, ok := s.index.Get(docID)
+		if !ok {
+			continue
 		}
-
+		slug := strings.TrimSuffix(filepath.Base(cache.Path), filepath.Ext(cache.Path))
 		kind := "file"
 		info, err := os.Stat(filepath.Join(targetDir, slug))
 		if err == nil && info.IsDir() {
@@ -307,9 +309,9 @@ func (s *impl) GetChildren(ctx context.Context, projectID, parentID string) ([]d
 		}
 
 		items = append(items, docstore.TreeItem{
-			ID:    matchedID,
+			ID:    docID,
 			Slug:  slug,
-			Title: title,
+			Title: cache.Title,
 			Kind:  kind,
 		})
 	}
@@ -424,63 +426,102 @@ func (s *impl) readIndexFile(dir string) []string {
 	if err != nil {
 		return []string{}
 	}
-	var slugs []string
-	_ = json.Unmarshal(data, &slugs)
-	return slugs
+	var entries []string
+	_ = json.Unmarshal(data, &entries)
+	if len(entries) == 0 {
+		return []string{}
+	}
+
+	resolved := make([]string, 0, len(entries))
+	changed := false
+	for _, entry := range entries {
+		id := strings.TrimSpace(entry)
+		if id == "" {
+			changed = true
+			continue
+		}
+		if _, ok := s.index.Get(id); ok {
+			resolved = append(resolved, id)
+			continue
+		}
+
+		relPath, _ := filepath.Rel(s.rootDir, filepath.Join(dir, id+".json"))
+		if docID := s.findIDByPath(relPath); docID != "" {
+			resolved = append(resolved, docID)
+			changed = true
+			continue
+		}
+		changed = true
+	}
+	if changed {
+		_ = s.writeIndexFile(dir, resolved)
+	}
+	return resolved
 }
 
-func (s *impl) writeIndexFile(dir string, slugs []string) error {
-	data, _ := json.Marshal(slugs)
+func (s *impl) writeIndexFile(dir string, docIDs []string) error {
+	data, _ := json.Marshal(docIDs)
 	return os.WriteFile(filepath.Join(dir, ".index"), data, 0644)
 }
 
-func (s *impl) addToIndexFile(dir, slug string) {
-	slugs := s.readIndexFile(dir)
-	for _, x := range slugs {
-		if x == slug {
+func (s *impl) addToIndexFile(dir, docID string) {
+	ids := s.readIndexFile(dir)
+	for _, x := range ids {
+		if x == docID {
 			return
 		}
 	}
-	slugs = append(slugs, slug)
-	_ = s.writeIndexFile(dir, slugs)
+	ids = append(ids, docID)
+	_ = s.writeIndexFile(dir, ids)
 }
 
-func (s *impl) removeFromIndexFile(dir, slug string) {
-	slugs := s.readIndexFile(dir)
-	newSlugs := make([]string, 0, len(slugs))
-	for _, x := range slugs {
-		if x != slug {
-			newSlugs = append(newSlugs, x)
+func (s *impl) removeFromIndexFile(dir, docID string) {
+	ids := s.readIndexFile(dir)
+	filtered := make([]string, 0, len(ids))
+	for _, x := range ids {
+		if x != docID {
+			filtered = append(filtered, x)
 		}
 	}
-	_ = s.writeIndexFile(dir, newSlugs)
+	_ = s.writeIndexFile(dir, filtered)
 }
 
-func (s *impl) updateIndexSlug(dir, oldSlug, newSlug string) {
-	slugs := s.readIndexFile(dir)
-	for i, x := range slugs {
-		if x == oldSlug {
-			slugs[i] = newSlug
-		}
-	}
-	_ = s.writeIndexFile(dir, slugs)
-}
-
-func (s *impl) reorderIndexFile(dir, slug string, index int) error {
-	slugs := s.readIndexFile(dir)
-	filtered := make([]string, 0, len(slugs))
-	for _, x := range slugs {
-		if x != slug {
+func (s *impl) reorderIndexFile(
+	dir,
+	docID,
+	beforeDocID,
+	afterDocID string,
+	insert bool,
+) error {
+	ids := s.readIndexFile(dir)
+	filtered := make([]string, 0, len(ids))
+	for _, x := range ids {
+		if x != docID {
 			filtered = append(filtered, x)
 		}
 	}
 
-	if index < 0 || index >= len(filtered) {
-		filtered = append(filtered, slug)
-	} else {
-		filtered = append(filtered[:index+1], filtered[index:]...)
-		filtered[index] = slug
+	if !insert {
+		return s.writeIndexFile(dir, filtered)
 	}
+
+	insertAt := len(filtered)
+	if beforeDocID != "" {
+		if idx := indexOf(filtered, beforeDocID); idx >= 0 {
+			insertAt = idx
+		}
+	} else if afterDocID != "" {
+		if idx := indexOf(filtered, afterDocID); idx >= 0 {
+			insertAt = idx + 1
+		}
+	}
+
+	if insertAt < 0 || insertAt > len(filtered) {
+		insertAt = len(filtered)
+	}
+	filtered = append(filtered, "")
+	copy(filtered[insertAt+1:], filtered[insertAt:])
+	filtered[insertAt] = docID
 
 	return s.writeIndexFile(dir, filtered)
 }
@@ -488,4 +529,13 @@ func (s *impl) reorderIndexFile(dir, slug string, index int) error {
 func (s *impl) findIDByPath(relPath string) string {
 	id, _ := s.index.FindIDByPath(relPath)
 	return id
+}
+
+func indexOf(items []string, value string) int {
+	for i, item := range items {
+		if item == value {
+			return i
+		}
+	}
+	return -1
 }

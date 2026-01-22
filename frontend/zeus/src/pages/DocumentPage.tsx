@@ -1,11 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type { JSONContent } from "@tiptap/react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import DocumentHeader from "../components/DocumentHeader";
+import KnowledgeBaseLayout from "../components/KnowledgeBaseLayout";
+import KnowledgeBaseSideNav, {
+  type KnowledgeBaseDocument,
+  type KnowledgeBaseMoveRequest,
+} from "../components/KnowledgeBaseSideNav";
 import RichTextViewer from "../components/RichTextViewer";
 import { apiFetch } from "../config/api";
+import { useProjectContext } from "../context/ProjectContext";
 
 type DocumentData = {
   id: string;
@@ -45,6 +51,29 @@ type DocumentResponse = {
   };
 };
 
+type DocumentListItem = {
+  id?: string;
+  slug?: string;
+  title?: string;
+  kind?: string;
+  type?: string;
+  doc_type?: string;
+  parent?: string;
+  parent_id?: string;
+  meta?: {
+    id?: string;
+    title?: string;
+    parent_id?: string;
+    parent?: string;
+    doc_type?: string;
+  };
+  has_child?: boolean;
+};
+
+type DocumentListResponse = {
+  data?: DocumentListItem[];
+};
+
 type DocumentHierarchyItem = {
   id?: string;
   title?: string;
@@ -76,16 +105,6 @@ const documentHierarchyPromiseCache = new Map<
   Promise<Array<{ id: string; name: string }>>
 >();
 
-type DocumentPageProps = {
-  projectKey: string;
-  documentId: string | null;
-  onDocumentsChanged?: (parentId: string) => void;
-  onDocumentMetaLoaded?: (meta: {
-    id: string;
-    parentId: string;
-    hierarchy: string[];
-  } | null) => void;
-};
 
 type UploadedAsset = {
   asset_id: string;
@@ -120,15 +139,11 @@ type ImportedAssetState = {
   }>;
 };
 
-function DocumentPage({
-  projectKey,
-  documentId,
-  onDocumentsChanged,
-  onDocumentMetaLoaded,
-}: DocumentPageProps) {
-  const params = useParams<{ projectKey?: string; documentId?: string }>();
-  const resolvedProjectKey = (params.projectKey || projectKey || "").trim();
-  const resolvedDocumentId = (params.documentId || documentId || "").trim();
+function DocumentPage() {
+  const { currentProject } = useProjectContext();
+  const params = useParams<{ documentId?: string }>();
+  const resolvedProjectKey = (currentProject?.key ?? "").trim();
+  const resolvedDocumentId = (params.documentId || "").trim();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -173,6 +188,391 @@ function DocumentPage({
   const inFlightRef = useRef<Map<string, Promise<DocumentData>>>(new Map());
   const currentRequestRef = useRef<string | null>(null);
   const refreshKeyRef = useRef<string>("");
+
+  const [rootDocuments, setRootDocuments] = useState<KnowledgeBaseDocument[]>([]);
+  const [childrenByParent, setChildrenByParent] = useState<
+    Record<string, KnowledgeBaseDocument[]>
+  >({});
+  const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
+  const [loadingIds, setLoadingIds] = useState<Record<string, boolean>>({});
+  const [rootLoading, setRootLoading] = useState(false);
+  const projectKeyRef = useRef<string | null>(null);
+  const loadingIdsRef = useRef<Record<string, boolean>>({});
+  const rootLoadAttemptRef = useRef<string | null>(null);
+  const initialRedirectRef = useRef(false);
+
+  const docParentMap = useMemo(() => {
+    const map = new Map<string, string>();
+    rootDocuments.forEach((doc) => {
+      map.set(doc.id, doc.parentId);
+    });
+    Object.values(childrenByParent).forEach((children) => {
+      children.forEach((doc) => {
+        map.set(doc.id, doc.parentId);
+      });
+    });
+    return map;
+  }, [childrenByParent, rootDocuments]);
+
+  const mapDocument = useCallback(
+    (item: DocumentListItem, parentId: string): KnowledgeBaseDocument => {
+      const rawType = String(
+        item.doc_type ?? item.meta?.doc_type ?? item.type ?? "",
+      ).toLowerCase();
+      let normalizedType =
+        rawType === "origin" || rawType === "requirement" ? "document" : rawType;
+      if (!normalizedType) {
+        normalizedType = "document";
+      }
+      const kind = String(item.kind ?? "").toLowerCase();
+      const hasChild =
+        kind === "dir" || Boolean((item as { has_child?: boolean }).has_child);
+      return {
+        id: String(item.meta?.id ?? item.id ?? ""),
+        title: String(item.meta?.title ?? item.title ?? item.slug ?? ""),
+        type: normalizedType,
+        parentId,
+        kind,
+        hasChild,
+        order: 0,
+        storageObjectId: "",
+      };
+    },
+    [],
+  );
+
+  const fetchDocuments = useCallback(
+    async (projectKey: string, parentId: string) => {
+      const params = new URLSearchParams({ parent_id: parentId });
+      const response = await apiFetch(
+        `/api/projects/${encodeURIComponent(projectKey)}/documents?${params.toString()}`,
+      );
+      if (!response.ok) {
+        throw new Error("Failed to load documents");
+      }
+      const payload = (await response.json()) as DocumentListResponse;
+      const items = Array.isArray(payload?.data) ? payload.data : [];
+      const normalizedParent = parentId ? parentId.trim() : "";
+      return items
+        .map((item) => mapDocument(item, normalizedParent))
+        .filter((doc) => doc.id);
+    },
+    [mapDocument],
+  );
+
+  const loadRootDocuments = useCallback(
+    async (projectKey: string) => {
+      rootLoadAttemptRef.current = projectKey;
+      setRootLoading(true);
+      try {
+        const docs = await fetchDocuments(projectKey, "");
+        if (projectKeyRef.current !== projectKey) {
+          return;
+        }
+        setRootDocuments(docs);
+      } catch {
+        if (projectKeyRef.current === projectKey) {
+          setRootDocuments([]);
+        }
+      } finally {
+        if (projectKeyRef.current === projectKey) {
+          setRootLoading(false);
+        }
+      }
+    },
+    [fetchDocuments],
+  );
+
+  const updateLoadingIds = useCallback((parentId: string, value: boolean) => {
+    setLoadingIds((prev) => {
+      const next = { ...prev, [parentId]: value };
+      loadingIdsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const loadChildren = useCallback(
+    async (projectKey: string, parentId: string, options?: { force?: boolean }) => {
+      const hasLoaded = Object.prototype.hasOwnProperty.call(childrenByParent, parentId);
+      if (!options?.force && hasLoaded) {
+        return;
+      }
+      if (loadingIdsRef.current[parentId]) {
+        return;
+      }
+      updateLoadingIds(parentId, true);
+      try {
+        const docs = await fetchDocuments(projectKey, parentId);
+        if (projectKeyRef.current !== projectKey) {
+          return;
+        }
+        setChildrenByParent((prev) => ({ ...prev, [parentId]: docs }));
+      } catch {
+        if (projectKeyRef.current === projectKey) {
+          setChildrenByParent((prev) => ({ ...prev, [parentId]: [] }));
+        }
+      } finally {
+        if (projectKeyRef.current === projectKey) {
+          updateLoadingIds(parentId, false);
+        }
+      }
+    },
+    [childrenByParent, fetchDocuments, updateLoadingIds],
+  );
+
+  const getDocumentHierarchy = useCallback(async (projectKey: string, documentId: string) => {
+    const requestKey = `${projectKey}:${documentId}`;
+    const cached = documentHierarchyCache.get(requestKey);
+    if (cached) {
+      return cached;
+    }
+    let promise = documentHierarchyPromiseCache.get(requestKey);
+    if (!promise) {
+      promise = (async () => {
+        const response = await apiFetch(
+          `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
+            documentId,
+          )}/hierarchy`,
+        );
+        if (!response.ok) {
+          throw new Error("failed to load document hierarchy");
+        }
+        const payload = (await response.json()) as DocumentHierarchyResponse;
+        const items = Array.isArray(payload?.data) ? payload.data : [];
+        return items
+          .map((item) => ({
+            id: String(item.id ?? "").trim(),
+            name: String(item.title ?? "").trim(),
+          }))
+          .filter((item) => item.id);
+      })();
+      documentHierarchyPromiseCache.set(requestKey, promise);
+      promise.finally(() => {
+        if (documentHierarchyPromiseCache.get(requestKey) === promise) {
+          documentHierarchyPromiseCache.delete(requestKey);
+        }
+      });
+    }
+    const hierarchy = await promise;
+    documentHierarchyCache.set(requestKey, hierarchy);
+    return hierarchy;
+  }, []);
+
+  const loadAncestorChain = useCallback(
+    async (projectKey: string, documentId: string) => {
+      const items = await getDocumentHierarchy(projectKey, documentId);
+      const ids = items
+        .map((item) => String(item.id ?? "").trim())
+        .filter((id) => id);
+      if (ids.length > 0 && ids[ids.length - 1] !== documentId) {
+        ids.push(documentId);
+      }
+      return ids;
+    },
+    [getDocumentHierarchy],
+  );
+
+  const buildAncestorsFromMap = useCallback(
+    (documentId: string, map: Map<string, string>) => {
+      const ancestors: string[] = [];
+      const visited = new Set<string>();
+      let currentId = map.get(documentId);
+      while (currentId && !visited.has(currentId)) {
+        if (isRootDocumentId(currentId)) {
+          break;
+        }
+        ancestors.push(currentId);
+        visited.add(currentId);
+        currentId = map.get(currentId);
+      }
+      return ancestors.reverse();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const projectKey = resolvedProjectKey || null;
+    projectKeyRef.current = projectKey;
+    setRootDocuments([]);
+    setChildrenByParent({});
+    setExpandedIds({});
+    setLoadingIds({});
+    loadingIdsRef.current = {};
+    rootLoadAttemptRef.current = null;
+    setRootLoading(false);
+    initialRedirectRef.current = false;
+    if (!projectKey) {
+      return;
+    }
+    loadRootDocuments(projectKey);
+  }, [loadRootDocuments, resolvedProjectKey]);
+
+  useEffect(() => {
+    if (!resolvedProjectKey || !rootDocuments.length || resolvedDocumentId) {
+      return;
+    }
+    if (rootLoading || initialRedirectRef.current) {
+      return;
+    }
+    const firstDoc = rootDocuments[0];
+    if (!firstDoc?.id) {
+      return;
+    }
+    initialRedirectRef.current = true;
+    navigate(`/documents/${encodeURIComponent(firstDoc.id)}`, { replace: true });
+  }, [navigate, resolvedDocumentId, resolvedProjectKey, rootDocuments, rootLoading]);
+
+  useEffect(() => {
+    const projectKey = resolvedProjectKey || null;
+    if (!projectKey) {
+      return;
+    }
+    const ensureRootLoaded = async () => {
+      if (rootLoadAttemptRef.current !== projectKey) {
+        await loadRootDocuments(projectKey);
+      }
+    };
+    const expandToDocument = async () => {
+      await ensureRootLoaded();
+      if (projectKeyRef.current !== projectKey) {
+        return;
+      }
+      if (!resolvedDocumentId) {
+        return;
+      }
+      if (docParentMap.has(resolvedDocumentId)) {
+        const ancestors = buildAncestorsFromMap(resolvedDocumentId, docParentMap);
+        if (ancestors.length > 0) {
+          const expanded: Record<string, boolean> = {};
+          ancestors.forEach((id) => {
+            expanded[id] = true;
+          });
+          setExpandedIds((prev) => ({ ...prev, ...expanded }));
+        }
+        return;
+      }
+      try {
+        const hierarchyIds = await loadAncestorChain(projectKey, resolvedDocumentId);
+        const ancestors = hierarchyIds
+          .slice(0, -1)
+          .filter((id) => id && id !== resolvedDocumentId && !isRootDocumentId(id));
+        const seenAncestors = new Set<string>();
+        const uniqueAncestors = ancestors.filter((id) => {
+          if (seenAncestors.has(id)) {
+            return false;
+          }
+          seenAncestors.add(id);
+          return true;
+        });
+        if (uniqueAncestors.length > 0) {
+          const expanded: Record<string, boolean> = {};
+          uniqueAncestors.forEach((id) => {
+            expanded[id] = true;
+          });
+          setExpandedIds((prev) => ({ ...prev, ...expanded }));
+          for (const ancestorId of uniqueAncestors) {
+            await loadChildren(projectKey, ancestorId);
+          }
+        }
+      } catch {
+        return;
+      }
+    };
+    void expandToDocument();
+  }, [
+    buildAncestorsFromMap,
+    docParentMap,
+    loadAncestorChain,
+    loadChildren,
+    loadRootDocuments,
+    resolvedDocumentId,
+    resolvedProjectKey,
+  ]);
+
+  const handleToggle = useCallback(
+    async (doc: KnowledgeBaseDocument) => {
+      if (!resolvedProjectKey || !doc.hasChild) {
+        return;
+      }
+      const nextExpanded = !expandedIds[doc.id];
+      if (nextExpanded) {
+        await loadChildren(resolvedProjectKey, doc.id);
+      }
+      setExpandedIds((prev) => ({ ...prev, [doc.id]: nextExpanded }));
+    },
+    [expandedIds, loadChildren, resolvedProjectKey],
+  );
+
+  const handleDocumentsChanged = useCallback(
+    async (parentId: string) => {
+      if (!resolvedProjectKey) {
+        return;
+      }
+      const normalizedParent = parentId.trim();
+      if (!normalizedParent || isRootDocumentId(normalizedParent)) {
+        await loadRootDocuments(resolvedProjectKey);
+        return;
+      }
+      setExpandedIds((prev) => ({ ...prev, [normalizedParent]: true }));
+      await loadChildren(resolvedProjectKey, normalizedParent, { force: true });
+    },
+    [loadChildren, loadRootDocuments, resolvedProjectKey],
+  );
+
+  const refreshParent = useCallback(
+    async (parentId: string) => {
+      if (!resolvedProjectKey) {
+        return;
+      }
+      const normalized = parentId.trim();
+      if (!normalized || isRootDocumentId(normalized)) {
+        await loadRootDocuments(resolvedProjectKey);
+        return;
+      }
+      setExpandedIds((prev) => ({ ...prev, [normalized]: true }));
+      await loadChildren(resolvedProjectKey, normalized, { force: true });
+    },
+    [loadChildren, loadRootDocuments, resolvedProjectKey],
+  );
+
+  const handleMove = useCallback(
+    async (request: KnowledgeBaseMoveRequest) => {
+      if (!resolvedProjectKey) {
+        return;
+      }
+		const payload = {
+			target_parent_id: request.newParentId,
+			before_doc_id: request.beforeId,
+			after_doc_id: request.afterId,
+		};
+      const response = await apiFetch(
+        `/api/projects/${encodeURIComponent(resolvedProjectKey)}/documents/${encodeURIComponent(request.docId)}/move`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+      if (!response.ok) {
+        return;
+      }
+      await refreshParent(request.sourceParentId);
+      if (request.targetParentId !== request.sourceParentId) {
+        await refreshParent(request.targetParentId);
+      }
+    },
+    [refreshParent, resolvedProjectKey],
+  );
+
+  const handleSelectDocument = useCallback(
+    (doc: KnowledgeBaseDocument) => {
+      if (!doc.id) {
+        return;
+      }
+      navigate(`/documents/${encodeURIComponent(doc.id)}`);
+    },
+    [navigate],
+  );
 
   const activeDocument = document;
   const allowChildActions = activeDocument ? activeDocument.docType !== "overview" : true;
@@ -270,59 +670,22 @@ function DocumentPage({
     if (!resolvedProjectKey || !resolvedDocumentId) {
       return;
     }
-    const requestKey = `${resolvedProjectKey}:${resolvedDocumentId}`;
-    const cachedHierarchy = documentHierarchyCache.get(requestKey);
     const applyHierarchy = (hierarchy: Array<{ id: string; name: string }>) => {
       setDocument((prev) => {
         if (!prev || prev.id !== resolvedDocumentId) {
           return prev;
         }
         const updated = { ...prev, hierarchy };
-        documentCache.set(requestKey, updated);
+        documentCache.set(`${resolvedProjectKey}:${resolvedDocumentId}`, updated);
         return updated;
       });
     };
-
-    if (cachedHierarchy) {
-      applyHierarchy(cachedHierarchy);
-      return;
-    }
-
-    let promise = documentHierarchyPromiseCache.get(requestKey);
-    if (!promise) {
-      promise = (async () => {
-        const response = await apiFetch(
-          `/api/projects/${encodeURIComponent(
-            resolvedProjectKey,
-          )}/documents/${encodeURIComponent(resolvedDocumentId)}/hierarchy`,
-        );
-        if (!response.ok) {
-          throw new Error("failed to load document hierarchy");
-        }
-        const payload = (await response.json()) as DocumentHierarchyResponse;
-        const items = Array.isArray(payload?.data) ? payload.data : [];
-        return items
-          .map((item) => ({
-            id: String(item.id ?? "").trim(),
-            name: String(item.title ?? "").trim(),
-          }))
-          .filter((item) => item.id);
-      })();
-      documentHierarchyPromiseCache.set(requestKey, promise);
-      promise.finally(() => {
-        if (documentHierarchyPromiseCache.get(requestKey) === promise) {
-          documentHierarchyPromiseCache.delete(requestKey);
-        }
-      });
-    }
-
     let isActive = true;
-    promise
+    getDocumentHierarchy(resolvedProjectKey, resolvedDocumentId)
       .then((hierarchy) => {
         if (!isActive) {
           return;
         }
-        documentHierarchyCache.set(requestKey, hierarchy);
         applyHierarchy(hierarchy);
       })
       .catch(() => {
@@ -332,7 +695,7 @@ function DocumentPage({
     return () => {
       isActive = false;
     };
-  }, [resolvedDocumentId, resolvedProjectKey]);
+  }, [getDocumentHierarchy, resolvedDocumentId, resolvedProjectKey]);
 
   useEffect(() => {
     if (!proposalId || !resolvedProjectKey || !resolvedDocumentId) {
@@ -386,25 +749,6 @@ function DocumentPage({
       isActive = false;
     };
   }, [proposalId, resolvedDocumentId, resolvedProjectKey]);
-
-  useEffect(() => {
-    if (!onDocumentMetaLoaded) {
-      return;
-    }
-    if (!resolvedDocumentId) {
-      onDocumentMetaLoaded(null);
-      return;
-    }
-    if (!document || document.id !== resolvedDocumentId) {
-      onDocumentMetaLoaded(null);
-      return;
-    }
-    onDocumentMetaLoaded({
-      id: document.id,
-      parentId: document.parentId,
-      hierarchy: document.hierarchy.map((item) => item.id),
-    });
-  }, [document, onDocumentMetaLoaded, resolvedDocumentId]);
 
   useEffect(() => {
     if (!resolvedDocumentId) {
@@ -476,9 +820,7 @@ function DocumentPage({
       const payload = (await response.json()) as DocumentResponse;
       const updated = mapDocumentDetail(payload?.data, resolvedDocumentId);
       setDocument(updated);
-      if (onDocumentsChanged) {
-        onDocumentsChanged(updated.parentId || "");
-      }
+      await handleDocumentsChanged(updated.parentId || "");
       clearProposalParam();
       setDiffData(null);
     } catch (err) {
@@ -622,7 +964,7 @@ function DocumentPage({
             type: "success",
             message: `Created OpenAPI document: ${created.title}`,
           });
-          onDocumentsChanged?.(activeDocument?.id ?? "");
+          await handleDocumentsChanged(activeDocument?.id ?? "");
         } else {
           setImportedAssets((prev) => {
             if (!prev || prev.projectKey !== resolvedProjectKey) {
@@ -701,7 +1043,7 @@ function DocumentPage({
             type: "success",
             message: `Created ${createdDocs.length} OpenAPI document(s).`,
           });
-          onDocumentsChanged?.(parentId);
+          await handleDocumentsChanged(parentId);
         } else {
           setImportStatus({ type: "success", message: "Upload completed." });
         }
@@ -824,225 +1166,241 @@ function DocumentPage({
   };
 
   return (
-    <>
-      <DocumentHeader
-        breadcrumbItems={breadcrumbItems}
-        mode="view"
-        allowChildActions={allowChildActions}
-        allowEdit={Boolean(activeDocument)}
-        allowRebuild={Boolean(activeDocument)}
-        rebuilding={rebuilding}
-        onEdit={handleEdit}
-        onSave={() => {}}
-        onCancel={() => {}}
-        onNew={handleOpenNew}
-        onImport={() => handleOpenImportWithMode("file")}
-        onRebuild={handleRebuild}
-      />
-      <div className="doc-viewer-page">{bodyContent()}</div>
-      {importModalOpen ? (
-        <div
-          className="modal-overlay"
-          role="dialog"
-          aria-modal="true"
-          onClick={handleCloseImport}
-        >
-          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Upload Assets</h2>
-              <button className="modal-close" type="button" onClick={handleCloseImport}>
-                Close
-              </button>
-            </div>
-            <div className="modal-body">
-              <div className="kb-import-tabs" role="tablist">
-                <button
-                  className={`kb-import-tab${importMode === "file" ? " active" : ""}`}
-                  type="button"
-                  onClick={() => handleModeChange("file")}
-                >
-                  File
-                </button>
-                <button
-                  className={`kb-import-tab${importMode === "folder" ? " active" : ""}`}
-                  type="button"
-                  onClick={() => handleModeChange("folder")}
-                >
-                  Folder
+    <KnowledgeBaseLayout
+      sideNav={
+        <KnowledgeBaseSideNav
+          documents={rootDocuments}
+          childrenByParent={childrenByParent}
+          expandedIds={expandedIds}
+          activeId={resolvedDocumentId || null}
+          loadingIds={loadingIds}
+          rootLoading={rootLoading}
+          onSelect={handleSelectDocument}
+          onToggle={handleToggle}
+          onMove={handleMove}
+        />
+      }
+    >
+      <>
+        <DocumentHeader
+          breadcrumbItems={breadcrumbItems}
+          mode="view"
+          allowChildActions={allowChildActions}
+          allowEdit={Boolean(activeDocument)}
+          allowRebuild={Boolean(activeDocument)}
+          rebuilding={rebuilding}
+          onEdit={handleEdit}
+          onSave={() => {}}
+          onCancel={() => {}}
+          onNew={handleOpenNew}
+          onImport={() => handleOpenImportWithMode("file")}
+          onRebuild={handleRebuild}
+        />
+        <div className="doc-viewer-page">{bodyContent()}</div>
+        {importModalOpen ? (
+          <div
+            className="modal-overlay"
+            role="dialog"
+            aria-modal="true"
+            onClick={handleCloseImport}
+          >
+            <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+              <div className="modal-header">
+                <h2>Upload Assets</h2>
+                <button className="modal-close" type="button" onClick={handleCloseImport}>
+                  Close
                 </button>
               </div>
-              {importMode === "file" ? (
-                <div className="kb-import-panel">
-                  <div className="kb-import-visual" aria-hidden="true">
-                    <svg
-                      className="kb-import-icon"
-                      viewBox="0 0 48 48"
-                      role="presentation"
-                    >
-                      <path
-                        d="M12 6h16l8 8v28H12z"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      />
-                      <path
-                        d="M28 6v10h10"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      />
-                    </svg>
-                  </div>
-                  <div className="kb-import-title">Select a file to import</div>
-                  <div className="kb-import-note">Uploads create assets only.</div>
-                  <button className="btn ghost" type="button" onClick={handleFilePick}>
-                    Choose file
+              <div className="modal-body">
+                <div className="kb-import-tabs" role="tablist">
+                  <button
+                    className={`kb-import-tab${importMode === "file" ? " active" : ""}`}
+                    type="button"
+                    onClick={() => handleModeChange("file")}
+                  >
+                    File
                   </button>
-                  <div className="kb-import-selection">
-                    {selectedFiles[0]?.name ?? "No file selected"}
-                  </div>
-                </div>
-              ) : (
-                <div className="kb-import-panel">
-                  <div className="kb-import-visual" aria-hidden="true">
-                    <svg
-                      className="kb-import-icon"
-                      viewBox="0 0 48 48"
-                      role="presentation"
-                    >
-                      <path
-                        d="M6 16h14l4 4h18v20H6z"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      />
-                      <path
-                        d="M6 16v-6h12l4 4h20v6"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      />
-                    </svg>
-                  </div>
-                  <div className="kb-import-title">Select a folder to import</div>
-                  <div className="kb-import-note">Uploads create assets only.</div>
-                  <button className="btn ghost" type="button" onClick={handleFolderPick}>
-                    Choose folder
+                  <button
+                    className={`kb-import-tab${importMode === "folder" ? " active" : ""}`}
+                    type="button"
+                    onClick={() => handleModeChange("folder")}
+                  >
+                    Folder
                   </button>
-                  <div className="kb-import-selection">
-                    {selectedFiles.length > 0
-                      ? `${selectedFiles.length} files selected`
-                      : "No folder selected"}
-                  </div>
                 </div>
-              )}
-              {importStatus.type !== "idle" ? (
-                <div
-                  className={`kb-import-status ${
-                    importStatus.type === "error" ? "error" : "success"
-                  }`}
-                >
-                  {importStatus.message}
-                </div>
-              ) : null}
-              {openApiDocs.length > 0 ? (
-                <div className="kb-import-summary">
-                  {openApiDocs.map((doc) => (
-                    <div key={doc.assetId} className="kb-import-summary-item">
-                      Created OpenAPI document: {doc.title}
+                {importMode === "file" ? (
+                  <div className="kb-import-panel">
+                    <div className="kb-import-visual" aria-hidden="true">
+                      <svg
+                        className="kb-import-icon"
+                        viewBox="0 0 48 48"
+                        role="presentation"
+                      >
+                        <path
+                          d="M12 6h16l8 8v28H12z"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        />
+                        <path
+                          d="M28 6v10h10"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        />
+                      </svg>
                     </div>
-                  ))}
-                </div>
-              ) : null}
-              {importedAssetCount > 0 ? (
-                <div className="kb-import-summary">
-                  <div className="kb-import-summary-item">
-                    Imported assets queued: {importedAssetCount}
+                    <div className="kb-import-title">Select a file to import</div>
+                    <div className="kb-import-note">Uploads create assets only.</div>
+                    <button className="btn ghost" type="button" onClick={handleFilePick}>
+                      Choose file
+                    </button>
+                    <div className="kb-import-selection">
+                      {selectedFiles[0]?.name ?? "No file selected"}
+                    </div>
                   </div>
-                </div>
-              ) : null}
-            </div>
-            <div className="modal-actions">
-              <button className="btn ghost" type="button" onClick={handleCloseImport}>
-                Cancel
-              </button>
-              <button
-                className="btn primary"
-                type="button"
-                onClick={handleImportSubmit}
-                disabled={uploading}
-              >
-                {uploading ? <span className="kb-import-spinner" aria-hidden="true" /> : null}
-                {importMode === "folder" && uploading ? `Upload ${uploadProgress}%` : "Upload"}
-              </button>
+                ) : (
+                  <div className="kb-import-panel">
+                    <div className="kb-import-visual" aria-hidden="true">
+                      <svg
+                        className="kb-import-icon"
+                        viewBox="0 0 48 48"
+                        role="presentation"
+                      >
+                        <path
+                          d="M6 16h14l4 4h18v20H6z"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        />
+                        <path
+                          d="M6 16v-6h12l4 4h20v6"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        />
+                      </svg>
+                    </div>
+                    <div className="kb-import-title">Select a folder to import</div>
+                    <div className="kb-import-note">Uploads create assets only.</div>
+                    <button className="btn ghost" type="button" onClick={handleFolderPick}>
+                      Choose folder
+                    </button>
+                    <div className="kb-import-selection">
+                      {selectedFiles.length > 0
+                        ? `${selectedFiles.length} files selected`
+                        : "No folder selected"}
+                    </div>
+                  </div>
+                )}
+                {importStatus.type !== "idle" ? (
+                  <div
+                    className={`kb-import-status ${
+                      importStatus.type === "error" ? "error" : "success"
+                    }`}
+                  >
+                    {importStatus.message}
+                  </div>
+                ) : null}
+                {openApiDocs.length > 0 ? (
+                  <div className="kb-import-summary">
+                    {openApiDocs.map((doc) => (
+                      <div key={doc.assetId} className="kb-import-summary-item">
+                        Created OpenAPI document: {doc.title}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {importedAssetCount > 0 ? (
+                  <div className="kb-import-summary">
+                    <div className="kb-import-summary-item">
+                      Imported assets queued: {importedAssetCount}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <div className="modal-actions">
+                <button className="btn ghost" type="button" onClick={handleCloseImport}>
+                  Cancel
+                </button>
+                <button
+                  className="btn primary"
+                  type="button"
+                  onClick={handleImportSubmit}
+                  disabled={uploading}
+                >
+                  {uploading ? <span className="kb-import-spinner" aria-hidden="true" /> : null}
+                  {importMode === "folder" && uploading ? `Upload ${uploadProgress}%` : "Upload"}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      ) : null}
-      {rebuildModalOpen ? (
-        <div
-          className="modal-overlay"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setRebuildModalOpen(false)}
-        >
-          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Rebuild knowledge</h2>
-              <button
-                className="modal-close"
-                type="button"
-                onClick={() => setRebuildModalOpen(false)}
-              >
-                Close
-              </button>
-            </div>
-            <div className="modal-body">
-              Generate a document summary as well?
-            </div>
-            <div className="modal-actions">
-              <button
-                className="btn ghost"
-                type="button"
-                onClick={() => setRebuildModalOpen(false)}
-                disabled={rebuilding}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn ghost"
-                type="button"
-                onClick={() => handleRebuildChoice(false)}
-                disabled={rebuilding}
-              >
-                Rebuild only
-              </button>
-              <button
-                className="btn primary"
-                type="button"
-                onClick={() => handleRebuildChoice(true)}
-                disabled={rebuilding}
-              >
-                Rebuild + Summary
-              </button>
+        ) : null}
+        {rebuildModalOpen ? (
+          <div
+            className="modal-overlay"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setRebuildModalOpen(false)}
+          >
+            <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+              <div className="modal-header">
+                <h2>Rebuild knowledge</h2>
+                <button
+                  className="modal-close"
+                  type="button"
+                  onClick={() => setRebuildModalOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+              <div className="modal-body">
+                Generate a document summary as well?
+              </div>
+              <div className="modal-actions">
+                <button
+                  className="btn ghost"
+                  type="button"
+                  onClick={() => setRebuildModalOpen(false)}
+                  disabled={rebuilding}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn ghost"
+                  type="button"
+                  onClick={() => handleRebuildChoice(false)}
+                  disabled={rebuilding}
+                >
+                  Rebuild only
+                </button>
+                <button
+                  className="btn primary"
+                  type="button"
+                  onClick={() => handleRebuildChoice(true)}
+                  disabled={rebuilding}
+                >
+                  Rebuild + Summary
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      ) : null}
-      <input
-        ref={fileInputRef}
-        className="kb-file-input"
-        type="file"
-        onChange={handleFileChange}
-      />
-      <input
-        ref={folderInputRef}
-        className="kb-file-input"
-        type="file"
-        multiple
-        onChange={handleFileChange}
-      />
-    </>
+        ) : null}
+        <input
+          ref={fileInputRef}
+          className="kb-file-input"
+          type="file"
+          onChange={handleFileChange}
+        />
+        <input
+          ref={folderInputRef}
+          className="kb-file-input"
+          type="file"
+          multiple
+          onChange={handleFileChange}
+        />
+      </>
+    </KnowledgeBaseLayout>
   );
 }
 
@@ -1057,13 +1415,13 @@ const mapHierarchyToBreadcrumb = (
     return [
       {
         label: fallbackTitle || "Document",
-        to: `/documents?document_id=${encodeURIComponent(fallbackId)}`,
+        to: `/documents/${encodeURIComponent(fallbackId)}`,
       },
     ];
   }
   return hierarchy.map((item) => ({
     label: item.name || "Document",
-    to: `/documents?document_id=${encodeURIComponent(item.id)}`,
+    to: `/documents/${encodeURIComponent(item.id)}`,
   }));
 };
 

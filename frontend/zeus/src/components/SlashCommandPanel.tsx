@@ -127,7 +127,7 @@ function SlashCommandPanel({
         onClick: ({ key }) => onSelect(String(key)),
       }}
       overlayClassName="chat-dock-dropdown"
-      dropdownRender={(menu) =>
+      popupRender={(menu) =>
         menuItems.length === 0 ? (
           <div className="chat-dock-dropdown-empty">{notFoundContent}</div>
         ) : (

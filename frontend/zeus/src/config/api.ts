@@ -16,7 +16,31 @@ const fetchWithCredentials = (path: string, init: RequestInit = {}) => {
   return fetch(buildApiUrl(path), { ...init, credentials: "include" });
 };
 
+const getCallerFrames = () => {
+  const stack = new Error().stack?.split("\n") ?? [];
+  const frames = stack.slice(1).map((line) => line.trim());
+  const filtered = frames.filter((line) => {
+    return !line.includes("/config/api.ts") && !line.includes("config/api.ts");
+  });
+  return {
+    caller3: filtered[2] ?? "",
+    caller4: filtered[3] ?? "",
+  };
+};
+
 export const apiFetch = (path: string, init: RequestInit = {}) => {
+  if (import.meta.env.DEV && path !== "/api/system") {
+    const { caller3, caller4 } = getCallerFrames();
+    const method = (init.method ?? "GET").toUpperCase();
+    console.groupCollapsed(`[api] ${method} ${path}`);
+    if (caller3) {
+      console.log("caller3:", caller3);
+    }
+    if (caller4) {
+      console.log("caller4:", caller4);
+    }
+    console.groupEnd();
+  }
   if (!hasSessionCookie() && !hasSessionBootstrap()) {
     return ensureSystemSession().then(() => fetchWithCredentials(path, init));
   }

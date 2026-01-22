@@ -135,7 +135,7 @@ func TestService_Move_Reparent(t *testing.T) {
 	require.NoError(t, svc.Save(ctx, testProjectID, child))
 
 	// Move Child -> Parent
-	err := svc.Move(ctx, testProjectID, "child-1", "parent-1", -1)
+	err := svc.Move(ctx, testProjectID, "child-1", "parent-1", "", "")
 	require.NoError(t, err)
 
 	// Verify Location
@@ -164,7 +164,7 @@ func TestService_GetChildren_Ordering(t *testing.T) {
 	// Move(d3, root, 0) places C at top
 	// Move(d1, root, 1) places A at 1
 	// B is last
-	require.NoError(t, svc.Move(ctx, testProjectID, "d3", "root", 0))
+	require.NoError(t, svc.Move(ctx, testProjectID, "d3", "root", "d1", ""))
 
 	// GetChildren
 	items, err := svc.GetChildren(ctx, testProjectID, "root")
@@ -379,7 +379,7 @@ func TestService_Hooks(t *testing.T) {
 
 	doc2 := newDoc("h2", "Parent")
 	require.NoError(t, svc.Save(ctx, testProjectID, doc2))
-	require.NoError(t, svc.Move(ctx, testProjectID, "h1", "h2", 0))
+	require.NoError(t, svc.Move(ctx, testProjectID, "h1", "h2", "", ""))
 
 	require.NoError(t, svc.Delete(ctx, testProjectID, "h1"))
 

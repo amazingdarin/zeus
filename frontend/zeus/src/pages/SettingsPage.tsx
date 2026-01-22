@@ -394,7 +394,7 @@ function SettingsPage() {
                             label: model,
                             value: model,
                           }))}
-                          dropdownRender={(menu) => (
+                          popupRender={(menu) => (
                             <>
                               {menu}
                               <Button
