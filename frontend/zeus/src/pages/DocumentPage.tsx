@@ -12,6 +12,7 @@ import KnowledgeBaseSideNav, {
 import RichTextViewer from "../components/RichTextViewer";
 import { apiFetch } from "../config/api";
 import { useProjectContext } from "../context/ProjectContext";
+import { exportContentJson } from "../utils/exportContentJson";
 
 type DocumentData = {
   id: string;
@@ -113,31 +114,59 @@ type UploadedAsset = {
   size: number;
 };
 
-type AssetKindResult = {
-  kind: string;
-  openapi_version?: string;
+type UploadFilterPresetId = "all" | "images" | "office" | "text";
+
+type UploadFilterPreset = {
+  id: UploadFilterPresetId;
+  label: string;
+  extensions: string[];
 };
 
-type UploadedFolderAsset = {
-  asset_id: string;
-  filename: string;
-  relative_path: string;
+type UploadSummary = {
+  directories: number;
+  files: number;
+  skipped: number;
 };
 
-type OpenApiCreatedDocument = {
-  id: string;
+type DirectoryEntry = {
+  path: string;
+  name: string;
+  parentPath: string | null;
+  depth: number;
+};
+
+type FileEntry = {
+  file: File;
+  path: string;
+  name: string;
+  parentPath: string | null;
+};
+
+type DocumentCreateMeta = {
   title: string;
-  assetId: string;
+  parentId: string;
 };
 
-type ImportedAssetState = {
-  projectKey: string;
-  assets: Array<{
-    asset_id: string;
-    filename: string;
-    relative_path?: string;
-  }>;
-};
+const UPLOAD_FILTER_PRESETS: UploadFilterPreset[] = [
+  { id: "all", label: "All", extensions: [] },
+  {
+    id: "images",
+    label: "Images",
+    extensions: ["png", "jpg", "jpeg", "gif", "webp", "svg"],
+  },
+  {
+    id: "office",
+    label: "Office/PDF",
+    extensions: ["docx", "pptx", "xlsx", "pdf"],
+  },
+  {
+    id: "text",
+    label: "Text",
+    extensions: ["md", "txt", "csv", "json", "yaml", "yml", "log"],
+  },
+];
+
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg"]);
 
 function DocumentPage() {
   const { currentProject } = useProjectContext();
@@ -179,9 +208,8 @@ function DocumentPage() {
     type: "idle" | "success" | "error";
     message?: string;
   }>({ type: "idle" });
-  const [openApiDocs, setOpenApiDocs] = useState<OpenApiCreatedDocument[]>([]);
-  const [importedAssets, setImportedAssets] = useState<ImportedAssetState | null>(null);
-  const importedAssetCount = importedAssets?.assets.length ?? 0;
+  const [uploadFilterPreset, setUploadFilterPreset] = useState<UploadFilterPresetId>("all");
+  const [uploadSummary, setUploadSummary] = useState<UploadSummary | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -213,6 +241,20 @@ function DocumentPage() {
     });
     return map;
   }, [childrenByParent, rootDocuments]);
+
+  const activeUploadPreset = useMemo(() => {
+    return (
+      UPLOAD_FILTER_PRESETS.find((preset) => preset.id === uploadFilterPreset) ??
+      UPLOAD_FILTER_PRESETS[0]
+    );
+  }, [uploadFilterPreset]);
+
+  const uploadAccept = useMemo(() => {
+    if (!activeUploadPreset.extensions.length) {
+      return undefined;
+    }
+    return activeUploadPreset.extensions.map((ext) => `.${ext}`).join(",");
+  }, [activeUploadPreset]);
 
   const mapDocument = useCallback(
     (item: DocumentListItem, parentId: string): KnowledgeBaseDocument => {
@@ -771,18 +813,6 @@ function DocumentPage() {
     setBreadcrumbItems(trimBreadcrumbItems(items));
   }, [document, resolvedDocumentId]);
 
-  useEffect(() => {
-    if (!resolvedProjectKey) {
-      setImportedAssets(null);
-      return;
-    }
-    setImportedAssets((prev) =>
-      prev && prev.projectKey === resolvedProjectKey
-        ? prev
-        : { projectKey: resolvedProjectKey, assets: [] },
-    );
-  }, [resolvedProjectKey]);
-
   const handleEdit = () => {
     if (!activeDocument) {
       return;
@@ -902,7 +932,7 @@ function DocumentPage() {
     setUploadTotal(0);
     setUploadCompleted(0);
     setImportStatus({ type: "idle" });
-    setOpenApiDocs([]);
+    setUploadSummary(null);
     setImportModalOpen(true);
   };
 
@@ -912,7 +942,7 @@ function DocumentPage() {
     setUploadTotal(0);
     setUploadCompleted(0);
     setImportStatus({ type: "idle" });
-    setOpenApiDocs([]);
+    setUploadSummary(null);
   };
 
   const handleFilePick = () => {
@@ -927,6 +957,7 @@ function DocumentPage() {
     const files = event.target.files ? Array.from(event.target.files) : [];
     setSelectedFiles(files);
     setImportStatus({ type: "idle" });
+    setUploadSummary(null);
   };
 
   const handleModeChange = (nextMode: "file" | "folder") => {
@@ -936,140 +967,97 @@ function DocumentPage() {
     setUploadTotal(0);
     setUploadCompleted(0);
     setImportStatus({ type: "idle" });
-    setOpenApiDocs([]);
+    setUploadSummary(null);
   };
 
-  // Uploads only create assets; document creation happens in a later step.
   const handleImportSubmit = async () => {
     if (!resolvedProjectKey) {
       console.log("import_missing_project");
       return;
     }
-
-    let shouldClearSelection = false;
-
-    if (importMode === "file") {
-      const file = selectedFiles[0];
-      if (!file) {
-        console.log("import_file_empty");
-        return;
-      }
-      setUploading(true);
-      setUploadTotal(1);
-      setUploadCompleted(0);
-      setImportStatus({ type: "idle" });
-      try {
-        const uploaded = await uploadSingleFile(resolvedProjectKey, file);
-        const kindResult = await fetchAssetKind(resolvedProjectKey, uploaded.asset_id);
-        if (kindResult.kind === "openapi") {
-          const created = await createOpenApiDocument(
-            resolvedProjectKey,
-            activeDocument?.id ?? "",
-            uploaded.filename,
-            uploaded.asset_id,
-          );
-          setOpenApiDocs([created]);
-          setImportStatus({
-            type: "success",
-            message: `Created OpenAPI document: ${created.title}`,
-          });
-          await handleDocumentsChanged(activeDocument?.id ?? "");
-        } else {
-          setImportedAssets((prev) => {
-            if (!prev || prev.projectKey !== resolvedProjectKey) {
-              return {
-                projectKey: resolvedProjectKey,
-                assets: [{ asset_id: uploaded.asset_id, filename: uploaded.filename }],
-              };
-            }
-            return {
-              projectKey: prev.projectKey,
-              assets: [
-                ...prev.assets,
-                { asset_id: uploaded.asset_id, filename: uploaded.filename },
-              ],
-            };
-          });
-          setImportStatus({ type: "success", message: "Upload completed." });
-        }
-        setUploadCompleted(1);
-        setImportModalOpen(false);
-        shouldClearSelection = true;
-      } catch (err) {
-        console.log("import_file_error", err);
-        setImportStatus({ type: "error", message: "Upload failed." });
-      } finally {
-        setUploading(false);
-        setUploadTotal(0);
-        setUploadCompleted(0);
-      }
-    } else {
-      if (selectedFiles.length === 0) {
-        console.log("import_folder_empty");
-        return;
-      }
-      try {
-        const totalItems = selectedFiles.length;
-        setUploading(true);
-        setUploadTotal(totalItems);
-        setUploadCompleted(0);
-        setImportStatus({ type: "idle" });
-        const parentId = activeDocument?.id ?? "";
-        const { assets: uploadedItems, openapiDocs: createdDocs } =
-          await uploadFolderWithOpenApi(
-            resolvedProjectKey,
-            selectedFiles,
-            parentId,
-            (completed) => setUploadCompleted(completed),
-          );
-
-        setImportedAssets((prev) => {
-          if (!prev || prev.projectKey !== resolvedProjectKey) {
-            return {
-              projectKey: resolvedProjectKey,
-              assets: uploadedItems.map((item) => ({
-                asset_id: item.asset_id,
-                filename: item.filename,
-                relative_path: item.relative_path,
-              })),
-            };
-          }
-          return {
-            projectKey: prev.projectKey,
-            assets: [
-              ...prev.assets,
-              ...uploadedItems.map((item) => ({
-                asset_id: item.asset_id,
-                filename: item.filename,
-                relative_path: item.relative_path,
-              })),
-            ],
-          };
-        });
-        if (createdDocs.length > 0) {
-          setOpenApiDocs(createdDocs);
-          setImportStatus({
-            type: "success",
-            message: `Created ${createdDocs.length} OpenAPI document(s).`,
-          });
-          await handleDocumentsChanged(parentId);
-        } else {
-          setImportStatus({ type: "success", message: "Upload completed." });
-        }
-        setImportModalOpen(false);
-        shouldClearSelection = true;
-      } catch (err) {
-        console.log("import_folder_error", err);
-        setImportStatus({ type: "error", message: "Upload failed." });
-      } finally {
-        setUploading(false);
-        setUploadTotal(0);
-        setUploadCompleted(0);
-      }
+    if (selectedFiles.length === 0) {
+      console.log(importMode === "file" ? "import_file_empty" : "import_folder_empty");
+      return;
     }
 
-    if (shouldClearSelection) {
+    const { files: filteredFiles, skipped } = filterFilesByPreset(
+      selectedFiles,
+      activeUploadPreset,
+    );
+    if (filteredFiles.length === 0) {
+      setImportStatus({ type: "error", message: "No files match the selected filter." });
+      return;
+    }
+
+    const { directories, files } = buildUploadEntries(filteredFiles);
+    const totalItems = directories.length + files.length;
+    setUploading(true);
+    setUploadTotal(totalItems);
+    setUploadCompleted(0);
+    setImportStatus({ type: "idle" });
+    setUploadSummary(null);
+
+    try {
+      const baseParentId = activeDocument?.id ?? "";
+      const directoryIds = new Map<string, string>();
+      let completed = 0;
+      const markCompleted = () => {
+        completed += 1;
+        setUploadCompleted(completed);
+      };
+
+      for (const directory of directories) {
+        const parentId = directory.parentPath
+          ? directoryIds.get(directory.parentPath) ?? baseParentId
+          : baseParentId;
+        const created = await createDocumentRecord(
+          resolvedProjectKey,
+          {
+            title: directory.name,
+            parentId,
+          },
+          { type: "doc", content: [] },
+        );
+        if (created.id) {
+          directoryIds.set(directory.path, created.id);
+        }
+        markCompleted();
+      }
+
+      for (const entry of files) {
+        const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
+        const docTitle = stripExtension(entry.name) || entry.name;
+        const parentId = entry.parentPath
+          ? directoryIds.get(entry.parentPath) ?? baseParentId
+          : baseParentId;
+        const block = buildAssetBlock(resolvedProjectKey, uploaded, docTitle);
+        await createDocumentRecord(
+          resolvedProjectKey,
+          {
+            title: docTitle,
+            parentId,
+          },
+          block ? { type: "doc", content: [block] } : { type: "doc", content: [] },
+        );
+        markCompleted();
+      }
+
+      setUploadSummary({
+        directories: directories.length,
+        files: files.length,
+        skipped,
+      });
+      setImportStatus({ type: "success", message: "Upload completed." });
+      setImportModalOpen(false);
       setSelectedFiles([]);
+      await handleDocumentsChanged(baseParentId);
+    } catch (err) {
+      console.log("import_upload_error", err);
+      setImportStatus({ type: "error", message: "Upload failed." });
+    } finally {
+      setUploading(false);
+      setUploadTotal(0);
+      setUploadCompleted(0);
     }
   };
 
@@ -1237,6 +1225,20 @@ function DocumentPage() {
                     Folder
                   </button>
                 </div>
+                <div className="kb-import-tabs" role="tablist" aria-label="Filter presets">
+                  {UPLOAD_FILTER_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      className={`kb-import-tab${
+                        uploadFilterPreset === preset.id ? " active" : ""
+                      }`}
+                      type="button"
+                      onClick={() => setUploadFilterPreset(preset.id)}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
                 {importMode === "file" ? (
                   <div className="kb-import-panel">
                     <div className="kb-import-visual" aria-hidden="true">
@@ -1260,7 +1262,7 @@ function DocumentPage() {
                       </svg>
                     </div>
                     <div className="kb-import-title">Select a file to import</div>
-                    <div className="kb-import-note">Uploads create assets only.</div>
+                    <div className="kb-import-note">Uploads create documents.</div>
                     <button className="btn ghost" type="button" onClick={handleFilePick}>
                       Choose file
                     </button>
@@ -1291,7 +1293,7 @@ function DocumentPage() {
                       </svg>
                     </div>
                     <div className="kb-import-title">Select a folder to import</div>
-                    <div className="kb-import-note">Uploads create assets only.</div>
+                    <div className="kb-import-note">Uploads create documents.</div>
                     <button className="btn ghost" type="button" onClick={handleFolderPick}>
                       Choose folder
                     </button>
@@ -1311,20 +1313,19 @@ function DocumentPage() {
                     {importStatus.message}
                   </div>
                 ) : null}
-                {openApiDocs.length > 0 ? (
-                  <div className="kb-import-summary">
-                    {openApiDocs.map((doc) => (
-                      <div key={doc.assetId} className="kb-import-summary-item">
-                        Created OpenAPI document: {doc.title}
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                {importedAssetCount > 0 ? (
+                {uploadSummary ? (
                   <div className="kb-import-summary">
                     <div className="kb-import-summary-item">
-                      Imported assets queued: {importedAssetCount}
+                      Created folders: {uploadSummary.directories}
                     </div>
+                    <div className="kb-import-summary-item">
+                      Created documents: {uploadSummary.files}
+                    </div>
+                    {uploadSummary.skipped > 0 ? (
+                      <div className="kb-import-summary-item">
+                        Skipped by filter: {uploadSummary.skipped}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -1399,6 +1400,7 @@ function DocumentPage() {
           ref={fileInputRef}
           className="kb-file-input"
           type="file"
+          accept={uploadAccept}
           onChange={handleFileChange}
         />
         <input
@@ -1406,6 +1408,7 @@ function DocumentPage() {
           className="kb-file-input"
           type="file"
           multiple
+          accept={uploadAccept}
           onChange={handleFileChange}
         />
       </>
@@ -1548,50 +1551,15 @@ async function uploadSingleFile(
   };
 }
 
-async function fetchAssetKind(
+async function createDocumentRecord(
   projectKey: string,
-  assetID: string,
-): Promise<AssetKindResult> {
-  const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/assets/${encodeURIComponent(
-      assetID,
-    )}/kind`,
-  );
-  if (!response.ok) {
-    throw new Error("asset kind lookup failed");
-  }
-  const payload = await response.json();
-  const data = payload?.data ?? payload ?? {};
-  return {
-    kind: String(data.kind ?? "generic"),
-    openapi_version: typeof data.openapi_version === "string" ? data.openapi_version : "",
-  };
-}
-
-async function createOpenApiDocument(
-  projectKey: string,
-  parentId: string,
-  filename: string,
-  assetId: string,
-): Promise<OpenApiCreatedDocument> {
-  const title = stripExtension(filename) || filename;
-  const payload = {
-    meta: {
-      title,
-      parent_id: parentId,
-      extra: {
-        doc_type: "openapi",
-      },
-    },
-    body: {
-      type: "openapi",
-      content: {
-        source: `storage://${assetId}`,
-        renderer: "swagger",
-      },
-    },
-  };
-
+  metaInput: DocumentCreateMeta,
+  content: JSONContent,
+): Promise<{ id: string; title: string }> {
+  const title = metaInput.title.trim() || "Untitled Document";
+  const parentId = resolveParentId(metaInput.parentId);
+  const slug = sanitizeFileName(title);
+  const payload = exportContentJson(content, null);
   const response = await apiFetch(
     `/api/projects/${encodeURIComponent(projectKey)}/documents`,
     {
@@ -1599,60 +1567,170 @@ async function createOpenApiDocument(
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        meta: {
+          title,
+          slug: slug || undefined,
+          parent_id: parentId,
+          extra: {
+            status: "draft",
+            tags: [],
+          },
+        },
+        body: {
+          type: "tiptap",
+          content: payload,
+        },
+      }),
     },
   );
-
   if (!response.ok) {
-    throw new Error("failed to create OpenAPI document");
+    throw new Error("create document failed");
   }
   const data = await response.json();
   const meta = data?.data?.meta ?? data?.data ?? {};
   return {
-    id: String(meta.id ?? ""),
+    id: String(meta.id ?? data?.data?.id ?? ""),
     title: String(meta.title ?? title),
-    assetId,
   };
 }
 
-async function uploadFolderWithOpenApi(
-  projectKey: string,
+function filterFilesByPreset(
   files: File[],
-  parentId: string,
-  onProgress?: (completed: number, total: number) => void,
-): Promise<{ assets: UploadedFolderAsset[]; openapiDocs: OpenApiCreatedDocument[] }> {
-  const list = Array.from(files);
-  const total = list.length;
-  const assets: UploadedFolderAsset[] = [];
-  const openapiDocs: OpenApiCreatedDocument[] = [];
-  let completed = 0;
+  preset: UploadFilterPreset,
+): { files: File[]; skipped: number } {
+  if (!preset.extensions.length) {
+    return { files, skipped: 0 };
+  }
+  const allowed = new Set(preset.extensions.map((ext) => ext.toLowerCase()));
+  const filtered: File[] = [];
+  let skipped = 0;
+  for (const file of files) {
+    const extension = getFileExtension(file.name);
+    if (extension && allowed.has(extension)) {
+      filtered.push(file);
+    } else {
+      skipped += 1;
+    }
+  }
+  return { files: filtered, skipped };
+}
 
-  for (const file of list) {
+function buildUploadEntries(files: File[]): { directories: DirectoryEntry[]; files: FileEntry[] } {
+  const directoryMap = new Map<string, DirectoryEntry>();
+  const fileEntries: FileEntry[] = [];
+
+  for (const file of files) {
     const relativePath = normalizeRelativePath(
       (file as File & { webkitRelativePath?: string }).webkitRelativePath ?? file.name,
     );
-    const uploaded = await uploadSingleFile(projectKey, file);
-    const kindResult = await fetchAssetKind(projectKey, uploaded.asset_id);
-    if (kindResult.kind === "openapi") {
-      const created = await createOpenApiDocument(
-        projectKey,
-        parentId,
-        uploaded.filename,
-        uploaded.asset_id,
-      );
-      openapiDocs.push(created);
-    } else {
-      assets.push({
-        asset_id: uploaded.asset_id,
-        filename: uploaded.filename,
-        relative_path: relativePath,
-      });
+    const segments = relativePath.split("/").filter(Boolean);
+    if (segments.length === 0) {
+      continue;
     }
-    completed += 1;
-    onProgress?.(completed, total);
+    const fileName = segments[segments.length - 1];
+    let parentPath: string | null = null;
+
+    if (segments.length > 1) {
+      const dirSegments = segments.slice(0, -1);
+      for (let i = 0; i < dirSegments.length; i += 1) {
+        const dirPath = dirSegments.slice(0, i + 1).join("/");
+        if (!directoryMap.has(dirPath)) {
+          directoryMap.set(dirPath, {
+            path: dirPath,
+            name: dirSegments[i],
+            parentPath: i > 0 ? dirSegments.slice(0, i).join("/") : null,
+            depth: i,
+          });
+        }
+      }
+      parentPath = dirSegments.join("/");
+    }
+
+    fileEntries.push({
+      file,
+      path: relativePath,
+      name: fileName,
+      parentPath,
+    });
   }
 
-  return { assets, openapiDocs };
+  const directories = Array.from(directoryMap.values()).sort((a, b) => {
+    if (a.depth !== b.depth) {
+      return a.depth - b.depth;
+    }
+    return a.path.localeCompare(b.path);
+  });
+  const sortedFiles = fileEntries.sort((a, b) => a.path.localeCompare(b.path));
+  return { directories, files: sortedFiles };
+}
+
+function buildAssetBlock(projectKey: string, asset: UploadedAsset, title: string): JSONContent {
+  if (isImageAsset(asset.mime, asset.filename)) {
+    const src = buildAssetContentUrl(projectKey, asset.asset_id);
+    return {
+      type: "image",
+      attrs: {
+        src,
+        alt: title,
+        title,
+      },
+    };
+  }
+  return {
+    type: "file_block",
+    attrs: {
+      asset_id: asset.asset_id,
+      file_name: asset.filename,
+      mime: asset.mime,
+      size: asset.size,
+    },
+  };
+}
+
+function buildAssetContentUrl(projectKey: string, assetId: string): string {
+  const normalized = assetId.trim();
+  if (!normalized) {
+    return "";
+  }
+  if (!projectKey) {
+    return normalized;
+  }
+  return `/api/projects/${encodeURIComponent(projectKey)}/assets/${encodeURIComponent(
+    normalized,
+  )}/content`;
+}
+
+function isImageAsset(mime: string, filename: string): boolean {
+  const normalizedMime = mime.toLowerCase();
+  if (normalizedMime.startsWith("image/")) {
+    return true;
+  }
+  const extension = getFileExtension(filename);
+  return extension ? IMAGE_EXTENSIONS.has(extension) : false;
+}
+
+function getFileExtension(filename: string): string {
+  const trimmed = filename.trim().toLowerCase();
+  if (!trimmed) {
+    return "";
+  }
+  const lastDot = trimmed.lastIndexOf(".");
+  if (lastDot <= 0 || lastDot === trimmed.length - 1) {
+    return "";
+  }
+  return trimmed.slice(lastDot + 1);
+}
+
+function sanitizeFileName(value: string): string {
+  const trimmed = value.trim().toLowerCase();
+  const cleaned = trimmed.replace(/[^a-z0-9-_]+/g, "_").replace(/^_+|_+$/g, "");
+  return cleaned.slice(0, 48);
+}
+
+function resolveParentId(parentId: string): string {
+  const normalized = parentId.trim();
+  return normalized || "root";
 }
 
 function normalizeRelativePath(path: string): string {
@@ -1669,10 +1747,6 @@ function stripExtension(filename: string): string {
     return trimmed;
   }
   return trimmed.slice(0, lastDot);
-}
-
-function createDocumentFromAssets(_assets: ImportedAssetState) {
-  // TODO: Step 2 implement document creation from assets.
 }
 
 function isRootDocumentId(value: string): boolean {
