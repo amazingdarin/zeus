@@ -19,17 +19,15 @@ import (
 	"zeus/internal/infra/embedding"
 	"zeus/internal/infra/gitadmin"
 	"zeus/internal/infra/gitclient"
-	"zeus/internal/infra/gittemp"
 	ingestions3 "zeus/internal/infra/ingestion/s3"
 	"zeus/internal/infra/llm"
+	"zeus/internal/infra/localstorage"
 	"zeus/internal/infra/logger"
 	"zeus/internal/infra/modelruntime"
-	"zeus/internal/infra/objectstorage"
 	providerinfra "zeus/internal/infra/provider"
 	"zeus/internal/infra/searchindex"
 	httpsession "zeus/internal/infra/session"
 	"zeus/internal/infra/taskcallback"
-	"zeus/internal/ingestion"
 	gitrepo "zeus/internal/repository/git"
 	"zeus/internal/repository/postgres"
 	"zeus/internal/repository/ragindex"
@@ -145,19 +143,12 @@ func main() {
 	// Init Services
 	storageObjectSvc := svcstorageobject.NewService(s3Ingestion, s3Client, storageObjectRepo)
 
-	assetPolicy := ingestion.DefaultPolicy{}
-	gitTempStorage := gittemp.NewGitTempAssetStorage(config.AppConfig.Git.RepoRoot)
-	objectStorage := objectstorage.NewObjectStorageAssetStorage(
-		s3Client,
-		config.AppConfig.ObjectStorage.Bucket,
-	)
 	assetMetaRoot := getenv("ZEUS_ASSET_META_ROOT", config.AppConfig.Asset.MetaRoot)
+	localFileStorage := localstorage.NewLocalAssetStorage(assetMetaRoot)
 	assetMetaStore := assetmeta.NewFileStore(assetMetaRoot)
 	assetReader := assetcontent.NewReader(s3Client)
 	assetSvc := svcasset.NewService(
-		assetPolicy,
-		gitTempStorage,
-		objectStorage,
+		localFileStorage,
 		assetMetaStore,
 		assetReader,
 		projectRepo,

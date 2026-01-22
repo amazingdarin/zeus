@@ -8,36 +8,29 @@ import (
 
 	"github.com/google/uuid"
 
-	"zeus/internal/ingestion"
 	"zeus/internal/repository"
 	"zeus/internal/service"
 	"zeus/internal/service/openapi"
 )
 
 type Service struct {
-	policy        ingestion.IngestionPolicy
-	gitStorage    service.AssetStorageService
-	objectStorage service.AssetStorageService
-	metaStore     service.AssetMetaStore
-	reader        service.AssetContentReader
-	projectRepo   repository.ProjectRepository
+	localFileStorage service.AssetStorageService
+	metaStore        service.AssetMetaStore
+	reader           service.AssetContentReader
+	projectRepo      repository.ProjectRepository
 }
 
 func NewService(
-	policy ingestion.IngestionPolicy,
-	gitStorage service.AssetStorageService,
-	objectStorage service.AssetStorageService,
+	localFileStorage service.AssetStorageService,
 	metaStore service.AssetMetaStore,
 	reader service.AssetContentReader,
 	projectRepo repository.ProjectRepository,
 ) *Service {
 	return &Service{
-		policy:        policy,
-		gitStorage:    gitStorage,
-		objectStorage: objectStorage,
-		metaStore:     metaStore,
-		reader:        reader,
-		projectRepo:   projectRepo,
+		localFileStorage: localFileStorage,
+		metaStore:        metaStore,
+		reader:           reader,
+		projectRepo:      projectRepo,
 	}
 }
 
@@ -70,19 +63,13 @@ func (s *Service) ImportFile(
 	if project == nil {
 		return "", fmt.Errorf("project not found")
 	}
-	repoName := strings.TrimSpace(project.RepoName)
-	if repoName == "" {
-		return "", fmt.Errorf("project repo name is required")
-	}
 
-	target := s.policy.Decide(size, mime)
-	storage, err := s.selectStorage(target)
-	if err != nil {
-		return "", err
+	if s.localFileStorage == nil {
+		return "", fmt.Errorf("local file storage is required")
 	}
 
 	assetID := uuid.NewString()
-	stored, err := storage.Store(ctx, repoName, assetID, filename, content)
+	stored, err := s.localFileStorage.Store(ctx, projectKey, assetID, filename, content)
 	if err != nil {
 		return "", err
 	}
@@ -101,7 +88,7 @@ func (s *Service) ImportFile(
 		Size:        storedSize,
 		Mime:        storedMime,
 		StorageType: stored.StorageType,
-		GitRepo:     repoName,
+		GitRepo:     projectKey,
 		GitTempPath: stored.GitTempPath,
 		Bucket:      stored.Bucket,
 		ObjectKey:   stored.ObjectKey,
@@ -201,23 +188,6 @@ func normalizeOpenAPIVersion(version string) string {
 		return "2.0"
 	}
 	return ""
-}
-
-func (s *Service) selectStorage(target ingestion.StorageType) (service.AssetStorageService, error) {
-	switch target {
-	case ingestion.StorageTypeGit:
-		if s.gitStorage == nil {
-			return nil, fmt.Errorf("git asset storage is required")
-		}
-		return s.gitStorage, nil
-	case ingestion.StorageTypeObject:
-		if s.objectStorage == nil {
-			return nil, fmt.Errorf("object asset storage is required")
-		}
-		return s.objectStorage, nil
-	default:
-		return nil, fmt.Errorf("unsupported storage type: %s", target)
-	}
 }
 
 var _ service.AssetService = (*Service)(nil)

@@ -595,6 +595,13 @@ function DocumentPage() {
     } else {
       refreshKeyRef.current = "";
     }
+    if (shouldBypassCache) {
+      documentCache.delete(requestKey);
+      documentPromiseCache.delete(requestKey);
+      inFlightRef.current.delete(requestKey);
+      documentHierarchyCache.delete(requestKey);
+      documentHierarchyPromiseCache.delete(requestKey);
+    }
     const cached = shouldBypassCache ? null : documentCache.get(requestKey);
     if (cached) {
       setDocument(cached);
@@ -608,7 +615,9 @@ function DocumentPage() {
     setLoading(true);
     setError(null);
 
-    let promise = inFlightRef.current.get(requestKey) ?? documentPromiseCache.get(requestKey);
+    let promise = shouldBypassCache
+      ? undefined
+      : inFlightRef.current.get(requestKey) ?? documentPromiseCache.get(requestKey);
     if (!promise) {
       promise = (async () => {
         const response = await apiFetch(

@@ -9,8 +9,6 @@ import (
 	"strings"
 
 	"zeus/internal/config"
-	"zeus/internal/infra/gitclient"
-	"zeus/internal/infra/session"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -41,16 +39,11 @@ func (r *Reader) ReadHead(
 
 	switch meta.StorageType {
 	case domain.AssetStorageTypeGit:
-		sessionInfo, ok := session.FromContext(ctx)
-		if !ok || sessionInfo == nil {
-			return nil, fmt.Errorf("session is required")
+		projectKey := strings.TrimSpace(meta.ProjectKey)
+		if projectKey == "" {
+			return nil, fmt.Errorf("project key is required")
 		}
-		sessionID := strings.TrimSpace(sessionInfo.ID)
-		if sessionID == "" {
-			return nil, fmt.Errorf("session id is required")
-		}
-		gitKey := gitclient.GenGitKeyFromSession(sessionID, meta.GitRepo)
-		gitTempDir := filepath.Join(config.AppConfig.Git.RepoRoot, string(gitKey), meta.GitTempPath)
+		gitTempDir := filepath.Join(config.AppConfig.Asset.MetaRoot, projectKey, meta.GitTempPath)
 		return readHeadFromFile(gitTempDir, maxBytes)
 	case domain.AssetStorageTypeObject:
 		return r.readHeadFromObject(ctx, meta, maxBytes)
@@ -63,18 +56,13 @@ func (r *Reader) ReadAll(ctx context.Context, meta service.AssetMeta) ([]byte, e
 	if r == nil {
 		return nil, fmt.Errorf("asset reader is required")
 	}
-	sessionInfo, ok := session.FromContext(ctx)
-	if !ok || sessionInfo == nil {
-		return nil, fmt.Errorf("session is required")
-	}
-	sessionID := strings.TrimSpace(sessionInfo.ID)
-	if sessionID == "" {
-		return nil, fmt.Errorf("session id is required")
-	}
 	switch meta.StorageType {
 	case domain.AssetStorageTypeGit:
-		gitKey := gitclient.GenGitKeyFromSession(sessionID, meta.GitRepo)
-		gitTempDir := filepath.Join(config.AppConfig.Git.RepoRoot, string(gitKey), meta.GitTempPath)
+		projectKey := strings.TrimSpace(meta.ProjectKey)
+		if projectKey == "" {
+			return nil, fmt.Errorf("project key is required")
+		}
+		gitTempDir := filepath.Join(config.AppConfig.Asset.MetaRoot, projectKey, meta.GitTempPath)
 		return readAllFromFile(gitTempDir)
 	case domain.AssetStorageTypeObject:
 		return r.readAllFromObject(ctx, meta)
@@ -86,7 +74,7 @@ func (r *Reader) ReadAll(ctx context.Context, meta service.AssetMeta) ([]byte, e
 func readHeadFromFile(path string, maxBytes int64) ([]byte, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return nil, fmt.Errorf("git temp path is required")
+		return nil, fmt.Errorf("asset path is required")
 	}
 	file, err := os.Open(path)
 	if err != nil {
@@ -105,7 +93,7 @@ func readHeadFromFile(path string, maxBytes int64) ([]byte, error) {
 func readAllFromFile(path string) ([]byte, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return nil, fmt.Errorf("git temp path is required")
+		return nil, fmt.Errorf("asset path is required")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

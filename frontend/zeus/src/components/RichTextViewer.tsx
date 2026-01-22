@@ -1,7 +1,13 @@
 import type { JSONContent } from "@tiptap/react";
 import type { Extensions } from "@tiptap/core";
 
-import { BlockRefNode, DocViewer, OpenApiNode, OpenApiRefNode } from "@zeus/doc-editor";
+import {
+  BlockRefNode,
+  DocViewer,
+  FileBlockNode,
+  OpenApiNode,
+  OpenApiRefNode,
+} from "@zeus/doc-editor";
 
 import { apiFetch } from "../config/api";
 
@@ -16,6 +22,10 @@ const openApiExtensions = (projectKey?: string): Extensions => [
     fetcher: apiFetch,
   }),
   OpenApiRefNode.configure({
+    projectKey,
+    fetcher: apiFetch,
+  }),
+  FileBlockNode.configure({
     projectKey,
     fetcher: apiFetch,
   }),

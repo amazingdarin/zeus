@@ -1,3 +1,4 @@
+import { useMemo } from "react"
 import type { JSONContent } from "@tiptap/react"
 import type { Extensions } from "@tiptap/core"
 
@@ -9,5 +10,13 @@ export interface DocViewerProps {
 }
 
 export function DocViewer({ content, extensions = [] }: DocViewerProps) {
-  return <DocEditor content={content} extensions={extensions} mode="view" />
+  const contentKey = useMemo(() => JSON.stringify(content ?? {}), [content])
+  return (
+    <DocEditor
+      key={contentKey}
+      content={content}
+      extensions={extensions}
+      mode="view"
+    />
+  )
 }

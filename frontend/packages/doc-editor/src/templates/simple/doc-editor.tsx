@@ -42,6 +42,7 @@ import "../../nodes/paragraph-node/paragraph-node.scss"
 // --- Tiptap UI ---
 import { HeadingDropdownMenu } from "../../ui/heading-dropdown-menu"
 import { ImageUploadButton } from "../../ui/image-upload-button"
+import { FileBlockButton } from "../../ui/file-block-button"
 import { ListDropdownMenu } from "../../ui/list-dropdown-menu"
 import { BlockquoteButton } from "../../ui/blockquote-button"
 import { CodeBlockButton } from "../../ui/code-block-button"
@@ -167,7 +168,8 @@ const MainToolbarContent = ({
       <ToolbarSeparator />
 
       <ToolbarGroup>
-        <ImageUploadButton text="Add" />
+        <ImageUploadButton text="Image" />
+        <FileBlockButton text="File" />
       </ToolbarGroup>
 
       <Spacer />

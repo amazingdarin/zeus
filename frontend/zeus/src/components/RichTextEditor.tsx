@@ -2,7 +2,13 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import type { Editor, JSONContent } from "@tiptap/react";
 import type { Extensions, Range } from "@tiptap/core";
 
-import { BlockRefNode, DocEditor, OpenApiNode, OpenApiRefNode } from "@zeus/doc-editor";
+import {
+  BlockRefNode,
+  DocEditor,
+  FileBlockNode,
+  OpenApiNode,
+  OpenApiRefNode,
+} from "@zeus/doc-editor";
 
 import { apiFetch } from "../config/api";
 import BlockRefPicker from "./BlockRefPicker";
@@ -21,6 +27,10 @@ const openApiExtensions = (projectKey?: string): Extensions => [
     fetcher: apiFetch,
   }),
   OpenApiRefNode.configure({
+    projectKey,
+    fetcher: apiFetch,
+  }),
+  FileBlockNode.configure({
     projectKey,
     fetcher: apiFetch,
   }),

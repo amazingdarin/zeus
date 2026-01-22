@@ -1,4 +1,4 @@
-package gittemp
+package localstorage
 
 import (
 	"context"
@@ -10,25 +10,22 @@ import (
 	"strings"
 
 	"zeus/internal/domain"
-	"zeus/internal/infra/gitclient"
-	"zeus/internal/infra/session"
 	"zeus/internal/service"
 )
 
-// GitTempAssetStorage stores small assets as temporary files under repo __tmp_assets.
-// It does not perform any git operations.
-type GitTempAssetStorage struct {
+// LocalAssetStorage stores assets as local files under project assets directory.
+type LocalAssetStorage struct {
 	repoRoot string
 }
 
-func NewGitTempAssetStorage(repoRoot string) *GitTempAssetStorage {
+func NewLocalAssetStorage(repoRoot string) *LocalAssetStorage {
 	repoRoot = strings.TrimSpace(repoRoot)
-	return &GitTempAssetStorage{repoRoot: repoRoot}
+	return &LocalAssetStorage{repoRoot: repoRoot}
 }
 
-func (s *GitTempAssetStorage) Store(
+func (s *LocalAssetStorage) Store(
 	ctx context.Context,
-	repo string,
+	projectKey string,
 	assetID string,
 	filename string,
 	content io.Reader,
@@ -36,11 +33,11 @@ func (s *GitTempAssetStorage) Store(
 	_ = ctx
 	_ = filename
 	if s == nil {
-		return service.StoredAssetInfo{}, fmt.Errorf("git temp storage is required")
+		return service.StoredAssetInfo{}, fmt.Errorf("asset storage is required")
 	}
-	repo = strings.TrimSpace(repo)
-	if repo == "" {
-		return service.StoredAssetInfo{}, fmt.Errorf("repo is required")
+	projectKey = strings.TrimSpace(projectKey)
+	if projectKey == "" {
+		return service.StoredAssetInfo{}, fmt.Errorf("project key is required")
 	}
 	assetID = strings.TrimSpace(assetID)
 	if assetID == "" {
@@ -53,20 +50,10 @@ func (s *GitTempAssetStorage) Store(
 		return service.StoredAssetInfo{}, fmt.Errorf("content is required")
 	}
 	if s.repoRoot == "" {
-		return service.StoredAssetInfo{}, fmt.Errorf("repo root is required")
+		return service.StoredAssetInfo{}, fmt.Errorf("asset root is required")
 	}
 
-	sessionInfo, ok := session.FromContext(ctx)
-	if !ok || sessionInfo == nil {
-		return service.StoredAssetInfo{}, fmt.Errorf("session is required")
-	}
-	sessionID := strings.TrimSpace(sessionInfo.ID)
-	if sessionID == "" {
-		return service.StoredAssetInfo{}, fmt.Errorf("session id is required")
-	}
-	gitKey := gitclient.GenGitKeyFromSession(sessionID, repo)
-
-	baseDir := filepath.Join(s.repoRoot, string(gitKey), "__tmp_assets")
+	baseDir := filepath.Join(s.repoRoot, projectKey, "assets")
 	if err := os.MkdirAll(baseDir, 0o755); err != nil {
 		return service.StoredAssetInfo{}, fmt.Errorf("create temp dir: %w", err)
 	}
@@ -105,9 +92,9 @@ func (s *GitTempAssetStorage) Store(
 		StorageType: domain.AssetStorageTypeGit,
 		Size:        size,
 		Mime:        mime,
-		GitRepo:     repo,
-		GitTempPath: filepath.Join("__tmp_assets", assetID),
+		GitRepo:     projectKey,
+		GitTempPath: filepath.Join("assets", assetID),
 	}, nil
 }
 
-var _ service.AssetStorageService = (*GitTempAssetStorage)(nil)
+var _ service.AssetStorageService = (*LocalAssetStorage)(nil)
