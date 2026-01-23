@@ -9,6 +9,7 @@ import OfficeViewer from "../../viewer/OfficeViewer"
 import { Button } from "../../primitives/button"
 import { TrashIcon } from "../../icons/trash-icon"
 import { ImagePlusIcon } from "../../icons/image-plus-icon"
+import { ChevronDownIcon } from "../../icons/chevron-down-icon"
 import type {
   FileBlockAttrs,
   FileBlockNodeOptions,
@@ -214,6 +215,7 @@ export function FileBlockNodeView({ node, editor, extension, getPos }: NodeViewP
 
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState(false)
   const [textState, setTextState] = useState<FileBlockState>({
     loading: false,
     error: null,
@@ -318,6 +320,10 @@ export function FileBlockNodeView({ node, editor, extension, getPos }: NodeViewP
     fileInputRef.current?.click()
   }
 
+  const toggleCollapse = () => {
+    setCollapsed((prev) => !prev)
+  }
+
   const handleRemove = () => {
     updateNodeAttrs({
       asset_id: "",
@@ -372,7 +378,11 @@ export function FileBlockNodeView({ node, editor, extension, getPos }: NodeViewP
 
   return (
     <NodeViewWrapper className="file-block-node">
-      <div className={`file-block-card${editor.isEditable ? " is-editable" : ""}`}>
+      <div
+        className={`file-block-card${editor.isEditable ? " is-editable" : ""}${
+          collapsed ? " is-collapsed" : ""
+        }`}
+      >
         <div className="file-block-header">
           <div className="file-block-meta">
             <div className="file-block-name">{nameLabel}</div>
@@ -407,47 +417,63 @@ export function FileBlockNodeView({ node, editor, extension, getPos }: NodeViewP
                 </Button>
               ) : null}
             </div>
+          ) : assetId ? (
+            <div className="file-block-actions">
+              <button
+                type="button"
+                className="file-block-toggle"
+                onClick={toggleCollapse}
+                aria-label={collapsed ? "Expand file preview" : "Collapse file preview"}
+                aria-expanded={!collapsed}
+              >
+                <ChevronDownIcon className="file-block-toggle-icon" />
+              </button>
+            </div>
           ) : null}
         </div>
-        {uploading ? <div className="file-block-state">Uploading...</div> : null}
-        {uploadError ? <div className="file-block-error">{uploadError}</div> : null}
-        {showUploadPrompt ? (
-          <button
-            type="button"
-            className="file-block-dropzone"
-            onClick={handleSelectFile}
-          >
-            <div className="file-block-dropzone-content">
-              <div className="file-block-dropzone-icon">+</div>
-              <div className="file-block-dropzone-text">
-                Drop a file or <em>browse</em>
+        {!collapsed ? (
+          <>
+            {uploading ? <div className="file-block-state">Uploading...</div> : null}
+            {uploadError ? <div className="file-block-error">{uploadError}</div> : null}
+            {showUploadPrompt ? (
+              <button
+                type="button"
+                className="file-block-dropzone"
+                onClick={handleSelectFile}
+              >
+                <div className="file-block-dropzone-content">
+                  <div className="file-block-dropzone-icon">+</div>
+                  <div className="file-block-dropzone-text">
+                    Drop a file or <em>browse</em>
+                  </div>
+                  <div className="file-block-dropzone-subtext">Supports office + text files</div>
+                </div>
+              </button>
+            ) : showOfficeViewer ? (
+              <div className="file-block-preview">
+                <OfficeViewer
+                  src={assetUrl}
+                  fileType={resolvedKind.officeType!}
+                  fetcher={fetcher}
+                />
               </div>
-              <div className="file-block-dropzone-subtext">Supports office + text files</div>
-            </div>
-          </button>
-        ) : showOfficeViewer ? (
-          <div className="file-block-preview">
-            <OfficeViewer
-              src={assetUrl}
-              fileType={resolvedKind.officeType!}
-              fetcher={fetcher}
-            />
-          </div>
-        ) : showTextViewer ? (
-          <div className="file-block-preview file-block-preview--text">
-            {textState.loading ? (
-              <div className="file-block-state">Loading text...</div>
-            ) : textState.error ? (
-              <div className="file-block-error">{textState.error}</div>
-            ) : (
-              <pre className="file-block-text">
-                {textState.text}
-                {textState.truncated ? "\n..." : ""}
-              </pre>
-            )}
-          </div>
-        ) : showUnsupported ? (
-          <div className="file-block-state">Preview not available.</div>
+            ) : showTextViewer ? (
+              <div className="file-block-preview file-block-preview--text">
+                {textState.loading ? (
+                  <div className="file-block-state">Loading text...</div>
+                ) : textState.error ? (
+                  <div className="file-block-error">{textState.error}</div>
+                ) : (
+                  <pre className="file-block-text">
+                    {textState.text}
+                    {textState.truncated ? "\n..." : ""}
+                  </pre>
+                )}
+              </div>
+            ) : showUnsupported ? (
+              <div className="file-block-state">Preview not available.</div>
+            ) : null}
+          </>
         ) : null}
       </div>
       <input
