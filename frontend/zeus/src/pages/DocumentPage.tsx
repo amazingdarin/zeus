@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
+import type { Extensions } from "@tiptap/core";
 import type { JSONContent } from "@tiptap/react";
+import { Image } from "@tiptap/extension-image";
+import { StarterKit } from "@tiptap/starter-kit";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import DocumentHeader from "../components/DocumentHeader";
@@ -17,16 +20,24 @@ import {
   fetchProposalDiff,
   applyProposal,
   moveDocument,
-  importDocument,
   createDocument,
   type DocumentListItem,
   type DocumentDetail,
 } from "../api/documents";
 import { rebuildDocumentRag } from "../api/projects";
 import { uploadAsset } from "../api/assets";
+import { apiFetch } from "../config/api";
 import { sanitizeFileName } from "../utils/fileName";
 import { useProjectContext } from "../context/ProjectContext";
-import { tiptapJsonToMarkdown } from "@zeus/doc-editor";
+import {
+  CodeBlockNode,
+  FileBlockNode,
+  HorizontalRule,
+  OpenApiNode,
+  OpenApiRefNode,
+  markdownToTiptapJson,
+  tiptapJsonToMarkdown,
+} from "@zeus/doc-editor";
 import { exportContentJson } from "../utils/exportContentJson";
 
 type DocumentData = {
@@ -144,6 +155,28 @@ const SMART_IMPORT_OPTIONS: SmartImportOption[] = [
   { id: "pdf", label: "PDF", enabled: false },
 ];
 
+const buildMarkdownExtensions = (projectKey: string): Extensions => [
+  StarterKit.configure({
+    horizontalRule: false,
+    codeBlock: false,
+  }),
+  HorizontalRule,
+  CodeBlockNode,
+  Image,
+  FileBlockNode.configure({
+    projectKey,
+    fetcher: apiFetch,
+  }),
+  OpenApiNode.configure({
+    projectKey,
+    fetcher: apiFetch,
+  }),
+  OpenApiRefNode.configure({
+    projectKey,
+    fetcher: apiFetch,
+  }),
+];
+
 function DocumentPage() {
   const { currentProject } = useProjectContext();
   const params = useParams<{ documentId?: string }>();
@@ -235,6 +268,11 @@ function DocumentPage() {
     }
     return activeUploadPreset.extensions.map((ext) => `.${ext}`).join(",");
   }, [activeUploadPreset]);
+
+  const markdownExtensions = useMemo(
+    () => buildMarkdownExtensions(resolvedProjectKey),
+    [resolvedProjectKey],
+  );
 
   const toggleSmartImportType = useCallback((type: SmartImportType) => {
     setSmartImportTypes((prev) => {
@@ -978,8 +1016,39 @@ function DocumentPage() {
           smartImportTypes.has("markdown") &&
           isMarkdownFile(entry.file);
         if (canSmartImport) {
-          await importMarkdownDocument(resolvedProjectKey, entry.file, parentId, docTitle);
-          converted += 1;
+          try {
+            const markdown = await entry.file.text();
+            const parsed = markdownToTiptapJson(markdown, { extensions: markdownExtensions });
+            const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
+            const fileBlock = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, true);
+            const contentItems = Array.isArray(parsed.content) ? parsed.content : [];
+            const mergedContent: JSONContent = {
+              ...parsed,
+              type: "doc",
+              content: [fileBlock, ...contentItems],
+            };
+            await createDocumentRecord(
+              resolvedProjectKey,
+              {
+                title: docTitle,
+                parentId,
+              },
+              mergedContent,
+            );
+            converted += 1;
+          } catch (err) {
+            const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
+            const fileBlock = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, true);
+            await createDocumentRecord(
+              resolvedProjectKey,
+              {
+                title: docTitle,
+                parentId,
+              },
+              fileBlock ? { type: "doc", content: [fileBlock] } : { type: "doc", content: [] },
+            );
+            fallback += 1;
+          }
         } else {
           const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
           const isText = await isLikelyTextFile(entry.file, uploaded);
@@ -1581,8 +1650,9 @@ function buildUploadEntries(files: File[]): { directories: DirectoryEntry[]; fil
   const fileEntries: FileEntry[] = [];
 
   for (const file of files) {
+    const rawPath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
     const relativePath = normalizeRelativePath(
-      (file as File & { webkitRelativePath?: string }).webkitRelativePath ?? file.name,
+      rawPath && rawPath.trim() ? rawPath : file.name,
     );
     const segments = relativePath.split("/").filter(Boolean);
     if (segments.length === 0) {
@@ -1695,21 +1765,6 @@ function isMarkdownFile(file: File): boolean {
   }
   const extension = getFileExtension(file.name);
   return extension ? MARKDOWN_EXTENSIONS.has(extension) : false;
-}
-
-async function importMarkdownDocument(
-  projectKey: string,
-  file: File,
-  parentId: string,
-  title: string,
-): Promise<void> {
-  const form = new FormData();
-  form.append("file", file);
-  form.append("parent_id", parentId);
-  form.append("title", title);
-  form.append("source_type", "markdown");
-
-  await importDocument(projectKey, form);
 }
 
 async function isLikelyTextFile(file: File, asset: UploadedAsset): Promise<boolean> {
