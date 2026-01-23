@@ -251,7 +251,7 @@ body {
 }
 
 .modal-card {
-  width: min(480px, 92vw);
+  width: min(600px, 92vw);
   background: var(--surface);
   color: var(--ink);
   border-radius: 18px;
@@ -1568,6 +1568,74 @@ body {
   grid-template-columns: repeat(2, 1fr);
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.kb-import-smart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(31, 35, 40, 0.03);
+  margin-bottom: 12px;
+}
+
+.kb-import-smart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.kb-import-smart-title {
+  font-weight: 600;
+}
+
+.kb-import-toggle {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink);
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.kb-import-toggle.active {
+  border-color: rgba(31, 35, 40, 0.3);
+  background: rgba(31, 35, 40, 0.08);
+}
+
+.kb-import-smart-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.kb-import-chip {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink);
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.kb-import-chip.active {
+  border-color: rgba(31, 35, 40, 0.3);
+  background: rgba(31, 35, 40, 0.08);
+}
+
+.kb-import-chip.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .kb-import-tab {

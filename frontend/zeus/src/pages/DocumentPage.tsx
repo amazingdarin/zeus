@@ -12,6 +12,7 @@ import KnowledgeBaseSideNav, {
 import RichTextViewer from "../components/RichTextViewer";
 import { apiFetch } from "../config/api";
 import { useProjectContext } from "../context/ProjectContext";
+import { tiptapJsonToMarkdown } from "@zeus/doc-editor";
 import { exportContentJson } from "../utils/exportContentJson";
 
 type DocumentData = {
@@ -126,6 +127,16 @@ type UploadSummary = {
   directories: number;
   files: number;
   skipped: number;
+  converted: number;
+  fallback: number;
+};
+
+type SmartImportType = "markdown" | "word" | "pdf";
+
+type SmartImportOption = {
+  id: SmartImportType;
+  label: string;
+  enabled: boolean;
 };
 
 type DirectoryEntry = {
@@ -177,6 +188,13 @@ const TEXT_MIME_VALUES = new Set([
   "application/x-www-form-urlencoded",
 ]);
 const TEXT_SNIFF_BYTES = 16 * 1024;
+const MARKDOWN_EXTENSIONS = new Set(["md", "markdown"]);
+const MARKDOWN_MIME_VALUES = new Set(["text/markdown", "text/x-markdown"]);
+const SMART_IMPORT_OPTIONS: SmartImportOption[] = [
+  { id: "markdown", label: "Markdown", enabled: true },
+  { id: "word", label: "Word", enabled: false },
+  { id: "pdf", label: "PDF", enabled: false },
+];
 
 function DocumentPage() {
   const { currentProject } = useProjectContext();
@@ -220,6 +238,10 @@ function DocumentPage() {
   }>({ type: "idle" });
   const [uploadFilterPreset, setUploadFilterPreset] = useState<UploadFilterPresetId>("all");
   const [uploadSummary, setUploadSummary] = useState<UploadSummary | null>(null);
+  const [smartImportEnabled, setSmartImportEnabled] = useState(true);
+  const [smartImportTypes, setSmartImportTypes] = useState<Set<SmartImportType>>(
+    () => new Set(["markdown"]),
+  );
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -265,6 +287,23 @@ function DocumentPage() {
     }
     return activeUploadPreset.extensions.map((ext) => `.${ext}`).join(",");
   }, [activeUploadPreset]);
+
+  const toggleSmartImportType = useCallback((type: SmartImportType) => {
+    setSmartImportTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
+  }, []);
+
+  const isSmartImportTypeSelected = useCallback(
+    (type: SmartImportType) => smartImportTypes.has(type),
+    [smartImportTypes],
+  );
 
   const mapDocument = useCallback(
     (item: DocumentListItem, parentId: string): KnowledgeBaseDocument => {
@@ -830,6 +869,17 @@ function DocumentPage() {
     navigate(`/documents/new?document_id=${encodeURIComponent(activeDocument.id)}`);
   };
 
+  const handleExport = useCallback(() => {
+    if (!activeDocument) {
+      return;
+    }
+    const content = activeDocument.content ?? { type: "doc", content: [] };
+    const markdown = tiptapJsonToMarkdown(content);
+    const safeTitle = sanitizeFileName(activeDocument.title || "document");
+    const filename = `${safeTitle || "document"}.md`;
+    downloadTextFile(markdown, filename, "text/markdown;charset=utf-8");
+  }, [activeDocument]);
+
   const clearProposalParam = () => {
     if (!proposalId) {
       return;
@@ -1011,6 +1061,8 @@ function DocumentPage() {
       const baseParentId = activeDocument?.id ?? "";
       const directoryIds = new Map<string, string>();
       let completed = 0;
+      let converted = 0;
+      let fallback = 0;
       const markCompleted = () => {
         completed += 1;
         setUploadCompleted(completed);
@@ -1035,21 +1087,31 @@ function DocumentPage() {
       }
 
       for (const entry of files) {
-        const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
         const docTitle = stripExtension(entry.name) || entry.name;
-        const isText = await isLikelyTextFile(entry.file, uploaded);
         const parentId = entry.parentPath
           ? directoryIds.get(entry.parentPath) ?? baseParentId
           : baseParentId;
-        const block = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, isText);
-        await createDocumentRecord(
-          resolvedProjectKey,
-          {
-            title: docTitle,
-            parentId,
-          },
-          block ? { type: "doc", content: [block] } : { type: "doc", content: [] },
-        );
+        const canSmartImport =
+          smartImportEnabled &&
+          smartImportTypes.has("markdown") &&
+          isMarkdownFile(entry.file);
+        if (canSmartImport) {
+          await importMarkdownDocument(resolvedProjectKey, entry.file, parentId, docTitle);
+          converted += 1;
+        } else {
+          const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
+          const isText = await isLikelyTextFile(entry.file, uploaded);
+          const block = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, isText);
+          await createDocumentRecord(
+            resolvedProjectKey,
+            {
+              title: docTitle,
+              parentId,
+            },
+            block ? { type: "doc", content: [block] } : { type: "doc", content: [] },
+          );
+          fallback += 1;
+        }
         markCompleted();
       }
 
@@ -1057,6 +1119,8 @@ function DocumentPage() {
         directories: directories.length,
         files: files.length,
         skipped,
+        converted,
+        fallback,
       });
       setImportStatus({ type: "success", message: "Upload completed." });
       setImportModalOpen(false);
@@ -1190,20 +1254,21 @@ function DocumentPage() {
       }
     >
       <>
-        <DocumentHeader
-          breadcrumbItems={breadcrumbItems}
-          mode="view"
-          allowChildActions={allowChildActions}
-          allowEdit={Boolean(activeDocument)}
-          allowRebuild={Boolean(activeDocument)}
-          rebuilding={rebuilding}
-          onEdit={handleEdit}
-          onSave={() => {}}
-          onCancel={() => {}}
-          onNew={handleOpenNew}
-          onImport={() => handleOpenImportWithMode("file")}
-          onRebuild={handleRebuild}
-        />
+          <DocumentHeader
+            breadcrumbItems={breadcrumbItems}
+            mode="view"
+            allowChildActions={allowChildActions}
+            allowEdit={Boolean(activeDocument)}
+            allowRebuild={Boolean(activeDocument)}
+            rebuilding={rebuilding}
+            onEdit={handleEdit}
+            onSave={() => {}}
+            onCancel={() => {}}
+            onNew={handleOpenNew}
+            onImport={() => handleOpenImportWithMode("file")}
+            onRebuild={handleRebuild}
+            onExport={activeDocument ? handleExport : undefined}
+          />
         <div className="doc-viewer-page">{bodyContent()}</div>
         {importModalOpen ? (
           <div
@@ -1235,6 +1300,43 @@ function DocumentPage() {
                   >
                     Folder
                   </button>
+                </div>
+                <div className="kb-import-smart">
+                  <div className="kb-import-smart-header">
+                    <div className="kb-import-smart-title">Smart Import</div>
+                    <button
+                      className={`kb-import-toggle${smartImportEnabled ? " active" : ""}`}
+                      type="button"
+                      aria-pressed={smartImportEnabled}
+                      onClick={() => setSmartImportEnabled((prev) => !prev)}
+                    >
+                      {smartImportEnabled ? "On" : "Off"}
+                    </button>
+                  </div>
+                  <fieldset className="kb-import-smart-options" aria-label="Smart import types">
+                    {SMART_IMPORT_OPTIONS.map((option) => {
+                      const disabled = !option.enabled || !smartImportEnabled;
+                      const active = isSmartImportTypeSelected(option.id);
+                      const chipClass = `kb-import-chip${active ? " active" : ""}${
+                        disabled ? " disabled" : ""
+                      }`;
+                      return (
+                        <button
+                          key={option.id}
+                          className={chipClass}
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => {
+                            if (!disabled) {
+                              toggleSmartImportType(option.id);
+                            }
+                          }}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </fieldset>
                 </div>
                 <div className="kb-import-tabs" role="tablist" aria-label="Filter presets">
                   {UPLOAD_FILTER_PRESETS.map((preset) => (
@@ -1332,6 +1434,16 @@ function DocumentPage() {
                     <div className="kb-import-summary-item">
                       Created documents: {uploadSummary.files}
                     </div>
+                    {uploadSummary.converted > 0 ? (
+                      <div className="kb-import-summary-item">
+                        Smart import: {uploadSummary.converted}
+                      </div>
+                    ) : null}
+                    {uploadSummary.fallback > 0 ? (
+                      <div className="kb-import-summary-item">
+                        Fallback uploads: {uploadSummary.fallback}
+                      </div>
+                    ) : null}
                     {uploadSummary.skipped > 0 ? (
                       <div className="kb-import-summary-item">
                         Skipped by filter: {uploadSummary.skipped}
@@ -1739,6 +1851,43 @@ function getFileExtension(filename: string): string {
   return trimmed.slice(lastDot + 1);
 }
 
+function isMarkdownFile(file: File): boolean {
+  const mime = file.type.trim().toLowerCase();
+  if (MARKDOWN_MIME_VALUES.has(mime)) {
+    return true;
+  }
+  const extension = getFileExtension(file.name);
+  return extension ? MARKDOWN_EXTENSIONS.has(extension) : false;
+}
+
+async function importMarkdownDocument(
+  projectKey: string,
+  file: File,
+  parentId: string,
+  title: string,
+): Promise<void> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("parent_id", parentId);
+  form.append("title", title);
+  form.append("source_type", "markdown");
+  const response = await apiFetch(
+    `/api/projects/${encodeURIComponent(projectKey)}/documents/import`,
+    {
+      method: "POST",
+      body: form,
+    },
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    const message =
+      typeof payload?.message === "string" && payload.message
+        ? payload.message
+        : "import failed";
+    throw new Error(message);
+  }
+}
+
 async function isLikelyTextFile(file: File, asset: UploadedAsset): Promise<boolean> {
   const normalizedMime = asset.mime.toLowerCase();
   if (normalizedMime.startsWith(TEXT_MIME_PREFIX) || TEXT_MIME_VALUES.has(normalizedMime)) {
@@ -1813,6 +1962,18 @@ function sanitizeFileName(value: string): string {
 function resolveParentId(parentId: string): string {
   const normalized = parentId.trim();
   return normalized || "root";
+}
+
+function downloadTextFile(content: string, filename: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function normalizeRelativePath(path: string): string {

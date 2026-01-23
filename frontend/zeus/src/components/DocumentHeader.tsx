@@ -19,6 +19,7 @@ type DocumentHeaderProps = {
   onNew: () => void;
   onImport: () => void;
   onRebuild?: () => void;
+  onExport?: () => void;
 };
 
 function DocumentHeader({
@@ -34,6 +35,7 @@ function DocumentHeader({
   onNew,
   onImport,
   onRebuild,
+  onExport,
 }: DocumentHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -75,6 +77,14 @@ function DocumentHeader({
       return;
     }
     onRebuild();
+  };
+
+  const handleExport = () => {
+    if (!onExport) {
+      return;
+    }
+    handleCloseMenu();
+    onExport();
   };
 
   return (
@@ -179,6 +189,11 @@ function DocumentHeader({
                 {allowChildActions ? (
                   <button className="kb-menu-item" type="button" onClick={handleImport}>
                     Import
+                  </button>
+                ) : null}
+                {onExport ? (
+                  <button className="kb-menu-item" type="button" onClick={handleExport}>
+                    Export
                   </button>
                 ) : null}
               </>

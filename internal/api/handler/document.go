@@ -2,8 +2,10 @@ package handler
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +15,7 @@ import (
 	"zeus/internal/domain/docstore"
 	"zeus/internal/service"
 	svc "zeus/internal/service/docstore"
+	svcdocument "zeus/internal/service/document"
 )
 
 type DocumentHandler struct {
@@ -229,6 +232,95 @@ func (h *DocumentHandler) Create(c *gin.Context) {
 	}
 
 	if err := docSvc.Save(c.Request.Context(), project.ID, doc); err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "SAVE_FAILED", Message: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, types.CreateDocumentResponse{
+		Code:    "OK",
+		Message: "success",
+		Data: types.DocumentDTO{
+			Meta: doc.Meta,
+			Body: doc.Body,
+		},
+	})
+}
+
+func (h *DocumentHandler) Import(c *gin.Context) {
+	projectKey := c.Param("project_key")
+	if projectKey == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{Code: "MISSING_PROJECT_KEY", Message: "project_key is required"})
+		return
+	}
+
+	project, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey)
+	if err != nil {
+		c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "PROJECT_NOT_FOUND", Message: err.Error()})
+		return
+	}
+
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{Code: "INVALID_REQUEST", Message: "file is required"})
+		return
+	}
+
+	parentID := strings.TrimSpace(c.PostForm("parent_id"))
+	if parentID == "" {
+		parentID = "root"
+	}
+	requestedType := strings.TrimSpace(c.PostForm("source_type"))
+	resolvedType, err := svcdocument.ResolveSourceType(fileHeader.Filename, requestedType)
+	if err != nil {
+		c.JSON(http.StatusUnprocessableEntity, types.ErrorResponse{Code: "UNSUPPORTED_SOURCE_TYPE", Message: "unsupported source_type"})
+		return
+	}
+	if resolvedType != "markdown" {
+		c.JSON(http.StatusUnprocessableEntity, types.ErrorResponse{Code: "UNSUPPORTED_SOURCE_TYPE", Message: "unsupported source_type"})
+		return
+	}
+
+	title := strings.TrimSpace(c.PostForm("title"))
+	if title == "" {
+		title = svcdocument.NormalizeImportTitle(fileHeader.Filename)
+	}
+
+	file, err := fileHeader.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "READ_FAILED", Message: "failed to read file"})
+		return
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "READ_FAILED", Message: "failed to read file"})
+		return
+	}
+
+	content, err := svcdocument.ConvertMarkdownToTiptapJSON(string(data))
+	if err != nil {
+		c.JSON(http.StatusUnprocessableEntity, types.ErrorResponse{Code: "CONVERT_FAILED", Message: err.Error()})
+		return
+	}
+
+	meta := docstore.DocumentMeta{
+		ID:            uuid.NewString(),
+		SchemaVersion: "v1",
+		Title:         title,
+		ParentID:      parentID,
+		Extra: map[string]interface{}{
+			"status": "draft",
+			"tags":   []string{},
+		},
+	}
+	body := docstore.DocumentBody{
+		Type:    "tiptap",
+		Content: content,
+	}
+
+	doc := &docstore.Document{Meta: meta, Body: body}
+	if err := h.ensureStore(projectKey).Save(c.Request.Context(), project.ID, doc); err != nil {
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "SAVE_FAILED", Message: err.Error()})
 		return
 	}
