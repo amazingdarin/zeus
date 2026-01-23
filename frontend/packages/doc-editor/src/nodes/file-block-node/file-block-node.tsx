@@ -215,7 +215,7 @@ export function FileBlockNodeView({ node, editor, extension, getPos }: NodeViewP
 
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(!editor.isEditable)
   const [textState, setTextState] = useState<FileBlockState>({
     loading: false,
     error: null,
@@ -223,6 +223,10 @@ export function FileBlockNodeView({ node, editor, extension, getPos }: NodeViewP
     truncated: false,
   })
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    setCollapsed(!editor.isEditable)
+  }, [editor.isEditable])
 
   const updateNodeAttrs = useCallback(
     (nextAttrs: Partial<FileBlockAttrs>) => {
