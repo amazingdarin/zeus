@@ -3,7 +3,7 @@ import type { JSONContent } from "@tiptap/react";
 import type { DataNode, TreeProps } from "antd/es/tree";
 import { Empty, List, Modal, Spin, Tree, Typography } from "antd";
 
-import { apiFetch } from "../config/api";
+import { fetchDocument, fetchDocumentList } from "../api/documents";
 
 const { Text } = Typography;
 
@@ -39,18 +39,7 @@ function BlockRefPicker({ open, projectKey, onCancel, onSelect }: BlockRefPicker
 
   const fetchDocuments = useCallback(
     async (parentId: string) => {
-      const params = new URLSearchParams();
-      if (parentId) {
-        params.set("parent_id", parentId);
-      }
-      const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents?${params.toString()}`,
-      );
-      if (!response.ok) {
-        throw new Error("Failed to load documents");
-      }
-      const payload = await response.json();
-      const items = Array.isArray(payload?.data) ? payload.data : [];
+      const items = await fetchDocumentList(projectKey, parentId);
       return items as TreeItem[];
     },
     [projectKey],
@@ -58,13 +47,8 @@ function BlockRefPicker({ open, projectKey, onCancel, onSelect }: BlockRefPicker
 
   const fetchDocumentDetail = useCallback(
     async (docId: string) => {
-      const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(docId)}`,
-      );
-      if (!response.ok) {
-        throw new Error("Failed to load document");
-      }
-      return response.json();
+      const detail = await fetchDocument(projectKey, docId);
+      return { data: detail };
     },
     [projectKey],
   );

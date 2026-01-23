@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import type { Project } from "../context/ProjectContext";
-import { apiFetch } from "../config/api";
+import { createProject } from "../api/projects";
 
 type CreateProjectModalProps = {
   onClose: () => void;
@@ -19,32 +19,11 @@ function CreateProjectModal({ onClose, onCreated }: CreateProjectModalProps) {
     setLoading(true);
     setError(null);
     try {
-      const response = await apiFetch("/api/projects", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          key: keyValue,
-          name,
-          description,
-        }),
+      const project = await createProject({
+        key: keyValue,
+        name,
+        description,
       });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        const message = payload?.message || payload?.error || "Create project failed";
-        throw new Error(message);
-      }
-      const data = payload?.data;
-      const resolvedKey = String(data?.key ?? keyValue).trim();
-      const project: Project = {
-        id: String(data?.id ?? ""),
-        key: resolvedKey,
-        name: String(data?.name ?? name),
-        description: description || undefined,
-        status: String(data?.status ?? "active"),
-        createdAt: data?.created_at ?? data?.createdAt ?? undefined,
-      };
       if (!project.id) {
         throw new Error("Project id is missing");
       }

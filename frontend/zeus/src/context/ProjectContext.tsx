@@ -11,7 +11,7 @@ import {
   type SetStateAction,
 } from "react";
 
-import { apiFetch } from "../config/api";
+import { fetchProjects } from "../api/projects";
 
 export type Project = {
   id: string;
@@ -57,20 +57,8 @@ function ProjectProvider({ children }: ProjectProviderProps) {
   const reloadProjects = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await apiFetch("/api/projects");
-      if (!response.ok) {
-        throw new Error("Failed to load projects");
-      }
-      const payload = await response.json();
-      const items = Array.isArray(payload?.data) ? payload.data : [];
-      const mapped = items.map((item: any) => ({
-        id: String(item.id ?? ""),
-        key: String(item.key ?? ""),
-        name: String(item.name ?? ""),
-        description: item.description ?? undefined,
-        status: item.status ?? undefined,
-        createdAt: item.created_at ?? item.createdAt ?? undefined,
-      }));
+      const items = await fetchProjects();
+      const mapped = items;
       if (!mountedRef.current) {
         return;
       }

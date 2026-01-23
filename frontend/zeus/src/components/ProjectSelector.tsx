@@ -3,7 +3,8 @@ import { DownOutlined, ReloadOutlined, RightOutlined } from "@ant-design/icons";
 
 import { type Project, useProjectContext } from "../context/ProjectContext";
 import CreateProjectModal from "./CreateProjectModal";
-import { apiFetch } from "../config/api";
+import { fetchTaskStatus as apiFetchTaskStatus } from "../api/tasks";
+import { rebuildProjectRag } from "../api/projects";
 
 
 type ProjectSelectorProps = {
@@ -54,16 +55,11 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
 
   const fetchTaskStatus = async (projectKey: string, taskId: string) => {
     try {
-      const response = await apiFetch(`/api/tasks/${encodeURIComponent(taskId)}`);
-      if (response.status === 404) {
+      const data = await apiFetchTaskStatus(taskId);
+      if (!data) {
         updateRebuildState(projectKey, null, null);
         return;
       }
-      if (!response.ok) {
-        throw new Error("task status failed");
-      }
-      const payload = await response.json();
-      const data = payload?.data ?? payload ?? {};
       const status = typeof data.status === "string" ? data.status : null;
       updateRebuildState(projectKey, status, taskId);
     } catch (err) {
@@ -112,18 +108,9 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
     }
     setRebuilding(true);
     try {
-      const query = withSummary ? "?with_summary=true" : "";
-      const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(activeProject.key)}/rag/rebuild${query}`,
-        { method: "POST" },
-      );
-      if (!response.ok) {
-        throw new Error("rebuild failed");
-      }
-      const payload = await response.json();
-      const data = payload?.data ?? payload ?? {};
-      const taskId = typeof data.task_id === "string" ? data.task_id : "";
-      const status = typeof data.status === "string" ? data.status : "pending";
+      const data = await rebuildProjectRag(activeProject.key, { with_summary: withSummary });
+      const taskId = data.task_id;
+      const status = data.status;
       if (taskId) {
         localStorage.setItem(rebuildStorageKey(activeProject.key), taskId);
         updateRebuildState(activeProject.key, status, taskId);
@@ -202,9 +189,8 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
           {availableProjects.map((project) => (
             <button
               key={project.id}
-              className={`project-selector-item${
-                activeProject && project.key === activeProject.key ? " active" : ""
-              }`}
+              className={`project-selector-item${activeProject && project.key === activeProject.key ? " active" : ""
+                }`}
               type="button"
               onClick={() => handleSelect(project)}
             >

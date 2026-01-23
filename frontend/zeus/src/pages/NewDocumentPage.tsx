@@ -4,12 +4,14 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import RichTextEditor from "../components/RichTextEditor";
 import RichTextViewer from "../components/RichTextViewer";
-import { apiFetch } from "../config/api";
-import { useProjectContext } from "../context/ProjectContext";
 import {
   exportContentJson,
   type ContentMetaInput,
 } from "../utils/exportContentJson";
+import { createDocument, fetchDocument } from "../api/documents";
+import { fetchStorageObjectDownload } from "../api/storage";
+import { useProjectContext } from "../context/ProjectContext";
+import { sanitizeFileName } from "../utils/fileName";
 
 function NewDocumentPage() {
   const { currentProject } = useProjectContext();
@@ -28,9 +30,6 @@ function NewDocumentPage() {
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [diffMode, setDiffMode] = useState(false);
   const [baselineContent, setBaselineContent] = useState<JSONContent | null>(null);
-  const inFlightRef = useRef<Map<string, Promise<Awaited<ReturnType<typeof fetchDocumentDetail>>>>>(
-    new Map(),
-  );
   const currentRequestRef = useRef<string | null>(null);
 
   const parentIdParam = useMemo(() => {
@@ -84,14 +83,14 @@ function NewDocumentPage() {
 
   const handleLoadDocument = useCallback(async (id: string) => {
     if (!currentProject?.key) return { type: "doc", content: [] };
-    
+
     setLoadingDocument(true);
     try {
-      const detail = await fetchDocumentDetail(currentProject.key, id);
-      
+      const detail = await fetchDocument(currentProject.key, id);
+
       const metaValue = detail?.meta;
       let contentToReturn: JSONContent | null = null;
-      
+
       if (metaValue) {
         setTitle(String(metaValue.title ?? ""));
         setParentID(String(metaValue.parent_id ?? metaValue.parent ?? "").trim());
@@ -99,24 +98,24 @@ function NewDocumentPage() {
         const bodyValue = detail?.body ?? detail?.content ?? {};
         const contentValue =
           bodyValue &&
-          typeof bodyValue === "object" &&
-          "type" in bodyValue &&
-          "content" in bodyValue
+            typeof bodyValue === "object" &&
+            "type" in bodyValue &&
+            "content" in bodyValue
             ? (bodyValue as { content?: unknown }).content
             : bodyValue;
         const contentMetaValue =
           contentValue &&
-          typeof contentValue === "object" &&
-          "meta" in contentValue &&
-          typeof (contentValue as { meta?: unknown }).meta === "object"
+            typeof contentValue === "object" &&
+            "meta" in contentValue &&
+            typeof (contentValue as { meta?: unknown }).meta === "object"
             ? ((contentValue as { meta?: EditorMeta }).meta ?? null)
             : null;
-        setContentMeta(contentMetaValue);
+        setContentMeta(contentMetaValue as ContentMetaInput);
 
         const nestedContent =
           contentValue &&
-          typeof contentValue === "object" &&
-          "content" in contentValue
+            typeof contentValue === "object" &&
+            "content" in contentValue
             ? (contentValue as { content?: unknown }).content
             : null;
         if (
@@ -136,34 +135,35 @@ function NewDocumentPage() {
       } else {
         setTitle(String(detail?.title ?? ""));
         setParentID(String(detail?.parent_id ?? "").trim());
-        
+
         const storageId = String(detail?.storage_object_id ?? "").trim();
         if (storageId) {
-           // We create a one-off controller just for this fetch
-           const controller = new AbortController();
-           const download = await fetchStorageDownload(
-             currentProject.key,
-             storageId,
-             controller.signal
-           );
-           if (download) {
-             const response = await fetch(download, { signal: controller.signal });
-             if (response.ok) {
-               const text = await response.text();
-               const parsed = parseEditorPayload(text);
-               if (parsed) {
-                 contentToReturn = parsed.content;
-                 setContentMeta(parsed.meta ?? null);
-               }
-             }
-           }
+          // We create a one-off controller just for this fetch
+          const controller = new AbortController();
+          const downloadInfo = await fetchStorageObjectDownload(
+            currentProject.key,
+            storageId,
+            controller.signal
+          );
+          const download = downloadInfo?.download?.url;
+          if (download) {
+            const response = await fetch(download, { signal: controller.signal });
+            if (response.ok) {
+              const text = await response.text();
+              const parsed = parseEditorPayload(text);
+              if (parsed) {
+                contentToReturn = parsed.content;
+                setContentMeta(parsed.meta ? (parsed.meta as ContentMetaInput) : null);
+              }
+            }
+          }
         }
       }
-      
+
       if (contentToReturn) {
         setBaselineContent(contentToReturn);
       }
-      
+
       return contentToReturn || { type: "doc", content: [] };
     } catch (err) {
       setSaveError("Failed to load document.");
@@ -209,9 +209,12 @@ function NewDocumentPage() {
           setSaving(false);
           return;
         }
-        payloadForSave = exportContentJson(parsed.content, parsed.meta ?? null);
+        payloadForSave = exportContentJson(
+          parsed.content,
+          parsed.meta ? (parsed.meta as ContentMetaInput) : null,
+        );
         setContent(parsed.content);
-        setContentMeta(parsed.meta ?? null);
+        setContentMeta(parsed.meta ? (parsed.meta as ContentMetaInput) : null);
       }
       let documentPayload;
       const normalizedTitle = title.trim() || "Untitled Document";
@@ -226,12 +229,12 @@ function NewDocumentPage() {
           tags: [],
         },
       };
-      documentPayload = await saveDocumentRecord(projectKey, meta, {
+      documentPayload = await createDocument(projectKey, meta, {
         type: "tiptap",
         content: payloadForSave,
       });
       const targetID = String(
-        documentPayload?.data?.meta?.id ?? documentPayload?.data?.id ?? documentId ?? "",
+        documentPayload?.meta?.id ?? documentPayload?.id ?? documentId ?? "",
       );
       if (targetID) {
         navigate(`/documents/${encodeURIComponent(targetID)}`, {
@@ -260,7 +263,7 @@ function NewDocumentPage() {
       return;
     }
     setContent(parsed.content);
-    setContentMeta(parsed.meta);
+    setContentMeta(parsed.meta ? (parsed.meta as ContentMetaInput) : null);
     setJsonError(null);
     setJsonMode(false);
   };
@@ -398,111 +401,7 @@ function NewDocumentPage() {
 
 export default NewDocumentPage;
 
-const saveDocumentRecord = async (
-  projectKey: string,
-  meta: {
-    id?: string;
-    slug?: string;
-    title: string;
-    parent_id: string;
-    extra?: {
-      status?: string;
-      tags?: string[];
-    };
-  },
-  body: {
-    type: string;
-    content: { meta: EditorMeta; content: JSONContent } | JSONContent;
-  },
-) => {
-  const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/documents`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        meta,
-        body,
-      }),
-    },
-  );
-  if (!response.ok) {
-    throw new Error("save document failed");
-  }
-  return response.json();
-};
 
-const sanitizeFileName = (value: string) => {
-  const trimmed = value.trim().toLowerCase();
-  const cleaned = trimmed.replace(/[^a-z0-9-_]+/g, "_").replace(/^_+|_+$/g, "");
-  return cleaned.slice(0, 48);
-};
-
-const fetchDocumentDetail = async (
-  projectKey: string,
-  documentId: string,
-) => {
-  const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
-      documentId,
-    )}`,
-  );
-  if (!response.ok) {
-    throw new Error("failed to load document");
-  }
-  const payload = (await response.json()) as {
-    data?: {
-      meta?: {
-        id?: string;
-        slug?: string;
-        title?: string;
-        parent_id?: string;
-        extra?: {
-          status?: string;
-          tags?: string[];
-        };
-      };
-      body?: {
-        type?: string;
-        content?: {
-          meta?: EditorMeta;
-          content?: JSONContent;
-        };
-      };
-      content?: {
-        meta?: EditorMeta;
-        content?: JSONContent;
-      };
-      id?: string;
-      title?: string;
-      parent_id?: string;
-      storage_object_id?: string;
-    };
-  };
-  return payload?.data ?? null;
-};
-
-const fetchStorageDownload = async (
-  projectKey: string,
-  storageObjectID: string,
-  signal: AbortSignal,
-) => {
-  const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/storage-objects/${encodeURIComponent(
-      storageObjectID,
-    )}`,
-    { signal },
-  );
-  if (!response.ok) {
-    throw new Error("failed to load storage object");
-  }
-  const payload = (await response.json()) as {
-    download?: { url?: string };
-  };
-  return payload?.download?.url ?? "";
-};
 
 type EditorMeta = {
   zeus?: boolean;
@@ -615,7 +514,7 @@ const buildBlockDiff = (
     }
   }
 
-  const results: BlockDiffEntry[] = [];
+
   let i = m;
   let j = n;
 
@@ -653,9 +552,9 @@ const buildBlockDiff = (
   // Reverse to get chronological order, then merge
   const chronOrder = rawPath.reverse();
   const mergedResults: BlockDiffEntry[] = [];
-  
+
   for (const entry of chronOrder) {
-      mergeDiffBlock(mergedResults, entry);
+    mergeDiffBlock(mergedResults, entry);
   }
 
   return mergedResults;
@@ -669,6 +568,7 @@ const appendRawDiffBlock = (
 ) => {
   const entry: BlockDiffEntry = {
     status,
+    content: null,
     originalContent: originalBlock ? wrapDoc(originalBlock) : null,
     editedContent: editedBlock ? wrapDoc(editedBlock) : null,
   };
@@ -679,20 +579,20 @@ const appendRawDiffBlock = (
 };
 
 const mergeDiffBlock = (
-    results: BlockDiffEntry[],
-    entry: BlockDiffEntry
+  results: BlockDiffEntry[],
+  entry: BlockDiffEntry
 ) => {
-  const last = results.at(-1);
+  const last = results[results.length - 1];
   if (last && last.status === entry.status) {
     // Merge logic
     if (entry.originalContent?.content && last.originalContent?.content) {
       last.originalContent.content.push(...entry.originalContent.content);
     }
     if (entry.editedContent?.content && last.editedContent?.content) {
-        last.editedContent.content.push(...entry.editedContent.content);
+      last.editedContent.content.push(...entry.editedContent.content);
     }
     if (entry.content?.content && last.content?.content) {
-        last.content.content.push(...entry.content.content);
+      last.content.content.push(...entry.content.content);
     }
     return;
   }

@@ -28,7 +28,6 @@ function ModelScenarioConfigPanel({
   disabled,
   onChange,
   onRefreshModels,
-  onTestRuntime,
 }: ModelScenarioConfigPanelProps) {
   const [models, setModels] = useState<string[]>([]);
   const [refreshing, setRefreshing] = useState(false);

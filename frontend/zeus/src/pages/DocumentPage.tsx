@@ -10,7 +10,21 @@ import KnowledgeBaseSideNav, {
   type KnowledgeBaseMoveRequest,
 } from "../components/KnowledgeBaseSideNav";
 import RichTextViewer from "../components/RichTextViewer";
-import { apiFetch } from "../config/api";
+import {
+  fetchDocument,
+  fetchDocumentHierarchy,
+  fetchDocumentList,
+  fetchProposalDiff,
+  applyProposal,
+  moveDocument,
+  importDocument,
+  createDocument,
+  type DocumentListItem,
+  type DocumentDetail,
+} from "../api/documents";
+import { rebuildDocumentRag } from "../api/projects";
+import { uploadAsset } from "../api/assets";
+import { sanitizeFileName } from "../utils/fileName";
 import { useProjectContext } from "../context/ProjectContext";
 import { tiptapJsonToMarkdown } from "@zeus/doc-editor";
 import { exportContentJson } from "../utils/exportContentJson";
@@ -31,73 +45,7 @@ type DocumentMetaInfo = {
   parentId: string;
 };
 
-type DocumentResponse = {
-  data?: {
-    meta?: {
-      id?: string;
-      title?: string;
-      parent_id?: string;
-      extra?: Record<string, unknown>;
-      doc_type?: string;
-    };
-    body?: DocumentBody;
-    content?: DocumentContentPayload;
-    hierarchy?: Array<{
-      id?: string;
-      name?: string;
-    }>;
-    id?: string;
-    title?: string;
-    parent_id?: string;
-    doc_type?: string;
-  };
-};
 
-type DocumentListItem = {
-  id?: string;
-  slug?: string;
-  title?: string;
-  kind?: string;
-  type?: string;
-  doc_type?: string;
-  parent?: string;
-  parent_id?: string;
-  meta?: {
-    id?: string;
-    title?: string;
-    parent_id?: string;
-    parent?: string;
-    doc_type?: string;
-  };
-  has_child?: boolean;
-};
-
-type DocumentListResponse = {
-  data?: DocumentListItem[];
-};
-
-type DocumentHierarchyItem = {
-  id?: string;
-  title?: string;
-  parent_id?: string;
-};
-
-type DocumentHierarchyResponse = {
-  data?: DocumentHierarchyItem[];
-};
-
-type DocumentContentPayload =
-  | {
-      meta?: Record<string, unknown>;
-      content?: JSONContent;
-    }
-  | JSONContent
-  | null;
-
-type DocumentBody = {
-  type?: string;
-  content?: DocumentContentPayload;
-};
 
 const documentCache = new Map<string, DocumentData>();
 const documentPromiseCache = new Map<string, Promise<DocumentData>>();
@@ -334,15 +282,7 @@ function DocumentPage() {
 
   const fetchDocuments = useCallback(
     async (projectKey: string, parentId: string) => {
-      const params = new URLSearchParams({ parent_id: parentId });
-      const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents?${params.toString()}`,
-      );
-      if (!response.ok) {
-        throw new Error("Failed to load documents");
-      }
-      const payload = (await response.json()) as DocumentListResponse;
-      const items = Array.isArray(payload?.data) ? payload.data : [];
+      const items = await fetchDocumentList(projectKey, parentId);
       const normalizedParent = parentId ? parentId.trim() : "";
       return items
         .map((item) => mapDocument(item, normalizedParent))
@@ -420,16 +360,7 @@ function DocumentPage() {
     let promise = documentHierarchyPromiseCache.get(requestKey);
     if (!promise) {
       promise = (async () => {
-        const response = await apiFetch(
-          `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
-            documentId,
-          )}/hierarchy`,
-        );
-        if (!response.ok) {
-          throw new Error("failed to load document hierarchy");
-        }
-        const payload = (await response.json()) as DocumentHierarchyResponse;
-        const items = Array.isArray(payload?.data) ? payload.data : [];
+        const items = await fetchDocumentHierarchy(projectKey, documentId);
         return items
           .map((item) => ({
             id: String(item.id ?? "").trim(),
@@ -631,22 +562,12 @@ function DocumentPage() {
       if (!resolvedProjectKey) {
         return;
       }
-		const payload = {
-			target_parent_id: request.newParentId,
-			before_doc_id: request.beforeId,
-			after_doc_id: request.afterId,
-		};
-      const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(resolvedProjectKey)}/documents/${encodeURIComponent(request.docId)}/move`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        },
-      );
-      if (!response.ok) {
-        return;
-      }
+      const movePayload = {
+        target_parent_id: request.newParentId,
+        before_doc_id: request.beforeId,
+        after_doc_id: request.afterId,
+      };
+      await moveDocument(resolvedProjectKey, request.docId, movePayload);
       await refreshParent(request.sourceParentId);
       if (request.targetParentId !== request.sourceParentId) {
         await refreshParent(request.targetParentId);
@@ -711,16 +632,8 @@ function DocumentPage() {
       : inFlightRef.current.get(requestKey) ?? documentPromiseCache.get(requestKey);
     if (!promise) {
       promise = (async () => {
-        const response = await apiFetch(
-          `/api/projects/${encodeURIComponent(resolvedProjectKey)}/documents/${encodeURIComponent(
-            resolvedDocumentId,
-          )}`,
-        );
-        if (!response.ok) {
-          throw new Error("failed to load document");
-        }
-        const payload = (await response.json()) as DocumentResponse;
-        const mapped = mapDocumentDetail(payload?.data, resolvedDocumentId);
+        const detail = await fetchDocument(resolvedProjectKey, resolvedDocumentId);
+        const mapped = mapDocumentDetail(detail, resolvedDocumentId);
         const cachedHierarchy = documentHierarchyCache.get(requestKey);
         if (cachedHierarchy) {
           mapped.hierarchy = cachedHierarchy;
@@ -807,22 +720,11 @@ function DocumentPage() {
     let isActive = true;
     setDiffLoading(true);
     setDiffError(null);
-    apiFetch(
-      `/api/projects/${encodeURIComponent(
-        resolvedProjectKey,
-      )}/documents/${encodeURIComponent(resolvedDocumentId)}/proposals/${encodeURIComponent(
-        proposalId,
-      )}/diff`,
-    )
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error("failed to load diff");
-        }
-        const payload = await response.json();
-        const data = payload?.data ?? payload ?? {};
+    fetchProposalDiff(resolvedProjectKey, resolvedDocumentId, proposalId)
+      .then((data) => {
         return {
-          metaDiff: String(data.meta_diff ?? ""),
-          contentDiff: String(data.content_diff ?? ""),
+          metaDiff: data.metaDiff,
+          contentDiff: data.contentDiff,
         };
       })
       .then((diff) => {
@@ -905,19 +807,8 @@ function DocumentPage() {
     setApplyLoading(true);
     setDiffError(null);
     try {
-      const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(
-          resolvedProjectKey,
-        )}/documents/${encodeURIComponent(
-          resolvedDocumentId,
-        )}/proposals/${encodeURIComponent(proposalId)}/apply`,
-        { method: "POST" },
-      );
-      if (!response.ok) {
-        throw new Error("failed to apply proposal");
-      }
-      const payload = (await response.json()) as DocumentResponse;
-      const updated = mapDocumentDetail(payload?.data, resolvedDocumentId);
+      const data = await applyProposal(resolvedProjectKey, resolvedDocumentId, proposalId);
+      const updated = mapDocumentDetail(data, resolvedDocumentId);
       setDocument(updated);
       await handleDocumentsChanged(updated.parentId || "");
       clearProposalParam();
@@ -938,16 +829,7 @@ function DocumentPage() {
     }
     setRebuilding(true);
     try {
-      const query = withSummary ? "?with_summary=true" : "";
-      const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(
-          resolvedProjectKey,
-        )}/rag/rebuild/documents/${encodeURIComponent(activeDocument.id)}${query}`,
-        { method: "POST" },
-      );
-      if (!response.ok) {
-        throw new Error("rebuild failed");
-      }
+      await rebuildDocumentRag(resolvedProjectKey, activeDocument.id, { with_summary: withSummary });
       console.log("rag_rebuild_done", {
         docId: activeDocument.id,
         withSummary,
@@ -1254,21 +1136,21 @@ function DocumentPage() {
       }
     >
       <>
-          <DocumentHeader
-            breadcrumbItems={breadcrumbItems}
-            mode="view"
-            allowChildActions={allowChildActions}
-            allowEdit={Boolean(activeDocument)}
-            allowRebuild={Boolean(activeDocument)}
-            rebuilding={rebuilding}
-            onEdit={handleEdit}
-            onSave={() => {}}
-            onCancel={() => {}}
-            onNew={handleOpenNew}
-            onImport={() => handleOpenImportWithMode("file")}
-            onRebuild={handleRebuild}
-            onExport={activeDocument ? handleExport : undefined}
-          />
+        <DocumentHeader
+          breadcrumbItems={breadcrumbItems}
+          mode="view"
+          allowChildActions={allowChildActions}
+          allowEdit={Boolean(activeDocument)}
+          allowRebuild={Boolean(activeDocument)}
+          rebuilding={rebuilding}
+          onEdit={handleEdit}
+          onSave={() => { }}
+          onCancel={() => { }}
+          onNew={handleOpenNew}
+          onImport={() => handleOpenImportWithMode("file")}
+          onRebuild={handleRebuild}
+          onExport={activeDocument ? handleExport : undefined}
+        />
         <div className="doc-viewer-page">{bodyContent()}</div>
         {importModalOpen ? (
           <div
@@ -1317,9 +1199,8 @@ function DocumentPage() {
                     {SMART_IMPORT_OPTIONS.map((option) => {
                       const disabled = !option.enabled || !smartImportEnabled;
                       const active = isSmartImportTypeSelected(option.id);
-                      const chipClass = `kb-import-chip${active ? " active" : ""}${
-                        disabled ? " disabled" : ""
-                      }`;
+                      const chipClass = `kb-import-chip${active ? " active" : ""}${disabled ? " disabled" : ""
+                        }`;
                       return (
                         <button
                           key={option.id}
@@ -1342,9 +1223,8 @@ function DocumentPage() {
                   {UPLOAD_FILTER_PRESETS.map((preset) => (
                     <button
                       key={preset.id}
-                      className={`kb-import-tab${
-                        uploadFilterPreset === preset.id ? " active" : ""
-                      }`}
+                      className={`kb-import-tab${uploadFilterPreset === preset.id ? " active" : ""
+                        }`}
                       type="button"
                       onClick={() => setUploadFilterPreset(preset.id)}
                     >
@@ -1419,9 +1299,8 @@ function DocumentPage() {
                 )}
                 {importStatus.type !== "idle" ? (
                   <div
-                    className={`kb-import-status ${
-                      importStatus.type === "error" ? "error" : "success"
-                    }`}
+                    className={`kb-import-status ${importStatus.type === "error" ? "error" : "success"
+                      }`}
                   >
                     {importStatus.message}
                   </div>
@@ -1569,7 +1448,7 @@ const trimBreadcrumbItems = (items: Array<{ label: string; to?: string }>) => {
   return [...head, { label: "..." }, ...tail];
 };
 
-function mapDocumentMeta(data: DocumentResponse["data"], fallbackId: string): DocumentMetaInfo {
+function mapDocumentMeta(data: DocumentDetail | undefined | null, fallbackId: string): DocumentMetaInfo {
   const meta = data?.meta ?? {};
   const extra =
     meta.extra && typeof meta.extra === "object"
@@ -1598,79 +1477,47 @@ function mapDocumentMeta(data: DocumentResponse["data"], fallbackId: string): Do
   };
 }
 
-function mapDocumentDetail(data: DocumentResponse["data"], fallbackId: string): DocumentData {
+function mapDocumentDetail(data: DocumentDetail | undefined | null, fallbackId: string): DocumentData {
   const meta = mapDocumentMeta(data, fallbackId);
-  const content = extractContentNode(data?.body ?? data?.content);
-  const hierarchy =
-    data?.hierarchy?.map((item) => ({
-      id: String(item?.id ?? "").trim(),
-      name: String(item?.name ?? "").trim(),
-    })) ?? [];
+  const body = data?.body;
+  const contentPayload = body?.content ?? data?.content;
+  let content: JSONContent | null = null;
+  if (contentPayload && typeof contentPayload === "object") {
+    if ("content" in contentPayload && Array.isArray(contentPayload.content)) {
+      content = contentPayload as JSONContent;
+    } else if ("content" in contentPayload && typeof contentPayload.content === "object") {
+      content = contentPayload.content as JSONContent;
+    }
+  }
+  const hierarchyData = data?.hierarchy ?? [];
+  const hierarchy = hierarchyData
+    .map((item) => ({
+      id: String(item.id ?? "").trim(),
+      name: String(item.title ?? "").trim(),
+    }))
+    .filter((item) => item.id);
+
   return {
     ...meta,
     content,
-    hierarchy: hierarchy.filter((item) => item.id),
+    hierarchy,
   };
 }
 
-function extractContentNode(content?: DocumentBody | DocumentContentPayload): JSONContent | null {
-  if (!content || typeof content !== "object") {
-    return null;
-  }
-  const bodyContent =
-    "type" in content && "content" in content
-      ? (content as DocumentBody).content
-      : content;
-  if (!bodyContent || typeof bodyContent !== "object") {
-    return null;
-  }
-  const maybeContent = (bodyContent as { content?: unknown }).content;
-  if (
-    maybeContent &&
-    typeof maybeContent === "object" &&
-    !Array.isArray(maybeContent) &&
-    "type" in (maybeContent as Record<string, unknown>)
-  ) {
-    return maybeContent as JSONContent;
-  }
-  const direct = bodyContent as JSONContent;
-  if (direct && typeof direct === "object" && "type" in direct) {
-    return direct as JSONContent;
-  }
-  return null;
+function isRootDocumentId(value: string): boolean {
+  return value.trim().toLowerCase() === "root";
 }
 
 async function uploadSingleFile(
   projectKey: string,
   file: File,
 ): Promise<UploadedAsset> {
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("filename", file.name);
-  formData.append("mime", file.type || "application/octet-stream");
-  formData.append("size", String(file.size));
-
-  const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/assets/import`,
-    {
-      method: "POST",
-      body: formData,
-    },
-  );
-  if (!response.ok) {
-    throw new Error("asset upload failed");
-  }
-  const payload = await response.json();
-  const data = payload?.data ?? payload ?? {};
-  const assetID = String(data.asset_id ?? "");
-  if (!assetID) {
-    throw new Error("missing asset id");
-  }
+  const data = await uploadAsset(projectKey, file);
   return {
-    asset_id: assetID,
-    filename: String(data.filename ?? file.name),
-    mime: String(data.mime ?? file.type ?? "application/octet-stream"),
-    size: Number(data.size ?? file.size ?? 0),
+    asset_id: data.asset_id,
+    filename: data.filename,
+    mime: data.mime,
+    size: data.size,
   };
 }
 
@@ -1683,37 +1530,27 @@ async function createDocumentRecord(
   const parentId = resolveParentId(metaInput.parentId);
   const slug = sanitizeFileName(title);
   const payload = exportContentJson(content, null);
-  const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/documents`,
+
+  const data = await createDocument(
+    projectKey,
     {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+      title,
+      slug: slug || undefined,
+      parent_id: parentId,
+      extra: {
+        status: "draft",
+        tags: [],
       },
-      body: JSON.stringify({
-        meta: {
-          title,
-          slug: slug || undefined,
-          parent_id: parentId,
-          extra: {
-            status: "draft",
-            tags: [],
-          },
-        },
-        body: {
-          type: "tiptap",
-          content: payload,
-        },
-      }),
+    },
+    {
+      type: "tiptap",
+      content: payload,
     },
   );
-  if (!response.ok) {
-    throw new Error("create document failed");
-  }
-  const data = await response.json();
-  const meta = data?.data?.meta ?? data?.data ?? {};
+
+  const meta = data?.meta ?? {};
   return {
-    id: String(meta.id ?? data?.data?.id ?? ""),
+    id: String(meta.id ?? data?.id ?? ""),
     title: String(meta.title ?? title),
   };
 }
@@ -1871,21 +1708,8 @@ async function importMarkdownDocument(
   form.append("parent_id", parentId);
   form.append("title", title);
   form.append("source_type", "markdown");
-  const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/documents/import`,
-    {
-      method: "POST",
-      body: form,
-    },
-  );
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    const message =
-      typeof payload?.message === "string" && payload.message
-        ? payload.message
-        : "import failed";
-    throw new Error(message);
-  }
+
+  await importDocument(projectKey, form);
 }
 
 async function isLikelyTextFile(file: File, asset: UploadedAsset): Promise<boolean> {
@@ -1953,15 +1777,24 @@ async function sniffTextContent(file: File): Promise<boolean> {
   }
 }
 
-function sanitizeFileName(value: string): string {
-  const trimmed = value.trim().toLowerCase();
-  const cleaned = trimmed.replace(/[^a-z0-9-_]+/g, "_").replace(/^_+|_+$/g, "");
-  return cleaned.slice(0, 48);
-}
+
 
 function resolveParentId(parentId: string): string {
   const normalized = parentId.trim();
   return normalized || "root";
+}
+
+function normalizeRelativePath(path: string): string {
+  return path.replace(/\\/g, "/");
+}
+
+function stripExtension(filename: string): string {
+  const trimmed = filename.trim();
+  const lastDot = trimmed.lastIndexOf(".");
+  if (lastDot <= 0 || lastDot === trimmed.length - 1) {
+    return trimmed;
+  }
+  return trimmed.slice(0, lastDot);
 }
 
 function downloadTextFile(content: string, filename: string, mime: string) {
@@ -1974,24 +1807,4 @@ function downloadTextFile(content: string, filename: string, mime: string) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
-}
-
-function normalizeRelativePath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/^\/+/, "").trim();
-}
-
-function stripExtension(filename: string): string {
-  const trimmed = filename.trim();
-  if (!trimmed) {
-    return "";
-  }
-  const lastDot = trimmed.lastIndexOf(".");
-  if (lastDot <= 0) {
-    return trimmed;
-  }
-  return trimmed.slice(0, lastDot);
-}
-
-function isRootDocumentId(value: string): boolean {
-  return value.trim().toLowerCase() === "root";
 }

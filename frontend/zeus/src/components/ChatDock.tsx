@@ -4,6 +4,7 @@ import { DownOutlined, UpOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 
 import { createChatRun, buildChatStreamUrl } from "../api/chat";
+import { applyProposal, rejectProposal } from "../api/documents";
 import { executeCommand } from "../api/commands";
 import { useProjectContext } from "../context/ProjectContext";
 import type { PromptTemplate } from "../lib/promptRegistry";
@@ -11,7 +12,7 @@ import { filterPromptTemplates, findPromptTemplate } from "../lib/promptRegistry
 import SlashCommandPanel from "./SlashCommandPanel";
 import PromptSlashPanel from "./PromptSlashPanel";
 import { parseZeusText, renderZeusText } from "../lib/zeusText";
-import { apiFetch } from "../config/api";
+
 
 type ChatArtifact = {
   type: string;
@@ -170,8 +171,8 @@ const buildPromptMessage = (message: string, prompt?: PromptTemplate) => {
     return message;
   }
   const replaced = template
-    .replaceAll("{{input}}", message)
-    .replaceAll("{{args}}", message);
+    .replace(/\{\{input\}\}/g, message)
+    .replace(/\{\{args\}\}/g, message);
   if (replaced !== template) {
     return replaced;
   }
@@ -202,7 +203,7 @@ function ChatDock() {
   const assistantBufferRef = useRef("");
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const resizeStartRef = useRef<{ y: number; height: number } | null>(null);
-  const inputRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLDivElement>(null);
   const lastAppliedCaretRef = useRef<number | null>(null);
 
   const canSend = useMemo(() => {
@@ -909,21 +910,14 @@ function ChatDock() {
       if (!proposalId) {
         return;
       }
-      const endpoint =
-        action === "apply"
-          ? `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
-              docId,
-            )}/proposals/${encodeURIComponent(proposalId)}/apply`
-          : `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
-              docId,
-            )}/proposals/${encodeURIComponent(proposalId)}/reject`;
       try {
-        const response = await apiFetch(endpoint, { method: "POST" });
-        if (!response.ok) {
-          throw new Error("proposal action failed");
+        if (action === "apply") {
+          await applyProposal(projectKey, docId, proposalId);
+          appendMessage("system", "Applied proposal.");
+        } else {
+          await rejectProposal(projectKey, docId, proposalId);
+          appendMessage("system", "Rejected proposal.");
         }
-        const text = action === "apply" ? "Applied proposal." : "Rejected proposal.";
-        appendMessage("system", text);
       } catch (err) {
         const messageText = err instanceof Error ? err.message : "proposal action failed";
         appendMessage("system", `Error: ${messageText}`);
@@ -1039,10 +1033,10 @@ function ChatDock() {
           if (artifact.type === "diff_list") {
             const items = Array.isArray(artifact.data?.items)
               ? (artifact.data?.items as Array<{
-                  doc_id?: string;
-                  title?: string;
-                  proposal_id?: string;
-                }>)
+                doc_id?: string;
+                title?: string;
+                proposal_id?: string;
+              }>)
               : [];
             const actions = Array.isArray(artifact.data?.actions)
               ? (artifact.data?.actions as Array<{ type?: string; label?: string }>)
@@ -1209,95 +1203,95 @@ function ChatDock() {
             <div className="chat-dock-input-row">
               <ActiveSlashPanel
                 value={input}
-              options={visibleOptions}
-              open={pickerOpen}
-              placeholder={projectKey ? "Type a message" : "Select a project to chat"}
-              inputRef={inputRef}
-              renderHtml={inputHtml}
-              onChange={(value, caret) => updateInput(value, caret)}
-              onSelect={(value) => handleOptionSelect(String(value))}
-              onDropdownVisibleChange={(open) => {
-                if (!open) {
-                  if (!slashTokenState.token.startsWith("/in:")) {
-                    dispatchInput({ type: "ESCAPE" });
-                  }
+                options={visibleOptions}
+                open={pickerOpen}
+                placeholder={projectKey ? "Type a message" : "Select a project to chat"}
+                inputRef={inputRef as any}
+                renderHtml={inputHtml}
+                onChange={(value, caret) => updateInput(value, caret)}
+                onSelect={(value) => handleOptionSelect(String(value))}
+                onDropdownVisibleChange={(open) => {
+                  if (!open) {
+                    if (!slashTokenState.token.startsWith("/in:")) {
+                      dispatchInput({ type: "ESCAPE" });
+                    }
                   }
                 }}
-              filterOption={false}
-              notFoundContent={
-                promptSlashState.active
-                  ? "No matching prompts"
-                  : docSearchState.active
-                    ? "No matching documents"
-                    : null
-              }
-              onKeyDown={(event) => {
-                if (
-                  pickerOpen &&
-                  visibleOptions.length > 0 &&
-                  (event.key === "ArrowDown" || event.key === "ArrowUp")
-                ) {
-                  event.preventDefault();
-                  const keys = visibleOptions.map((option) =>
-                    String(option.value ?? option.label ?? ""),
-                  );
-                  if (keys.length === 0) {
+                filterOption={false}
+                notFoundContent={
+                  promptSlashState.active
+                    ? "No matching prompts"
+                    : docSearchState.active
+                      ? "No matching documents"
+                      : null
+                }
+                onKeyDown={(event) => {
+                  if (
+                    pickerOpen &&
+                    visibleOptions.length > 0 &&
+                    (event.key === "ArrowDown" || event.key === "ArrowUp")
+                  ) {
+                    event.preventDefault();
+                    const keys = visibleOptions.map((option) =>
+                      String(option.value ?? option.label ?? ""),
+                    );
+                    if (keys.length === 0) {
+                      return;
+                    }
+                    const currentIndex = activeDropdownKey
+                      ? keys.indexOf(activeDropdownKey)
+                      : -1;
+                    const direction = event.key === "ArrowDown" ? 1 : -1;
+                    const nextIndex =
+                      currentIndex === -1
+                        ? 0
+                        : (currentIndex + direction + keys.length) % keys.length;
+                    setActiveDropdownKey(keys[nextIndex]);
                     return;
                   }
-                  const currentIndex = activeDropdownKey
-                    ? keys.indexOf(activeDropdownKey)
-                    : -1;
-                  const direction = event.key === "ArrowDown" ? 1 : -1;
-                  const nextIndex =
-                    currentIndex === -1
-                      ? 0
-                      : (currentIndex + direction + keys.length) % keys.length;
-                  setActiveDropdownKey(keys[nextIndex]);
-                  return;
-                }
-                if (handleTokenDeletion(event)) {
-                  return;
-                }
-                if (event.key !== "Enter") {
-                  return;
-                }
-                if (inputState.isComposing || event.nativeEvent.isComposing) {
-                  return;
-                }
-                if (
-                  pickerOpen &&
-                  visibleOptions.length > 0 &&
-                  activeDropdownKey &&
-                  !input.trim().startsWith("/op:")
-                ) {
-                  event.preventDefault();
-                  handleOptionSelect(activeDropdownKey);
-                  return;
-                }
-                if (
-                  pickerOpen &&
-                  visibleOptions.length > 0 &&
-                  (docSearchState.active || inputState.mode === "slash") &&
-                  !event.shiftKey &&
-                  !event.altKey &&
-                  !event.ctrlKey &&
-                  !event.metaKey
-                ) {
-                  if (!input.trim().startsWith("/op:")) {
+                  if (handleTokenDeletion(event)) {
+                    return;
+                  }
+                  if (event.key !== "Enter") {
+                    return;
+                  }
+                  if (inputState.isComposing || event.nativeEvent.isComposing) {
+                    return;
+                  }
+                  if (
+                    pickerOpen &&
+                    visibleOptions.length > 0 &&
+                    activeDropdownKey &&
+                    !input.trim().startsWith("/op:")
+                  ) {
+                    event.preventDefault();
+                    handleOptionSelect(activeDropdownKey);
+                    return;
+                  }
+                  if (
+                    pickerOpen &&
+                    visibleOptions.length > 0 &&
+                    (docSearchState.active || inputState.mode === "slash") &&
+                    !event.shiftKey &&
+                    !event.altKey &&
+                    !event.ctrlKey &&
+                    !event.metaKey
+                  ) {
+                    if (!input.trim().startsWith("/op:")) {
+                      event.preventDefault();
+                      return;
+                    }
+                  }
+                  if (
+                    docSearchState.active &&
+                    !event.shiftKey &&
+                    !event.altKey &&
+                    !event.ctrlKey &&
+                    !event.metaKey
+                  ) {
                     event.preventDefault();
                     return;
                   }
-                }
-                if (
-                  docSearchState.active &&
-                  !event.shiftKey &&
-                  !event.altKey &&
-                  !event.ctrlKey &&
-                  !event.metaKey
-                ) {
-                  event.preventDefault();
-                  return;
-                }
                   if (event.altKey || event.getModifierState("Alt")) {
                     event.preventDefault();
                     event.stopPropagation();
@@ -1315,11 +1309,11 @@ function ChatDock() {
                   event.preventDefault();
                   handleSend();
                 }}
-              onCompositionStart={() => setComposing(true)}
-              onCompositionEnd={() => setComposing(false)}
-              disabled={!projectKey || isGenerating}
-              activeKey={activeDropdownKey}
-            />
+                onCompositionStart={() => setComposing(true)}
+                onCompositionEnd={() => setComposing(false)}
+                disabled={!projectKey || isGenerating}
+                activeKey={activeDropdownKey}
+              />
               <div className="chat-dock-actions">
                 <button type="button" onClick={handleSend} disabled={!canSend}>
                   Send
