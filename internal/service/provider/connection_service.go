@@ -25,8 +25,7 @@ type ConnectionService struct {
 }
 
 func NewConnectionService(
-	repo repository.ProviderConnectionRepository,
-	credentialRepo repository.ProviderCredentialRepository,
+	repos repository.Repository,
 	registry *Registry,
 	clientFactory modelruntime.ClientFactory,
 	keyManager util.KeyManager,
@@ -35,8 +34,8 @@ func NewConnectionService(
 		clientFactory = modelruntime.DefaultClientFactory
 	}
 	return &ConnectionService{
-		repo:           repo,
-		credentialRepo: credentialRepo,
+		repo:           repos.ProviderConnection,
+		credentialRepo: repos.ProviderCredential,
 		registry:       registry,
 		clientFactory:  clientFactory,
 		keyManager:     keyManager,
@@ -200,7 +199,14 @@ func (s *ConnectionService) ListModels(ctx context.Context, connectionID string)
 	if s == nil {
 		return nil, fmt.Errorf("provider connection service not initialized")
 	}
-	modelsSvc := NewConnectionModelsService(s.repo, s.credentialRepo, s.clientFactory, s.keyManager)
+	modelsSvc := NewConnectionModelsService(
+		repository.Repository{
+			ProviderConnection: s.repo,
+			ProviderCredential: s.credentialRepo,
+		},
+		s.clientFactory,
+		s.keyManager,
+	)
 	return modelsSvc.ListModels(ctx, connectionID)
 }
 

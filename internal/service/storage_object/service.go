@@ -36,7 +36,7 @@ var (
 func NewService(
 	ingestionSvc ingestion.FileIngestionService,
 	s3Client *s3.Client,
-	repo repository.StorageObjectRepository,
+	repos repository.Repository,
 ) *Service {
 	var presigner *s3.PresignClient
 	if s3Client != nil {
@@ -44,7 +44,7 @@ func NewService(
 	}
 	return &Service{
 		ingestion: ingestionSvc,
-		repo:      repo,
+		repo:      repos.StorageObject,
 		presigner: presigner,
 		now:       time.Now,
 		expires:   10 * time.Minute,

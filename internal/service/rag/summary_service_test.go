@@ -110,7 +110,7 @@ func TestGenerateDocumentSummary_NoChange(t *testing.T) {
 	service := NewSummaryService(
 		fakeDocReader{},
 		fakeExtractor{units: units},
-		repo,
+		repository.Repository{DocumentSummary: repo},
 		llmClient,
 		fakeRuntimeResolver{runtime: embedding.ModelRuntime{ID: "runtime-1"}},
 	)
@@ -150,7 +150,7 @@ func TestGenerateDocumentSummary_ContentChanged(t *testing.T) {
 	service := NewSummaryService(
 		fakeDocReader{},
 		fakeExtractor{units: units},
-		repo,
+		repository.Repository{DocumentSummary: repo},
 		llmClient,
 		fakeRuntimeResolver{runtime: embedding.ModelRuntime{ID: "runtime-2"}},
 	)
@@ -184,7 +184,7 @@ func TestGenerateDocumentSummary_AfterDelete(t *testing.T) {
 	service := NewSummaryService(
 		fakeDocReader{},
 		fakeExtractor{units: units},
-		repo,
+		repository.Repository{DocumentSummary: repo},
 		llmClient,
 		fakeRuntimeResolver{runtime: embedding.ModelRuntime{ID: "runtime-3"}},
 	)

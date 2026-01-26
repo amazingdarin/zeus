@@ -22,8 +22,8 @@ type CredentialService struct {
 	clock      func() time.Time
 }
 
-func NewCredentialService(repo repository.ProviderCredentialRepository, keyManager util.KeyManager, copilot *provider.CopilotDeviceClient) *CredentialService {
-	return &CredentialService{repo: repo, keyManager: keyManager, copilot: copilot, clock: time.Now}
+func NewCredentialService(repos repository.Repository, keyManager util.KeyManager, copilot *provider.CopilotDeviceClient) *CredentialService {
+	return &CredentialService{repo: repos.ProviderCredential, keyManager: keyManager, copilot: copilot, clock: time.Now}
 }
 
 func (s *CredentialService) StoreAPIKey(ctx context.Context, input service.ProviderAuthInput) (*domain.ProviderCredential, error) {

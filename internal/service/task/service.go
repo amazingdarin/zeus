@@ -17,8 +17,8 @@ type Service struct {
 	repo repository.TaskRepository
 }
 
-func NewService(repo repository.TaskRepository) *Service {
-	return &Service{repo: repo}
+func NewService(repos repository.Repository) *Service {
+	return &Service{repo: repos.Task}
 }
 
 func (s *Service) Create(ctx context.Context, input service.TaskInput) (*domain.Task, error) {

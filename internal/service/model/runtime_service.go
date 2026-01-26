@@ -23,7 +23,7 @@ type RuntimeService struct {
 }
 
 func NewRuntimeService(
-	repo repository.ModelRuntimeRepository,
+	repos repository.Repository,
 	clientFactory modelruntime.ClientFactory,
 	encryptionKey string,
 ) *RuntimeService {
@@ -31,7 +31,7 @@ func NewRuntimeService(
 		clientFactory = modelruntime.DefaultClientFactory
 	}
 	return &RuntimeService{
-		repo:          repo,
+		repo:          repos.ModelRuntime,
 		clientFactory: clientFactory,
 		encryptionKey: strings.TrimSpace(encryptionKey),
 		now:           time.Now,

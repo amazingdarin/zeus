@@ -24,13 +24,13 @@ func NewService(
 	localFileStorage service.AssetStorageService,
 	metaStore service.AssetMetaStore,
 	reader service.AssetContentReader,
-	projectRepo repository.ProjectRepository,
+	repos repository.Repository,
 ) *Service {
 	return &Service{
 		localFileStorage: localFileStorage,
 		metaStore:        metaStore,
 		reader:           reader,
-		projectRepo:      projectRepo,
+		projectRepo:      repos.Project,
 	}
 }
 

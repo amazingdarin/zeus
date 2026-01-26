@@ -23,8 +23,7 @@ type ConnectionModelsService struct {
 }
 
 func NewConnectionModelsService(
-	connectionRepo repository.ProviderConnectionRepository,
-	credentialRepo repository.ProviderCredentialRepository,
+	repos repository.Repository,
 	clientFactory modelruntime.ClientFactory,
 	keyManager util.KeyManager,
 ) *ConnectionModelsService {
@@ -32,8 +31,8 @@ func NewConnectionModelsService(
 		clientFactory = modelruntime.DefaultClientFactory
 	}
 	return &ConnectionModelsService{
-		connectionRepo: connectionRepo,
-		credentialRepo: credentialRepo,
+		connectionRepo: repos.ProviderConnection,
+		credentialRepo: repos.ProviderCredential,
 		clientFactory:  clientFactory,
 		keyManager:     keyManager,
 	}

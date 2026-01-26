@@ -22,15 +22,11 @@ type Service struct {
 	proposalRepo  repository.KnowledgeChangeProposalRepository
 }
 
-func NewService(
-	knowledgeRepo repository.KnowledgeRepository,
-	projectRepo repository.ProjectRepository,
-	proposalRepo repository.KnowledgeChangeProposalRepository,
-) *Service {
+func NewService(repos repository.Repository) *Service {
 	return &Service{
-		knowledgeRepo: knowledgeRepo,
-		projectRepo:   projectRepo,
-		proposalRepo:  proposalRepo,
+		knowledgeRepo: repos.Knowledge,
+		projectRepo:   repos.Project,
+		proposalRepo:  repos.KnowledgeChangeProposal,
 	}
 }
 

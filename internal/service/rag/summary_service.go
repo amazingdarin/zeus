@@ -38,14 +38,14 @@ type SummaryService struct {
 func NewSummaryService(
 	reader repository.DocumentReader,
 	extractor RAGExtractor,
-	repo ragsummary.DocumentSummaryRepository,
+	repos repository.Repository,
 	llmClient llm.Client,
 	runtime embedding.ModelRuntimeResolver,
 ) *SummaryService {
 	return &SummaryService{
 		reader:    reader,
 		extractor: extractor,
-		repo:      repo,
+		repo:      repos.DocumentSummary,
 		llm:       llmClient,
 		runtime:   runtime,
 	}

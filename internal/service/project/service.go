@@ -26,12 +26,12 @@ type Service struct {
 }
 
 func NewService(
-	projectRepo repository.ProjectRepository,
+	repos repository.Repository,
 	gitAdmin gitadmin.GitAdmin,
 	gitClientManager *gitclient.GitClientManager,
 ) *Service {
 	return &Service{
-		projectRepo:      projectRepo,
+		projectRepo:      repos.Project,
 		gitAdmin:         gitAdmin,
 		gitClientManager: gitClientManager,
 	}

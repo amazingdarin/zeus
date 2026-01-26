@@ -20,16 +20,14 @@ type RuntimeResolver struct {
 }
 
 func NewRuntimeResolver(
-	runtimeRepo repository.ModelRuntimeRepository,
-	connectionRepo repository.ProviderConnectionRepository,
-	credentialRepo repository.ProviderCredentialRepository,
+	repos repository.Repository,
 	keyManager util.KeyManager,
 	legacyKey string,
 ) *RuntimeResolver {
 	return &RuntimeResolver{
-		runtimeRepo:    runtimeRepo,
-		connectionRepo: connectionRepo,
-		credentialRepo: credentialRepo,
+		runtimeRepo:    repos.ModelRuntime,
+		connectionRepo: repos.ProviderConnection,
+		credentialRepo: repos.ProviderCredential,
 		keyManager:     keyManager,
 		legacyKey:      strings.TrimSpace(legacyKey),
 	}

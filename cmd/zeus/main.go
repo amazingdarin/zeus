@@ -29,6 +29,7 @@ import (
 	"zeus/internal/infra/searchindex"
 	httpsession "zeus/internal/infra/session"
 	"zeus/internal/infra/taskcallback"
+	"zeus/internal/repository"
 	gitrepo "zeus/internal/repository/git"
 	"zeus/internal/repository/postgres"
 	"zeus/internal/repository/ragindex"
@@ -123,6 +124,21 @@ func InitGitClientManager(ctx context.Context) *gitclient.GitClientManager {
 	return manager
 }
 
+func InitRepository(db *gorm.DB, gitClientManager *gitclient.GitClientManager) repository.Repository {
+	return repository.Repository{
+		Project:                 postgres.NewProjectRepository(db),
+		StorageObject:           postgres.NewStorageObjectRepository(db),
+		ModelRuntime:            postgres.NewModelRuntimeRepository(db),
+		ProviderConnection:      postgres.NewProviderConnectionRepository(db),
+		ProviderCredential:      postgres.NewProviderCredentialRepository(db),
+		DocumentSummary:         postgres.NewDocumentSummaryRepository(db),
+		Task:                    postgres.NewTaskRepository(db),
+		KnowledgeChangeProposal: postgres.NewKnowledgeChangeProposalRepository(db),
+		Knowledge:               gitrepo.NewKnowledgeRepository(gitClientManager),
+		Document:                postgres.NewDocumentRepository(db),
+	}
+}
+
 func main() {
 	ctx := context.Background()
 	InitLogger()
@@ -133,18 +149,10 @@ func main() {
 	gitClientManager := InitGitClientManager(ctx)
 
 	// Init Repositories
-	projectRepo := postgres.NewProjectRepository(db)
-	storageObjectRepo := postgres.NewStorageObjectRepository(db)
-	modelRuntimeRepo := postgres.NewModelRuntimeRepository(db)
-	providerConnectionRepo := postgres.NewProviderConnectionRepository(db)
-	providerCredentialRepo := postgres.NewProviderCredentialRepository(db)
-	summaryRepo := postgres.NewDocumentSummaryRepository(db)
-	taskRepo := postgres.NewTaskRepository(db)
-	changeProposalRepo := postgres.NewKnowledgeChangeProposalRepository(db)
-	knowledgeRepo := gitrepo.NewKnowledgeRepository(gitClientManager)
+	repos := InitRepository(db, gitClientManager)
 
 	// Init Services
-	storageObjectSvc := svcstorageobject.NewService(s3Ingestion, s3Client, storageObjectRepo)
+	storageObjectSvc := svcstorageobject.NewService(s3Ingestion, s3Client, repos)
 
 	pandoc := convert.NewPandoc("")
 	convertSvc := svcconvert.NewService(pandoc)
@@ -157,10 +165,10 @@ func main() {
 		localFileStorage,
 		assetMetaStore,
 		assetReader,
-		projectRepo,
+		repos,
 	)
 	openapiIndexSvc := svcopenapi.NewIndexService(assetMetaStore, assetReader)
-	projectSvc := svcproject.NewService(projectRepo, gitAdmin, gitClientManager)
+	projectSvc := svcproject.NewService(repos, gitAdmin, gitClientManager)
 	keyManager, err := util.NewLocalKeyManager(config.AppConfig.Security)
 	if err != nil {
 		log.WithContext(ctx).Fatalf("init key manager: %v", err)
@@ -170,16 +178,15 @@ func main() {
 		config.AppConfig.Providers.Copilot.Scopes,
 	)
 	providerRegistry := svcprovider.NewRegistry()
-	providerCredentialSvc := svcprovider.NewCredentialService(providerCredentialRepo, keyManager, copilotClient)
+	providerCredentialSvc := svcprovider.NewCredentialService(repos, keyManager, copilotClient)
 	providerConnectionSvc := svcprovider.NewConnectionService(
-		providerConnectionRepo,
-		providerCredentialRepo,
+		repos,
 		providerRegistry,
 		modelruntime.DefaultClientFactory,
 		keyManager,
 	)
 	modelRuntimeSvc := svcmodel.NewRuntimeService(
-		modelRuntimeRepo,
+		repos,
 		modelruntime.DefaultClientFactory,
 		config.AppConfig.Security.EncryptionKey,
 	)
@@ -188,31 +195,29 @@ func main() {
 	if searchIndexRoot == "" {
 		searchIndexRoot = searchindex.DefaultIndexRoot
 	}
-	indexBuilder := searchindex.NewIndexBuilder(knowledgeRepo, searchIndexRoot)
+	indexBuilder := searchindex.NewIndexBuilder(repos.Knowledge, searchIndexRoot)
 	searchSvc := svcsearch.NewService(indexBuilder)
-	knowledgeSvc := svcknowledge.NewService(knowledgeRepo, projectRepo, changeProposalRepo)
+	knowledgeSvc := svcknowledge.NewService(repos)
 	documentSvc := svcdocument.NewService(config.AppConfig.Git.RepoRoot)
 	ragIndex := ragindex.NewPostgresIndex(db)
 	ragExtractor := svcrag.SimpleBlockExtractor{}
 	runtimeResolver := svcmodel.NewRuntimeResolver(
-		modelRuntimeRepo,
-		providerConnectionRepo,
-		providerCredentialRepo,
+		repos,
 		keyManager,
 		config.AppConfig.Security.EncryptionKey,
 	)
 	ragEmbedder := embedding.NewOpenAICompatibleEmbedder(runtimeResolver)
-	ragReader := gitrepo.NewGitDocumentReader(knowledgeRepo, projectRepo)
+	ragReader := gitrepo.NewGitDocumentReader(repos.Knowledge, repos.Project)
 	ragSvc := svcrag.NewService(ragReader, ragExtractor, ragEmbedder, ragIndex, svcrag.SimpleAssembler{})
 	summaryLLM := llm.NewOpenAICompatibleClient()
 	summarySvc := svcrag.NewSummaryService(
 		ragReader,
 		ragExtractor,
-		summaryRepo,
+		repos,
 		summaryLLM,
 		runtimeResolver,
 	)
-	taskSvc := svctask.NewService(taskRepo)
+	taskSvc := svctask.NewService(repos)
 	chatRunRegistry := chatrun.NewMemoryRunRegistry()
 	slashRouter := chatstream.NewDefaultSlashRouter(
 		[]chatstream.SlashCommand{
@@ -251,7 +256,7 @@ User request:
 	)
 
 	taskWorker := svctask.NewWorker(
-		taskRepo,
+		repos.Task,
 		[]svctask.Handler{
 			svctask.NewRagRebuildProjectHandler(ragSvc, summarySvc),
 		},
