@@ -39,6 +39,7 @@ import {
   tiptapJsonToMarkdown,
 } from "@zeus/doc-editor";
 import { exportContentJson } from "../utils/exportContentJson";
+import { convertDocument } from "../api/convert";
 
 type DocumentData = {
   id: string;
@@ -149,9 +150,10 @@ const TEXT_MIME_VALUES = new Set([
 const TEXT_SNIFF_BYTES = 16 * 1024;
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown"]);
 const MARKDOWN_MIME_VALUES = new Set(["text/markdown", "text/x-markdown"]);
+const WORD_EXTENSIONS = new Set(["docx"]);
 const SMART_IMPORT_OPTIONS: SmartImportOption[] = [
   { id: "markdown", label: "Markdown", enabled: true },
-  { id: "word", label: "Word", enabled: false },
+  { id: "word", label: "Word", enabled: true },
   { id: "pdf", label: "PDF", enabled: false },
 ];
 
@@ -286,10 +288,8 @@ function DocumentPage() {
     });
   }, []);
 
-  const isSmartImportTypeSelected = useCallback(
-    (type: SmartImportType) => smartImportTypes.has(type),
-    [smartImportTypes],
-  );
+
+  const isSmartImportTypeSelected = (type: SmartImportType) => smartImportTypes.has(type);
 
   const mapDocument = useCallback(
     (item: DocumentListItem, parentId: string): KnowledgeBaseDocument => {
@@ -1015,9 +1015,15 @@ function DocumentPage() {
           smartImportEnabled &&
           smartImportTypes.has("markdown") &&
           isMarkdownFile(entry.file);
-        if (canSmartImport) {
+        const canDocxImport =
+          smartImportEnabled &&
+          smartImportTypes.has("word") &&
+          isDocxFile(entry.file);
+        if (canSmartImport || canDocxImport) {
           try {
-            const markdown = await entry.file.text();
+            const markdown = canDocxImport
+              ? (await convertDocument(resolvedProjectKey, entry.file, "docx", "md")).content
+              : await entry.file.text();
             const parsed = markdownToTiptapJson(markdown, { extensions: markdownExtensions });
             const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
             const fileBlock = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, true);
@@ -1765,6 +1771,17 @@ function isMarkdownFile(file: File): boolean {
   }
   const extension = getFileExtension(file.name);
   return extension ? MARKDOWN_EXTENSIONS.has(extension) : false;
+}
+
+function isDocxFile(file: File): boolean {
+  const extension = getFileExtension(file.name);
+  if (extension) {
+    return WORD_EXTENSIONS.has(extension);
+  }
+  return (
+    file.type.trim().toLowerCase() ===
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  );
 }
 
 async function isLikelyTextFile(file: File, asset: UploadedAsset): Promise<boolean> {

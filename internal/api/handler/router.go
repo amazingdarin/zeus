@@ -6,6 +6,7 @@ import (
 	"zeus/internal/service"
 	"zeus/internal/service/chatrun"
 	"zeus/internal/service/chatstream"
+	svcdocstore "zeus/internal/service/docstore"
 	svcopenapi "zeus/internal/service/openapi"
 )
 
@@ -27,13 +28,14 @@ func RegisterRoutes(
 	chatRunRegistry chatrun.RunRegistry,
 	chatStreamSvc ChatStreamRunner,
 	commandRouter chatstream.SlashRouter,
-	repoRoot string,
+	convertSvc service.ConvertService,
+	docstoreProvider svcdocstore.Provider,
 ) {
 	storageObjectHandler := NewStorageObjectHandler(storageObjectSvc, projectSvc)
 	assetHandler := NewAssetHandler(assetSvc)
 	projectHandler := NewProjectHandler(projectSvc)
 	knowledgeHandler := NewKnowledgeHandler(knowledgeSvc)
-	documentHandler := NewDocumentHandler(projectSvc, repoRoot)
+	documentHandler := NewDocumentHandler(projectSvc, docstoreProvider)
 	searchHandler := NewSearchHandler(searchSvc)
 	ragHandler := NewRAGHandler(ragSvc, summarySvc, projectSvc, taskSvc)
 	taskHandler := NewTaskHandler(taskSvc)
@@ -45,6 +47,7 @@ func RegisterRoutes(
 	chatRunHandler := NewChatRunHandler(chatRunRegistry, projectSvc)
 	chatStreamHandler := NewChatStreamHandler(chatRunRegistry, chatStreamSvc, projectSvc)
 	commandHandler := NewCommandHandler(commandRouter, projectSvc)
+	convertHandler := NewConvertHandler(convertSvc, projectSvc)
 
 	api := r.Group("/api")
 
@@ -59,6 +62,9 @@ func RegisterRoutes(
 	api.POST("/projects/:project_key/assets/import", assetHandler.Import)
 	api.GET("/projects/:project_key/assets/:asset_id/kind", assetHandler.Kind)
 	api.GET("/projects/:project_key/assets/:asset_id/content", assetHandler.Content)
+
+	// Convert
+	api.POST("/projects/:project_key/convert", convertHandler.Convert)
 
 	// Project
 	api.POST("/projects", projectHandler.Create)

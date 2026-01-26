@@ -13,9 +13,11 @@ import (
 	"zeus/internal/api/handler"
 	"zeus/internal/api/middleware"
 	"zeus/internal/config"
+	"zeus/internal/domain/docstore"
 	"zeus/internal/infra/assetcontent"
 	"zeus/internal/infra/assetmeta"
 	clients3 "zeus/internal/infra/client/s3"
+	"zeus/internal/infra/convert"
 	"zeus/internal/infra/embedding"
 	"zeus/internal/infra/gitadmin"
 	"zeus/internal/infra/gitclient"
@@ -34,6 +36,9 @@ import (
 	svcasset "zeus/internal/service/asset"
 	"zeus/internal/service/chatrun"
 	"zeus/internal/service/chatstream"
+	svcconvert "zeus/internal/service/convert"
+	svcdocstore "zeus/internal/service/docstore"
+	svcindex "zeus/internal/service/index"
 	svcknowledge "zeus/internal/service/knowledge"
 	svcmodel "zeus/internal/service/model"
 	svcopenapi "zeus/internal/service/openapi"
@@ -139,9 +144,14 @@ func main() {
 	taskRepo := postgres.NewTaskRepository(db)
 	changeProposalRepo := postgres.NewKnowledgeChangeProposalRepository(db)
 	knowledgeRepo := gitrepo.NewKnowledgeRepository(gitClientManager)
+	docIndexRepo := postgres.NewDocumentIndexRepository(db)
+	blockIndexRepo := postgres.NewBlockIndexRepository(db)
 
 	// Init Services
 	storageObjectSvc := svcstorageobject.NewService(s3Ingestion, s3Client, storageObjectRepo)
+
+	pandoc := convert.NewPandoc("")
+	convertSvc := svcconvert.NewService(pandoc)
 
 	assetMetaRoot := getenv("ZEUS_ASSET_META_ROOT", config.AppConfig.Asset.MetaRoot)
 	localFileStorage := localstorage.NewLocalAssetStorage(assetMetaRoot)
@@ -185,6 +195,10 @@ func main() {
 	indexBuilder := searchindex.NewIndexBuilder(knowledgeRepo, searchIndexRoot)
 	searchSvc := svcsearch.NewService(indexBuilder)
 	knowledgeSvc := svcknowledge.NewService(knowledgeRepo, projectRepo, changeProposalRepo)
+	docstoreProvider := svcdocstore.NewServiceProvider(config.AppConfig.Git.RepoRoot, docstore.Hooks{})
+	docGetter := svcindex.NewProjectDocstoreGetter(projectRepo, docstoreProvider)
+	fulltextIndexSvc := svcindex.NewFulltextIndexService(docIndexRepo, blockIndexRepo, docGetter, nil)
+	docstoreProvider.SetHooks(fulltextIndexSvc.DocumentHooks())
 	ragIndex := ragindex.NewPostgresIndex(db)
 	ragExtractor := svcrag.SimpleBlockExtractor{}
 	runtimeResolver := svcmodel.NewRuntimeResolver(
@@ -279,7 +293,8 @@ User request:
 		chatRunRegistry,
 		chatStreamSvc,
 		slashRouter,
-		config.AppConfig.Git.RepoRoot,
+		convertSvc,
+		docstoreProvider,
 	)
 
 	if err := router.Run(config.AppConfig.Server.Addr); err != nil {
