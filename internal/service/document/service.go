@@ -20,9 +20,9 @@ func (s *Service) projectRoot(projectKey string) string {
 	return filepath.Join(s.repoRoot, projectKey)
 }
 
-func NewService(rootDir string) service.DocumentService {
+func NewService(repoRoot string) service.DocumentService {
 	svc := &Service{
-		repoRoot: rootDir,
+		repoRoot: repoRoot,
 		index:    NewIndexManager(),
 	}
 	return svc
