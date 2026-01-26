@@ -1,55 +1,35 @@
 package handler
 
 import (
-	"context"
+	"errors"
 	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
-	"sync"
+
+	"zeus/internal/domain/docstore"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	"zeus/internal/api/types"
-	"zeus/internal/domain/docstore"
 	"zeus/internal/service"
-	svc "zeus/internal/service/docstore"
-	svcdocument "zeus/internal/service/document"
+	svc "zeus/internal/service/document"
 )
 
 type DocumentHandler struct {
-	projectSvc service.ProjectService
-	repoRoot   string
-	stores     sync.Map
+	projectSvc  service.ProjectService
+	documentSvc service.DocumentService
 }
 
 func NewDocumentHandler(
 	projectSvc service.ProjectService,
-	repoRoot string,
+	documentSvc service.DocumentService,
 ) *DocumentHandler {
 	return &DocumentHandler{
-		projectSvc: projectSvc,
-		repoRoot:   repoRoot,
+		projectSvc:  projectSvc,
+		documentSvc: documentSvc,
 	}
-}
-
-func (h *DocumentHandler) getStore(projectKey string) (svc.Service, string, error) {
-	if val, ok := h.stores.Load(projectKey); ok {
-		return val.(svc.Service), "", nil
-	}
-
-	project, err := h.projectSvc.GetByKey(context.Background(), projectKey)
-	if err != nil {
-		return nil, "", err
-	}
-
-	projectDir := filepath.Join(h.repoRoot, projectKey)
-
-	newSvc := svc.NewService(projectDir)
-
-	actual, _ := h.stores.LoadOrStore(projectKey, newSvc)
-	return actual.(svc.Service), project.ID, nil
 }
 
 func (h *DocumentHandler) List(c *gin.Context) {
@@ -60,15 +40,12 @@ func (h *DocumentHandler) List(c *gin.Context) {
 	}
 	parentID := c.Query("parent_id")
 
-	project, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey)
-	if err != nil {
+	if _, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey); err != nil {
 		c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "PROJECT_NOT_FOUND", Message: err.Error()})
 		return
 	}
 
-	docSvc := h.ensureStore(projectKey)
-
-	items, err := docSvc.GetChildren(c.Request.Context(), project.ID, parentID)
+	items, err := h.documentSvc.GetChildren(c.Request.Context(), projectKey, parentID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "LIST_FAILED", Message: err.Error()})
 		return
@@ -89,14 +66,12 @@ func (h *DocumentHandler) Get(c *gin.Context) {
 		return
 	}
 
-	project, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey)
-	if err != nil {
+	if _, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey); err != nil {
 		c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "PROJECT_NOT_FOUND", Message: err.Error()})
 		return
 	}
 
-	docSvc := h.ensureStore(projectKey)
-	doc, err := docSvc.Get(c.Request.Context(), project.ID, docID)
+	doc, err := h.documentSvc.Get(c.Request.Context(), projectKey, docID)
 	if err != nil {
 		if err == svc.ErrNotFound {
 			c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "NOT_FOUND", Message: "document not found"})
@@ -124,14 +99,12 @@ func (h *DocumentHandler) GetHierarchy(c *gin.Context) {
 		return
 	}
 
-	project, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey)
-	if err != nil {
+	if _, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey); err != nil {
 		c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "PROJECT_NOT_FOUND", Message: err.Error()})
 		return
 	}
 
-	docSvc := h.ensureStore(projectKey)
-	chain, err := docSvc.GetHierarchy(c.Request.Context(), project.ID, docID)
+	chain, err := h.documentSvc.GetHierarchy(c.Request.Context(), projectKey, docID)
 	if err != nil {
 		if err == svc.ErrNotFound {
 			c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "NOT_FOUND", Message: "document not found"})
@@ -166,14 +139,12 @@ func (h *DocumentHandler) GetBlock(c *gin.Context) {
 		return
 	}
 
-	project, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey)
-	if err != nil {
+	if _, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey); err != nil {
 		c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "PROJECT_NOT_FOUND", Message: err.Error()})
 		return
 	}
 
-	docSvc := h.ensureStore(projectKey)
-	doc, err := docSvc.GetBlockByID(c.Request.Context(), project.ID, docID, blockID)
+	doc, err := h.documentSvc.GetBlockByID(c.Request.Context(), projectKey, docID, blockID)
 	if err != nil {
 		if err == svc.ErrNotFound {
 			c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "NOT_FOUND", Message: "document not found"})
@@ -210,13 +181,10 @@ func (h *DocumentHandler) Create(c *gin.Context) {
 		return
 	}
 
-	project, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey)
-	if err != nil {
+	if _, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey); err != nil {
 		c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "PROJECT_NOT_FOUND", Message: err.Error()})
 		return
 	}
-
-	docSvc := h.ensureStore(projectKey)
 
 	if req.Meta.ID == "" {
 		req.Meta.ID = uuid.NewString()
@@ -231,7 +199,7 @@ func (h *DocumentHandler) Create(c *gin.Context) {
 		Body: req.Body,
 	}
 
-	if err := docSvc.Save(c.Request.Context(), project.ID, doc); err != nil {
+	if err := h.documentSvc.Save(c.Request.Context(), projectKey, doc); err != nil {
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "SAVE_FAILED", Message: err.Error()})
 		return
 	}
@@ -253,8 +221,7 @@ func (h *DocumentHandler) Import(c *gin.Context) {
 		return
 	}
 
-	project, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey)
-	if err != nil {
+	if _, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey); err != nil {
 		c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "PROJECT_NOT_FOUND", Message: err.Error()})
 		return
 	}
@@ -270,7 +237,7 @@ func (h *DocumentHandler) Import(c *gin.Context) {
 		parentID = "root"
 	}
 	requestedType := strings.TrimSpace(c.PostForm("source_type"))
-	resolvedType, err := svcdocument.ResolveSourceType(fileHeader.Filename, requestedType)
+	resolvedType, err := resolveSourceType(fileHeader.Filename, requestedType)
 	if err != nil {
 		c.JSON(http.StatusUnprocessableEntity, types.ErrorResponse{Code: "UNSUPPORTED_SOURCE_TYPE", Message: "unsupported source_type"})
 		return
@@ -282,7 +249,7 @@ func (h *DocumentHandler) Import(c *gin.Context) {
 
 	title := strings.TrimSpace(c.PostForm("title"))
 	if title == "" {
-		title = svcdocument.NormalizeImportTitle(fileHeader.Filename)
+		title = normalizeImportTitle(fileHeader.Filename)
 	}
 
 	file, err := fileHeader.Open()
@@ -298,12 +265,6 @@ func (h *DocumentHandler) Import(c *gin.Context) {
 		return
 	}
 
-	content, err := svcdocument.ConvertMarkdownToTiptapJSON(string(data))
-	if err != nil {
-		c.JSON(http.StatusUnprocessableEntity, types.ErrorResponse{Code: "CONVERT_FAILED", Message: err.Error()})
-		return
-	}
-
 	meta := docstore.DocumentMeta{
 		ID:            uuid.NewString(),
 		SchemaVersion: "v1",
@@ -316,11 +277,11 @@ func (h *DocumentHandler) Import(c *gin.Context) {
 	}
 	body := docstore.DocumentBody{
 		Type:    "tiptap",
-		Content: content,
+		Content: data,
 	}
 
 	doc := &docstore.Document{Meta: meta, Body: body}
-	if err := h.ensureStore(projectKey).Save(c.Request.Context(), project.ID, doc); err != nil {
+	if err := h.documentSvc.Save(c.Request.Context(), projectKey, doc); err != nil {
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "SAVE_FAILED", Message: err.Error()})
 		return
 	}
@@ -343,15 +304,12 @@ func (h *DocumentHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	project, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey)
-	if err != nil {
+	if _, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey); err != nil {
 		c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "PROJECT_NOT_FOUND", Message: err.Error()})
 		return
 	}
 
-	docSvc := h.ensureStore(projectKey)
-
-	if err := docSvc.Delete(c.Request.Context(), project.ID, docID); err != nil {
+	if err := h.documentSvc.Delete(c.Request.Context(), projectKey, docID); err != nil {
 		if err == svc.ErrNotFound {
 			c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "NOT_FOUND", Message: "document not found"})
 			return
@@ -377,17 +335,14 @@ func (h *DocumentHandler) Move(c *gin.Context) {
 		return
 	}
 
-	project, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey)
-	if err != nil {
+	if _, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey); err != nil {
 		c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "PROJECT_NOT_FOUND", Message: err.Error()})
 		return
 	}
 
-	docSvc := h.ensureStore(projectKey)
-
-	if err := docSvc.Move(
+	if err := h.documentSvc.Move(
 		c.Request.Context(),
-		project.ID,
+		projectKey,
 		docID,
 		req.TargetParentID,
 		req.BeforeDocID,
@@ -404,12 +359,32 @@ func (h *DocumentHandler) Move(c *gin.Context) {
 	c.JSON(http.StatusOK, types.MoveDocumentResponse{Code: "OK", Message: "success"})
 }
 
-func (h *DocumentHandler) ensureStore(projectKey string) svc.Service {
-	if val, ok := h.stores.Load(projectKey); ok {
-		return val.(svc.Service)
+func resolveSourceType(filename string, requested string) (string, error) {
+	requested = strings.TrimSpace(strings.ToLower(requested))
+	if requested != "" {
+		return requested, nil
 	}
-	projectDir := filepath.Join(h.repoRoot, projectKey)
-	docSvc := svc.NewService(projectDir)
-	actual, _ := h.stores.LoadOrStore(projectKey, docSvc)
-	return actual.(svc.Service)
+
+	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(filename)))
+	switch ext {
+	case ".md", ".markdown":
+		return "markdown", nil
+	default:
+		return "", errUnsupportedSourceType
+	}
 }
+
+func normalizeImportTitle(filename string) string {
+	trimmed := strings.TrimSpace(filename)
+	if trimmed == "" {
+		return "Untitled"
+	}
+	base := strings.TrimSuffix(trimmed, filepath.Ext(trimmed))
+	base = strings.TrimSpace(base)
+	if base == "" {
+		return "Untitled"
+	}
+	return base
+}
+
+var errUnsupportedSourceType = errors.New("unsupported source_type")

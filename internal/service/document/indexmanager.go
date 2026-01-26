@@ -1,62 +1,17 @@
-package docstore
+package document
 
 import (
-	"context"
 	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"zeus/internal/domain/docstore"
 )
 
-// Service defines the document management operations
-type Service interface {
-	Get(ctx context.Context, projectID, docID string) (*docstore.Document, error)
-	Save(ctx context.Context, projectID string, doc *docstore.Document) error
-	Delete(ctx context.Context, projectID, docID string) error
-	Move(ctx context.Context, projectID, docID, targetParentID, beforeDocID, afterDocID string) error
-	GetChildren(ctx context.Context, projectID, parentID string) ([]docstore.TreeItem, error)
-	GetHierarchy(ctx context.Context, projectID, docID string) ([]docstore.DocumentMeta, error)
-	GetBlockByID(ctx context.Context, projectID, docID, blockID string) (*docstore.Document, error)
-	RegisterHooks(hooks docstore.Hooks)
-}
-
-type impl struct {
-	rootDir string
-	index   *IndexManager
-	hooks   docstore.Hooks
-}
-
-func NewService(rootDir string) Service {
-	svc := &impl{
-		rootDir: rootDir,
-		index:   NewIndexManager(),
-	}
-	// Initial rebuild (blocking for simplicity, should be async in prod)
-	svc.index.Rebuild(rootDir)
-	return svc
-}
-
-func (s *impl) RegisterHooks(hooks docstore.Hooks) {
-	s.hooks.BeforeSave = append(s.hooks.BeforeSave, hooks.BeforeSave...)
-	s.hooks.AfterSave = append(s.hooks.AfterSave, hooks.AfterSave...)
-	s.hooks.BeforeDelete = append(s.hooks.BeforeDelete, hooks.BeforeDelete...)
-	s.hooks.AfterDelete = append(s.hooks.AfterDelete, hooks.AfterDelete...)
-	s.hooks.BeforeMove = append(s.hooks.BeforeMove, hooks.BeforeMove...)
-	s.hooks.AfterMove = append(s.hooks.AfterMove, hooks.AfterMove...)
-}
-
 // --- Index Manager ---
-
-type CachedDoc struct {
-	Path     string
-	Title    string
-	ParentID string
-}
 
 type IndexManager struct {
 	mu       sync.RWMutex
@@ -141,9 +96,4 @@ func (idx *IndexManager) FindIDByPath(path string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-// Helper to get time
-func now() time.Time {
-	return time.Now()
 }

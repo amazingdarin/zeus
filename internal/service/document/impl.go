@@ -1,4 +1,4 @@
-package docstore
+package document
 
 import (
 	"context"
@@ -18,13 +18,13 @@ var (
 	ErrBlockNotFound = errors.New("block not found")
 )
 
-func (s *impl) Get(ctx context.Context, projectID, docID string) (*docstore.Document, error) {
+func (s *Service) Get(ctx context.Context, projectKey, docID string) (*docstore.Document, error) {
 	cache, ok := s.index.Get(docID)
 	if !ok {
 		return nil, ErrNotFound
 	}
 
-	fullPath := filepath.Join(s.rootDir, cache.Path)
+	fullPath := filepath.Join(s.projectRoot(projectKey), cache.Path)
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -41,8 +41,8 @@ func (s *impl) Get(ctx context.Context, projectID, docID string) (*docstore.Docu
 	return &doc, nil
 }
 
-func (s *impl) Save(ctx context.Context, projectID string, doc *docstore.Document) error {
-	hookCtx := docstore.HookContext{ProjectID: projectID}
+func (s *Service) Save(ctx context.Context, projectKey string, doc *docstore.Document) error {
+	hookCtx := docstore.HookContext{ProjectID: projectKey}
 	for _, hook := range s.hooks.BeforeSave {
 		if err := hook(hookCtx, doc); err != nil {
 			return err
@@ -53,7 +53,7 @@ func (s *impl) Save(ctx context.Context, projectID string, doc *docstore.Documen
 
 	var targetDir string
 	if exists {
-		currentPath := filepath.Join(s.rootDir, cache.Path)
+		currentPath := filepath.Join(s.projectRoot(projectKey), cache.Path)
 		targetDir = filepath.Dir(currentPath)
 	} else {
 		if doc.Meta.ParentID != "" && doc.Meta.ParentID != "root" {
@@ -61,11 +61,11 @@ func (s *impl) Save(ctx context.Context, projectID string, doc *docstore.Documen
 			if !ok {
 				return errors.New("parent document not found")
 			}
-			parentPath := filepath.Join(s.rootDir, parentCache.Path)
+			parentPath := filepath.Join(s.projectRoot(projectKey), parentCache.Path)
 			ext := filepath.Ext(parentPath)
 			targetDir = parentPath[:len(parentPath)-len(ext)]
 		} else {
-			targetDir = filepath.Join(s.rootDir, "docs")
+			targetDir = filepath.Join(s.projectRoot(projectKey), "docs")
 		}
 	}
 
@@ -96,7 +96,7 @@ func (s *impl) Save(ctx context.Context, projectID string, doc *docstore.Documen
 	fullPath := filepath.Join(targetDir, filename)
 
 	if exists {
-		oldFullPath := filepath.Join(s.rootDir, cache.Path)
+		oldFullPath := filepath.Join(s.projectRoot(projectKey), cache.Path)
 		if oldFullPath != fullPath {
 			if err := s.renameFileAndDir(oldFullPath, fullPath); err != nil {
 				return err
@@ -109,7 +109,7 @@ func (s *impl) Save(ctx context.Context, projectID string, doc *docstore.Documen
 	}
 	s.addToIndexFile(targetDir, doc.Meta.ID)
 
-	doc.Meta.Path, _ = filepath.Rel(s.rootDir, fullPath)
+	doc.Meta.Path, _ = filepath.Rel(s.projectRoot(projectKey), fullPath)
 	doc.Meta.UpdatedAt = now()
 	if doc.Meta.CreatedAt.IsZero() {
 		doc.Meta.CreatedAt = now()
@@ -123,7 +123,7 @@ func (s *impl) Save(ctx context.Context, projectID string, doc *docstore.Documen
 		return err
 	}
 
-	relPath, _ := filepath.Rel(s.rootDir, fullPath)
+	relPath, _ := filepath.Rel(s.projectRoot(projectKey), fullPath)
 	s.index.Update(doc.Meta.ID, CachedDoc{
 		Path:     relPath,
 		Title:    doc.Meta.Title,
@@ -139,8 +139,8 @@ func (s *impl) Save(ctx context.Context, projectID string, doc *docstore.Documen
 	return nil
 }
 
-func (s *impl) Delete(ctx context.Context, projectID, docID string) error {
-	hookCtx := docstore.HookContext{ProjectID: projectID}
+func (s *Service) Delete(ctx context.Context, projectKey, docID string) error {
+	hookCtx := docstore.HookContext{ProjectID: projectKey}
 	for _, hook := range s.hooks.BeforeDelete {
 		if err := hook(hookCtx, docID); err != nil {
 			return err
@@ -152,7 +152,7 @@ func (s *impl) Delete(ctx context.Context, projectID, docID string) error {
 		return ErrNotFound
 	}
 
-	fullPath := filepath.Join(s.rootDir, cache.Path)
+	fullPath := filepath.Join(s.projectRoot(projectKey), cache.Path)
 
 	if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
 		return err
@@ -176,8 +176,8 @@ func (s *impl) Delete(ctx context.Context, projectID, docID string) error {
 	return nil
 }
 
-func (s *impl) Move(ctx context.Context, projectID, docID, targetParentID, beforeDocID, afterDocID string) error {
-	hookCtx := docstore.HookContext{ProjectID: projectID}
+func (s *Service) Move(ctx context.Context, projectKey, docID, targetParentID, beforeDocID, afterDocID string) error {
+	hookCtx := docstore.HookContext{ProjectID: projectKey}
 	for _, hook := range s.hooks.BeforeMove {
 		if err := hook(hookCtx, docID, targetParentID); err != nil {
 			return err
@@ -188,17 +188,17 @@ func (s *impl) Move(ctx context.Context, projectID, docID, targetParentID, befor
 	if !ok {
 		return ErrNotFound
 	}
-	oldPath := filepath.Join(s.rootDir, cache.Path)
+	oldPath := filepath.Join(s.projectRoot(projectKey), cache.Path)
 
 	var targetDir string
 	if targetParentID == "" || targetParentID == "root" {
-		targetDir = filepath.Join(s.rootDir, "docs")
+		targetDir = filepath.Join(s.projectRoot(projectKey), "docs")
 	} else {
 		pCache, ok := s.index.Get(targetParentID)
 		if !ok {
 			return errors.New("target parent not found")
 		}
-		pPath := filepath.Join(s.rootDir, pCache.Path)
+		pPath := filepath.Join(s.projectRoot(projectKey), pCache.Path)
 		targetDir = pPath[:len(pPath)-len(filepath.Ext(pPath))]
 	}
 
@@ -218,7 +218,7 @@ func (s *impl) Move(ctx context.Context, projectID, docID, targetParentID, befor
 			return err
 		}
 
-		relPath, _ := filepath.Rel(s.rootDir, newPath)
+		relPath, _ := filepath.Rel(s.projectRoot(projectKey), newPath)
 		s.index.Update(docID, CachedDoc{
 			Path:     relPath,
 			Title:    cache.Title,
@@ -264,16 +264,16 @@ func (s *impl) Move(ctx context.Context, projectID, docID, targetParentID, befor
 	return nil
 }
 
-func (s *impl) GetChildren(ctx context.Context, projectID, parentID string) ([]docstore.TreeItem, error) {
+func (s *Service) GetChildren(ctx context.Context, projectKey, parentID string) ([]docstore.TreeItem, error) {
 	var targetDir string
 	if parentID == "" || parentID == "root" {
-		targetDir = filepath.Join(s.rootDir, "docs")
+		targetDir = filepath.Join(s.projectRoot(projectKey), "docs")
 	} else {
 		cache, ok := s.index.Get(parentID)
 		if !ok {
 			return []docstore.TreeItem{}, nil
 		}
-		pPath := filepath.Join(s.rootDir, cache.Path)
+		pPath := filepath.Join(s.projectRoot(projectKey), cache.Path)
 		targetDir = pPath[:len(pPath)-len(filepath.Ext(pPath))]
 	}
 
@@ -283,7 +283,7 @@ func (s *impl) GetChildren(ctx context.Context, projectID, parentID string) ([]d
 		entries, _ := os.ReadDir(targetDir)
 		for _, e := range entries {
 			if strings.HasSuffix(e.Name(), ".json") {
-				relPath, _ := filepath.Rel(s.rootDir, filepath.Join(targetDir, e.Name()))
+				relPath, _ := filepath.Rel(s.projectRoot(projectKey), filepath.Join(targetDir, e.Name()))
 				id, _ := s.index.FindIDByPath(relPath)
 				if id != "" {
 					order = append(order, id)
@@ -319,7 +319,7 @@ func (s *impl) GetChildren(ctx context.Context, projectID, parentID string) ([]d
 	return items, nil
 }
 
-func (s *impl) GetHierarchy(ctx context.Context, projectID, docID string) ([]docstore.DocumentMeta, error) {
+func (s *Service) GetHierarchy(ctx context.Context, projectKey, docID string) ([]docstore.DocumentMeta, error) {
 	docID = strings.TrimSpace(docID)
 	if docID == "" {
 		return nil, ErrNotFound
@@ -393,7 +393,7 @@ func reverseDocumentMeta(items []docstore.DocumentMeta) {
 	}
 }
 
-func (s *impl) ensureUniqueSlug(dir, slug, myID string) string {
+func (s *Service) ensureUniqueSlug(dir, slug, myID string) string {
 	base := slug
 	count := 1
 	for {
@@ -408,7 +408,7 @@ func (s *impl) ensureUniqueSlug(dir, slug, myID string) string {
 	}
 }
 
-func (s *impl) renameFileAndDir(oldPath, newPath string) error {
+func (s *Service) renameFileAndDir(oldPath, newPath string) error {
 	if err := os.Rename(oldPath, newPath); err != nil {
 		return err
 	}
@@ -421,7 +421,7 @@ func (s *impl) renameFileAndDir(oldPath, newPath string) error {
 	return nil
 }
 
-func (s *impl) readIndexFile(dir string) []string {
+func (s *Service) readIndexFile(dir string) []string {
 	data, err := os.ReadFile(filepath.Join(dir, ".index"))
 	if err != nil {
 		return []string{}
@@ -445,7 +445,7 @@ func (s *impl) readIndexFile(dir string) []string {
 			continue
 		}
 
-		relPath, _ := filepath.Rel(s.rootDir, filepath.Join(dir, id+".json"))
+		relPath, _ := filepath.Rel(s.repoRoot, filepath.Join(dir, id+".json"))
 		if docID := s.findIDByPath(relPath); docID != "" {
 			resolved = append(resolved, docID)
 			changed = true
@@ -459,12 +459,12 @@ func (s *impl) readIndexFile(dir string) []string {
 	return resolved
 }
 
-func (s *impl) writeIndexFile(dir string, docIDs []string) error {
+func (s *Service) writeIndexFile(dir string, docIDs []string) error {
 	data, _ := json.Marshal(docIDs)
 	return os.WriteFile(filepath.Join(dir, ".index"), data, 0644)
 }
 
-func (s *impl) addToIndexFile(dir, docID string) {
+func (s *Service) addToIndexFile(dir, docID string) {
 	ids := s.readIndexFile(dir)
 	for _, x := range ids {
 		if x == docID {
@@ -475,7 +475,7 @@ func (s *impl) addToIndexFile(dir, docID string) {
 	_ = s.writeIndexFile(dir, ids)
 }
 
-func (s *impl) removeFromIndexFile(dir, docID string) {
+func (s *Service) removeFromIndexFile(dir, docID string) {
 	ids := s.readIndexFile(dir)
 	filtered := make([]string, 0, len(ids))
 	for _, x := range ids {
@@ -486,7 +486,7 @@ func (s *impl) removeFromIndexFile(dir, docID string) {
 	_ = s.writeIndexFile(dir, filtered)
 }
 
-func (s *impl) reorderIndexFile(
+func (s *Service) reorderIndexFile(
 	dir,
 	docID,
 	beforeDocID,
@@ -526,7 +526,7 @@ func (s *impl) reorderIndexFile(
 	return s.writeIndexFile(dir, filtered)
 }
 
-func (s *impl) findIDByPath(relPath string) string {
+func (s *Service) findIDByPath(relPath string) string {
 	id, _ := s.index.FindIDByPath(relPath)
 	return id
 }

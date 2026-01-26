@@ -13,7 +13,6 @@ import (
 	"zeus/internal/api/handler"
 	"zeus/internal/api/middleware"
 	"zeus/internal/config"
-	"zeus/internal/domain/docstore"
 	"zeus/internal/infra/assetcontent"
 	"zeus/internal/infra/assetmeta"
 	clients3 "zeus/internal/infra/client/s3"
@@ -37,8 +36,7 @@ import (
 	"zeus/internal/service/chatrun"
 	"zeus/internal/service/chatstream"
 	svcconvert "zeus/internal/service/convert"
-	svcdocstore "zeus/internal/service/docstore"
-	svcindex "zeus/internal/service/index"
+	svcdocument "zeus/internal/service/document"
 	svcknowledge "zeus/internal/service/knowledge"
 	svcmodel "zeus/internal/service/model"
 	svcopenapi "zeus/internal/service/openapi"
@@ -144,8 +142,6 @@ func main() {
 	taskRepo := postgres.NewTaskRepository(db)
 	changeProposalRepo := postgres.NewKnowledgeChangeProposalRepository(db)
 	knowledgeRepo := gitrepo.NewKnowledgeRepository(gitClientManager)
-	docIndexRepo := postgres.NewDocumentIndexRepository(db)
-	blockIndexRepo := postgres.NewBlockIndexRepository(db)
 
 	// Init Services
 	storageObjectSvc := svcstorageobject.NewService(s3Ingestion, s3Client, storageObjectRepo)
@@ -195,10 +191,7 @@ func main() {
 	indexBuilder := searchindex.NewIndexBuilder(knowledgeRepo, searchIndexRoot)
 	searchSvc := svcsearch.NewService(indexBuilder)
 	knowledgeSvc := svcknowledge.NewService(knowledgeRepo, projectRepo, changeProposalRepo)
-	docstoreProvider := svcdocstore.NewServiceProvider(config.AppConfig.Git.RepoRoot, docstore.Hooks{})
-	docGetter := svcindex.NewProjectDocstoreGetter(projectRepo, docstoreProvider)
-	fulltextIndexSvc := svcindex.NewFulltextIndexService(docIndexRepo, blockIndexRepo, docGetter, nil)
-	docstoreProvider.SetHooks(fulltextIndexSvc.DocumentHooks())
+	documentSvc := svcdocument.NewService(config.AppConfig.Git.RepoRoot)
 	ragIndex := ragindex.NewPostgresIndex(db)
 	ragExtractor := svcrag.SimpleBlockExtractor{}
 	runtimeResolver := svcmodel.NewRuntimeResolver(
@@ -280,6 +273,7 @@ User request:
 		storageObjectSvc,
 		assetSvc,
 		projectSvc,
+		documentSvc,
 		knowledgeSvc,
 		searchSvc,
 		ragSvc,
@@ -294,7 +288,6 @@ User request:
 		chatStreamSvc,
 		slashRouter,
 		convertSvc,
-		docstoreProvider,
 	)
 
 	if err := router.Run(config.AppConfig.Server.Addr); err != nil {

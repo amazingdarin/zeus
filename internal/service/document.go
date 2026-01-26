@@ -2,42 +2,18 @@ package service
 
 import (
 	"context"
-	"io"
 
-	"zeus/internal/domain"
+	"zeus/internal/domain/docstore"
 )
 
-type FilePayload struct {
-	Reader    io.Reader
-	SizeBytes int64
-	MimeType  string
-
-	OriginalPath string
-	SourceType   domain.StorageObjectSourceType
-	SourceRef    string
-}
-
+// DocumentService defines the document management operations.
 type DocumentService interface {
-	// Create 创建普通文档（manual / derived）
-	Create(
-		ctx context.Context,
-		doc *domain.Document,
-		content string,
-	) (*domain.Document, error)
-	Update(ctx context.Context, doc *domain.Document) (*domain.Document, error)
-
-	// Get 根据ID查询文档
-	Get(ctx context.Context, id string) (*domain.Document, error)
-	// GetProjectRootID 根据ProjectID查询RootDocumentID
-	GetProjectRootID(ctx context.Context, projectID string) (string, error)
-	ListByParent(ctx context.Context, projectID, parentID string) ([]*domain.Document, error)
-	GetSubtree(ctx context.Context, rootID string) ([]*domain.Document, error)
-
-	// 结构操作
-	Move(ctx context.Context, id string, newParentID *string) error
-	Reorder(ctx context.Context, id string, newOrder int) error
-
-	// 生命周期
-	UpdateContent(ctx context.Context, id string, content string) error
-	Archive(ctx context.Context, id string) error
+	Get(ctx context.Context, projectKey, docID string) (*docstore.Document, error)
+	Save(ctx context.Context, projectKey string, doc *docstore.Document) error
+	Delete(ctx context.Context, projectKey, docID string) error
+	Move(ctx context.Context, projectKey, docID, targetParentID, beforeDocID, afterDocID string) error
+	GetChildren(ctx context.Context, projectKey, parentID string) ([]docstore.TreeItem, error)
+	GetHierarchy(ctx context.Context, projectKey, docID string) ([]docstore.DocumentMeta, error)
+	GetBlockByID(ctx context.Context, projectKey, docID, blockID string) (*docstore.Document, error)
+	RegisterHooks(hooks docstore.Hooks)
 }

@@ -6,7 +6,6 @@ import (
 	"zeus/internal/service"
 	"zeus/internal/service/chatrun"
 	"zeus/internal/service/chatstream"
-	svcdocstore "zeus/internal/service/docstore"
 	svcopenapi "zeus/internal/service/openapi"
 )
 
@@ -15,6 +14,7 @@ func RegisterRoutes(
 	storageObjectSvc service.StorageObjectService,
 	assetSvc service.AssetService,
 	projectSvc service.ProjectService,
+	documentSvc service.DocumentService,
 	knowledgeSvc service.KnowledgeService,
 	searchSvc service.SearchService,
 	ragSvc service.RAGService,
@@ -29,13 +29,12 @@ func RegisterRoutes(
 	chatStreamSvc ChatStreamRunner,
 	commandRouter chatstream.SlashRouter,
 	convertSvc service.ConvertService,
-	docstoreProvider svcdocstore.Provider,
 ) {
 	storageObjectHandler := NewStorageObjectHandler(storageObjectSvc, projectSvc)
 	assetHandler := NewAssetHandler(assetSvc)
 	projectHandler := NewProjectHandler(projectSvc)
 	knowledgeHandler := NewKnowledgeHandler(knowledgeSvc)
-	documentHandler := NewDocumentHandler(projectSvc, docstoreProvider)
+	documentHandler := NewDocumentHandler(projectSvc, documentSvc)
 	searchHandler := NewSearchHandler(searchSvc)
 	ragHandler := NewRAGHandler(ragSvc, summarySvc, projectSvc, taskSvc)
 	taskHandler := NewTaskHandler(taskSvc)

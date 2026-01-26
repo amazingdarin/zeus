@@ -1,4 +1,4 @@
-package docstore
+package document
 
 import (
 	"context"
@@ -8,9 +8,9 @@ import (
 	"zeus/internal/domain/docstore"
 )
 
-func (s *impl) GetBlockByID(
+func (s *Service) GetBlockByID(
 	ctx context.Context,
-	projectID,
+	projectKey,
 	docID,
 	blockID string,
 ) (*docstore.Document, error) {
@@ -19,7 +19,7 @@ func (s *impl) GetBlockByID(
 		return nil, fmt.Errorf("block id is required")
 	}
 
-	doc, err := s.Get(ctx, projectID, docID)
+	doc, err := s.Get(ctx, projectKey, docID)
 	if err != nil {
 		return nil, err
 	}
