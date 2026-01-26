@@ -144,7 +144,7 @@ export function toggleBlockquote(editor: Editor | null): boolean {
 /**
  * Determines if the blockquote button should be shown
  */
-export function shouldShowButton(props: {
+export function shouldShowBlockquoteButton(props: {
   editor: Editor | null
   hideWhenUnavailable: boolean
 }): boolean {
@@ -162,39 +162,6 @@ export function shouldShowButton(props: {
 
 /**
  * Custom hook that provides blockquote functionality for Tiptap editor
- *
- * @example
- * ```tsx
- * // Simple usage - no params needed
- * function MySimpleBlockquoteButton() {
- *   const { isVisible, handleToggle, isActive } = useBlockquote()
- *
- *   if (!isVisible) return null
- *
- *   return <button onClick={handleToggle}>Blockquote</button>
- * }
- *
- * // Advanced usage with configuration
- * function MyAdvancedBlockquoteButton() {
- *   const { isVisible, handleToggle, label, isActive } = useBlockquote({
- *     editor: myEditor,
- *     hideWhenUnavailable: true,
- *     onToggled: () => console.log('Blockquote toggled!')
- *   })
- *
- *   if (!isVisible) return null
- *
- *   return (
- *     <MyButton
- *       onClick={handleToggle}
- *       aria-label={label}
- *       aria-pressed={isActive}
- *     >
- *       Toggle Blockquote
- *     </MyButton>
- *   )
- * }
- * ```
  */
 export function useBlockquote(config?: UseBlockquoteConfig) {
   const {
@@ -212,7 +179,7 @@ export function useBlockquote(config?: UseBlockquoteConfig) {
     if (!editor) return
 
     const handleSelectionUpdate = () => {
-      setIsVisible(shouldShowButton({ editor, hideWhenUnavailable }))
+      setIsVisible(shouldShowBlockquoteButton({ editor, hideWhenUnavailable }))
     }
 
     handleSelectionUpdate()

@@ -221,7 +221,7 @@ export function toggleList(editor: Editor | null, type: ListType): boolean {
 /**
  * Determines if the list button should be shown
  */
-export function shouldShowButton(props: {
+export function shouldShowListButton(props: {
   editor: Editor | null
   type: ListType
   hideWhenUnavailable: boolean
@@ -240,40 +240,6 @@ export function shouldShowButton(props: {
 
 /**
  * Custom hook that provides list functionality for Tiptap editor
- *
- * @example
- * ```tsx
- * // Simple usage
- * function MySimpleListButton() {
- *   const { isVisible, handleToggle, isActive } = useList({ type: "bulletList" })
- *
- *   if (!isVisible) return null
- *
- *   return <button onClick={handleToggle}>Bullet List</button>
- * }
- *
- * // Advanced usage with configuration
- * function MyAdvancedListButton() {
- *   const { isVisible, handleToggle, label, isActive } = useList({
- *     type: "orderedList",
- *     editor: myEditor,
- *     hideWhenUnavailable: true,
- *     onToggled: () => console.log('List toggled!')
- *   })
- *
- *   if (!isVisible) return null
- *
- *   return (
- *     <MyButton
- *       onClick={handleToggle}
- *       aria-label={label}
- *       aria-pressed={isActive}
- *     >
- *       Toggle List
- *     </MyButton>
- *   )
- * }
- * ```
  */
 export function useList(config: UseListConfig) {
   const {
@@ -292,7 +258,7 @@ export function useList(config: UseListConfig) {
     if (!editor) return
 
     const handleSelectionUpdate = () => {
-      setIsVisible(shouldShowButton({ editor, type, hideWhenUnavailable }))
+      setIsVisible(shouldShowListButton({ editor, type, hideWhenUnavailable }))
     }
 
     handleSelectionUpdate()

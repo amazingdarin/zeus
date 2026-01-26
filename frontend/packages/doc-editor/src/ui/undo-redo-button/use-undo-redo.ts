@@ -81,7 +81,7 @@ export function executeUndoRedoAction(
 /**
  * Determines if the history button should be shown
  */
-export function shouldShowButton(props: {
+export function shouldShowUndoRedoButton(props: {
   editor: Editor | null
   hideWhenUnavailable: boolean
   action: UndoRedoAction
@@ -99,39 +99,6 @@ export function shouldShowButton(props: {
 
 /**
  * Custom hook that provides history functionality for Tiptap editor
- *
- * @example
- * ```tsx
- * // Simple usage
- * function MySimpleUndoButton() {
- *   const { isVisible, handleAction } = useHistory({ action: "undo" })
- *
- *   if (!isVisible) return null
- *
- *   return <button onClick={handleAction}>Undo</button>
- * }
- *
- * // Advanced usage with configuration
- * function MyAdvancedRedoButton() {
- *   const { isVisible, handleAction, label } = useHistory({
- *     editor: myEditor,
- *     action: "redo",
- *     hideWhenUnavailable: true,
- *     onExecuted: () => console.log('Action executed!')
- *   })
- *
- *   if (!isVisible) return null
- *
- *   return (
- *     <MyButton
- *       onClick={handleAction}
- *       aria-label={label}
- *     >
- *       Redo
- *     </MyButton>
- *   )
- * }
- * ```
  */
 export function useUndoRedo(config: UseUndoRedoConfig) {
   const {
@@ -149,7 +116,7 @@ export function useUndoRedo(config: UseUndoRedoConfig) {
     if (!editor) return
 
     const handleUpdate = () => {
-      setIsVisible(shouldShowButton({ editor, hideWhenUnavailable, action }))
+      setIsVisible(shouldShowUndoRedoButton({ editor, hideWhenUnavailable, action }))
     }
 
     handleUpdate()

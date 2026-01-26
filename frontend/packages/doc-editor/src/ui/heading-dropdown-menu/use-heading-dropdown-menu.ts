@@ -14,8 +14,8 @@ import {
   headingIcons,
   type Level,
   isHeadingActive,
-  canToggle,
-  shouldShowButton,
+  canToggleHeading as canToggle,
+  shouldShowHeadingButton as shouldShowButton,
 } from "../heading-button"
 
 /**

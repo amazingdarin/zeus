@@ -70,7 +70,7 @@ export const HEADING_SHORTCUT_KEYS: Record<Level, string> = {
 /**
  * Checks if heading can be toggled in the current editor state
  */
-export function canToggle(
+export function canToggleHeading(
   editor: Editor | null,
   level?: Level,
   turnInto: boolean = true
@@ -137,7 +137,7 @@ export function toggleHeading(
   if (!editor || !editor.isEditable) return false
 
   const levels = Array.isArray(level) ? level : [level]
-  const toggleLevel = levels.find((l) => canToggle(editor, l))
+  const toggleLevel = levels.find((l) => canToggleHeading(editor, l))
 
   if (!toggleLevel) return false
 
@@ -204,7 +204,7 @@ export function toggleHeading(
 /**
  * Determines if the heading button should be shown
  */
-export function shouldShowButton(props: {
+export function shouldShowHeadingButton(props: {
   editor: Editor | null
   level?: Level | Level[]
   hideWhenUnavailable: boolean
@@ -216,9 +216,9 @@ export function shouldShowButton(props: {
 
   if (hideWhenUnavailable && !editor.isActive("code")) {
     if (Array.isArray(level)) {
-      return level.some((l) => canToggle(editor, l))
+      return level.some((l) => canToggleHeading(editor, l))
     }
-    return canToggle(editor, level)
+    return canToggleHeading(editor, level)
   }
 
   return true
@@ -280,14 +280,14 @@ export function useHeading(config: UseHeadingConfig) {
 
   const { editor } = useTiptapEditor(providedEditor)
   const [isVisible, setIsVisible] = useState<boolean>(true)
-  const canToggleState = canToggle(editor, level)
+  const canToggleState = canToggleHeading(editor, level)
   const isActive = isHeadingActive(editor, level)
 
   useEffect(() => {
     if (!editor) return
 
     const handleSelectionUpdate = () => {
-      setIsVisible(shouldShowButton({ editor, level, hideWhenUnavailable }))
+      setIsVisible(shouldShowHeadingButton({ editor, level, hideWhenUnavailable }))
     }
 
     handleSelectionUpdate()

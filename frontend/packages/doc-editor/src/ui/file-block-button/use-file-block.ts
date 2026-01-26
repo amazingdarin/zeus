@@ -39,7 +39,7 @@ export function insertFileBlock(editor: Editor | null): boolean {
   }
 }
 
-export function shouldShowButton(props: {
+export function shouldShowFileBlockButton(props: {
   editor: Editor | null
   hideWhenUnavailable: boolean
 }): boolean {
@@ -61,7 +61,7 @@ export function useFileBlock(props: UseFileBlockConfig) {
   const [canInsert, setCanInsert] = useState(false)
 
   useEffect(() => {
-    setIsVisible(shouldShowButton({ editor, hideWhenUnavailable }))
+    setIsVisible(shouldShowFileBlockButton({ editor, hideWhenUnavailable }))
     setCanInsert(canInsertFileBlock(editor))
   }, [editor, hideWhenUnavailable])
 

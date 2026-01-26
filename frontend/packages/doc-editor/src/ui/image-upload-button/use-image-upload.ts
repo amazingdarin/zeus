@@ -76,7 +76,7 @@ export function insertImage(editor: Editor | null): boolean {
 /**
  * Determines if the image button should be shown
  */
-export function shouldShowButton(props: {
+export function shouldShowImageUploadButton(props: {
   editor: Editor | null
   hideWhenUnavailable: boolean
 }): boolean {
@@ -145,7 +145,7 @@ export function useImageUpload(config?: UseImageUploadConfig) {
     if (!editor) return
 
     const handleSelectionUpdate = () => {
-      setIsVisible(shouldShowButton({ editor, hideWhenUnavailable }))
+      setIsVisible(shouldShowImageUploadButton({ editor, hideWhenUnavailable }))
     }
 
     handleSelectionUpdate()

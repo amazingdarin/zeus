@@ -3,10 +3,13 @@
     "baseUrl": ".",
     "target": "ES2020",
     "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "skipLibCheck": true,
-
     /* Bundler mode */
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
@@ -15,15 +18,23 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "paths": {
-      "@/*": ["zeus/src/*"]
+      "@/*": [
+        "zeus/src/*"
+      ]
     },
-
     /* Linting */
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["zeus/src"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  "include": [
+    "zeus/src",
+    "packages/doc-editor/src"
+  ],
+  "references": [
+    {
+      "path": "./tsconfig.node.json"
+    }
+  ]
 }

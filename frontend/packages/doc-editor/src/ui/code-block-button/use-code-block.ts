@@ -43,7 +43,7 @@ export interface UseCodeBlockConfig {
 /**
  * Checks if code block can be toggled in the current editor state
  */
-export function canToggle(
+export function canToggleCodeBlock(
   editor: Editor | null,
   turnInto: boolean = true
 ): boolean {
@@ -85,7 +85,7 @@ export function canToggle(
  */
 export function toggleCodeBlock(editor: Editor | null): boolean {
   if (!editor || !editor.isEditable) return false
-  if (!canToggle(editor)) return false
+  if (!canToggleCodeBlock(editor)) return false
 
   try {
     const view = editor.view
@@ -147,7 +147,7 @@ export function toggleCodeBlock(editor: Editor | null): boolean {
 /**
  * Determines if the code block button should be shown
  */
-export function shouldShowButton(props: {
+export function shouldShowCodeBlockButton(props: {
   editor: Editor | null
   hideWhenUnavailable: boolean
 }): boolean {
@@ -157,7 +157,7 @@ export function shouldShowButton(props: {
   if (!isNodeInSchema("codeBlock", editor)) return false
 
   if (hideWhenUnavailable && !editor.isActive("code")) {
-    return canToggle(editor)
+    return canToggleCodeBlock(editor)
   }
 
   return true
@@ -165,46 +165,6 @@ export function shouldShowButton(props: {
 
 /**
  * Custom hook that provides code block functionality for Tiptap editor
- *
- * @example
- * ```tsx
- * // Simple usage - no params needed
- * function MySimpleCodeBlockButton() {
- *   const { isVisible, isActive, handleToggle } = useCodeBlock()
- *
- *   if (!isVisible) return null
- *
- *   return (
- *     <button
- *       onClick={handleToggle}
- *       aria-pressed={isActive}
- *     >
- *       Code Block
- *     </button>
- *   )
- * }
- *
- * // Advanced usage with configuration
- * function MyAdvancedCodeBlockButton() {
- *   const { isVisible, isActive, handleToggle, label } = useCodeBlock({
- *     editor: myEditor,
- *     hideWhenUnavailable: true,
- *     onToggled: (isActive) => console.log('Code block toggled:', isActive)
- *   })
- *
- *   if (!isVisible) return null
- *
- *   return (
- *     <MyButton
- *       onClick={handleToggle}
- *       aria-label={label}
- *       aria-pressed={isActive}
- *     >
- *       Toggle Code Block
- *     </MyButton>
- *   )
- * }
- * ```
  */
 export function useCodeBlock(config?: UseCodeBlockConfig) {
   const {
@@ -215,14 +175,14 @@ export function useCodeBlock(config?: UseCodeBlockConfig) {
 
   const { editor } = useTiptapEditor(providedEditor)
   const [isVisible, setIsVisible] = useState<boolean>(true)
-  const canToggleState = canToggle(editor)
+  const canToggleState = canToggleCodeBlock(editor)
   const isActive = editor?.isActive("codeBlock") || false
 
   useEffect(() => {
     if (!editor) return
 
     const handleSelectionUpdate = () => {
-      setIsVisible(shouldShowButton({ editor, hideWhenUnavailable }))
+      setIsVisible(shouldShowCodeBlockButton({ editor, hideWhenUnavailable }))
     }
 
     handleSelectionUpdate()

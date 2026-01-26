@@ -100,7 +100,7 @@ export function toggleMark(editor: Editor | null, type: Mark): boolean {
 /**
  * Determines if the mark button should be shown
  */
-export function shouldShowButton(props: {
+export function shouldShowMarkButton(props: {
   editor: Editor | null
   type: Mark
   hideWhenUnavailable: boolean
@@ -126,40 +126,6 @@ export function getFormattedMarkName(type: Mark): string {
 
 /**
  * Custom hook that provides mark functionality for Tiptap editor
- *
- * @example
- * ```tsx
- * // Simple usage
- * function MySimpleBoldButton() {
- *   const { isVisible, handleMark } = useMark({ type: "bold" })
- *
- *   if (!isVisible) return null
- *
- *   return <button onClick={handleMark}>Bold</button>
- * }
- *
- * // Advanced usage with configuration
- * function MyAdvancedItalicButton() {
- *   const { isVisible, handleMark, label, isActive } = useMark({
- *     editor: myEditor,
- *     type: "italic",
- *     hideWhenUnavailable: true,
- *     onToggled: () => console.log('Mark toggled!')
- *   })
- *
- *   if (!isVisible) return null
- *
- *   return (
- *     <MyButton
- *       onClick={handleMark}
- *       aria-pressed={isActive}
- *       aria-label={label}
- *     >
- *       Italic
- *     </MyButton>
- *   )
- * }
- * ```
  */
 export function useMark(config: UseMarkConfig) {
   const {
@@ -178,7 +144,7 @@ export function useMark(config: UseMarkConfig) {
     if (!editor) return
 
     const handleSelectionUpdate = () => {
-      setIsVisible(shouldShowButton({ editor, type, hideWhenUnavailable }))
+      setIsVisible(shouldShowMarkButton({ editor, type, hideWhenUnavailable }))
     }
 
     handleSelectionUpdate()

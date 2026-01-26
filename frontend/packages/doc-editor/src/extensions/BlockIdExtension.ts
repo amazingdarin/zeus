@@ -1,5 +1,5 @@
 import { Extension } from "@tiptap/core"
-import { Extension, type JSONContent } from "@tiptap/react"
+import { type JSONContent } from "@tiptap/react"
 import type { EditorState, Transaction } from "@tiptap/pm/state"
 import { Plugin, PluginKey } from "@tiptap/pm/state"
 
@@ -134,7 +134,7 @@ export const BlockIdExtension = Extension.create({
       new Plugin({
         key: new PluginKey("blockId"),
         appendTransaction: (
-          transactions: Transaction[],
+          transactions: readonly Transaction[],
           _oldState: EditorState,
           newState: EditorState
         ) => {
