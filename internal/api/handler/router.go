@@ -3,6 +3,10 @@ package handler
 import (
 	"github.com/gin-gonic/gin"
 
+	documentapi "zeus/internal/modules/document/api"
+	knowledgeapi "zeus/internal/modules/knowledge/api"
+	searchapi "zeus/internal/modules/knowledge/search/api"
+	projectapi "zeus/internal/modules/project/api"
 	"zeus/internal/service"
 	"zeus/internal/service/chatrun"
 	"zeus/internal/service/chatstream"
@@ -32,10 +36,10 @@ func RegisterRoutes(
 ) {
 	storageObjectHandler := NewStorageObjectHandler(storageObjectSvc, projectSvc)
 	assetHandler := NewAssetHandler(assetSvc)
-	projectHandler := NewProjectHandler(projectSvc)
-	knowledgeHandler := NewKnowledgeHandler(knowledgeSvc)
-	documentHandler := NewDocumentHandler(projectSvc, documentSvc)
-	searchHandler := NewSearchHandler(searchSvc)
+	projectHandler := projectapi.NewProjectHandler(projectSvc)
+	knowledgeHandler := knowledgeapi.NewKnowledgeHandler(knowledgeSvc)
+	documentHandler := documentapi.NewDocumentHandler(projectSvc, documentSvc)
+	searchHandler := searchapi.NewSearchHandler(searchSvc)
 	ragHandler := NewRAGHandler(ragSvc, summarySvc, projectSvc, taskSvc)
 	taskHandler := NewTaskHandler(taskSvc)
 	summaryHandler := NewDocumentSummaryHandler(summarySvc, projectSvc)

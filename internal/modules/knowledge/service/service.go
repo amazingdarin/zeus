@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"zeus/internal/domain"
+	projectrepo "zeus/internal/modules/project/repository"
 	"zeus/internal/repository"
 	"zeus/internal/service"
 	"zeus/internal/types"
@@ -18,7 +19,7 @@ import (
 
 type Service struct {
 	knowledgeRepo repository.KnowledgeRepository
-	projectRepo   repository.ProjectRepository
+	projectRepo   projectrepo.ProjectRepository
 	proposalRepo  repository.KnowledgeChangeProposalRepository
 }
 

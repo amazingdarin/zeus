@@ -1,4 +1,4 @@
-package handler
+package api
 
 import (
 	"errors"
@@ -13,8 +13,8 @@ import (
 	"github.com/google/uuid"
 
 	"zeus/internal/api/types"
+	svc "zeus/internal/modules/document/service"
 	"zeus/internal/service"
-	svc "zeus/internal/service/document"
 )
 
 type DocumentHandler struct {

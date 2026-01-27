@@ -7,17 +7,18 @@ import (
 	"strings"
 
 	"zeus/internal/domain"
+	projectrepo "zeus/internal/modules/project/repository"
 	"zeus/internal/repository"
 )
 
 type GitDocumentReader struct {
 	knowledgeRepo repository.KnowledgeRepository
-	projectRepo   repository.ProjectRepository
+	projectRepo   projectrepo.ProjectRepository
 }
 
 func NewGitDocumentReader(
 	knowledgeRepo repository.KnowledgeRepository,
-	projectRepo repository.ProjectRepository,
+	projectRepo projectrepo.ProjectRepository,
 ) *GitDocumentReader {
 	return &GitDocumentReader{
 		knowledgeRepo: knowledgeRepo,

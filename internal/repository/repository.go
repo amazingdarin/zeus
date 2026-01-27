@@ -1,10 +1,13 @@
 package repository
 
-import "zeus/internal/repository/ragsummary"
+import (
+	"zeus/internal/modules/project/repository"
+	"zeus/internal/repository/ragsummary"
+)
 
 // Repository ALL repo
 type Repository struct {
-	Project                 ProjectRepository
+	Project                 repository.ProjectRepository
 	StorageObject           StorageObjectRepository
 	ModelRuntime            ModelRuntimeRepository
 	ProviderConnection      ProviderConnectionRepository

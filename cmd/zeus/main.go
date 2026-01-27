@@ -29,6 +29,11 @@ import (
 	"zeus/internal/infra/searchindex"
 	httpsession "zeus/internal/infra/session"
 	"zeus/internal/infra/taskcallback"
+	docsvc "zeus/internal/modules/document/service"
+	searchsvc "zeus/internal/modules/knowledge/search/service"
+	knowledgesvc "zeus/internal/modules/knowledge/service"
+	projectrepo "zeus/internal/modules/project/repository/postgres"
+	projectsvc "zeus/internal/modules/project/service"
 	"zeus/internal/repository"
 	gitrepo "zeus/internal/repository/git"
 	"zeus/internal/repository/postgres"
@@ -37,14 +42,10 @@ import (
 	"zeus/internal/service/chatrun"
 	"zeus/internal/service/chatstream"
 	svcconvert "zeus/internal/service/convert"
-	svcdocument "zeus/internal/service/document"
-	svcknowledge "zeus/internal/service/knowledge"
 	svcmodel "zeus/internal/service/model"
 	svcopenapi "zeus/internal/service/openapi"
-	svcproject "zeus/internal/service/project"
 	svcprovider "zeus/internal/service/provider"
 	svcrag "zeus/internal/service/rag"
-	svcsearch "zeus/internal/service/search"
 	svcstorageobject "zeus/internal/service/storage_object"
 	svctask "zeus/internal/service/task"
 	"zeus/internal/util"
@@ -126,7 +127,7 @@ func InitGitClientManager(ctx context.Context) *gitclient.GitClientManager {
 
 func InitRepository(db *gorm.DB, gitClientManager *gitclient.GitClientManager) repository.Repository {
 	return repository.Repository{
-		Project:                 postgres.NewProjectRepository(db),
+		Project:                 projectrepo.NewProjectRepository(db),
 		StorageObject:           postgres.NewStorageObjectRepository(db),
 		ModelRuntime:            postgres.NewModelRuntimeRepository(db),
 		ProviderConnection:      postgres.NewProviderConnectionRepository(db),
@@ -168,7 +169,7 @@ func main() {
 		repos,
 	)
 	openapiIndexSvc := svcopenapi.NewIndexService(assetMetaStore, assetReader)
-	projectSvc := svcproject.NewService(repos, gitAdmin, gitClientManager)
+	projectSvc := projectsvc.NewService(repos, gitAdmin, gitClientManager)
 	keyManager, err := util.NewLocalKeyManager(config.AppConfig.Security)
 	if err != nil {
 		log.WithContext(ctx).Fatalf("init key manager: %v", err)
@@ -196,9 +197,9 @@ func main() {
 		searchIndexRoot = searchindex.DefaultIndexRoot
 	}
 	indexBuilder := searchindex.NewIndexBuilder(repos.Knowledge, searchIndexRoot)
-	searchSvc := svcsearch.NewService(indexBuilder)
-	knowledgeSvc := svcknowledge.NewService(repos)
-	documentSvc := svcdocument.NewService(config.AppConfig.Git.RepoRoot)
+	searchSvc := searchsvc.NewService(indexBuilder)
+	knowledgeSvc := knowledgesvc.NewService(repos)
+	documentSvc := docsvc.NewService(config.AppConfig.Git.RepoRoot)
 	ragIndex := ragindex.NewPostgresIndex(db)
 	ragExtractor := svcrag.SimpleBlockExtractor{}
 	runtimeResolver := svcmodel.NewRuntimeResolver(

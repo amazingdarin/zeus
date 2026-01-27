@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	projectrepo "zeus/internal/modules/project/repository"
 	"zeus/internal/repository"
 	"zeus/internal/service"
 	"zeus/internal/service/openapi"
@@ -17,7 +18,7 @@ type Service struct {
 	localFileStorage service.AssetStorageService
 	metaStore        service.AssetMetaStore
 	reader           service.AssetContentReader
-	projectRepo      repository.ProjectRepository
+	projectRepo      projectrepo.ProjectRepository
 }
 
 func NewService(

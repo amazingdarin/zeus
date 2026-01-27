@@ -15,12 +15,13 @@ import (
 	"zeus/internal/domain"
 	"zeus/internal/infra/gitadmin"
 	"zeus/internal/infra/gitclient"
+	projectrepo "zeus/internal/modules/project/repository"
 	"zeus/internal/repository"
 	"zeus/internal/service"
 )
 
 type Service struct {
-	projectRepo      repository.ProjectRepository
+	projectRepo      projectrepo.ProjectRepository
 	gitAdmin         gitadmin.GitAdmin
 	gitClientManager *gitclient.GitClientManager
 }
@@ -86,7 +87,7 @@ func (s *Service) Create(ctx context.Context, project *domain.Project) error {
 }
 
 func (s *Service) List(ctx context.Context) ([]*domain.Project, error) {
-	projects, _, err := s.projectRepo.List(ctx, repository.ProjectFilter{}, repository.ProjectOption{})
+	projects, _, err := s.projectRepo.List(ctx, projectrepo.ProjectFilter{}, projectrepo.ProjectOption{})
 	if err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
