@@ -10,6 +10,8 @@ import (
 	"strings"
 	"unicode"
 
+	"slices"
+
 	"zeus/internal/domain/docstore"
 )
 
@@ -42,6 +44,7 @@ func (s *Service) Get(ctx context.Context, projectKey, docID string) (*docstore.
 	return &doc, nil
 }
 
+// Save persists a document to disk and updates in-memory and on-disk indexes.
 func (s *Service) Save(ctx context.Context, projectKey string, doc *docstore.Document) error {
 	s.index.Ensure(projectKey, s.projectRoot(projectKey))
 	hookCtx := docstore.HookContext{ProjectID: projectKey}
@@ -84,10 +87,10 @@ func (s *Service) Save(ctx context.Context, projectKey string, doc *docstore.Doc
 		if currentSlug == doc.Meta.Slug {
 			finalSlug = currentSlug
 		} else {
-			finalSlug = s.ensureUniqueSlug(targetDir, doc.Meta.Slug, doc.Meta.ID)
+			finalSlug = s.ensureUniqueSlug(targetDir, doc.Meta.Slug)
 		}
 	} else {
-		finalSlug = s.ensureUniqueSlug(targetDir, doc.Meta.Slug, doc.Meta.ID)
+		finalSlug = s.ensureUniqueSlug(targetDir, doc.Meta.Slug)
 	}
 	doc.Meta.Slug = finalSlug
 
@@ -141,6 +144,7 @@ func (s *Service) Save(ctx context.Context, projectKey string, doc *docstore.Doc
 	return nil
 }
 
+// Delete removes a document file, companion directory, and index references.
 func (s *Service) Delete(ctx context.Context, projectKey, docID string) error {
 	s.index.Ensure(projectKey, s.projectRoot(projectKey))
 	hookCtx := docstore.HookContext{ProjectID: projectKey}
@@ -179,6 +183,7 @@ func (s *Service) Delete(ctx context.Context, projectKey, docID string) error {
 	return nil
 }
 
+// Move relocates a document under a different parent and updates ordering.
 func (s *Service) Move(ctx context.Context, projectKey, docID, targetParentID, beforeDocID, afterDocID string) error {
 	s.index.Ensure(projectKey, s.projectRoot(projectKey))
 	hookCtx := docstore.HookContext{ProjectID: projectKey}
@@ -214,7 +219,7 @@ func (s *Service) Move(ctx context.Context, projectKey, docID, targetParentID, b
 		}
 		filename := filepath.Base(oldPath)
 		slug := strings.TrimSuffix(filename, filepath.Ext(filename))
-		newSlug := s.ensureUniqueSlug(targetDir, slug, docID)
+		newSlug := s.ensureUniqueSlug(targetDir, slug)
 		filename = newSlug + filepath.Ext(filename)
 
 		newPath = filepath.Join(targetDir, filename)
@@ -268,6 +273,7 @@ func (s *Service) Move(ctx context.Context, projectKey, docID, targetParentID, b
 	return nil
 }
 
+// GetChildren lists documents under the parent, repairing the index file if needed.
 func (s *Service) GetChildren(ctx context.Context, projectKey, parentID string) ([]docstore.TreeItem, error) {
 	s.index.Ensure(projectKey, s.projectRoot(projectKey))
 	var targetDir string
@@ -324,6 +330,7 @@ func (s *Service) GetChildren(ctx context.Context, projectKey, parentID string) 
 	return items, nil
 }
 
+// GetHierarchy returns the ancestor chain from root to the given document.
 func (s *Service) GetHierarchy(ctx context.Context, projectKey, docID string) ([]docstore.DocumentMeta, error) {
 	s.index.Ensure(projectKey, s.projectRoot(projectKey))
 	docID = strings.TrimSpace(docID)
@@ -362,6 +369,7 @@ func (s *Service) GetHierarchy(ctx context.Context, projectKey, docID string) ([
 	return chain, nil
 }
 
+// normalizeSlug converts a title into a URL-friendly slug.
 func normalizeSlug(s string) string {
 	s = strings.TrimSpace(strings.ToLower(s))
 	if s == "" {
@@ -393,13 +401,15 @@ func normalizeSlug(s string) string {
 	return strings.Trim(out.String(), "-")
 }
 
+// reverseDocumentMeta reverses a slice of document metadata in place.
 func reverseDocumentMeta(items []docstore.DocumentMeta) {
 	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
 		items[i], items[j] = items[j], items[i]
 	}
 }
 
-func (s *Service) ensureUniqueSlug(dir, slug, myID string) string {
+// ensureUniqueSlug resolves collisions within a directory by suffixing numbers.
+func (s *Service) ensureUniqueSlug(dir, slug string) string {
 	base := slug
 	count := 1
 	for {
@@ -414,6 +424,7 @@ func (s *Service) ensureUniqueSlug(dir, slug, myID string) string {
 	}
 }
 
+// renameFileAndDir renames a document file and its companion directory.
 func (s *Service) renameFileAndDir(oldPath, newPath string) error {
 	if err := os.Rename(oldPath, newPath); err != nil {
 		return err
@@ -427,20 +438,24 @@ func (s *Service) renameFileAndDir(oldPath, newPath string) error {
 	return nil
 }
 
+// readIndexFile loads the index file and repairs missing or invalid entries.
 func (s *Service) readIndexFile(projectKey, dir string) []string {
 	data, err := os.ReadFile(filepath.Join(dir, ".index"))
 	if err != nil {
 		return []string{}
 	}
 	var entries []string
-	_ = json.Unmarshal(data, &entries)
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return []string{}
+	}
 	if len(entries) == 0 {
 		return []string{}
 	}
 
 	// .index stores document IDs, while filenames are slug.json.
-	// Do not assume id == filename; validate against the in-memory index instead.
+	// Validate IDs against the in-memory index and de-duplicate.
 	resolved := make([]string, 0, len(entries))
+	seen := make(map[string]struct{}, len(entries))
 	changed := false
 	for _, entry := range entries {
 		id := strings.TrimSpace(entry)
@@ -448,23 +463,23 @@ func (s *Service) readIndexFile(projectKey, dir string) []string {
 			changed = true
 			continue
 		}
-		if _, ok := s.index.Get(projectKey, id); ok {
-			resolved = append(resolved, id)
+		if _, ok := seen[id]; ok {
+			changed = true
 			continue
 		}
-		changed = true
+		if _, ok := s.index.Get(projectKey, id); !ok {
+			changed = true
+			continue
+		}
+		seen[id] = struct{}{}
+		resolved = append(resolved, id)
 	}
 
 	// If index is partially missing, rebuild order from files in directory.
-	if changed {
-		seen := make(map[string]struct{}, len(resolved))
-		for _, id := range resolved {
-			seen[id] = struct{}{}
-		}
-		repaired := s.collectIDsFromDir(projectKey, dir, seen)
-		if len(repaired) > 0 {
-			resolved = append(resolved, repaired...)
-		}
+	repaired := s.collectIDsFromDir(projectKey, dir, seen)
+	if len(repaired) > 0 {
+		resolved = append(resolved, repaired...)
+		changed = true
 	}
 	if changed {
 		_ = s.writeIndexFile(dir, resolved)
@@ -509,22 +524,23 @@ func (s *Service) collectIDsFromDir(projectKey, dir string, seen map[string]stru
 	return ids
 }
 
+// writeIndexFile writes the ordered list of document IDs for a directory.
 func (s *Service) writeIndexFile(dir string, docIDs []string) error {
 	data, _ := json.Marshal(docIDs)
 	return os.WriteFile(filepath.Join(dir, ".index"), data, 0644)
 }
 
+// addToIndexFile appends a document ID to a directory index when missing.
 func (s *Service) addToIndexFile(projectKey, dir, docID string) {
 	ids := s.readIndexFile(projectKey, dir)
-	for _, x := range ids {
-		if x == docID {
-			return
-		}
+	if slices.Contains(ids, docID) {
+		return
 	}
 	ids = append(ids, docID)
 	_ = s.writeIndexFile(dir, ids)
 }
 
+// removeFromIndexFile deletes a document ID from a directory index.
 func (s *Service) removeFromIndexFile(projectKey, dir, docID string) {
 	ids := s.readIndexFile(projectKey, dir)
 	filtered := make([]string, 0, len(ids))
@@ -536,6 +552,7 @@ func (s *Service) removeFromIndexFile(projectKey, dir, docID string) {
 	_ = s.writeIndexFile(dir, filtered)
 }
 
+// reorderIndexFile removes or inserts a document ID according to ordering hints.
 func (s *Service) reorderIndexFile(
 	projectKey,
 	dir,
@@ -577,6 +594,7 @@ func (s *Service) reorderIndexFile(
 	return s.writeIndexFile(dir, filtered)
 }
 
+// indexOf returns the index of value in items or -1 when not found.
 func indexOf(items []string, value string) int {
 	for i, item := range items {
 		if item == value {

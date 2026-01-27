@@ -24,6 +24,7 @@ func NewIndexManager() *IndexManager {
 	}
 }
 
+// Ensure initializes the project index if it has not been built yet.
 func (idx *IndexManager) Ensure(projectKey, root string) {
 	idx.mu.RLock()
 	_, ok := idx.data[projectKey]
@@ -34,6 +35,7 @@ func (idx *IndexManager) Ensure(projectKey, root string) {
 	idx.RebuildProject(projectKey, root)
 }
 
+// RebuildProject rebuilds the in-memory index by scanning project files.
 func (idx *IndexManager) RebuildProject(projectKey, root string) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
@@ -79,6 +81,7 @@ func (idx *IndexManager) RebuildProject(projectKey, root string) {
 	})
 }
 
+// Get returns cached metadata for a document ID.
 func (idx *IndexManager) Get(projectKey, id string) (CachedDoc, bool) {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
@@ -90,6 +93,7 @@ func (idx *IndexManager) Get(projectKey, id string) (CachedDoc, bool) {
 	return val, ok
 }
 
+// Update stores cached metadata for a document ID.
 func (idx *IndexManager) Update(projectKey, id string, data CachedDoc) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
@@ -99,6 +103,7 @@ func (idx *IndexManager) Update(projectKey, id string, data CachedDoc) {
 	idx.data[projectKey][id] = data
 }
 
+// Remove deletes cached metadata for a document ID.
 func (idx *IndexManager) Remove(projectKey, id string) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
@@ -108,6 +113,7 @@ func (idx *IndexManager) Remove(projectKey, id string) {
 	delete(idx.data[projectKey], id)
 }
 
+// FindIDByPath returns the document ID for a given relative path.
 func (idx *IndexManager) FindIDByPath(projectKey, path string) (string, bool) {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()

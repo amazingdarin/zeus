@@ -17,7 +17,7 @@ const testProjectID = "proj-1"
 
 func setup(t *testing.T) (*Service, string) {
 	tmpDir := t.TempDir()
-	return &Service{repoRoot: tmpDir, index: NewIndexManager()}, tmpDir
+	return &Service{repoRoot: tmpDir, index: NewIndexManager()}, filepath.Join(tmpDir, testProjectID)
 }
 
 func newDoc(id, title string) *docstore.Document {
@@ -237,32 +237,32 @@ func TestService_GetBlockByID(t *testing.T) {
 		},
 		Body: docstore.DocumentBody{
 			Type: "tiptap",
-			Content: map[string]interface{}{
-				"meta": map[string]interface{}{
+			Content: map[string]any{
+				"meta": map[string]any{
 					"zeus": true,
 				},
-				"content": map[string]interface{}{
+				"content": map[string]any{
 					"type": "doc",
-					"content": []interface{}{
-						map[string]interface{}{
+					"content": []any{
+						map[string]any{
 							"type": "paragraph",
-							"attrs": map[string]interface{}{
+							"attrs": map[string]any{
 								"id": "block-1",
 							},
-							"content": []interface{}{
-								map[string]interface{}{
+							"content": []any{
+								map[string]any{
 									"type": "text",
 									"text": "hello",
 								},
 							},
 						},
-						map[string]interface{}{
+						map[string]any{
 							"type": "heading",
-							"attrs": map[string]interface{}{
+							"attrs": map[string]any{
 								"id": "block-2",
 							},
-							"content": []interface{}{
-								map[string]interface{}{
+							"content": []any{
+								map[string]any{
 									"type": "text",
 									"text": "world",
 								},
@@ -280,18 +280,18 @@ func TestService_GetBlockByID(t *testing.T) {
 	require.NotNil(t, blockDoc)
 	assert.Equal(t, "block-doc", blockDoc.Meta.ID)
 
-	bodyContent, ok := blockDoc.Body.Content.(map[string]interface{})
+	bodyContent, ok := blockDoc.Body.Content.(map[string]any)
 	require.True(t, ok)
-	contentRoot, ok := bodyContent["content"].(map[string]interface{})
+	contentRoot, ok := bodyContent["content"].(map[string]any)
 	require.True(t, ok)
-	children, ok := contentRoot["content"].([]interface{})
+	children, ok := contentRoot["content"].([]any)
 	require.True(t, ok)
 	require.Len(t, children, 1)
-	block, ok := children[0].(map[string]interface{})
+	block, ok := children[0].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "heading", block["type"])
 
-	attrs, ok := block["attrs"].(map[string]interface{})
+	attrs, ok := block["attrs"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "block-2", attrs["id"])
 

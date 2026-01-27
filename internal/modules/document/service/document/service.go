@@ -16,10 +16,12 @@ type Service struct {
 
 var _ service.DocumentService = (*Service)(nil)
 
+// projectRoot returns the filesystem root for a project.
 func (s *Service) projectRoot(projectKey string) string {
 	return filepath.Join(s.repoRoot, projectKey)
 }
 
+// NewService constructs a document service with a local index cache.
 func NewService(repoRoot string) service.DocumentService {
 	svc := &Service{
 		repoRoot: repoRoot,
@@ -28,6 +30,7 @@ func NewService(repoRoot string) service.DocumentService {
 	return svc
 }
 
+// RegisterHooks appends lifecycle hooks for save/delete/move operations.
 func (s *Service) RegisterHooks(hooks docstore.Hooks) {
 	s.hooks.BeforeSave = append(s.hooks.BeforeSave, hooks.BeforeSave...)
 	s.hooks.AfterSave = append(s.hooks.AfterSave, hooks.AfterSave...)
