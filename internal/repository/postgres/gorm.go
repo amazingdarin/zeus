@@ -2,11 +2,15 @@ package postgres
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
+	log "github.com/sirupsen/logrus"
+
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 const defaultPort = 5432
@@ -68,7 +72,26 @@ func NewGormDB(cfg Config) *gorm.DB {
 	if err != nil {
 		return nil
 	}
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	logLevel := logger.Info
+	if strings.EqualFold(os.Getenv("ZEUS_GORM_LOG_LEVEL"), "warn") {
+		logLevel = logger.Warn
+	} else if strings.EqualFold(os.Getenv("ZEUS_GORM_LOG_LEVEL"), "error") {
+		logLevel = logger.Error
+	} else if strings.EqualFold(os.Getenv("ZEUS_GORM_LOG_LEVEL"), "silent") {
+		logLevel = logger.Silent
+	}
+
+	ormLogger := logger.New(
+		log.StandardLogger(),
+		logger.Config{
+			SlowThreshold:             200 * time.Millisecond,
+			LogLevel:                  logLevel,
+			IgnoreRecordNotFoundError: false,
+			Colorful:                  false,
+		},
+	)
+
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: ormLogger})
 	if err != nil {
 		return nil
 	}
