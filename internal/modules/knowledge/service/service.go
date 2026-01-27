@@ -9,12 +9,12 @@ import (
 
 	"github.com/google/uuid"
 
+	"zeus/internal/core/util"
 	"zeus/internal/domain"
 	projectrepo "zeus/internal/modules/project/repository"
 	"zeus/internal/repository"
 	"zeus/internal/service"
 	"zeus/internal/types"
-	"zeus/internal/util"
 )
 
 type Service struct {

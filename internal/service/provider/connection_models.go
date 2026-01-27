@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"zeus/internal/core/util"
 	"zeus/internal/infra/modelruntime"
 	"zeus/internal/repository"
-	"zeus/internal/util"
 )
 
 var copilotDefaultModels = []string{

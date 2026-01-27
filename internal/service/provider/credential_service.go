@@ -8,11 +8,11 @@ import (
 
 	"github.com/google/uuid"
 
+	"zeus/internal/core/util"
 	"zeus/internal/domain"
 	"zeus/internal/infra/provider"
 	"zeus/internal/repository"
 	"zeus/internal/service"
-	"zeus/internal/util"
 )
 
 type CredentialService struct {

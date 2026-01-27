@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"zeus/internal/core/util"
 	"zeus/internal/domain"
 	"zeus/internal/infra/embedding"
 	"zeus/internal/repository"
-	"zeus/internal/util"
 )
 
 type RuntimeResolver struct {
