@@ -14,20 +14,31 @@ import (
 // --- Index Manager ---
 
 type IndexManager struct {
-	mu       sync.RWMutex
-	idToData map[string]CachedDoc
+	mu   sync.RWMutex
+	data map[string]map[string]CachedDoc
 }
 
 func NewIndexManager() *IndexManager {
 	return &IndexManager{
-		idToData: make(map[string]CachedDoc),
+		data: make(map[string]map[string]CachedDoc),
 	}
 }
 
-func (idx *IndexManager) Rebuild(root string) {
+func (idx *IndexManager) Ensure(projectKey, root string) {
+	idx.mu.RLock()
+	_, ok := idx.data[projectKey]
+	idx.mu.RUnlock()
+	if ok {
+		return
+	}
+	idx.RebuildProject(projectKey, root)
+}
+
+func (idx *IndexManager) RebuildProject(projectKey, root string) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
-	idx.idToData = make(map[string]CachedDoc)
+	idx.data[projectKey] = make(map[string]CachedDoc)
+	projectData := idx.data[projectKey]
 
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -57,7 +68,7 @@ func (idx *IndexManager) Rebuild(root string) {
 		decoder := json.NewDecoder(f)
 		if err := decoder.Decode(&partial); err == nil && partial.Meta.ID != "" {
 			relPath, _ := filepath.Rel(root, path)
-			idx.idToData[partial.Meta.ID] = CachedDoc{
+			projectData[partial.Meta.ID] = CachedDoc{
 				Path:     relPath,
 				Title:    partial.Meta.Title,
 				ParentID: partial.Meta.ParentID,
@@ -68,29 +79,43 @@ func (idx *IndexManager) Rebuild(root string) {
 	})
 }
 
-func (idx *IndexManager) Get(id string) (CachedDoc, bool) {
+func (idx *IndexManager) Get(projectKey, id string) (CachedDoc, bool) {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
-	val, ok := idx.idToData[id]
+	projectData, ok := idx.data[projectKey]
+	if !ok {
+		return CachedDoc{}, false
+	}
+	val, ok := projectData[id]
 	return val, ok
 }
 
-func (idx *IndexManager) Update(id string, data CachedDoc) {
+func (idx *IndexManager) Update(projectKey, id string, data CachedDoc) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
-	idx.idToData[id] = data
+	if _, ok := idx.data[projectKey]; !ok {
+		idx.data[projectKey] = make(map[string]CachedDoc)
+	}
+	idx.data[projectKey][id] = data
 }
 
-func (idx *IndexManager) Remove(id string) {
+func (idx *IndexManager) Remove(projectKey, id string) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
-	delete(idx.idToData, id)
+	if _, ok := idx.data[projectKey]; !ok {
+		return
+	}
+	delete(idx.data[projectKey], id)
 }
 
-func (idx *IndexManager) FindIDByPath(path string) (string, bool) {
+func (idx *IndexManager) FindIDByPath(projectKey, path string) (string, bool) {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
-	for id, data := range idx.idToData {
+	projectData, ok := idx.data[projectKey]
+	if !ok {
+		return "", false
+	}
+	for id, data := range projectData {
 		if data.Path == path {
 			return id, true
 		}

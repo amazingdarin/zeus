@@ -19,7 +19,8 @@ var (
 )
 
 func (s *Service) Get(ctx context.Context, projectKey, docID string) (*docstore.Document, error) {
-	cache, ok := s.index.Get(docID)
+	s.index.Ensure(projectKey, s.projectRoot(projectKey))
+	cache, ok := s.index.Get(projectKey, docID)
 	if !ok {
 		return nil, ErrNotFound
 	}
@@ -28,7 +29,7 @@ func (s *Service) Get(ctx context.Context, projectKey, docID string) (*docstore.
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			s.index.Remove(docID)
+			s.index.Remove(projectKey, docID)
 			return nil, ErrNotFound
 		}
 		return nil, err
@@ -42,6 +43,7 @@ func (s *Service) Get(ctx context.Context, projectKey, docID string) (*docstore.
 }
 
 func (s *Service) Save(ctx context.Context, projectKey string, doc *docstore.Document) error {
+	s.index.Ensure(projectKey, s.projectRoot(projectKey))
 	hookCtx := docstore.HookContext{ProjectID: projectKey}
 	for _, hook := range s.hooks.BeforeSave {
 		if err := hook(hookCtx, doc); err != nil {
@@ -49,7 +51,7 @@ func (s *Service) Save(ctx context.Context, projectKey string, doc *docstore.Doc
 		}
 	}
 
-	cache, exists := s.index.Get(doc.Meta.ID)
+	cache, exists := s.index.Get(projectKey, doc.Meta.ID)
 
 	var targetDir string
 	if exists {
@@ -57,7 +59,7 @@ func (s *Service) Save(ctx context.Context, projectKey string, doc *docstore.Doc
 		targetDir = filepath.Dir(currentPath)
 	} else {
 		if doc.Meta.ParentID != "" && doc.Meta.ParentID != "root" {
-			parentCache, ok := s.index.Get(doc.Meta.ParentID)
+			parentCache, ok := s.index.Get(projectKey, doc.Meta.ParentID)
 			if !ok {
 				return errors.New("parent document not found")
 			}
@@ -103,11 +105,11 @@ func (s *Service) Save(ctx context.Context, projectKey string, doc *docstore.Doc
 			}
 			oldDir := filepath.Dir(oldFullPath)
 			if oldDir != targetDir {
-				s.removeFromIndexFile(oldDir, doc.Meta.ID)
+				s.removeFromIndexFile(projectKey, oldDir, doc.Meta.ID)
 			}
 		}
 	}
-	s.addToIndexFile(targetDir, doc.Meta.ID)
+	s.addToIndexFile(projectKey, targetDir, doc.Meta.ID)
 
 	doc.Meta.Path, _ = filepath.Rel(s.projectRoot(projectKey), fullPath)
 	doc.Meta.UpdatedAt = now()
@@ -124,7 +126,7 @@ func (s *Service) Save(ctx context.Context, projectKey string, doc *docstore.Doc
 	}
 
 	relPath, _ := filepath.Rel(s.projectRoot(projectKey), fullPath)
-	s.index.Update(doc.Meta.ID, CachedDoc{
+	s.index.Update(projectKey, doc.Meta.ID, CachedDoc{
 		Path:     relPath,
 		Title:    doc.Meta.Title,
 		ParentID: doc.Meta.ParentID,
@@ -140,6 +142,7 @@ func (s *Service) Save(ctx context.Context, projectKey string, doc *docstore.Doc
 }
 
 func (s *Service) Delete(ctx context.Context, projectKey, docID string) error {
+	s.index.Ensure(projectKey, s.projectRoot(projectKey))
 	hookCtx := docstore.HookContext{ProjectID: projectKey}
 	for _, hook := range s.hooks.BeforeDelete {
 		if err := hook(hookCtx, docID); err != nil {
@@ -147,7 +150,7 @@ func (s *Service) Delete(ctx context.Context, projectKey, docID string) error {
 		}
 	}
 
-	cache, ok := s.index.Get(docID)
+	cache, ok := s.index.Get(projectKey, docID)
 	if !ok {
 		return ErrNotFound
 	}
@@ -163,9 +166,9 @@ func (s *Service) Delete(ctx context.Context, projectKey, docID string) error {
 	_ = os.RemoveAll(companionDir)
 
 	parentDir := filepath.Dir(fullPath)
-	s.removeFromIndexFile(parentDir, docID)
+	s.removeFromIndexFile(projectKey, parentDir, docID)
 
-	s.index.Remove(docID)
+	s.index.Remove(projectKey, docID)
 
 	for _, hook := range s.hooks.AfterDelete {
 		if err := hook(hookCtx, docID); err != nil {
@@ -177,6 +180,7 @@ func (s *Service) Delete(ctx context.Context, projectKey, docID string) error {
 }
 
 func (s *Service) Move(ctx context.Context, projectKey, docID, targetParentID, beforeDocID, afterDocID string) error {
+	s.index.Ensure(projectKey, s.projectRoot(projectKey))
 	hookCtx := docstore.HookContext{ProjectID: projectKey}
 	for _, hook := range s.hooks.BeforeMove {
 		if err := hook(hookCtx, docID, targetParentID); err != nil {
@@ -184,7 +188,7 @@ func (s *Service) Move(ctx context.Context, projectKey, docID, targetParentID, b
 		}
 	}
 
-	cache, ok := s.index.Get(docID)
+	cache, ok := s.index.Get(projectKey, docID)
 	if !ok {
 		return ErrNotFound
 	}
@@ -194,7 +198,7 @@ func (s *Service) Move(ctx context.Context, projectKey, docID, targetParentID, b
 	if targetParentID == "" || targetParentID == "root" {
 		targetDir = filepath.Join(s.projectRoot(projectKey), "docs")
 	} else {
-		pCache, ok := s.index.Get(targetParentID)
+		pCache, ok := s.index.Get(projectKey, targetParentID)
 		if !ok {
 			return errors.New("target parent not found")
 		}
@@ -219,7 +223,7 @@ func (s *Service) Move(ctx context.Context, projectKey, docID, targetParentID, b
 		}
 
 		relPath, _ := filepath.Rel(s.projectRoot(projectKey), newPath)
-		s.index.Update(docID, CachedDoc{
+		s.index.Update(projectKey, docID, CachedDoc{
 			Path:     relPath,
 			Title:    cache.Title,
 			ParentID: targetParentID,
@@ -247,11 +251,11 @@ func (s *Service) Move(ctx context.Context, projectKey, docID, targetParentID, b
 	}
 
 	if oldDir != targetDir {
-		if err := s.reorderIndexFile(oldDir, docID, "", "", false); err != nil {
+		if err := s.reorderIndexFile(projectKey, oldDir, docID, "", "", false); err != nil {
 			return err
 		}
 	}
-	if err := s.reorderIndexFile(targetDir, docID, beforeDocID, afterDocID, true); err != nil {
+	if err := s.reorderIndexFile(projectKey, targetDir, docID, beforeDocID, afterDocID, true); err != nil {
 		return err
 	}
 
@@ -265,11 +269,12 @@ func (s *Service) Move(ctx context.Context, projectKey, docID, targetParentID, b
 }
 
 func (s *Service) GetChildren(ctx context.Context, projectKey, parentID string) ([]docstore.TreeItem, error) {
+	s.index.Ensure(projectKey, s.projectRoot(projectKey))
 	var targetDir string
 	if parentID == "" || parentID == "root" {
 		targetDir = filepath.Join(s.projectRoot(projectKey), "docs")
 	} else {
-		cache, ok := s.index.Get(parentID)
+		cache, ok := s.index.Get(projectKey, parentID)
 		if !ok {
 			return []docstore.TreeItem{}, nil
 		}
@@ -277,14 +282,14 @@ func (s *Service) GetChildren(ctx context.Context, projectKey, parentID string) 
 		targetDir = pPath[:len(pPath)-len(filepath.Ext(pPath))]
 	}
 
-	order := s.readIndexFile(targetDir)
+	order := s.readIndexFile(projectKey, targetDir)
 
 	if len(order) == 0 {
 		entries, _ := os.ReadDir(targetDir)
 		for _, e := range entries {
 			if strings.HasSuffix(e.Name(), ".json") {
 				relPath, _ := filepath.Rel(s.projectRoot(projectKey), filepath.Join(targetDir, e.Name()))
-				id, _ := s.index.FindIDByPath(relPath)
+				id, _ := s.index.FindIDByPath(projectKey, relPath)
 				if id != "" {
 					order = append(order, id)
 				}
@@ -297,7 +302,7 @@ func (s *Service) GetChildren(ctx context.Context, projectKey, parentID string) 
 
 	items := make([]docstore.TreeItem, 0, len(order))
 	for _, docID := range order {
-		cache, ok := s.index.Get(docID)
+		cache, ok := s.index.Get(projectKey, docID)
 		if !ok {
 			continue
 		}
@@ -320,11 +325,12 @@ func (s *Service) GetChildren(ctx context.Context, projectKey, parentID string) 
 }
 
 func (s *Service) GetHierarchy(ctx context.Context, projectKey, docID string) ([]docstore.DocumentMeta, error) {
+	s.index.Ensure(projectKey, s.projectRoot(projectKey))
 	docID = strings.TrimSpace(docID)
 	if docID == "" {
 		return nil, ErrNotFound
 	}
-	if _, ok := s.index.Get(docID); !ok {
+	if _, ok := s.index.Get(projectKey, docID); !ok {
 		return nil, ErrNotFound
 	}
 
@@ -336,7 +342,7 @@ func (s *Service) GetHierarchy(ctx context.Context, projectKey, docID string) ([
 			break
 		}
 		visited[currentID] = struct{}{}
-		cache, ok := s.index.Get(currentID)
+		cache, ok := s.index.Get(projectKey, currentID)
 		if !ok {
 			break
 		}
@@ -421,7 +427,7 @@ func (s *Service) renameFileAndDir(oldPath, newPath string) error {
 	return nil
 }
 
-func (s *Service) readIndexFile(dir string) []string {
+func (s *Service) readIndexFile(projectKey, dir string) []string {
 	data, err := os.ReadFile(filepath.Join(dir, ".index"))
 	if err != nil {
 		return []string{}
@@ -432,6 +438,8 @@ func (s *Service) readIndexFile(dir string) []string {
 		return []string{}
 	}
 
+	// .index stores document IDs, while filenames are slug.json.
+	// Do not assume id == filename; validate against the in-memory index instead.
 	resolved := make([]string, 0, len(entries))
 	changed := false
 	for _, entry := range entries {
@@ -440,18 +448,23 @@ func (s *Service) readIndexFile(dir string) []string {
 			changed = true
 			continue
 		}
-		if _, ok := s.index.Get(id); ok {
+		if _, ok := s.index.Get(projectKey, id); ok {
 			resolved = append(resolved, id)
 			continue
 		}
-
-		relPath, _ := filepath.Rel(s.repoRoot, filepath.Join(dir, id+".json"))
-		if docID := s.findIDByPath(relPath); docID != "" {
-			resolved = append(resolved, docID)
-			changed = true
-			continue
-		}
 		changed = true
+	}
+
+	// If index is partially missing, rebuild order from files in directory.
+	if changed {
+		seen := make(map[string]struct{}, len(resolved))
+		for _, id := range resolved {
+			seen[id] = struct{}{}
+		}
+		repaired := s.collectIDsFromDir(projectKey, dir, seen)
+		if len(repaired) > 0 {
+			resolved = append(resolved, repaired...)
+		}
 	}
 	if changed {
 		_ = s.writeIndexFile(dir, resolved)
@@ -459,13 +472,50 @@ func (s *Service) readIndexFile(dir string) []string {
 	return resolved
 }
 
+// collectIDsFromDir scans JSON documents under dir and returns IDs not in seen.
+func (s *Service) collectIDsFromDir(projectKey, dir string, seen map[string]struct{}) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	ids := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		fullPath := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+		var partial struct {
+			Meta docstore.DocumentMeta `json:"meta"`
+		}
+		if err := json.Unmarshal(data, &partial); err != nil {
+			continue
+		}
+		id := strings.TrimSpace(partial.Meta.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		if _, ok := s.index.Get(projectKey, id); ok {
+			ids = append(ids, id)
+			seen[id] = struct{}{}
+		}
+	}
+	return ids
+}
+
 func (s *Service) writeIndexFile(dir string, docIDs []string) error {
 	data, _ := json.Marshal(docIDs)
 	return os.WriteFile(filepath.Join(dir, ".index"), data, 0644)
 }
 
-func (s *Service) addToIndexFile(dir, docID string) {
-	ids := s.readIndexFile(dir)
+func (s *Service) addToIndexFile(projectKey, dir, docID string) {
+	ids := s.readIndexFile(projectKey, dir)
 	for _, x := range ids {
 		if x == docID {
 			return
@@ -475,8 +525,8 @@ func (s *Service) addToIndexFile(dir, docID string) {
 	_ = s.writeIndexFile(dir, ids)
 }
 
-func (s *Service) removeFromIndexFile(dir, docID string) {
-	ids := s.readIndexFile(dir)
+func (s *Service) removeFromIndexFile(projectKey, dir, docID string) {
+	ids := s.readIndexFile(projectKey, dir)
 	filtered := make([]string, 0, len(ids))
 	for _, x := range ids {
 		if x != docID {
@@ -487,13 +537,14 @@ func (s *Service) removeFromIndexFile(dir, docID string) {
 }
 
 func (s *Service) reorderIndexFile(
+	projectKey,
 	dir,
 	docID,
 	beforeDocID,
 	afterDocID string,
 	insert bool,
 ) error {
-	ids := s.readIndexFile(dir)
+	ids := s.readIndexFile(projectKey, dir)
 	filtered := make([]string, 0, len(ids))
 	for _, x := range ids {
 		if x != docID {
@@ -524,11 +575,6 @@ func (s *Service) reorderIndexFile(
 	filtered[insertAt] = docID
 
 	return s.writeIndexFile(dir, filtered)
-}
-
-func (s *Service) findIDByPath(relPath string) string {
-	id, _ := s.index.FindIDByPath(relPath)
-	return id
 }
 
 func indexOf(items []string, value string) int {

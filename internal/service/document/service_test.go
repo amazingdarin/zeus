@@ -2,6 +2,7 @@ package document
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,10 +15,9 @@ import (
 
 const testProjectID = "proj-1"
 
-func setup(t *testing.T) (Service, string) {
+func setup(t *testing.T) (*Service, string) {
 	tmpDir := t.TempDir()
-	svc := NewService(tmpDir)
-	return svc, tmpDir
+	return &Service{repoRoot: tmpDir, index: NewIndexManager()}, tmpDir
 }
 
 func newDoc(id, title string) *docstore.Document {
@@ -315,6 +315,80 @@ func TestService_Restart_RebuildIndex(t *testing.T) {
 	loaded, err := svcB.Get(context.Background(), testProjectID, "persist-1")
 	require.NoError(t, err)
 	assert.Equal(t, "Persistent Doc", loaded.Meta.Title)
+}
+
+func TestService_GetChildren_RepairsIndexWithoutDuplicates(t *testing.T) {
+	svc, root := setup(t)
+	ctx := context.Background()
+
+	// Create three documents.
+	d1 := newDoc("doc-1", "Alpha")
+	d2 := newDoc("doc-2", "Beta")
+	d3 := newDoc("doc-3", "Gamma")
+	require.NoError(t, svc.Save(ctx, testProjectID, d1))
+	require.NoError(t, svc.Save(ctx, testProjectID, d2))
+	require.NoError(t, svc.Save(ctx, testProjectID, d3))
+
+	indexPath := filepath.Join(root, "docs", ".index")
+	require.FileExists(t, indexPath)
+
+	// Corrupt index: keep only the first ID.
+	require.NoError(t, os.WriteFile(indexPath, []byte("[\"doc-1\"]"), 0644))
+
+	items, err := svc.GetChildren(ctx, testProjectID, "root")
+	require.NoError(t, err)
+	require.Len(t, items, 3)
+
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		if _, ok := seen[item.ID]; ok {
+			t.Fatalf("duplicate doc id %s", item.ID)
+		}
+		seen[item.ID] = struct{}{}
+	}
+
+	// .index should be repaired to include all IDs, without duplicates.
+	data, err := os.ReadFile(indexPath)
+	require.NoError(t, err)
+	var ids []string
+	require.NoError(t, json.Unmarshal(data, &ids))
+	require.Len(t, ids, 3)
+	unique := map[string]struct{}{}
+	for _, id := range ids {
+		if _, ok := unique[id]; ok {
+			t.Fatalf("duplicate id %s in index", id)
+		}
+		unique[id] = struct{}{}
+	}
+}
+
+func TestService_GetChildren_RepairsIndexWithMissingEntry(t *testing.T) {
+	svc, root := setup(t)
+	ctx := context.Background()
+
+	// Create two documents.
+	d1 := newDoc("doc-a", "Alpha")
+	d2 := newDoc("doc-b", "Beta")
+	require.NoError(t, svc.Save(ctx, testProjectID, d1))
+	require.NoError(t, svc.Save(ctx, testProjectID, d2))
+
+	indexPath := filepath.Join(root, "docs", ".index")
+
+	// Drop doc-b from index.
+	require.NoError(t, os.WriteFile(indexPath, []byte("[\"doc-a\"]"), 0644))
+
+	items, err := svc.GetChildren(ctx, testProjectID, "root")
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+
+	// Ensure both are present.
+	found := map[string]bool{"doc-a": false, "doc-b": false}
+	for _, item := range items {
+		found[item.ID] = true
+	}
+	if !found["doc-a"] || !found["doc-b"] {
+		t.Fatalf("expected both documents to be listed")
+	}
 }
 
 func TestService_Hooks(t *testing.T) {
