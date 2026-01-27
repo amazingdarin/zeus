@@ -14,7 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"zeus/internal/domain"
-	"zeus/internal/service"
+	documentservice "zeus/internal/modules/document/service"
 )
 
 type Reader struct {
@@ -27,7 +27,7 @@ func NewReader(s3Client *s3.Client) *Reader {
 
 func (r *Reader) ReadHead(
 	ctx context.Context,
-	meta service.AssetMeta,
+	meta documentservice.AssetMeta,
 	maxBytes int64,
 ) ([]byte, error) {
 	if r == nil {
@@ -52,7 +52,7 @@ func (r *Reader) ReadHead(
 	}
 }
 
-func (r *Reader) ReadAll(ctx context.Context, meta service.AssetMeta) ([]byte, error) {
+func (r *Reader) ReadAll(ctx context.Context, meta documentservice.AssetMeta) ([]byte, error) {
 	if r == nil {
 		return nil, fmt.Errorf("asset reader is required")
 	}
@@ -104,7 +104,7 @@ func readAllFromFile(path string) ([]byte, error) {
 
 func (r *Reader) readHeadFromObject(
 	ctx context.Context,
-	meta service.AssetMeta,
+	meta documentservice.AssetMeta,
 	maxBytes int64,
 ) ([]byte, error) {
 	if r.s3 == nil {
@@ -133,7 +133,7 @@ func (r *Reader) readHeadFromObject(
 
 func (r *Reader) readAllFromObject(
 	ctx context.Context,
-	meta service.AssetMeta,
+	meta documentservice.AssetMeta,
 ) ([]byte, error) {
 	if r.s3 == nil {
 		return nil, fmt.Errorf("s3 client is required")
@@ -157,4 +157,4 @@ func (r *Reader) readAllFromObject(
 	return data, nil
 }
 
-var _ service.AssetContentReader = (*Reader)(nil)
+var _ documentservice.AssetContentReader = (*Reader)(nil)

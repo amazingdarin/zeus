@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"zeus/internal/service"
+	documentservice "zeus/internal/modules/document/service"
 )
 
 const DefaultMetaRoot = "/var/lib/zeus/assets"
@@ -25,7 +25,7 @@ func NewFileStore(root string) *FileStore {
 	return &FileStore{root: root}
 }
 
-func (s *FileStore) Save(ctx context.Context, meta service.AssetMeta) error {
+func (s *FileStore) Save(ctx context.Context, meta documentservice.AssetMeta) error {
 	_ = ctx
 	if s == nil {
 		return fmt.Errorf("asset meta store is required")
@@ -55,7 +55,7 @@ func (s *FileStore) Load(
 	ctx context.Context,
 	projectKey string,
 	assetID string,
-) (*service.AssetMeta, error) {
+) (*documentservice.AssetMeta, error) {
 	_ = ctx
 	if s == nil {
 		return nil, fmt.Errorf("asset meta store is required")
@@ -72,15 +72,15 @@ func (s *FileStore) Load(
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, service.ErrAssetNotFound
+			return nil, documentservice.ErrAssetNotFound
 		}
 		return nil, fmt.Errorf("read meta: %w", err)
 	}
-	var meta service.AssetMeta
+	var meta documentservice.AssetMeta
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return nil, fmt.Errorf("parse meta: %w", err)
 	}
 	return &meta, nil
 }
 
-var _ service.AssetMetaStore = (*FileStore)(nil)
+var _ documentservice.AssetMetaStore = (*FileStore)(nil)

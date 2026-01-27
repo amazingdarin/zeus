@@ -1,14 +1,18 @@
 package service
 
-import "zeus/internal/infra/embedding"
+import (
+	"zeus/internal/infra/embedding"
+	documentservice "zeus/internal/modules/document/service"
+	service2 "zeus/internal/modules/project/service"
+)
 
 // Services aggregates application services.
 type Services struct {
 	StorageObject      StorageObjectService
-	Asset              AssetService
-	Project            ProjectService
+	Asset              documentservice.AssetService
+	Project            service2.ProjectService
 	Knowledge          KnowledgeService
-	Document           DocumentService
+	Document           documentservice.DocumentService
 	Search             SearchService
 	RAG                RAGService
 	Summary            DocumentSummaryService

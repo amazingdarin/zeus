@@ -13,7 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"zeus/internal/domain"
-	"zeus/internal/service"
+	documentservice "zeus/internal/modules/document/service"
 )
 
 // ObjectStorageAssetStorage stores assets into an S3-compatible backend.
@@ -37,26 +37,26 @@ func (s *ObjectStorageAssetStorage) Store(
 	assetID string,
 	filename string,
 	content io.Reader,
-) (service.StoredAssetInfo, error) {
+) (documentservice.StoredAssetInfo, error) {
 	if s == nil {
-		return service.StoredAssetInfo{}, fmt.Errorf("object storage is required")
+		return documentservice.StoredAssetInfo{}, fmt.Errorf("object storage is required")
 	}
 	if s.client == nil {
-		return service.StoredAssetInfo{}, fmt.Errorf("s3 client is required")
+		return documentservice.StoredAssetInfo{}, fmt.Errorf("s3 client is required")
 	}
 	if strings.TrimSpace(s.bucket) == "" {
-		return service.StoredAssetInfo{}, fmt.Errorf("bucket is required")
+		return documentservice.StoredAssetInfo{}, fmt.Errorf("bucket is required")
 	}
 	repo = strings.TrimSpace(repo)
 	if repo == "" {
-		return service.StoredAssetInfo{}, fmt.Errorf("repo is required")
+		return documentservice.StoredAssetInfo{}, fmt.Errorf("repo is required")
 	}
 	assetID = strings.TrimSpace(assetID)
 	if assetID == "" {
-		return service.StoredAssetInfo{}, fmt.Errorf("asset id is required")
+		return documentservice.StoredAssetInfo{}, fmt.Errorf("asset id is required")
 	}
 	if content == nil {
-		return service.StoredAssetInfo{}, fmt.Errorf("content is required")
+		return documentservice.StoredAssetInfo{}, fmt.Errorf("content is required")
 	}
 
 	now := s.nowTime()
@@ -70,7 +70,7 @@ func (s *ObjectStorageAssetStorage) Store(
 
 	mime, reader, counter, err := sniffAndCount(content)
 	if err != nil {
-		return service.StoredAssetInfo{}, fmt.Errorf("read content: %w", err)
+		return documentservice.StoredAssetInfo{}, fmt.Errorf("read content: %w", err)
 	}
 
 	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{
@@ -80,10 +80,10 @@ func (s *ObjectStorageAssetStorage) Store(
 		ContentType: aws.String(mime),
 	})
 	if err != nil {
-		return service.StoredAssetInfo{}, fmt.Errorf("put object: %w", err)
+		return documentservice.StoredAssetInfo{}, fmt.Errorf("put object: %w", err)
 	}
 
-	return service.StoredAssetInfo{
+	return documentservice.StoredAssetInfo{
 		StorageType: domain.AssetStorageTypeObject,
 		Size:        counter.n,
 		Mime:        mime,
@@ -123,4 +123,4 @@ func sniffAndCount(r io.Reader) (string, io.Reader, *countWriter, error) {
 	return mime, io.TeeReader(reader, counter), counter, nil
 }
 
-var _ service.AssetStorageService = (*ObjectStorageAssetStorage)(nil)
+var _ documentservice.AssetStorageService = (*ObjectStorageAssetStorage)(nil)
