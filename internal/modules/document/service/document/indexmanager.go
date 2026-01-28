@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"zeus/internal/domain/docstore"
+	"zeus/internal/domain"
 )
 
 // --- Index Manager ---
@@ -63,7 +63,7 @@ func (idx *IndexManager) RebuildProject(projectKey, root string) {
 		// This assumes the file is JSON and has a "meta" field at the top level
 		// For MD, we would need to parse frontmatter
 		var partial struct {
-			Meta docstore.DocumentMeta `json:"meta"`
+			Meta domain.DocumentMeta `json:"meta"`
 		}
 
 		// Read fully for now to be safe, optimize later

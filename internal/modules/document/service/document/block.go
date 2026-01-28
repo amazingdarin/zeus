@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"zeus/internal/domain/docstore"
+	"zeus/internal/domain"
 )
 
 func (s *Service) GetBlockByID(
@@ -13,7 +13,7 @@ func (s *Service) GetBlockByID(
 	projectKey,
 	docID,
 	blockID string,
-) (*docstore.Document, error) {
+) (*domain.Document, error) {
 	blockID = strings.TrimSpace(blockID)
 	if blockID == "" {
 		return nil, fmt.Errorf("block id is required")
@@ -30,7 +30,7 @@ func (s *Service) GetBlockByID(
 	}
 
 	filtered := *doc
-	filtered.Body = docstore.DocumentBody{
+	filtered.Body = domain.DocumentBody{
 		Type:    doc.Body.Type,
 		Content: buildBlockContent(doc.Body.Content, block),
 	}

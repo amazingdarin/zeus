@@ -107,10 +107,9 @@ func InitGitClientManager(ctx context.Context) *gitclient.GitClientManager {
 
 func InitRepository(db *gorm.DB, gitClientManager *gitclient.GitClientManager) repository.Repository {
 	return repository.Repository{
-		Project:       projectrepo.NewProjectRepository(db),
-		StorageObject: postgres.NewStorageObjectRepository(db),
-		Task:          postgres.NewTaskRepository(db),
-		Document:      postgres.NewDocumentRepository(db),
+		Project:           projectrepo.NewProjectRepository(db),
+		Task:              postgres.NewTaskRepository(db),
+		KnowledgeFulltext: postgres.NewKnowledgeFulltextRepository(db),
 	}
 }
 

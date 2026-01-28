@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"zeus/internal/domain/docstore"
+	"zeus/internal/domain"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,13 +20,13 @@ func setup(t *testing.T) (*Service, string) {
 	return &Service{repoRoot: tmpDir, index: NewIndexManager()}, filepath.Join(tmpDir, testProjectID)
 }
 
-func newDoc(id, title string) *docstore.Document {
-	return &docstore.Document{
-		Meta: docstore.DocumentMeta{
+func newDoc(id, title string) *domain.Document {
+	return &domain.Document{
+		Meta: domain.DocumentMeta{
 			ID:    id,
 			Title: title,
 		},
-		Body: docstore.DocumentBody{
+		Body: domain.DocumentBody{
 			Type:    "markdown",
 			Content: "hello world",
 		},
@@ -230,12 +230,12 @@ func TestService_GetBlockByID(t *testing.T) {
 	svc, _ := setup(t)
 	ctx := context.Background()
 
-	doc := &docstore.Document{
-		Meta: docstore.DocumentMeta{
+	doc := &domain.Document{
+		Meta: domain.DocumentMeta{
 			ID:    "block-doc",
 			Title: "Block Doc",
 		},
-		Body: docstore.DocumentBody{
+		Body: domain.DocumentBody{
 			Type: "tiptap",
 			Content: map[string]any{
 				"meta": map[string]any{
@@ -397,48 +397,48 @@ func TestService_Hooks(t *testing.T) {
 
 	var callLog []string
 
-	hooks := docstore.Hooks{
-		BeforeSave: []func(ctx docstore.HookContext, doc *docstore.Document) error{
-			func(ctx docstore.HookContext, doc *docstore.Document) error {
+	hooks := domain.Hooks{
+		BeforeSave: []func(ctx domain.HookContext, doc *domain.Document) error{
+			func(ctx domain.HookContext, doc *domain.Document) error {
 				callLog = append(callLog, "BeforeSave1:"+doc.Meta.Title)
 				return nil
 			},
 		},
-		AfterSave: []func(ctx docstore.HookContext, doc *docstore.Document) error{
-			func(ctx docstore.HookContext, doc *docstore.Document) error {
+		AfterSave: []func(ctx domain.HookContext, doc *domain.Document) error{
+			func(ctx domain.HookContext, doc *domain.Document) error {
 				callLog = append(callLog, "AfterSave1:"+doc.Meta.Title)
 				return nil
 			},
 		},
-		BeforeDelete: []func(ctx docstore.HookContext, docID string) error{
-			func(ctx docstore.HookContext, docID string) error {
+		BeforeDelete: []func(ctx domain.HookContext, docID string) error{
+			func(ctx domain.HookContext, docID string) error {
 				callLog = append(callLog, "BeforeDelete1:"+docID)
 				return nil
 			},
 		},
-		AfterDelete: []func(ctx docstore.HookContext, docID string) error{
-			func(ctx docstore.HookContext, docID string) error {
+		AfterDelete: []func(ctx domain.HookContext, docID string) error{
+			func(ctx domain.HookContext, docID string) error {
 				callLog = append(callLog, "AfterDelete1:"+docID)
 				return nil
 			},
 		},
-		BeforeMove: []func(ctx docstore.HookContext, docID, targetParentID string) error{
-			func(ctx docstore.HookContext, docID, targetParentID string) error {
+		BeforeMove: []func(ctx domain.HookContext, docID, targetParentID string) error{
+			func(ctx domain.HookContext, docID, targetParentID string) error {
 				callLog = append(callLog, "BeforeMove1:"+docID)
 				return nil
 			},
 		},
-		AfterMove: []func(ctx docstore.HookContext, docID, targetParentID string) error{
-			func(ctx docstore.HookContext, docID, targetParentID string) error {
+		AfterMove: []func(ctx domain.HookContext, docID, targetParentID string) error{
+			func(ctx domain.HookContext, docID, targetParentID string) error {
 				callLog = append(callLog, "AfterMove1:"+docID)
 				return nil
 			},
 		},
 	}
 
-	hooks2 := docstore.Hooks{
-		BeforeSave: []func(ctx docstore.HookContext, doc *docstore.Document) error{
-			func(ctx docstore.HookContext, doc *docstore.Document) error {
+	hooks2 := domain.Hooks{
+		BeforeSave: []func(ctx domain.HookContext, doc *domain.Document) error{
+			func(ctx domain.HookContext, doc *domain.Document) error {
 				callLog = append(callLog, "BeforeSave2:"+doc.Meta.Title)
 				return nil
 			},

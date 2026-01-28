@@ -7,12 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode"
 
-	"slices"
-
-	"zeus/internal/domain/docstore"
+	"zeus/internal/domain"
 )
 
 var (
@@ -20,7 +19,7 @@ var (
 	ErrBlockNotFound = errors.New("block not found")
 )
 
-func (s *Service) Get(ctx context.Context, projectKey, docID string) (*docstore.Document, error) {
+func (s *Service) Get(ctx context.Context, projectKey, docID string) (*domain.Document, error) {
 	s.index.Ensure(projectKey, s.projectRoot(projectKey))
 	cache, ok := s.index.Get(projectKey, docID)
 	if !ok {
@@ -37,7 +36,7 @@ func (s *Service) Get(ctx context.Context, projectKey, docID string) (*docstore.
 		return nil, err
 	}
 
-	var doc docstore.Document
+	var doc domain.Document
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("failed to parse doc: %w", err)
 	}
@@ -45,9 +44,9 @@ func (s *Service) Get(ctx context.Context, projectKey, docID string) (*docstore.
 }
 
 // Save persists a document to disk and updates in-memory and on-disk indexes.
-func (s *Service) Save(ctx context.Context, projectKey string, doc *docstore.Document) error {
+func (s *Service) Save(ctx context.Context, projectKey string, doc *domain.Document) error {
 	s.index.Ensure(projectKey, s.projectRoot(projectKey))
-	hookCtx := docstore.HookContext{ProjectID: projectKey}
+	hookCtx := domain.HookContext{ProjectID: projectKey}
 	for _, hook := range s.hooks.BeforeSave {
 		if err := hook(hookCtx, doc); err != nil {
 			return err
@@ -147,7 +146,7 @@ func (s *Service) Save(ctx context.Context, projectKey string, doc *docstore.Doc
 // Delete removes a document file, companion directory, and index references.
 func (s *Service) Delete(ctx context.Context, projectKey, docID string) error {
 	s.index.Ensure(projectKey, s.projectRoot(projectKey))
-	hookCtx := docstore.HookContext{ProjectID: projectKey}
+	hookCtx := domain.HookContext{ProjectID: projectKey}
 	for _, hook := range s.hooks.BeforeDelete {
 		if err := hook(hookCtx, docID); err != nil {
 			return err
@@ -186,7 +185,7 @@ func (s *Service) Delete(ctx context.Context, projectKey, docID string) error {
 // Move relocates a document under a different parent and updates ordering.
 func (s *Service) Move(ctx context.Context, projectKey, docID, targetParentID, beforeDocID, afterDocID string) error {
 	s.index.Ensure(projectKey, s.projectRoot(projectKey))
-	hookCtx := docstore.HookContext{ProjectID: projectKey}
+	hookCtx := domain.HookContext{ProjectID: projectKey}
 	for _, hook := range s.hooks.BeforeMove {
 		if err := hook(hookCtx, docID, targetParentID); err != nil {
 			return err
@@ -238,7 +237,7 @@ func (s *Service) Move(ctx context.Context, projectKey, docID, targetParentID, b
 		if err != nil {
 			return err
 		}
-		var doc docstore.Document
+		var doc domain.Document
 		if err := json.Unmarshal(data, &doc); err != nil {
 			return err
 		}
@@ -274,7 +273,7 @@ func (s *Service) Move(ctx context.Context, projectKey, docID, targetParentID, b
 }
 
 // GetChildren lists documents under the parent, repairing the index file if needed.
-func (s *Service) GetChildren(ctx context.Context, projectKey, parentID string) ([]docstore.TreeItem, error) {
+func (s *Service) GetChildren(ctx context.Context, projectKey, parentID string) ([]domain.TreeItem, error) {
 	s.index.Ensure(projectKey, s.projectRoot(projectKey))
 	var targetDir string
 	if parentID == "" || parentID == "root" {
@@ -282,7 +281,7 @@ func (s *Service) GetChildren(ctx context.Context, projectKey, parentID string) 
 	} else {
 		cache, ok := s.index.Get(projectKey, parentID)
 		if !ok {
-			return []docstore.TreeItem{}, nil
+			return []domain.TreeItem{}, nil
 		}
 		pPath := filepath.Join(s.projectRoot(projectKey), cache.Path)
 		targetDir = pPath[:len(pPath)-len(filepath.Ext(pPath))]
@@ -306,7 +305,7 @@ func (s *Service) GetChildren(ctx context.Context, projectKey, parentID string) 
 		}
 	}
 
-	items := make([]docstore.TreeItem, 0, len(order))
+	items := make([]domain.TreeItem, 0, len(order))
 	for _, docID := range order {
 		cache, ok := s.index.Get(projectKey, docID)
 		if !ok {
@@ -319,7 +318,7 @@ func (s *Service) GetChildren(ctx context.Context, projectKey, parentID string) 
 			kind = "dir"
 		}
 
-		items = append(items, docstore.TreeItem{
+		items = append(items, domain.TreeItem{
 			ID:    docID,
 			Slug:  slug,
 			Title: cache.Title,
@@ -331,7 +330,7 @@ func (s *Service) GetChildren(ctx context.Context, projectKey, parentID string) 
 }
 
 // GetHierarchy returns the ancestor chain from root to the given document.
-func (s *Service) GetHierarchy(ctx context.Context, projectKey, docID string) ([]docstore.DocumentMeta, error) {
+func (s *Service) GetHierarchy(ctx context.Context, projectKey, docID string) ([]domain.DocumentMeta, error) {
 	s.index.Ensure(projectKey, s.projectRoot(projectKey))
 	docID = strings.TrimSpace(docID)
 	if docID == "" {
@@ -341,7 +340,7 @@ func (s *Service) GetHierarchy(ctx context.Context, projectKey, docID string) ([
 		return nil, ErrNotFound
 	}
 
-	chain := []docstore.DocumentMeta{}
+	chain := []domain.DocumentMeta{}
 	visited := map[string]struct{}{}
 	currentID := docID
 	for currentID != "" {
@@ -353,7 +352,7 @@ func (s *Service) GetHierarchy(ctx context.Context, projectKey, docID string) ([
 		if !ok {
 			break
 		}
-		chain = append(chain, docstore.DocumentMeta{
+		chain = append(chain, domain.DocumentMeta{
 			ID:       currentID,
 			Title:    cache.Title,
 			ParentID: cache.ParentID,
@@ -402,7 +401,7 @@ func normalizeSlug(s string) string {
 }
 
 // reverseDocumentMeta reverses a slice of document metadata in place.
-func reverseDocumentMeta(items []docstore.DocumentMeta) {
+func reverseDocumentMeta(items []domain.DocumentMeta) {
 	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
 		items[i], items[j] = items[j], items[i]
 	}
@@ -504,7 +503,7 @@ func (s *Service) collectIDsFromDir(projectKey, dir string, seen map[string]stru
 			continue
 		}
 		var partial struct {
-			Meta docstore.DocumentMeta `json:"meta"`
+			Meta domain.DocumentMeta `json:"meta"`
 		}
 		if err := json.Unmarshal(data, &partial); err != nil {
 			continue

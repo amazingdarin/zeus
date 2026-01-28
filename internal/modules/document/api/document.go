@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"zeus/internal/domain/docstore"
+	"zeus/internal/domain"
 	service2 "zeus/internal/modules/document/service"
 	svc "zeus/internal/modules/document/service/document"
 	"zeus/internal/modules/project/service"
@@ -195,7 +195,7 @@ func (h *DocumentHandler) Create(c *gin.Context) {
 		return
 	}
 
-	doc := &docstore.Document{
+	doc := &domain.Document{
 		Meta: req.Meta,
 		Body: req.Body,
 	}
@@ -266,7 +266,7 @@ func (h *DocumentHandler) Import(c *gin.Context) {
 		return
 	}
 
-	meta := docstore.DocumentMeta{
+	meta := domain.DocumentMeta{
 		ID:            uuid.NewString(),
 		SchemaVersion: "v1",
 		Title:         title,
@@ -276,12 +276,12 @@ func (h *DocumentHandler) Import(c *gin.Context) {
 			"tags":   []string{},
 		},
 	}
-	body := docstore.DocumentBody{
+	body := domain.DocumentBody{
 		Type:    "tiptap",
 		Content: data,
 	}
 
-	doc := &docstore.Document{Meta: meta, Body: body}
+	doc := &domain.Document{Meta: meta, Body: body}
 	if err := h.documentSvc.Save(c.Request.Context(), projectKey, doc); err != nil {
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "SAVE_FAILED", Message: err.Error()})
 		return

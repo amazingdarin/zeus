@@ -1,13 +1,13 @@
 package types
 
 import (
-	"zeus/internal/domain/docstore"
+	"zeus/internal/domain"
 )
 
 // DocumentDTO uses the unified domain model
 type DocumentDTO struct {
-	Meta docstore.DocumentMeta `json:"meta"`
-	Body docstore.DocumentBody `json:"body,omitempty"`
+	Meta domain.DocumentMeta `json:"meta"`
+	Body domain.DocumentBody `json:"body,omitempty"`
 }
 
 type GetDocumentResponse struct {
@@ -29,14 +29,14 @@ type DocumentHierarchyResponse struct {
 }
 
 type ListDocumentsResponse struct {
-	Code    string              `json:"code"`
-	Message string              `json:"message"`
-	Data    []docstore.TreeItem `json:"data"`
+	Code    string            `json:"code"`
+	Message string            `json:"message"`
+	Data    []domain.TreeItem `json:"data"`
 }
 
 type CreateDocumentRequest struct {
-	Meta docstore.DocumentMeta `json:"meta"`
-	Body docstore.DocumentBody `json:"body"`
+	Meta domain.DocumentMeta `json:"meta"`
+	Body domain.DocumentBody `json:"body"`
 }
 
 type CreateDocumentResponse struct {
