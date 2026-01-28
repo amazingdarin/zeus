@@ -6,6 +6,7 @@ import (
 	"time"
 
 	docsvc "zeus/internal/modules/document/service/document"
+	knowledgesvc "zeus/internal/modules/knowledge/service/knowledge"
 	projectsvc "zeus/internal/modules/project/service/project"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -130,6 +131,8 @@ func BuildRouter(ctx context.Context) *gin.Engine {
 
 	projectSvc := projectsvc.NewService(repos, gitAdmin, gitClientManager)
 	documentSvc := docsvc.NewService(config.AppConfig.Git.RepoRoot)
+	knowledgeSvc := knowledgesvc.NewService(repos, documentSvc)
+	documentSvc.RegisterHooks(knowledgeSvc.DocumentHooks())
 	sessionManager := httpsession.NewSessionManager(nil)
 
 	router := gin.Default()
