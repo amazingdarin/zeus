@@ -8,6 +8,8 @@ service:
   port: 9000
   consolePort: 9001
   consoleEnabled: true
+  nodePort: null
+  consoleNodePort: null
 
 persistence:
   enabled: true

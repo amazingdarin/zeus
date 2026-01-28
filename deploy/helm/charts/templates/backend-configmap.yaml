@@ -1,0 +1,11 @@
+{{- if .Values.backend.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "zeus.fullname" . }}-backend-config
+  labels:
+    {{- include "zeus.labels" . | nindent 4 }}
+data:
+  config.yaml: |-
+{{ .Values.backend.config | nindent 4 }}
+{{- end }}

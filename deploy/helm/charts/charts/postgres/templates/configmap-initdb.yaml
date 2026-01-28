@@ -10,4 +10,6 @@ data:
     {{- range .Values.postgres.extensions }}
     CREATE EXTENSION IF NOT EXISTS {{ . }};
     {{- end }}
+  02-init.sql: |-
+{{- .Files.Get "files/init.sql" | nindent 4 }}
 {{- end }}

@@ -1,16 +1,3 @@
-CREATE EXTENSION IF NOT EXISTS vector;
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE EXTENSION IF NOT EXISTS zhparser;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_ts_config WHERE cfgname = 'zhparser') THEN
-    CREATE TEXT SEARCH CONFIGURATION zhparser (PARSER = zhparser);
-    ALTER TEXT SEARCH CONFIGURATION zhparser ADD MAPPING FOR n,v,a,i,e,l WITH simple;
-  END IF;
-END
-$$;
-
 CREATE TABLE project
 (
     id          TEXT PRIMARY KEY,

@@ -6,6 +6,7 @@ image:
 service:
   type: ClusterIP
   port: 5432
+  nodePort: null
 
 persistence:
   enabled: true
@@ -20,3 +21,5 @@ postgres:
   password: zeus
   extensions:
     - vector
+    - pg_trgm
+    - zhparser
