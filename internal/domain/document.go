@@ -1,43 +1,48 @@
-package domain
+package docstore
 
-import (
-	"time"
-)
+import "time"
 
-type DocumentType string
-
-const (
-	DocumentTypeOverview    DocumentType = "overview"    // 项目概览
-	DocumentTypeModule      DocumentType = "module"      // 功能模块
-	DocumentTypeApi         DocumentType = "api"         // API文档
-	DocumentTypeOrigin      DocumentType = "origin"      // 原始文档
-	DocumentTypeRequirement DocumentType = "requirement" // 需求文档
-)
-
-type DocumentStatus string
-
-const (
-	DocumentStatusActive   DocumentStatus = "active"
-	DocumentStatusArchived DocumentStatus = "archived"
-)
-
+// Document is the unified data model
 type Document struct {
-	ID        string
+	Meta DocumentMeta `json:"meta"`
+	Body DocumentBody `json:"body"`
+}
+
+type DocumentMeta struct {
+	ID            string                 `json:"id"`
+	SchemaVersion string                 `json:"schema_version"` // Default V1
+	Title         string                 `json:"title"`
+	Slug          string                 `json:"slug"` // System source of truth for filename
+	Path          string                 `json:"path"` // Logical slug path: "docs/api/v1"
+	ParentID      string                 `json:"parent_id,omitempty"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
+	Extra         map[string]interface{} `json:"extra,omitempty"` // Extra fields for extension
+}
+
+type DocumentBody struct {
+	Type    string      `json:"type"`    // "tiptap" | "markdown"
+	Content interface{} `json:"content"` // *TiptapDoc (for tiptap) OR string (for markdown)
+}
+
+// TreeItem used for listing and lazy loading
+type TreeItem struct {
+	ID       string     `json:"id"`
+	Slug     string     `json:"slug"`
+	Title    string     `json:"title"`
+	Kind     string     `json:"kind"` // "file" | "dir"
+	Children []TreeItem `json:"children,omitempty"`
+}
+
+type HookContext struct {
 	ProjectID string
+}
 
-	Type        DocumentType   // 文档类型
-	Title       string         // 标题
-	Description string         // 副标题
-	Status      DocumentStatus // 生命周期
-
-	Path          string         // 层级目录
-	Order         int            // 同级排序
-	StorageObject *StorageObject // 存储信息
-
-	Parent   *Document   // 父级文档
-	Children []*Document // 子文档
-	HasChild bool        // 是否包含子文档
-
-	CreatedAt time.Time
-	UpdatedAt time.Time
+type Hooks struct {
+	BeforeSave   []func(ctx HookContext, doc *Document) error
+	AfterSave    []func(ctx HookContext, doc *Document) error
+	BeforeDelete []func(ctx HookContext, docID string) error
+	AfterDelete  []func(ctx HookContext, docID string) error
+	BeforeMove   []func(ctx HookContext, docID, targetParentID string) error
+	AfterMove    []func(ctx HookContext, docID, targetParentID string) error
 }

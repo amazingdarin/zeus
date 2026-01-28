@@ -138,3 +138,12 @@ Zeus 使用 OpenAPI 3.1 作为统一 API DDL，
 确保 API 契约、实现与文档的一致性，并为 AI 编码与自动化提供稳定基础。
 
 详细工程规范请参阅 PROJECT_GUIDE.md。
+
+## 八、集成测试（Postgres）
+
+知识库全文检索的仓储集成测试需要本地 Postgres 配置。
+
+```bash
+export ZEUS_CONFIG_PATH=config.yaml
+go test ./internal/repository/postgres -run KnowledgeFulltextRepository -v
+```

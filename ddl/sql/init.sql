@@ -106,6 +106,38 @@ CREATE TABLE document
     updated_at        TIMESTAMPTZ   DEFAULT now()
 );
 
+CREATE EXTENSION IF NOT EXISTS zhparser;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_ts_config WHERE cfgname = 'zhparser') THEN
+    CREATE TEXT SEARCH CONFIGURATION zhparser (PARSER = zhparser);
+    ALTER TEXT SEARCH CONFIGURATION zhparser ADD MAPPING FOR n,v,a,i,e,l WITH simple;
+  END IF;
+END
+$$;
+
+CREATE TABLE knowledge_fulltext_index
+(
+    project_key   TEXT NOT NULL,
+    index_name    TEXT NOT NULL,
+    doc_id        TEXT NOT NULL,
+    title         TEXT NOT NULL DEFAULT '',
+    content_plain TEXT NOT NULL DEFAULT '',
+    tsv_en        tsvector NOT NULL,
+    tsv_zh        tsvector NOT NULL,
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    PRIMARY KEY (project_key, index_name, doc_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_kft_en
+ON knowledge_fulltext_index USING GIN(tsv_en);
+
+CREATE INDEX IF NOT EXISTS idx_kft_zh
+ON knowledge_fulltext_index USING GIN(tsv_zh);
+
 
 
 CREATE TABLE spec_version

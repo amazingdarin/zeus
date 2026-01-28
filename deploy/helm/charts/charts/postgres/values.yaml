@@ -1,6 +1,6 @@
 image:
-  repository: pgvector/pgvector
-  tag: "pg15"
+  repository: zeus/postgres
+  tag: "pg15-zhparser"
   pullPolicy: IfNotPresent
 
 service:
