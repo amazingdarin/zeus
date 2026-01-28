@@ -1,4 +1,4 @@
-package knowledge
+package fulltext
 
 import (
 	"fmt"

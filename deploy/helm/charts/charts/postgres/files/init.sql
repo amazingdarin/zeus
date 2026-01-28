@@ -85,3 +85,24 @@ ON knowledge_fulltext_index USING GIN(tsv_en);
 
 CREATE INDEX IF NOT EXISTS idx_kft_zh
 ON knowledge_fulltext_index USING GIN(tsv_zh);
+
+CREATE TABLE knowledge_embedding_index
+(
+    project_key   TEXT NOT NULL,
+    index_name    TEXT NOT NULL,
+    doc_id        TEXT NOT NULL,
+    block_id      TEXT NOT NULL,
+    chunk_index   INT  NOT NULL,
+    content       TEXT NOT NULL,
+    model         TEXT NOT NULL,
+    embedding     vector(768) NOT NULL,
+    metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (project_key, index_name, doc_id, block_id, chunk_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_kei_project
+ON knowledge_embedding_index (project_key);
+
+CREATE INDEX IF NOT EXISTS idx_kei_embedding
+ON knowledge_embedding_index USING ivfflat (embedding vector_l2_ops);

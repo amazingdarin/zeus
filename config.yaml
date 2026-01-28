@@ -34,17 +34,13 @@ git:
   author_email: zeus@local
   default_branch: main
 
-search:
-  index_root: /Users/darin/mine/code/zeus/resources/zeus/index
+embedding:
+  base_url: "http://localhost:11434"
+  api_key: ""
+  model_name: "nomic-embed-text:v1.5"
 
 security:
   encryption_key: zeus-dev-key
   encryption_keys: []
   active_key_id: ""
   active_key_version: 0
-
-providers:
-  copilot:
-    client_id: "Ov23liPsn9jEM8DUvp3I"
-    # client_secret 55fd5a33e9692426693f704d7f1b8b08250c44aa
-    scopes: []

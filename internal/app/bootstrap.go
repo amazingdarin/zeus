@@ -6,7 +6,8 @@ import (
 	"time"
 
 	docsvc "zeus/internal/modules/document/service/document"
-	knowledgesvc "zeus/internal/modules/knowledge/service/knowledge"
+	embeddingsvc "zeus/internal/modules/knowledge/service/embedding"
+	fulltextsvc "zeus/internal/modules/knowledge/service/fulltext"
 	projectsvc "zeus/internal/modules/project/service/project"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -21,6 +22,7 @@ import (
 	"zeus/internal/infra/assetcontent"
 	"zeus/internal/infra/assetmeta"
 	clients3 "zeus/internal/infra/client/s3"
+	"zeus/internal/infra/embedding"
 	"zeus/internal/infra/gitadmin"
 	"zeus/internal/infra/gitclient"
 	ingestions3 "zeus/internal/infra/ingestion/s3"
@@ -108,9 +110,10 @@ func InitGitClientManager(ctx context.Context) *gitclient.GitClientManager {
 
 func InitRepository(db *gorm.DB, gitClientManager *gitclient.GitClientManager) repository.Repository {
 	return repository.Repository{
-		Project:           projectrepo.NewProjectRepository(db),
-		Task:              postgres.NewTaskRepository(db),
-		KnowledgeFulltext: postgres.NewKnowledgeFulltextRepository(db),
+		Project:            projectrepo.NewProjectRepository(db),
+		Task:               postgres.NewTaskRepository(db),
+		KnowledgeFulltext:  postgres.NewKnowledgeFulltextRepository(db),
+		KnowledgeEmbedding: postgres.NewKnowledgeEmbeddingRepository(db),
 	}
 }
 
@@ -131,8 +134,12 @@ func BuildRouter(ctx context.Context) *gin.Engine {
 
 	projectSvc := projectsvc.NewService(repos, gitAdmin, gitClientManager)
 	documentSvc := docsvc.NewService(config.AppConfig.Git.RepoRoot)
-	knowledgeSvc := knowledgesvc.NewService(repos, documentSvc)
-	documentSvc.RegisterHooks(knowledgeSvc.DocumentHooks())
+	fulltextSvc := fulltextsvc.NewService(repos, documentSvc)
+	embeddingResolver := embedding.NewConfigRuntimeResolver()
+	embedder := embedding.NewOpenAICompatibleEmbedder(embeddingResolver)
+	embeddingSvc := embeddingsvc.NewService(embedder, repos.KnowledgeEmbedding, documentSvc)
+	documentSvc.RegisterHooks(fulltextSvc.DocumentHooks())
+	documentSvc.RegisterHooks(embeddingSvc.DocumentHooks())
 	sessionManager := httpsession.NewSessionManager(nil)
 
 	router := gin.Default()

@@ -15,6 +15,7 @@ type Config struct {
 	Asset         AssetConfig         `mapstructure:"asset"`
 	Git           GitConfig           `mapstructure:"git"`
 	Search        SearchConfig        `mapstructure:"search"`
+	Embedding     EmbeddingConfig     `mapstructure:"embedding"`
 	Security      SecurityConfig      `mapstructure:"security"`
 	Providers     ProvidersConfig     `mapstructure:"providers"`
 }
@@ -71,6 +72,12 @@ type GitConfig struct {
 
 type SearchConfig struct {
 	IndexRoot string `mapstructure:"index_root"`
+}
+
+type EmbeddingConfig struct {
+	BaseURL   string `mapstructure:"base_url"`
+	APIKey    string `mapstructure:"api_key"`
+	ModelName string `mapstructure:"model_name"`
 }
 
 type SecurityConfig struct {

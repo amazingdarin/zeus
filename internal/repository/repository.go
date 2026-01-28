@@ -6,8 +6,9 @@ import (
 
 // Repository ALL repo
 type Repository struct {
-	Project           repository.ProjectRepository
-	StorageObject     StorageObjectRepository
-	Task              TaskRepository
-	KnowledgeFulltext KnowledgeFulltextRepository
+	Project            repository.ProjectRepository
+	StorageObject      StorageObjectRepository
+	Task               TaskRepository
+	KnowledgeFulltext  KnowledgeFulltextRepository
+	KnowledgeEmbedding KnowledgeEmbeddingRepository
 }
