@@ -31,6 +31,7 @@ import {
 import { ImageUploadNode } from "../../nodes/image-upload-node/image-upload-node-extension"
 import { HorizontalRule } from "../../nodes/horizontal-rule-node/horizontal-rule-node-extension"
 import { CodeBlockNode } from "../../nodes/code-block-node/code-block-node-extension"
+import { LinkPreviewNode } from "../../nodes/link-preview-node/link-preview-node-extension"
 import "../../nodes/blockquote-node/blockquote-node.scss"
 import "../../nodes/code-block-node/code-block-node.scss"
 import "../../nodes/horizontal-rule-node/horizontal-rule-node.scss"
@@ -38,11 +39,13 @@ import "../../nodes/list-node/list-node.scss"
 import "../../nodes/image-node/image-node.scss"
 import "../../nodes/heading-node/heading-node.scss"
 import "../../nodes/paragraph-node/paragraph-node.scss"
+import "../../nodes/link-preview-node/link-preview-node.scss"
 
 // --- Tiptap UI ---
 import { HeadingDropdownMenu } from "../../ui/heading-dropdown-menu"
 import { ImageUploadButton } from "../../ui/image-upload-button"
 import { FileBlockButton } from "../../ui/file-block-button"
+import { LinkPreviewButton } from "../../ui/link-preview-button"
 import { ListDropdownMenu } from "../../ui/list-dropdown-menu"
 import { BlockquoteButton } from "../../ui/blockquote-button"
 import { CodeBlockButton } from "../../ui/code-block-button"
@@ -91,6 +94,7 @@ type DocEditorProps = {
   docId?: string
   onLoadDocument?: (id: string) => Promise<JSONContent>
   onEditorReady?: (editor: Editor | null) => void
+  linkPreviewFetchHtml?: (url: string) => Promise<string>
 }
 
 const defaultContent: JSONContent = {
@@ -170,6 +174,7 @@ const MainToolbarContent = ({
       <ToolbarGroup>
         <ImageUploadButton text="Image" />
         <FileBlockButton text="File" />
+        <LinkPreviewButton text="Link Preview" />
       </ToolbarGroup>
 
       <Spacer />
@@ -217,6 +222,7 @@ export function DocEditor({
   docId,
   onLoadDocument,
   onEditorReady,
+  linkPreviewFetchHtml,
 }: DocEditorProps) {
   const isEditable = mode === "edit"
   const isMobile = useIsBreakpoint()
@@ -278,6 +284,9 @@ export function DocEditor({
         limit: 3,
         upload: handleImageUpload,
         onError: (error) => console.error("Upload failed:", error),
+      }),
+      LinkPreviewNode.configure({
+        fetchHtml: linkPreviewFetchHtml,
       }),
       ...extensions,
     ],
