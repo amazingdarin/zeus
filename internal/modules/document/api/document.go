@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"zeus/internal/domain"
+	httpfetch "zeus/internal/infra/ingestion/httpfetch"
 	service2 "zeus/internal/modules/document/service"
 	svc "zeus/internal/modules/document/service/document"
 	"zeus/internal/modules/project/service"
@@ -21,6 +23,7 @@ import (
 type DocumentHandler struct {
 	projectSvc  service.ProjectService
 	documentSvc service2.DocumentService
+	fetcher     *httpfetch.Fetcher
 }
 
 func NewDocumentHandler(
@@ -30,7 +33,57 @@ func NewDocumentHandler(
 	return &DocumentHandler{
 		projectSvc:  projectSvc,
 		documentSvc: documentSvc,
+		fetcher:     httpfetch.NewFetcher(httpfetch.FetcherConfig{}),
 	}
+}
+
+func (h *DocumentHandler) FetchURL(c *gin.Context) {
+	projectKey := c.Param("project_key")
+	if projectKey == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{Code: "MISSING_PROJECT_KEY", Message: "project_key is required"})
+		return
+	}
+
+	var req types.FetchURLRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{Code: "INVALID_REQUEST", Message: "invalid request body"})
+		return
+	}
+
+	if _, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey); err != nil {
+		c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "PROJECT_NOT_FOUND", Message: err.Error()})
+		return
+	}
+
+	result, err := h.fetcher.Fetch(c.Request.Context(), req.URL)
+	if err != nil {
+		switch {
+		case errors.Is(err, httpfetch.ErrInvalidURL):
+			c.JSON(http.StatusBadRequest, types.ErrorResponse{Code: "INVALID_URL", Message: "url must be http or https"})
+			return
+		case errors.Is(err, httpfetch.ErrFetchTimeout):
+			c.JSON(http.StatusGatewayTimeout, types.ErrorResponse{Code: "FETCH_TIMEOUT", Message: "fetch timeout"})
+			return
+		case errors.Is(err, httpfetch.ErrPayloadTooLarge):
+			c.JSON(http.StatusRequestEntityTooLarge, types.ErrorResponse{Code: "PAYLOAD_TOO_LARGE", Message: "payload too large"})
+			return
+		default:
+			c.JSON(http.StatusBadGateway, types.ErrorResponse{Code: "FETCH_FAILED", Message: "fetch failed"})
+			return
+		}
+	}
+
+	response := types.FetchURLResponse{
+		Code:    "OK",
+		Message: "success",
+		Data: types.FetchURLData{
+			URL:       result.URL,
+			HTML:      string(result.HTML),
+			FetchedAt: result.FetchedAt.Format(time.RFC3339),
+		},
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *DocumentHandler) List(c *gin.Context) {

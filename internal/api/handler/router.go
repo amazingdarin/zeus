@@ -38,6 +38,7 @@ func RegisterRoutes(
 	api.GET("/projects/:project_key/documents", documentHandler.List)
 	api.POST("/projects/:project_key/documents", documentHandler.Create)
 	api.POST("/projects/:project_key/documents/import", documentHandler.Import)
+	api.POST("/projects/:project_key/documents/fetch-url", documentHandler.FetchURL)
 	api.PATCH("/projects/:project_key/documents/:doc_id/move", documentHandler.Move)
 	api.GET("/projects/:project_key/documents/:doc_id", documentHandler.Get)
 	api.GET("/projects/:project_key/documents/:doc_id/hierarchy", documentHandler.GetHierarchy)

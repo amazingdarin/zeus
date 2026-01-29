@@ -55,3 +55,19 @@ type MoveDocumentResponse struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
+
+type FetchURLRequest struct {
+	URL string `json:"url"`
+}
+
+type FetchURLData struct {
+	URL       string `json:"url"`
+	HTML      string `json:"html"`
+	FetchedAt string `json:"fetched_at"`
+}
+
+type FetchURLResponse struct {
+	Code    string       `json:"code"`
+	Message string       `json:"message"`
+	Data    FetchURLData `json:"data"`
+}
