@@ -11,6 +11,7 @@ import {
 } from "@zeus/doc-editor";
 
 import { apiFetch } from "../config/api";
+import { fetchUrlHtml } from "../api/documents";
 import BlockRefPicker from "./BlockRefPicker";
 
 interface RichTextEditorProps {
@@ -112,7 +113,7 @@ function RichTextEditor({
       onSelect: handleBlockSelect,
     });
     return [...openapi, blockRef];
-  }, [handleTrigger, projectKey]);
+  }, [handleBlockSelect, handleTrigger, projectKey]);
 
   return (
     <>
@@ -123,6 +124,13 @@ function RichTextEditor({
         mode="edit"
         docId={docId}
         onLoadDocument={onLoadDocument}
+        linkPreviewFetchHtml={async (url: string) => {
+          if (!projectKey) {
+            throw new Error("Missing project key")
+          }
+          const data = await fetchUrlHtml(projectKey, url)
+          return data.html
+        }}
         onEditorReady={(editor) => {
           editorRef.current = editor;
         }}

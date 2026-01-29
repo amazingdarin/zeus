@@ -10,6 +10,7 @@ import {
 } from "@zeus/doc-editor";
 
 import { apiFetch } from "../config/api";
+import { fetchUrlHtml } from "../api/documents";
 
 interface RichTextViewerProps {
   content: JSONContent;
@@ -44,7 +45,17 @@ function RichTextViewer({ content, projectKey }: RichTextViewerProps) {
 
   return (
     <div className="rich-text-viewer">
-      <DocViewer content={content} extensions={extensions} />
+      <DocViewer
+        content={content}
+        extensions={extensions}
+        linkPreviewFetchHtml={async (url: string) => {
+          if (!projectKey) {
+            throw new Error("Missing project key")
+          }
+          const data = await fetchUrlHtml(projectKey, url)
+          return data.html
+        }}
+      />
     </div>
   );
 }
