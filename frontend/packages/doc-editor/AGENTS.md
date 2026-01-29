@@ -1,27 +1,26 @@
 # DOC-EDITOR PACKAGE
 
-Tiptap-based document editor library used by the main app.
+Tiptap-based editor library with custom nodes and UI primitives.
 
 ## STRUCTURE
 ```
 frontend/packages/doc-editor/src/
 ├── templates/     # editor/viewer templates
 ├── hooks/         # reusable hooks
-├── nodes/         # editor node implementations
-├── ui/            # editor UI components
+├── nodes/         # tiptap nodes (openapi, block-ref, image)
 ├── primitives/    # base UI building blocks
-└── styles/        # shared styles
+└── lib/           # tiptap + markdown helpers
 ```
 
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Editor template | src/templates | main editor composition |
-| Hooks | src/hooks | editor state helpers |
-| Node types | src/nodes | tiptap nodes |
-| OpenAPI nodes | src/nodes/openapi-* | Swagger UI viewer + filters |
-| UI controls | src/ui | toolbar controls |
+| Editor composition | src/templates | doc editor + viewer templates |
+| Node registry | src/nodes/index.ts | exported nodes |
+| OpenAPI nodes | src/nodes/openapi-node | Swagger UI viewer |
+| Block refs | src/nodes/block-ref-node | cross-block references |
+| Markdown utils | src/lib/markdown.ts | conversions |
 
 ## CONVENTIONS
-- Keep editor logic in hooks/templates.
-- Node-specific styles live next to node code.
+- Node-specific styles live beside node code (scss).
+- Export public API from src/index.ts.
