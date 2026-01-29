@@ -200,8 +200,8 @@ export const uploadDocument = async (
 };
 
 export const importDocument = async (
-    projectKey: string,
-    formData: FormData,
+  projectKey: string,
+  formData: FormData,
 ): Promise<void> => {
     const response = await apiFetch(
         `/api/projects/${encodeURIComponent(projectKey)}/documents/import`,
@@ -214,6 +214,39 @@ export const importDocument = async (
         const payload = await response.json().catch(() => null);
         throw new Error(payload?.message || "Import failed");
     }
+};
+
+export type FetchUrlResult = {
+  url: string;
+  html: string;
+  fetched_at: string;
+};
+
+export const fetchUrlHtml = async (
+  projectKey: string,
+  url: string,
+): Promise<FetchUrlResult> => {
+  const response = await apiFetch(
+    `/api/projects/${encodeURIComponent(projectKey)}/documents/fetch-url`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ url }),
+    },
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.message || "Fetch URL failed");
+  }
+  const payload = await response.json();
+  const data = payload?.data ?? payload ?? {};
+  return {
+    url: String(data.url ?? url),
+    html: String(data.html ?? ""),
+    fetched_at: String(data.fetched_at ?? ""),
+  };
 };
 
 export type ProposalDiff = {
@@ -275,4 +308,3 @@ export const rejectProposal = async (
         throw new Error("failed to reject proposal");
     }
 };
-
