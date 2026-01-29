@@ -1696,6 +1696,29 @@ body {
   color: var(--muted);
 }
 
+.kb-import-url-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.kb-import-url-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(31, 35, 40, 0.2);
+  background: #fff;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.kb-import-url-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .kb-import-status {
   margin-top: 16px;
   padding: 10px 12px;
@@ -1736,6 +1759,15 @@ body {
   pointer-events: none;
   width: 0;
   height: 0;
+}
+
+.modal-overlay-button {
+  position: fixed;
+  inset: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
 }
 
 .doc-viewer-page {

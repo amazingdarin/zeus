@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
+import { Readability } from "@mozilla/readability";
+import TurndownService from "turndown";
 import type { Extensions } from "@tiptap/core";
 import type { JSONContent } from "@tiptap/react";
 import { Image } from "@tiptap/extension-image";
@@ -21,6 +23,7 @@ import {
   applyProposal,
   moveDocument,
   createDocument,
+  fetchUrlHtml,
   type DocumentListItem,
   type DocumentDetail,
 } from "../api/documents";
@@ -75,7 +78,7 @@ type UploadedAsset = {
   size: number;
 };
 
-type UploadFilterPresetId = "all" | "images" | "office" | "text";
+type UploadFilterPresetId = "all" | "images" | "office" | "text" | "markdown";
 
 type UploadFilterPreset = {
   id: UploadFilterPresetId;
@@ -116,6 +119,7 @@ type FileEntry = {
 type DocumentCreateMeta = {
   title: string;
   parentId: string;
+  extra?: Record<string, unknown>;
 };
 
 const UPLOAD_FILTER_PRESETS: UploadFilterPreset[] = [
@@ -127,13 +131,18 @@ const UPLOAD_FILTER_PRESETS: UploadFilterPreset[] = [
   },
   {
     id: "office",
-    label: "Office/PDF",
+    label: "Office",
     extensions: ["docx", "pptx", "xlsx", "pdf"],
   },
   {
     id: "text",
     label: "Text",
-    extensions: ["md", "txt", "csv", "json", "yaml", "yml", "log"],
+    extensions: ["txt", "csv", "json", "yaml", "yml", "log"],
+  },
+  {
+    id: "markdown",
+    label: "Markdown",
+    extensions: ["md", "markdown"],
   },
 ];
 
@@ -156,6 +165,34 @@ const SMART_IMPORT_OPTIONS: SmartImportOption[] = [
   { id: "word", label: "Word", enabled: true },
   { id: "pdf", label: "PDF", enabled: false },
 ];
+
+const createDefaultUploadFilterSet = () => new Set<UploadFilterPresetId>(["all"]);
+
+const buildUploadFilterPreset = (
+  selectedPresets: Set<UploadFilterPresetId>,
+): UploadFilterPreset => {
+  if (selectedPresets.has("all") || selectedPresets.size === 0) {
+    return UPLOAD_FILTER_PRESETS[0];
+  }
+  const extensions: string[] = [];
+  const seen = new Set<string>();
+  UPLOAD_FILTER_PRESETS.forEach((preset) => {
+    if (preset.id === "all" || !selectedPresets.has(preset.id)) {
+      return;
+    }
+    preset.extensions.forEach((ext) => {
+      if (!seen.has(ext)) {
+        seen.add(ext);
+        extensions.push(ext);
+      }
+    });
+  });
+  return {
+    id: "all",
+    label: "Custom",
+    extensions,
+  };
+};
 
 const buildMarkdownExtensions = (projectKey: string): Extensions => [
   StarterKit.configure({
@@ -210,8 +247,10 @@ function DocumentPage() {
   const [rebuildModalOpen, setRebuildModalOpen] = useState(false);
 
   const [importModalOpen, setImportModalOpen] = useState(false);
-  const [importMode, setImportMode] = useState<"file" | "folder">("file");
+  const [importMode, setImportMode] = useState<"file" | "folder" | "url">("file");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [importUrl, setImportUrl] = useState("");
+  const [importUrlTitle, setImportUrlTitle] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadTotal, setUploadTotal] = useState(0);
   const [uploadCompleted, setUploadCompleted] = useState(0);
@@ -219,7 +258,9 @@ function DocumentPage() {
     type: "idle" | "success" | "error";
     message?: string;
   }>({ type: "idle" });
-  const [uploadFilterPreset, setUploadFilterPreset] = useState<UploadFilterPresetId>("all");
+  const [uploadFilterPresets, setUploadFilterPresets] = useState<Set<UploadFilterPresetId>>(
+    () => createDefaultUploadFilterSet(),
+  );
   const [uploadSummary, setUploadSummary] = useState<UploadSummary | null>(null);
   const [smartImportEnabled, setSmartImportEnabled] = useState(true);
   const [smartImportTypes, setSmartImportTypes] = useState<Set<SmartImportType>>(
@@ -257,12 +298,10 @@ function DocumentPage() {
     return map;
   }, [childrenByParent, rootDocuments]);
 
-  const activeUploadPreset = useMemo(() => {
-    return (
-      UPLOAD_FILTER_PRESETS.find((preset) => preset.id === uploadFilterPreset) ??
-      UPLOAD_FILTER_PRESETS[0]
-    );
-  }, [uploadFilterPreset]);
+  const activeUploadPreset = useMemo(
+    () => buildUploadFilterPreset(uploadFilterPresets),
+    [uploadFilterPresets],
+  );
 
   const uploadAccept = useMemo(() => {
     if (!activeUploadPreset.extensions.length) {
@@ -270,6 +309,30 @@ function DocumentPage() {
     }
     return activeUploadPreset.extensions.map((ext) => `.${ext}`).join(",");
   }, [activeUploadPreset]);
+
+  const isUploadFilterSelected = useCallback(
+    (id: UploadFilterPresetId) => uploadFilterPresets.has(id),
+    [uploadFilterPresets],
+  );
+
+  const toggleUploadFilterPreset = useCallback((id: UploadFilterPresetId) => {
+    setUploadFilterPresets((prev) => {
+      const next = new Set(prev);
+      if (id === "all") {
+        return createDefaultUploadFilterSet();
+      }
+      next.delete("all");
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      if (next.size === 0) {
+        next.add("all");
+      }
+      return next;
+    });
+  }, []);
 
   const markdownExtensions = useMemo(
     () => buildMarkdownExtensions(resolvedProjectKey),
@@ -902,12 +965,14 @@ function DocumentPage() {
     navigate(target);
   };
 
-  const handleOpenImportWithMode = (mode: "file" | "folder") => {
+  const handleOpenImportWithMode = (mode: "file" | "folder" | "url") => {
     if (!allowChildActions) {
       return;
     }
     setImportMode(mode);
     setSelectedFiles([]);
+    setImportUrl("");
+    setImportUrlTitle("");
     setUploading(false);
     setUploadTotal(0);
     setUploadCompleted(0);
@@ -923,6 +988,8 @@ function DocumentPage() {
     setUploadCompleted(0);
     setImportStatus({ type: "idle" });
     setUploadSummary(null);
+    setImportUrl("");
+    setImportUrlTitle("");
   };
 
   const handleFilePick = () => {
@@ -940,9 +1007,11 @@ function DocumentPage() {
     setUploadSummary(null);
   };
 
-  const handleModeChange = (nextMode: "file" | "folder") => {
+  const handleModeChange = (nextMode: "file" | "folder" | "url") => {
     setImportMode(nextMode);
     setSelectedFiles([]);
+    setImportUrl("");
+    setImportUrlTitle("");
     setUploading(false);
     setUploadTotal(0);
     setUploadCompleted(0);
@@ -953,6 +1022,80 @@ function DocumentPage() {
   const handleImportSubmit = async () => {
     if (!resolvedProjectKey) {
       console.log("import_missing_project");
+      return;
+    }
+    if (importMode === "url") {
+      const urlValue = importUrl.trim();
+      if (!urlValue) {
+        setImportStatus({ type: "error", message: "URL is required." });
+        return;
+      }
+      if (!isValidHttpUrl(urlValue)) {
+        setImportStatus({ type: "error", message: "Enter a valid http(s) URL." });
+        return;
+      }
+      setUploading(true);
+      setUploadTotal(1);
+      setUploadCompleted(0);
+      setImportStatus({ type: "idle" });
+      setUploadSummary(null);
+      try {
+        const { html, url } = await fetchUrlHtmlWithFallback(
+          resolvedProjectKey,
+          urlValue,
+        );
+        if (!html) {
+          throw new Error("Empty HTML response");
+        }
+        const parsedDoc = new DOMParser().parseFromString(html, "text/html");
+        const article = new Readability(parsedDoc).parse();
+        const extractedTitle = article?.title?.trim() ?? "";
+        const content = article?.content ?? "";
+        if (!content.trim()) {
+          throw new Error("No readable content found");
+        }
+        const turndownService = new TurndownService({
+          headingStyle: "atx",
+          codeBlockStyle: "fenced",
+        });
+        const markdown = turndownService.turndown(content);
+        const parsed = markdownToTiptapJson(markdown, { extensions: markdownExtensions });
+        const finalTitle = importUrlTitle.trim() || extractedTitle || url;
+        await createDocumentRecord(
+          resolvedProjectKey,
+          {
+            title: finalTitle,
+            parentId: activeDocument?.id ?? "",
+            extra: {
+              source_url: url,
+              fetched_at: new Date().toISOString(),
+            },
+          },
+          parsed,
+        );
+        setUploadCompleted(1);
+        setUploadSummary({
+          directories: 0,
+          files: 1,
+          skipped: 0,
+          converted: 1,
+          fallback: 0,
+        });
+        setImportStatus({ type: "success", message: "Import completed." });
+        setImportModalOpen(false);
+        setImportUrl("");
+        setImportUrlTitle("");
+        setSelectedFiles([]);
+        await handleDocumentsChanged(activeDocument?.id ?? "");
+      } catch (err) {
+        console.log("import_url_error", err);
+        const message = err instanceof Error && err.message ? err.message : "Import failed.";
+        setImportStatus({ type: "error", message });
+      } finally {
+        setUploading(false);
+        setUploadTotal(0);
+        setUploadCompleted(0);
+      }
       return;
     }
     if (selectedFiles.length === 0) {
@@ -1228,13 +1371,21 @@ function DocumentPage() {
         />
         <div className="doc-viewer-page">{bodyContent()}</div>
         {importModalOpen ? (
-          <div
-            className="modal-overlay"
-            role="dialog"
-            aria-modal="true"
-            onClick={handleCloseImport}
-          >
-            <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+          <div className="modal-overlay" role="presentation">
+            <button
+              className="modal-overlay-button"
+              type="button"
+              aria-label="Close import dialog"
+              onClick={handleCloseImport}
+            />
+            <div
+              className="modal-card"
+              role="dialog"
+              aria-modal="true"
+              tabIndex={-1}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
               <div className="modal-header">
                 <h2>Upload Assets</h2>
                 <button className="modal-close" type="button" onClick={handleCloseImport}>
@@ -1257,56 +1408,73 @@ function DocumentPage() {
                   >
                     Folder
                   </button>
+                  <button
+                    className={`kb-import-tab${importMode === "url" ? " active" : ""}`}
+                    type="button"
+                    onClick={() => handleModeChange("url")}
+                  >
+                    URL
+                  </button>
                 </div>
-                <div className="kb-import-smart">
-                  <div className="kb-import-smart-header">
-                    <div className="kb-import-smart-title">Smart Import</div>
-                    <button
-                      className={`kb-import-toggle${smartImportEnabled ? " active" : ""}`}
-                      type="button"
-                      aria-pressed={smartImportEnabled}
-                      onClick={() => setSmartImportEnabled((prev) => !prev)}
-                    >
-                      {smartImportEnabled ? "On" : "Off"}
-                    </button>
-                  </div>
-                  <fieldset className="kb-import-smart-options" aria-label="Smart import types">
-                    {SMART_IMPORT_OPTIONS.map((option) => {
-                      const disabled = !option.enabled || !smartImportEnabled;
-                      const active = isSmartImportTypeSelected(option.id);
-                      const chipClass = `kb-import-chip${active ? " active" : ""}${disabled ? " disabled" : ""
-                        }`;
-                      return (
+                {importMode !== "url" ? (
+                  <>
+                    <fieldset className="kb-import-smart">
+                      <div className="kb-import-smart-header">
+                        <div className="kb-import-smart-title">Smart Import</div>
                         <button
-                          key={option.id}
-                          className={chipClass}
+                          className={`kb-import-toggle${smartImportEnabled ? " active" : ""}`}
                           type="button"
-                          disabled={disabled}
-                          onClick={() => {
-                            if (!disabled) {
-                              toggleSmartImportType(option.id);
-                            }
-                          }}
+                          aria-pressed={smartImportEnabled}
+                          onClick={() => setSmartImportEnabled((prev) => !prev)}
                         >
-                          {option.label}
+                          {smartImportEnabled ? "On" : "Off"}
                         </button>
-                      );
-                    })}
-                  </fieldset>
-                </div>
-                <div className="kb-import-tabs" role="tablist" aria-label="Filter presets">
-                  {UPLOAD_FILTER_PRESETS.map((preset) => (
-                    <button
-                      key={preset.id}
-                      className={`kb-import-tab${uploadFilterPreset === preset.id ? " active" : ""
-                        }`}
-                      type="button"
-                      onClick={() => setUploadFilterPreset(preset.id)}
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
-                </div>
+                      </div>
+                      <fieldset className="kb-import-smart-options" aria-label="Smart import types">
+                        {SMART_IMPORT_OPTIONS.map((option) => {
+                          const disabled = !option.enabled || !smartImportEnabled;
+                          const active = isSmartImportTypeSelected(option.id);
+                          const chipClass = `kb-import-chip${active ? " active" : ""}${disabled ? " disabled" : ""
+                            }`;
+                          return (
+                            <button
+                              key={option.id}
+                              className={chipClass}
+                              type="button"
+                              disabled={disabled}
+                              onClick={() => {
+                                if (!disabled) {
+                                  toggleSmartImportType(option.id);
+                                }
+                              }}
+                            >
+                              {option.label}
+                            </button>
+                          );
+                        })}
+                      </fieldset>
+                    </fieldset>
+                    <fieldset className="kb-import-smart" aria-label="Filter presets">
+                      <div className="kb-import-smart-options">
+                        {UPLOAD_FILTER_PRESETS.map((preset) => {
+                          const active = isUploadFilterSelected(preset.id);
+                          const chipClass = `kb-import-chip${active ? " active" : ""}`;
+                          return (
+                            <button
+                              key={preset.id}
+                              className={chipClass}
+                              type="button"
+                              aria-pressed={active}
+                              onClick={() => toggleUploadFilterPreset(preset.id)}
+                            >
+                              {preset.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
+                  </>
+                ) : null}
                 {importMode === "file" ? (
                   <div className="kb-import-panel">
                     <div className="kb-import-visual" aria-hidden="true">
@@ -1338,7 +1506,7 @@ function DocumentPage() {
                       {selectedFiles[0]?.name ?? "No file selected"}
                     </div>
                   </div>
-                ) : (
+                ) : importMode === "folder" ? (
                   <div className="kb-import-panel">
                     <div className="kb-import-visual" aria-hidden="true">
                       <svg
@@ -1369,6 +1537,52 @@ function DocumentPage() {
                       {selectedFiles.length > 0
                         ? `${selectedFiles.length} files selected`
                         : "No folder selected"}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="kb-import-panel">
+                    <div className="kb-import-visual" aria-hidden="true">
+                      <svg
+                        className="kb-import-icon"
+                        viewBox="0 0 48 48"
+                        role="presentation"
+                      >
+                        <path
+                          d="M24 6c6.627 0 12 5.373 12 12 0 4.418-2.39 8.277-5.94 10.354"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        />
+                        <path
+                          d="M24 6c-6.627 0-12 5.373-12 12 0 4.418 2.39 8.277 5.94 10.354"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        />
+                        <circle cx="24" cy="24" r="4" fill="currentColor" />
+                      </svg>
+                    </div>
+                    <div className="kb-import-title">Import from URL</div>
+                    <div className="kb-import-note">
+                      Paste a URL to fetch and convert the page content.
+                    </div>
+                    <div className="kb-import-url-fields">
+                      <input
+                        className="kb-import-url-input"
+                        type="url"
+                        placeholder="https://example.com/article"
+                        value={importUrl}
+                        onChange={(event) => setImportUrl(event.target.value)}
+                        disabled={uploading}
+                      />
+                      <input
+                        className="kb-import-url-input"
+                        type="text"
+                        placeholder="Title (optional)"
+                        value={importUrlTitle}
+                        onChange={(event) => setImportUrlTitle(event.target.value)}
+                        disabled={uploading}
+                      />
                     </div>
                   </div>
                 )}
@@ -1414,23 +1628,38 @@ function DocumentPage() {
                   className="btn primary"
                   type="button"
                   onClick={handleImportSubmit}
-                  disabled={uploading}
+                  disabled={
+                    uploading ||
+                    (importMode === "url" && !importUrl.trim())
+                  }
                 >
                   {uploading ? <span className="kb-import-spinner" aria-hidden="true" /> : null}
-                  {importMode === "folder" && uploading ? `Upload ${uploadProgress}%` : "Upload"}
+                  {importMode === "url"
+                    ? "Import URL"
+                    : importMode === "folder" && uploading
+                      ? `Upload ${uploadProgress}%`
+                      : "Upload"}
                 </button>
               </div>
             </div>
           </div>
         ) : null}
         {rebuildModalOpen ? (
-          <div
-            className="modal-overlay"
-            role="dialog"
-            aria-modal="true"
-            onClick={() => setRebuildModalOpen(false)}
-          >
-            <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+          <div className="modal-overlay" role="presentation">
+            <button
+              className="modal-overlay-button"
+              type="button"
+              aria-label="Close rebuild dialog"
+              onClick={() => setRebuildModalOpen(false)}
+            />
+            <div
+              className="modal-card"
+              role="dialog"
+              aria-modal="true"
+              tabIndex={-1}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
               <div className="modal-header">
                 <h2>Rebuild knowledge</h2>
                 <button
@@ -1604,6 +1833,7 @@ async function createDocumentRecord(
   const title = metaInput.title.trim() || "Untitled Document";
   const parentId = resolveParentId(metaInput.parentId);
   const slug = sanitizeFileName(title);
+  const extra = metaInput.extra ?? {};
   const payload = exportContentJson(content, null);
 
   const data = await createDocument(
@@ -1615,6 +1845,7 @@ async function createDocumentRecord(
       extra: {
         status: "draft",
         tags: [],
+        ...extra,
       },
     },
     {
@@ -1854,6 +2085,39 @@ async function sniffTextContent(file: File): Promise<boolean> {
 function resolveParentId(parentId: string): string {
   const normalized = parentId.trim();
   return normalized || "root";
+}
+
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+async function fetchUrlHtmlWithFallback(
+  projectKey: string,
+  url: string,
+): Promise<{ html: string; url: string }> {
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      mode: "cors",
+    });
+    if (!response.ok) {
+      throw new Error(`Fetch failed with status ${response.status}`);
+    }
+    const html = await response.text();
+    if (!html.trim()) {
+      throw new Error("Empty HTML response");
+    }
+    return { html, url: response.url || url };
+  } catch (error) {
+    console.log("import_url_fetch_client_failed", error);
+    const fallback = await fetchUrlHtml(projectKey, url);
+    return { html: fallback.html, url: fallback.url };
+  }
 }
 
 function normalizeRelativePath(path: string): string {
