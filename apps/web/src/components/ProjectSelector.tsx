@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { DownOutlined, ReloadOutlined, RightOutlined } from "@ant-design/icons";
+import { ReloadOutlined } from "@ant-design/icons";
 
 import { type Project, useProjectContext } from "../context/ProjectContext";
 import CreateProjectModal from "./CreateProjectModal";
@@ -11,7 +11,7 @@ type ProjectSelectorProps = {
   collapsed?: boolean;
 };
 
-function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
+function ProjectSelector({ collapsed: _collapsed = false }: ProjectSelectorProps) {
   const [open, setOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
@@ -137,44 +137,17 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
   };
 
   return (
-    <div className={`project-selector${collapsed ? " compact" : ""}`}>
-      <div className={`sidebar-title-wrap project-title-wrap${collapsed ? " compact" : ""}`}>
-        <div className="project-title-row">
-          <div className={`sidebar-title${collapsed ? " compact" : ""}`}>Project</div>
-          {!collapsed ? (
-            <button
-              className="project-rebuild-button"
-              type="button"
-              aria-label="Rebuild project knowledge"
-              onClick={handleRebuildProject}
-              disabled={!activeProject || rebuilding}
-            >
-              <ReloadOutlined />
-            </button>
-          ) : null}
-        </div>
-        {collapsed ? <div className="sidebar-divider" aria-hidden="true" /> : null}
-      </div>
+    <div className="project-selector compact">
       <button
-        className={`project-selector-button${collapsed ? " compact" : ""}`}
+        className="sidebar-menu-item"
         type="button"
         aria-expanded={open}
         onClick={toggleOpen}
+        title={activeProject ? activeProject.name : "Select a project"}
       >
-        {collapsed ? (
-          <span className="project-selector-icon" aria-label="Project">
-            {projectInitial}
-          </span>
-        ) : (
-          <>
-            <span className="project-selector-label">
-              {activeProject ? activeProject.name : "Select a project"}
-            </span>
-            <span className="project-selector-caret">
-              {open ? <DownOutlined /> : <RightOutlined />}
-            </span>
-          </>
-        )}
+        <span className="project-selector-initial" aria-label="Project">
+          {projectInitial}
+        </span>
       </button>
       {open ? (
         <div className={`project-selector-menu${collapsed ? " compact" : ""}`}>
