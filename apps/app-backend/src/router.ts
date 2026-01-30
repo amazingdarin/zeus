@@ -13,6 +13,12 @@ import {
 import type { Document, CreateDocumentRequest, MoveDocumentRequest, SearchQuery } from "./storage/types.js";
 import { knowledgeSearch } from "./knowledge/search.js";
 import { assetStore } from "./storage/asset-store.js";
+import {
+  llmGateway,
+  type ChatOptions,
+  type CompletionOptions,
+  type EmbeddingOptions,
+} from "./llm/index.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -572,6 +578,118 @@ export const buildRouter = () => {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Search failed";
       error(res, "SEARCH_FAILED", message, 500);
+    }
+  });
+
+  // ============================================
+  // LLM Gateway APIs
+  // ============================================
+
+  /**
+   * List available LLM providers
+   * GET /llm/providers
+   */
+  router.get("/llm/providers", (_req: Request, res: Response) => {
+    try {
+      const providers = llmGateway.listProviders();
+      success(res, providers);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "List providers failed";
+      error(res, "LIST_PROVIDERS_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * List available LLM models
+   * GET /llm/models
+   */
+  router.get("/llm/models", (_req: Request, res: Response) => {
+    try {
+      const models = llmGateway.listModels();
+      success(res, models);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "List models failed";
+      error(res, "LIST_MODELS_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Chat with LLM
+   * POST /llm/chat
+   */
+  router.post("/llm/chat", async (req: Request, res: Response) => {
+    try {
+      const options = req.body as ChatOptions;
+      
+      if (!options.provider || !options.model || !options.messages) {
+        error(res, "INVALID_REQUEST", "provider, model, and messages are required");
+        return;
+      }
+
+      if (options.stream) {
+        // Streaming response
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+
+        const stream = await llmGateway.chatStream(options);
+        
+        for await (const chunk of stream.textStream) {
+          res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
+        }
+        
+        res.write("data: [DONE]\n\n");
+        res.end();
+      } else {
+        // Non-streaming response
+        const result = await llmGateway.chat(options);
+        success(res, result);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Chat failed";
+      error(res, "CHAT_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Text completion with LLM
+   * POST /llm/complete
+   */
+  router.post("/llm/complete", async (req: Request, res: Response) => {
+    try {
+      const options = req.body as CompletionOptions;
+      
+      if (!options.provider || !options.model || !options.prompt) {
+        error(res, "INVALID_REQUEST", "provider, model, and prompt are required");
+        return;
+      }
+
+      const result = await llmGateway.complete(options);
+      success(res, result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Completion failed";
+      error(res, "COMPLETION_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Generate embeddings
+   * POST /llm/embed
+   */
+  router.post("/llm/embed", async (req: Request, res: Response) => {
+    try {
+      const options = req.body as EmbeddingOptions;
+      
+      if (!options.provider || !options.model || !options.inputs || !Array.isArray(options.inputs)) {
+        error(res, "INVALID_REQUEST", "provider, model, and inputs array are required");
+        return;
+      }
+
+      const result = await llmGateway.generateEmbeddings(options);
+      success(res, result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Embedding failed";
+      error(res, "EMBEDDING_FAILED", message, 500);
     }
   });
 

@@ -1,15 +1,42 @@
 import { query } from "../db/postgres.js";
 import type { Document, SearchResult } from "../storage/types.js";
 import { buildChunks } from "./chunker.js";
+import { llmGateway, type LLMProviderId } from "../llm/index.js";
 
-const EMBEDDING_API_URL = process.env.EMBEDDING_API_URL || "http://localhost:11434/api/embeddings";
-const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || "nomic-embed-text";
+// Legacy Ollama API configuration (fallback)
+const EMBEDDING_API_URL = process.env.EMBEDDING_API_URL || "";
+const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || "text-embedding-3-small";
+
+// LLM Gateway configuration
+const EMBEDDING_PROVIDER = (process.env.EMBEDDING_PROVIDER || "openai") as LLMProviderId;
+const EMBEDDING_USE_GATEWAY = process.env.EMBEDDING_USE_GATEWAY !== "false";
 
 /**
  * Call the embedding API to generate vectors
+ * Uses LLM Gateway by default, falls back to legacy Ollama API if configured
  */
 async function embed(inputs: string[]): Promise<number[][]> {
   if (inputs.length === 0) return [];
+
+  // Use LLM Gateway if enabled and provider is available
+  if (EMBEDDING_USE_GATEWAY && llmGateway.isProviderAvailable(EMBEDDING_PROVIDER)) {
+    try {
+      const result = await llmGateway.generateEmbeddings({
+        provider: EMBEDDING_PROVIDER,
+        model: EMBEDDING_MODEL,
+        inputs,
+      });
+      return result.embeddings;
+    } catch (err) {
+      console.warn("LLM Gateway embedding failed, falling back to legacy API:", err);
+      // Fall through to legacy API
+    }
+  }
+
+  // Legacy Ollama API fallback
+  if (!EMBEDDING_API_URL) {
+    throw new Error("No embedding provider available. Set OPENAI_API_KEY or EMBEDDING_API_URL.");
+  }
 
   const vectors: number[][] = [];
 
