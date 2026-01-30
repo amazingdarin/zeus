@@ -405,9 +405,14 @@ class ProviderRegistry {
       }
       case "ollama": {
         // Ollama uses OpenAI-compatible API, no API key required
+        // Ensure baseUrl has /v1 suffix for OpenAI compatibility
+        let ollamaBaseUrl = baseUrl || config?.baseUrl || "http://localhost:11434";
+        if (!ollamaBaseUrl.endsWith("/v1")) {
+          ollamaBaseUrl = ollamaBaseUrl.replace(/\/$/, "") + "/v1";
+        }
         const openai = createOpenAI({
           apiKey: apiKey || "ollama", // Ollama doesn't need a real key, but SDK requires one
-          baseURL: baseUrl || config?.baseUrl || "http://localhost:11434/v1",
+          baseURL: ollamaBaseUrl,
           compatibility: "compatible",
         });
         return openai(modelId);
@@ -461,9 +466,14 @@ class ProviderRegistry {
       }
       case "ollama": {
         // Ollama uses OpenAI-compatible embedding API
+        // Ensure baseUrl has /v1 suffix for OpenAI compatibility
+        let ollamaBaseUrl = baseUrl || config?.baseUrl || "http://localhost:11434";
+        if (!ollamaBaseUrl.endsWith("/v1")) {
+          ollamaBaseUrl = ollamaBaseUrl.replace(/\/$/, "") + "/v1";
+        }
         const openai = createOpenAI({
           apiKey: apiKey || "ollama",
-          baseURL: baseUrl || config?.baseUrl || "http://localhost:11434/v1",
+          baseURL: ollamaBaseUrl,
           compatibility: "compatible",
         });
         return openai.embedding(modelId);
