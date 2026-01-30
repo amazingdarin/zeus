@@ -1119,6 +1119,11 @@ function DocumentPage() {
       setUploadCompleted(0);
       setImportStatus({ type: "idle" });
       setUploadSummary(null);
+      // Build file type filters from selected presets
+      const fileTypeFilters = uploadFilterPresets.has("all")
+        ? ["all" as const]
+        : Array.from(uploadFilterPresets) as ("all" | "images" | "office" | "text" | "markdown")[];
+
       setGitLogEntries([
         { id: crypto.randomUUID(), text: `Cloning ${repoUrl}` },
         {
@@ -1129,6 +1134,10 @@ function DocumentPage() {
           id: crypto.randomUUID(),
           text: gitSubdir.trim() ? `Importing subdir ${gitSubdir.trim()}` : "Importing full repo",
         },
+        {
+          id: crypto.randomUUID(),
+          text: smartImportEnabled ? `Smart Import: ${Array.from(smartImportTypes).join(", ")}` : "Smart Import: Off",
+        },
       ]);
       try {
         const result = await importGit(resolvedProjectKey, {
@@ -1136,12 +1145,23 @@ function DocumentPage() {
           branch: branchValue || undefined,
           subdir: gitSubdir.trim() || undefined,
           parent_id: activeDocument?.id ?? "root",
+          smart_import: smartImportEnabled,
+          smart_import_types: Array.from(smartImportTypes) as ("markdown" | "word" | "pdf")[],
+          file_types: fileTypeFilters,
         });
         setUploadCompleted(1);
         setGitLogEntries((prev) => [
           ...prev,
           { id: crypto.randomUUID(), text: `Created folders ${result.directories}` },
           { id: crypto.randomUUID(), text: `Created documents ${result.files}` },
+          {
+            id: crypto.randomUUID(),
+            text: result.converted ? `Smart converted ${result.converted}` : "No smart conversions",
+          },
+          {
+            id: crypto.randomUUID(),
+            text: result.fallback ? `Fallback uploads ${result.fallback}` : "No fallback uploads",
+          },
           {
             id: crypto.randomUUID(),
             text: result.skipped ? `Skipped ${result.skipped}` : "No skipped files",
@@ -1151,8 +1171,8 @@ function DocumentPage() {
           directories: result.directories,
           files: result.files,
           skipped: result.skipped,
-          converted: 0,
-          fallback: 0,
+          converted: result.converted,
+          fallback: result.fallback,
         });
         setImportStatus({ type: "success", message: "Import completed." });
         setImportModalOpen(false);
@@ -1504,7 +1524,7 @@ function DocumentPage() {
                     Git
                   </button>
                 </div>
-                {importMode !== "url" && importMode !== "git" ? (
+                {importMode !== "url" ? (
                   <>
                     <fieldset className="kb-import-smart">
                       <div className="kb-import-smart-header">

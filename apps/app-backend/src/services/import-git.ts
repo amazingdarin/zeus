@@ -5,20 +5,30 @@ import { v4 as uuidv4 } from "uuid";
 
 import { convertDocument } from "./convert.js";
 import { documentStore } from "../storage/document-store.js";
+import { assetStore } from "../storage/asset-store.js";
 import { knowledgeSearch } from "../knowledge/search.js";
 import type { Document } from "../storage/types.js";
 
-type ImportGitRequest = {
+export type SmartImportType = "markdown" | "word" | "pdf";
+export type FileTypeFilter = "all" | "images" | "office" | "text" | "markdown";
+
+export type ImportGitRequest = {
   repo_url?: string;
   branch?: string;
   subdir?: string;
   parent_id?: string;
+  // New options for Smart Import
+  smart_import?: boolean;
+  smart_import_types?: SmartImportType[];
+  file_types?: FileTypeFilter[];
 };
 
-type ImportGitResult = {
+export type ImportGitResult = {
   directories: number;
   files: number;
   skipped: number;
+  converted: number;
+  fallback: number;
 };
 
 type DirectoryEntry = {
@@ -39,6 +49,91 @@ type FileEntry = {
 const MAX_FILES = 2000;
 const MAX_BYTES = 2 * 1024 * 1024;
 
+// File extension categories
+const FILE_TYPE_EXTENSIONS: Record<FileTypeFilter, string[]> = {
+  all: [],
+  images: ["png", "jpg", "jpeg", "gif", "webp", "svg"],
+  office: ["docx", "pptx", "xlsx", "pdf"],
+  text: ["txt", "csv", "json", "yaml", "yml", "log"],
+  markdown: ["md", "markdown"],
+};
+
+// MIME type mapping
+const EXT_TO_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  txt: "text/plain",
+  csv: "text/csv",
+  json: "application/json",
+  yaml: "application/x-yaml",
+  yml: "application/x-yaml",
+  log: "text/plain",
+  md: "text/markdown",
+  markdown: "text/markdown",
+};
+
+/**
+ * Build the set of allowed extensions from file type filters
+ */
+const buildAllowedExtensions = (fileTypes: FileTypeFilter[]): Set<string> | null => {
+  if (!fileTypes || fileTypes.length === 0 || fileTypes.includes("all")) {
+    return null; // null means all extensions allowed
+  }
+  const extensions = new Set<string>();
+  for (const type of fileTypes) {
+    const exts = FILE_TYPE_EXTENSIONS[type];
+    if (exts) {
+      for (const ext of exts) {
+        extensions.add(ext);
+      }
+    }
+  }
+  return extensions;
+};
+
+/**
+ * Check if a file extension is allowed
+ */
+const isExtensionAllowed = (ext: string, allowedExtensions: Set<string> | null): boolean => {
+  if (!allowedExtensions) return true;
+  return allowedExtensions.has(ext.toLowerCase());
+};
+
+/**
+ * Check if a file should use smart import (markdown conversion)
+ */
+const shouldSmartImport = (
+  ext: string,
+  smartImport: boolean,
+  smartImportTypes: Set<SmartImportType>,
+): { enabled: boolean; type: SmartImportType | null } => {
+  if (!smartImport) {
+    return { enabled: false, type: null };
+  }
+
+  const lowerExt = ext.toLowerCase();
+
+  if (smartImportTypes.has("markdown") && ["md", "markdown"].includes(lowerExt)) {
+    return { enabled: true, type: "markdown" };
+  }
+  if (smartImportTypes.has("word") && lowerExt === "docx") {
+    return { enabled: true, type: "word" };
+  }
+  if (smartImportTypes.has("pdf") && lowerExt === "pdf") {
+    return { enabled: true, type: "pdf" };
+  }
+
+  return { enabled: false, type: null };
+};
+
 export const importGit = async (
   projectKey: string,
   req: ImportGitRequest,
@@ -51,62 +146,113 @@ export const importGit = async (
   const branch = String(req.branch ?? "main").trim() || "main";
   const subdir = String(req.subdir ?? "").trim();
   const parentId = String(req.parent_id ?? "root");
+  const smartImport = req.smart_import ?? false;
+  const smartImportTypes = new Set<SmartImportType>(req.smart_import_types ?? []);
+  const allowedExtensions = buildAllowedExtensions(req.file_types ?? []);
 
   const tempDir = path.join(process.cwd(), ".tmp", `git-import-${uuidv4()}`);
   await mkdir(tempDir, { recursive: true });
 
-  const git = simpleGit();
-  await git.clone(repoUrl, tempDir, ["--depth=1", "--branch", branch]);
+  try {
+    const git = simpleGit();
+    await git.clone(repoUrl, tempDir, ["--depth=1", "--branch", branch]);
 
-  const baseDir = subdir ? path.join(tempDir, subdir) : tempDir;
-  const rootTitle = subdir ? path.basename(subdir) : "";
-  const { directories, files } = await scanEntries(baseDir);
+    const baseDir = subdir ? path.join(tempDir, subdir) : tempDir;
+    const rootTitle = subdir ? path.basename(subdir) : "";
+    const { directories, files } = await scanEntries(baseDir);
 
-  const result: ImportGitResult = { directories: 0, files: 0, skipped: 0 };
-  const directoryMap = new Map<string, string>();
+    const result: ImportGitResult = {
+      directories: 0,
+      files: 0,
+      skipped: 0,
+      converted: 0,
+      fallback: 0,
+    };
+    const directoryMap = new Map<string, string>();
 
-  let rootParentId = parentId;
-  if (rootTitle) {
-    const rootId = await createFolder(projectKey, rootTitle, parentId);
-    directoryMap.set(".", rootId);
-    rootParentId = rootId;
-    result.directories += 1;
-  }
-
-  for (const dir of directories) {
-    const parentKey = dir.parent ?? ".";
-    const resolvedParent =
-      parentKey === "." ? rootParentId : (directoryMap.get(parentKey) ?? rootParentId);
-    const folderId = await createFolder(projectKey, dir.name, resolvedParent);
-    directoryMap.set(dir.path, folderId);
-    result.directories += 1;
-  }
-
-  for (const file of files) {
-    if (result.files + result.skipped >= MAX_FILES) {
-      result.skipped += 1;
-      continue;
+    let rootParentId = parentId;
+    if (rootTitle) {
+      const rootId = await createFolder(projectKey, rootTitle, parentId);
+      directoryMap.set(".", rootId);
+      rootParentId = rootId;
+      result.directories += 1;
     }
-    const info = await stat(file.fullPath);
-    if (info.size > MAX_BYTES) {
-      result.skipped += 1;
-      continue;
-    }
-    const content = await readFile(file.fullPath);
-    const resolvedParent = file.parent
-      ? (directoryMap.get(file.parent) ?? rootParentId)
-      : rootParentId;
-    const markdown = await convertFileToMarkdown(file.ext, content);
-    if (!markdown) {
-      result.skipped += 1;
-      continue;
-    }
-    await createDocument(projectKey, file.name, resolvedParent, markdown);
-    result.files += 1;
-  }
 
-  await rm(tempDir, { recursive: true, force: true });
-  return result;
+    for (const dir of directories) {
+      const parentKey = dir.parent ?? ".";
+      const resolvedParent =
+        parentKey === "." ? rootParentId : (directoryMap.get(parentKey) ?? rootParentId);
+      const folderId = await createFolder(projectKey, dir.name, resolvedParent);
+      directoryMap.set(dir.path, folderId);
+      result.directories += 1;
+    }
+
+    for (const file of files) {
+      if (result.files + result.skipped >= MAX_FILES) {
+        result.skipped += 1;
+        continue;
+      }
+
+      // Check if extension is allowed
+      if (!isExtensionAllowed(file.ext, allowedExtensions)) {
+        result.skipped += 1;
+        continue;
+      }
+
+      const info = await stat(file.fullPath);
+      if (info.size > MAX_BYTES) {
+        result.skipped += 1;
+        continue;
+      }
+
+      const content = await readFile(file.fullPath);
+      const resolvedParent = file.parent
+        ? (directoryMap.get(file.parent) ?? rootParentId)
+        : rootParentId;
+
+      // Check if should use smart import
+      const smartResult = shouldSmartImport(file.ext, smartImport, smartImportTypes);
+
+      if (smartResult.enabled) {
+        // Smart import: convert to markdown and create document with file block
+        try {
+          const markdown = await convertFileToMarkdown(file.ext, content);
+          if (!markdown) {
+            // Fallback: upload as asset and create file block
+            await createDocumentWithAsset(projectKey, file, content, resolvedParent);
+            result.fallback += 1;
+          } else {
+            // Upload as asset first
+            const assetMeta = await uploadAsset(projectKey, file, content);
+            // Create document with file block + markdown content
+            await createSmartDocument(projectKey, file.name, resolvedParent, markdown, assetMeta);
+            result.converted += 1;
+          }
+        } catch (err) {
+          console.error("Smart import error:", err);
+          // Fallback to asset upload
+          await createDocumentWithAsset(projectKey, file, content, resolvedParent);
+          result.fallback += 1;
+        }
+      } else {
+        // Regular import: try to convert to markdown, or upload as asset
+        const markdown = await convertFileToMarkdown(file.ext, content);
+        if (markdown) {
+          await createDocument(projectKey, file.name, resolvedParent, markdown);
+          result.converted += 1;
+        } else {
+          // Upload as asset and create file block document
+          await createDocumentWithAsset(projectKey, file, content, resolvedParent);
+          result.fallback += 1;
+        }
+      }
+      result.files += 1;
+    }
+
+    return result;
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 };
 
 const scanEntries = async (
@@ -153,26 +299,47 @@ const convertFileToMarkdown = async (ext: string, content: Buffer): Promise<stri
     return content.toString("utf-8");
   }
   if (["docx", "pdf", "html"].includes(ext)) {
-    const result = await convertDocument(
-      "",
-      {
-        buffer: content,
-        originalname: `file.${ext}`,
-        mimetype: "",
-        fieldname: "file",
-        size: content.length,
-        destination: "",
-        encoding: "",
-        filename: "",
-        path: "",
-        stream: undefined,
-      } as unknown as Express.Multer.File,
-      ext,
-      "markdown",
-    );
-    return result.content;
+    try {
+      const result = await convertDocument(
+        "",
+        {
+          buffer: content,
+          originalname: `file.${ext}`,
+          mimetype: "",
+          fieldname: "file",
+          size: content.length,
+          destination: "",
+          encoding: "",
+          filename: "",
+          path: "",
+          stream: undefined,
+        } as unknown as Express.Multer.File,
+        ext,
+        "markdown",
+      );
+      return result.content;
+    } catch (err) {
+      console.error("Convert error:", err);
+      return "";
+    }
   }
   return "";
+};
+
+const uploadAsset = async (
+  projectKey: string,
+  file: FileEntry,
+  content: Buffer,
+): Promise<{ id: string; filename: string; mime: string; size: number }> => {
+  const filename = `${file.name}.${file.ext}`;
+  const mime = EXT_TO_MIME[file.ext.toLowerCase()] ?? "application/octet-stream";
+  const meta = await assetStore.save(projectKey, filename, mime, content);
+  return {
+    id: meta.id,
+    filename: meta.filename,
+    mime: meta.mime,
+    size: meta.size,
+  };
 };
 
 const createFolder = async (
@@ -247,6 +414,93 @@ const createDocument = async (
   });
 };
 
+const createDocumentWithAsset = async (
+  projectKey: string,
+  file: FileEntry,
+  content: Buffer,
+  parentId: string,
+): Promise<void> => {
+  // Upload as asset
+  const assetMeta = await uploadAsset(projectKey, file, content);
+
+  // Create document with file block
+  const doc: Document = {
+    meta: {
+      id: uuidv4(),
+      schema_version: "v1",
+      title: file.name,
+      slug: "",
+      path: "",
+      parent_id: parentId,
+      created_at: "",
+      updated_at: "",
+      extra: {
+        status: "draft",
+        tags: [],
+      },
+    },
+    body: {
+      type: "tiptap",
+      content: buildFileBlockDoc(assetMeta),
+    },
+  };
+
+  const saved = await documentStore.save(projectKey, doc);
+
+  // Index asynchronously
+  knowledgeSearch.indexDocument(projectKey, saved).catch((err) => {
+    console.error("Index error:", err);
+  });
+};
+
+const createSmartDocument = async (
+  projectKey: string,
+  title: string,
+  parentId: string,
+  markdown: string,
+  assetMeta: { id: string; filename: string; mime: string; size: number },
+): Promise<void> => {
+  // Create document with file block at top, followed by markdown content
+  const fileBlock = buildFileBlockNode(assetMeta);
+  const markdownContent = buildPlainTextDoc(markdown);
+
+  const doc: Document = {
+    meta: {
+      id: uuidv4(),
+      schema_version: "v1",
+      title,
+      slug: "",
+      path: "",
+      parent_id: parentId,
+      created_at: "",
+      updated_at: "",
+      extra: {
+        status: "draft",
+        tags: [],
+      },
+    },
+    body: {
+      type: "tiptap",
+      content: {
+        type: "doc",
+        content: [
+          fileBlock,
+          ...(Array.isArray((markdownContent as any).content)
+            ? (markdownContent as any).content
+            : []),
+        ],
+      },
+    },
+  };
+
+  const saved = await documentStore.save(projectKey, doc);
+
+  // Index asynchronously
+  knowledgeSearch.indexDocument(projectKey, saved).catch((err) => {
+    console.error("Index error:", err);
+  });
+};
+
 /**
  * Build a simple Tiptap document with the text content
  */
@@ -265,4 +519,84 @@ function buildPlainTextDoc(text: string): unknown {
       },
     ],
   };
+}
+
+/**
+ * Build a Tiptap document with a file block
+ */
+function buildFileBlockDoc(assetMeta: {
+  id: string;
+  filename: string;
+  mime: string;
+  size: number;
+}): unknown {
+  return {
+    type: "doc",
+    content: [buildFileBlockNode(assetMeta)],
+  };
+}
+
+/**
+ * Build a file block node
+ */
+function buildFileBlockNode(assetMeta: {
+  id: string;
+  filename: string;
+  mime: string;
+  size: number;
+}): unknown {
+  const { fileType, officeType } = resolveFileKind(assetMeta.filename, assetMeta.mime);
+  return {
+    type: "fileBlock",
+    attrs: {
+      asset_id: assetMeta.id,
+      file_name: assetMeta.filename,
+      mime: assetMeta.mime,
+      size: assetMeta.size,
+      file_type: fileType,
+      office_type: officeType,
+    },
+  };
+}
+
+/**
+ * Resolve file kind from filename and MIME type
+ */
+function resolveFileKind(
+  fileName: string,
+  mime: string,
+): { fileType: "office" | "text" | "unknown"; officeType?: string } {
+  const OFFICE_MIME_MAP: Record<string, string> = {
+    "application/pdf": "pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  };
+
+  const OFFICE_EXT_MAP: Record<string, string> = {
+    pdf: "pdf",
+    docx: "docx",
+    pptx: "pptx",
+    xlsx: "xlsx",
+  };
+
+  const TEXT_EXTENSIONS = new Set(["txt", "md", "csv", "json", "yaml", "yml", "log"]);
+
+  const normalizedMime = mime.toLowerCase();
+  if (normalizedMime in OFFICE_MIME_MAP) {
+    return { fileType: "office", officeType: OFFICE_MIME_MAP[normalizedMime] };
+  }
+  if (normalizedMime.startsWith("text/")) {
+    return { fileType: "text" };
+  }
+
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+  if (ext in OFFICE_EXT_MAP) {
+    return { fileType: "office", officeType: OFFICE_EXT_MAP[ext] };
+  }
+  if (TEXT_EXTENSIONS.has(ext)) {
+    return { fileType: "text" };
+  }
+
+  return { fileType: "unknown" };
 }

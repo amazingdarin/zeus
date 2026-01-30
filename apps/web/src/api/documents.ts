@@ -216,17 +216,25 @@ export const importDocument = async (
     }
 };
 
+export type SmartImportType = "markdown" | "word" | "pdf";
+export type FileTypeFilter = "all" | "images" | "office" | "text" | "markdown";
+
 export type ImportGitRequest = {
   repo_url: string;
   branch?: string;
   subdir?: string;
   parent_id?: string;
+  smart_import?: boolean;
+  smart_import_types?: SmartImportType[];
+  file_types?: FileTypeFilter[];
 };
 
 export type ImportGitResult = {
   directories: number;
   files: number;
   skipped: number;
+  converted: number;
+  fallback: number;
 };
 
 export const importGit = async (
