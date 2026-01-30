@@ -1,0 +1,42 @@
+{
+  "meta": {
+    "id": "c8dec40b-b4f6-48d2-bb1d-eddf78f36311",
+    "schema_version": "v1",
+    "title": "食品经营许可证",
+    "slug": "食品经营许可证",
+    "path": "docs/设计文档/被告工商资料/食品经营许可证.json",
+    "parent_id": "1463f372-b776-47de-bcd0-0a45230cc334",
+    "created_at": "2026-01-30T07:50:49.134Z",
+    "updated_at": "2026-01-30T07:50:49.134Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "meta": {
+        "zeus": true,
+        "format": "tiptap",
+        "schema_version": 1,
+        "editor": "tiptap",
+        "created_at": "2026-01-30T07:50:49.131Z",
+        "updated_at": "2026-01-30T07:50:49.131Z"
+      },
+      "content": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "image",
+            "attrs": {
+              "src": "/api/projects/zeus/assets/9ac1a59e-cc04-4a5c-8904-a84a97b816db/content",
+              "alt": "食品经营许可证",
+              "title": "食品经营许可证"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

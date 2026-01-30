@@ -19,6 +19,28 @@ const upload = multer({ storage: multer.memoryStorage() });
 /**
  * Determine asset kind from MIME type
  */
+/**
+ * Fix filename encoding (handle Latin-1 interpreted as UTF-8)
+ */
+function fixFilename(filename: string): string {
+  try {
+    // Try to detect if the filename was incorrectly decoded as Latin-1
+    // If we can re-encode as Latin-1 and decode as UTF-8, do it
+    const latin1 = Buffer.from(filename, 'latin1');
+    const utf8 = latin1.toString('utf8');
+    // Check if the result looks valid (contains original characters or common UTF-8 patterns)
+    if (utf8 !== filename && !utf8.includes('\ufffd')) {
+      return utf8;
+    }
+  } catch (e) {
+    // Ignore decoding errors
+  }
+  return filename;
+}
+
+/**
+ * Determine asset kind from MIME type
+ */
 function getAssetKind(mime: string): string {
   if (mime.startsWith("image/")) return "image";
   if (mime.startsWith("video/")) return "video";
@@ -358,14 +380,15 @@ export const buildRouter = () => {
           return;
         }
         const parentId = String(req.query.parent_id ?? "root");
+        const filename = fixFilename(file.originalname);
         const sourceType = String(req.body?.source_type ?? "").trim().toLowerCase();
-        const from = sourceType || file.originalname.split(".").pop() || "";
+        const from = sourceType || filename.split(".").pop() || "";
         
         // Convert the file to markdown
         const converted = await convertDocument(projectKey, file, from, "markdown");
         
         // Create a document with the converted content
-        const title = file.originalname.replace(/\.[^/.]+$/, "") || "Untitled";
+        const title = filename.replace(/\.[^/.]+$/, "") || "Untitled";
         const doc: Document = {
           meta: {
             id: uuidv4(),
@@ -413,8 +436,9 @@ export const buildRouter = () => {
           error(res, "INVALID_REQUEST", "file is required");
           return;
         }
+        const filename = fixFilename(file.originalname);
         const sourceType = String(req.body?.source_type ?? "").trim().toLowerCase();
-        const from = sourceType || file.originalname.split(".").pop() || "";
+        const from = sourceType || filename.split(".").pop() || "";
         const converted = await convertDocument(projectKey, file, from, "markdown");
         success(res, converted);
       } catch (err) {
@@ -444,9 +468,10 @@ export const buildRouter = () => {
           return;
         }
         
+        const filename = fixFilename(file.originalname);
         const meta = await assetStore.save(
           projectKey,
-          file.originalname,
+          filename,
           file.mimetype,
           file.buffer
         );

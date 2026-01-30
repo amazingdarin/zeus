@@ -1,0 +1,44 @@
+{
+  "meta": {
+    "id": "eeec0953-4b42-4145-a10d-4ddd228a629c",
+    "schema_version": "v1",
+    "title": "广州市荔湾区泰多米餐饮店（个体工商户）报告",
+    "slug": "广州市荔湾区泰多米餐饮店-个体工商户-报告",
+    "path": "docs/设计文档/被告工商资料/广州市荔湾区泰多米餐饮店-个体工商户-报告.json",
+    "parent_id": "1463f372-b776-47de-bcd0-0a45230cc334",
+    "created_at": "2026-01-30T07:50:49.044Z",
+    "updated_at": "2026-01-30T07:50:49.044Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "meta": {
+        "zeus": true,
+        "format": "tiptap",
+        "schema_version": 1,
+        "editor": "tiptap",
+        "created_at": "2026-01-30T07:50:49.039Z",
+        "updated_at": "2026-01-30T07:50:49.039Z"
+      },
+      "content": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "file_block",
+            "attrs": {
+              "asset_id": "c332306b-df6d-4aea-bb1c-dfd2fdc1732b",
+              "file_name": "å¹¿å·å¸èæ¹¾åºæ³°å¤ç±³é¤é¥®åºï¼ä¸ªä½å·¥åæ·ï¼æ¥å.pdf",
+              "mime": "application/pdf",
+              "size": 158085,
+              "file_type": ""
+            }
+          }
+        ]
+      }
+    }
+  }
+}
