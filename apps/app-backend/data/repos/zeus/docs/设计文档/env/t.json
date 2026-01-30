@@ -1,0 +1,41 @@
+{
+  "meta": {
+    "id": "466b9b82-72ad-4f20-b06b-67f7fff7eb7b",
+    "schema_version": "v1",
+    "title": "t",
+    "slug": "t",
+    "path": "docs/设计文档/env/t.json",
+    "parent_id": "21dad86b-ba0c-4358-9654-e417da411961",
+    "created_at": "2026-01-30T16:18:05.214Z",
+    "updated_at": "2026-01-30T16:18:05.214Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "meta": {
+        "zeus": true,
+        "format": "tiptap",
+        "schema_version": 1,
+        "editor": "tiptap",
+        "created_at": "2026-01-30T16:18:05.193Z",
+        "updated_at": "2026-01-30T16:18:05.193Z"
+      },
+      "content": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "23ccdf90-8c5b-4d6c-976e-bdc3e419b4e8",
+              "textAlign": null
+            }
+          }
+        ]
+      }
+    }
+  }
+}

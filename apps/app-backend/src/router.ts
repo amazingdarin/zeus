@@ -602,6 +602,76 @@ export const buildRouter = () => {
   });
 
   // ============================================
+  // RAG Rebuild APIs
+  // ============================================
+
+  /**
+   * Rebuild all document indexes for a project
+   * POST /projects/:projectKey/rag/rebuild
+   */
+  router.post("/projects/:projectKey/rag/rebuild", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      
+      // Get all documents for the project
+      const documents = await documentStore.getAllDocuments(projectKey);
+      
+      if (documents.length === 0) {
+        success(res, {
+          status: "completed",
+          total: 0,
+          succeeded: 0,
+          failed: 0,
+          errors: [],
+        });
+        return;
+      }
+
+      // Rebuild indexes
+      const progress = await knowledgeSearch.rebuildAll(projectKey, documents);
+      
+      success(res, {
+        status: "completed",
+        total: progress.total,
+        succeeded: progress.succeeded,
+        failed: progress.failed,
+        errors: progress.errors,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Rebuild failed";
+      error(res, "REBUILD_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Rebuild index for a single document
+   * POST /projects/:projectKey/rag/rebuild/documents/:docId
+   */
+  router.post("/projects/:projectKey/rag/rebuild/documents/:docId", async (req: Request, res: Response) => {
+    try {
+      const { projectKey, docId } = req.params;
+      
+      // Get the document
+      const doc = await documentStore.get(projectKey, docId);
+      
+      // Rebuild its index
+      await knowledgeSearch.rebuildDocument(projectKey, doc);
+      
+      success(res, {
+        status: "completed",
+        docId: doc.meta.id,
+      });
+    } catch (err) {
+      if (err instanceof DocumentNotFoundError) {
+        error(res, "NOT_FOUND", err.message, 404);
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Rebuild failed";
+      error(res, "REBUILD_FAILED", message, 500);
+    }
+  });
+
+  // ============================================
   // LLM Gateway APIs
   // ============================================
 

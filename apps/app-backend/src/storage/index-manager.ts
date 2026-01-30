@@ -50,6 +50,15 @@ export class IndexManager {
   }
 
   /**
+   * Get all document IDs for a project
+   */
+  getAllIds(projectKey: string): string[] {
+    const projectIndex = this.indexes.get(projectKey);
+    if (!projectIndex) return [];
+    return Array.from(projectIndex.keys());
+  }
+
+  /**
    * Find document ID by its path
    */
   findIdByPath(projectKey: string, docPath: string): string | undefined {

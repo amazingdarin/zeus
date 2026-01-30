@@ -95,7 +95,7 @@ CREATE TABLE knowledge_embedding_index
     chunk_index   INT  NOT NULL,
     content       TEXT NOT NULL,
     model         TEXT NOT NULL,
-    embedding     vector(768) NOT NULL,
+    embedding     vector(1536) NOT NULL,  -- Support OpenAI text-embedding-3-small (1536 dim)
     metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (project_key, index_name, doc_id, block_id, chunk_index)
@@ -105,4 +105,4 @@ CREATE INDEX IF NOT EXISTS idx_kei_project
 ON knowledge_embedding_index (project_key);
 
 CREATE INDEX IF NOT EXISTS idx_kei_embedding
-ON knowledge_embedding_index USING ivfflat (embedding vector_l2_ops);
+ON knowledge_embedding_index USING ivfflat (embedding vector_cosine_ops);

@@ -571,6 +571,35 @@ export const documentStore = {
       },
     };
   },
+
+  /**
+   * Get all document IDs for a project
+   */
+  async getAllDocumentIds(projectKey: string): Promise<string[]> {
+    const root = projectRoot(projectKey);
+    await indexManager.ensure(projectKey, root);
+    return indexManager.getAllIds(projectKey);
+  },
+
+  /**
+   * Get all documents for a project (for indexing purposes)
+   */
+  async getAllDocuments(projectKey: string): Promise<Document[]> {
+    const ids = await this.getAllDocumentIds(projectKey);
+    const documents: Document[] = [];
+    
+    for (const docId of ids) {
+      try {
+        const doc = await this.get(projectKey, docId);
+        documents.push(doc);
+      } catch (err) {
+        // Skip documents that fail to load
+        console.warn(`Failed to load document ${docId}:`, err);
+      }
+    }
+    
+    return documents;
+  },
 };
 
 /**

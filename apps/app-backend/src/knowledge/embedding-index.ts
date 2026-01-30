@@ -1,64 +1,77 @@
 import { query } from "../db/postgres.js";
 import type { Document, SearchResult } from "../storage/types.js";
 import { buildChunks } from "./chunker.js";
-import { llmGateway, type LLMProviderId } from "../llm/index.js";
+import { llmGateway, configStore, type LLMProviderId, type ProviderConfigInternal } from "../llm/index.js";
 
-// Legacy Ollama API configuration (fallback)
-const EMBEDDING_API_URL = process.env.EMBEDDING_API_URL || "";
-const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || "text-embedding-3-small";
+// Cache for embedding config to avoid repeated DB queries
+let cachedEmbeddingConfig: ProviderConfigInternal | null | undefined = undefined;
+let configLastChecked = 0;
+const CONFIG_CACHE_TTL = 60000; // 1 minute
 
-// LLM Gateway configuration
-const EMBEDDING_PROVIDER = (process.env.EMBEDDING_PROVIDER || "openai") as LLMProviderId;
-const EMBEDDING_USE_GATEWAY = process.env.EMBEDDING_USE_GATEWAY !== "false";
+/**
+ * Get the configured embedding provider
+ */
+async function getEmbeddingConfig(): Promise<ProviderConfigInternal | null> {
+  const now = Date.now();
+  if (cachedEmbeddingConfig !== undefined && now - configLastChecked < CONFIG_CACHE_TTL) {
+    return cachedEmbeddingConfig;
+  }
+
+  try {
+    cachedEmbeddingConfig = await configStore.getInternalByType("embedding");
+    configLastChecked = now;
+    return cachedEmbeddingConfig;
+  } catch (err) {
+    console.warn("Failed to get embedding config:", err);
+    return null;
+  }
+}
+
+/**
+ * Clear the embedding config cache (call after config changes)
+ */
+export function clearEmbeddingConfigCache(): void {
+  cachedEmbeddingConfig = undefined;
+  configLastChecked = 0;
+}
 
 /**
  * Call the embedding API to generate vectors
- * Uses LLM Gateway by default, falls back to legacy Ollama API if configured
+ * Uses the configured embedding provider from AI settings
  */
 async function embed(inputs: string[]): Promise<number[][]> {
   if (inputs.length === 0) return [];
 
-  // Use LLM Gateway if enabled and provider is available
-  if (EMBEDDING_USE_GATEWAY && llmGateway.isProviderAvailable(EMBEDDING_PROVIDER)) {
-    try {
-      const result = await llmGateway.generateEmbeddings({
-        provider: EMBEDDING_PROVIDER,
-        model: EMBEDDING_MODEL,
-        inputs,
-      });
-      return result.embeddings;
-    } catch (err) {
-      console.warn("LLM Gateway embedding failed, falling back to legacy API:", err);
-      // Fall through to legacy API
-    }
+  // Get the configured embedding provider
+  const config = await getEmbeddingConfig();
+
+  if (!config || !config.enabled) {
+    throw new Error("No embedding provider configured. Please configure an Embedding provider in AI settings.");
   }
 
-  // Legacy Ollama API fallback
-  if (!EMBEDDING_API_URL) {
-    throw new Error("No embedding provider available. Set OPENAI_API_KEY or EMBEDDING_API_URL.");
-  }
+  const provider = config.providerId as LLMProviderId;
+  const model = config.defaultModel || "text-embedding-3-small";
 
-  const vectors: number[][] = [];
-
-  for (const input of inputs) {
-    const response = await fetch(EMBEDDING_API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: EMBEDDING_MODEL,
-        prompt: input,
-      }),
+  // Use LLM Gateway with the configured provider
+  try {
+    const result = await llmGateway.generateEmbeddings({
+      provider,
+      model,
+      inputs,
     });
-
-    if (!response.ok) {
-      throw new Error(`Embedding API error: ${response.status}`);
-    }
-
-    const data = (await response.json()) as { embedding: number[] };
-    vectors.push(data.embedding);
+    return result.embeddings;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`Embedding generation failed: ${message}`);
   }
+}
 
-  return vectors;
+/**
+ * Get the current embedding model name
+ */
+async function getEmbeddingModel(): Promise<string> {
+  const config = await getEmbeddingConfig();
+  return config?.defaultModel || "unknown";
 }
 
 /**
@@ -87,6 +100,9 @@ export const embeddingIndex = {
     if (vectors.length !== chunks.length) {
       throw new Error("Embedding size mismatch");
     }
+
+    // Get the model name for metadata
+    const modelName = await getEmbeddingModel();
 
     // Delete existing chunks for this document
     await query(
@@ -118,7 +134,7 @@ export const embeddingIndex = {
           chunk.block_id,
           chunk.chunk_index,
           chunk.content,
-          EMBEDDING_MODEL,
+          modelName,
           formatVector(vector),
           JSON.stringify(metadata),
         ],
@@ -134,6 +150,17 @@ export const embeddingIndex = {
       `DELETE FROM knowledge_embedding_index 
        WHERE project_key = $1 AND index_name = $2 AND doc_id = $3`,
       [projectKey, indexName, docId],
+    );
+  },
+
+  /**
+   * Remove all documents for an index
+   */
+  async removeByIndex(projectKey: string, indexName: string): Promise<void> {
+    await query(
+      `DELETE FROM knowledge_embedding_index 
+       WHERE project_key = $1 AND index_name = $2`,
+      [projectKey, indexName],
     );
   },
 
@@ -172,12 +199,12 @@ export const embeddingIndex = {
     }>(
       `SELECT 
          doc_id,
-         1 - (embedding <-> $3::vector) as score,
+         1 - (embedding <=> $3::vector) as score,
          content,
          metadata_json
        FROM knowledge_embedding_index
        WHERE project_key = $1 AND index_name = $2
-       ORDER BY embedding <-> $3::vector
+       ORDER BY embedding <=> $3::vector
        LIMIT $4 OFFSET $5`,
       [projectKey, indexName, formatVector(vector), limit, offset],
     );

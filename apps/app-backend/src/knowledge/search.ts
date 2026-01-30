@@ -1,8 +1,16 @@
 import type { Document, SearchQuery, SearchResult } from "../storage/types.js";
 import { fulltextIndex } from "./fulltext-index.js";
-import { embeddingIndex } from "./embedding-index.js";
+import { embeddingIndex, clearEmbeddingConfigCache } from "./embedding-index.js";
 
 export type SearchMode = "fulltext" | "embedding" | "hybrid";
+
+export type RebuildProgress = {
+  total: number;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  errors: Array<{ docId: string; error: string }>;
+};
 
 /**
  * Unified knowledge search service
@@ -80,6 +88,65 @@ export const knowledgeSearch = {
       fulltextIndex.remove(projectKey, indexName, docId),
       embeddingIndex.remove(projectKey, indexName, docId),
     ]);
+  },
+
+  /**
+   * Rebuild indexes for all documents in a project
+   */
+  async rebuildAll(
+    projectKey: string,
+    documents: Document[],
+    onProgress?: (progress: RebuildProgress) => void,
+  ): Promise<RebuildProgress> {
+    const indexName = projectKey;
+    const progress: RebuildProgress = {
+      total: documents.length,
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+      errors: [],
+    };
+
+    // Clear embedding config cache to get fresh settings
+    clearEmbeddingConfigCache();
+
+    // First, clear all existing indexes for this project
+    await Promise.all([
+      fulltextIndex.removeByIndex(projectKey, indexName),
+      embeddingIndex.removeByIndex?.(projectKey, indexName).catch(() => {}),
+    ]);
+
+    // Index each document
+    for (const doc of documents) {
+      try {
+        await this.indexDocument(projectKey, doc);
+        progress.succeeded++;
+      } catch (err) {
+        progress.failed++;
+        progress.errors.push({
+          docId: doc.meta.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      progress.processed++;
+      onProgress?.(progress);
+    }
+
+    return progress;
+  },
+
+  /**
+   * Rebuild index for a single document
+   */
+  async rebuildDocument(projectKey: string, doc: Document): Promise<void> {
+    // Clear embedding config cache to get fresh settings
+    clearEmbeddingConfigCache();
+    
+    // Remove existing index entries first
+    await this.removeDocument(projectKey, doc.meta.id);
+    
+    // Re-index
+    await this.indexDocument(projectKey, doc);
   },
 };
 
