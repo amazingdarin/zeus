@@ -960,6 +960,7 @@ function DocumentPage() {
       return;
     }
     setDeleting(true);
+    const parentId = activeDocument.parentId;
     try {
       const result = await deleteDocument(resolvedProjectKey, activeDocument.id, true);
       console.log("Document deleted:", result);
@@ -971,8 +972,15 @@ function DocumentPage() {
         documentHierarchyCache.delete(cacheKey);
         documentHierarchyPromiseCache.delete(cacheKey);
       }
-      // Clear children cache for deleted documents
+      // Clear children cache and expanded state for deleted documents
       setChildrenByParent((prev) => {
+        const next = { ...prev };
+        for (const deletedId of result.deleted_ids) {
+          delete next[deletedId];
+        }
+        return next;
+      });
+      setExpandedIds((prev) => {
         const next = { ...prev };
         for (const deletedId of result.deleted_ids) {
           delete next[deletedId];
@@ -984,9 +992,17 @@ function DocumentPage() {
       // Refresh the document tree
       await loadRootDocuments(resolvedProjectKey);
       // If there was a parent, refresh its children too
-      const parentId = activeDocument.parentId;
       if (parentId && parentId !== "root") {
-        await loadChildren(resolvedProjectKey, parentId, { force: true });
+        const children = await fetchDocuments(resolvedProjectKey, parentId);
+        setChildrenByParent((prev) => ({ ...prev, [parentId]: children }));
+        // If parent now has no children, collapse it
+        if (children.length === 0) {
+          setExpandedIds((prev) => {
+            const next = { ...prev };
+            delete next[parentId];
+            return next;
+          });
+        }
       }
     } catch (err) {
       console.error("Delete failed:", err);
@@ -994,7 +1010,7 @@ function DocumentPage() {
     } finally {
       setDeleting(false);
     }
-  }, [resolvedProjectKey, activeDocument, deleting, navigate, loadRootDocuments, loadChildren]);
+  }, [resolvedProjectKey, activeDocument, deleting, navigate, loadRootDocuments, fetchDocuments]);
 
   const handleOpenNew = () => {
     if (!allowChildActions) {
