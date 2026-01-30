@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "e9737b29-c068-47e0-a69b-3d5afc5fc078",
+    "schema_version": "v1",
+    "title": "MobileHeader",
+    "slug": "mobileheader",
+    "path": "docs/设计文档/frontend/src/components/mobileheader.json",
+    "parent_id": "ea76c45a-57e0-4880-a57e-97b71f85f428",
+    "created_at": "2026-01-30T08:53:41.994Z",
+    "updated_at": "2026-01-30T08:53:41.994Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "fileBlock",
+          "attrs": {
+            "asset_id": "67d81417-54aa-41ae-91bb-a00a98e11761",
+            "file_name": "MobileHeader.tsx",
+            "mime": "application/octet-stream",
+            "size": 746,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

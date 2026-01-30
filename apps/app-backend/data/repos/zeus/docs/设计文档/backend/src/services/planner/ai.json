@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "8a52f512-3d62-4c06-9ea8-442421504430",
+    "schema_version": "v1",
+    "title": "ai",
+    "slug": "ai",
+    "path": "docs/设计文档/backend/src/services/planner/ai.json",
+    "parent_id": "a67cab8b-7af5-4c37-a1b1-e0add8a1275e",
+    "created_at": "2026-01-30T08:53:41.296Z",
+    "updated_at": "2026-01-30T08:53:41.296Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "fileBlock",
+          "attrs": {
+            "asset_id": "ff4d3afb-ff0b-45f2-a25d-adda8f6a3e13",
+            "file_name": "ai.ts",
+            "mime": "application/octet-stream",
+            "size": 14924,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

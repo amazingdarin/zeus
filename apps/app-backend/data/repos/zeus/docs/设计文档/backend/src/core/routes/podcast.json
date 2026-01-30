@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "e7c32094-fbd5-45a2-bd19-69c306718bd9",
+    "schema_version": "v1",
+    "title": "podcast",
+    "slug": "podcast",
+    "path": "docs/设计文档/backend/src/core/routes/podcast.json",
+    "parent_id": "26003516-8787-4438-858e-ff4b7f917dc8",
+    "created_at": "2026-01-30T08:53:41.175Z",
+    "updated_at": "2026-01-30T08:53:41.175Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "fileBlock",
+          "attrs": {
+            "asset_id": "2dda8675-0c56-4326-86a6-6e388a296745",
+            "file_name": "podcast.ts",
+            "mime": "application/octet-stream",
+            "size": 4634,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

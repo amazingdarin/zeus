@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "c056eecc-c611-4e22-bdaa-5dd15b3d5d7c",
+    "schema_version": "v1",
+    "title": "util",
+    "slug": "util",
+    "path": "docs/设计文档/backend/src/utils/llm/models/util.json",
+    "parent_id": "b584e70b-b22a-4747-80bb-aacb105969d6",
+    "created_at": "2026-01-30T08:53:41.533Z",
+    "updated_at": "2026-01-30T08:53:41.533Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "fileBlock",
+          "attrs": {
+            "asset_id": "986e6d45-4eaa-4270-8d0e-d95cad88024a",
+            "file_name": "util.ts",
+            "mime": "application/octet-stream",
+            "size": 153,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

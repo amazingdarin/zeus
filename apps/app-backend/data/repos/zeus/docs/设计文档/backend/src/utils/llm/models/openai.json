@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "de3b77b5-6911-4b9a-bb19-714a5d11806c",
+    "schema_version": "v1",
+    "title": "openai",
+    "slug": "openai",
+    "path": "docs/设计文档/backend/src/utils/llm/models/openai.json",
+    "parent_id": "b584e70b-b22a-4747-80bb-aacb105969d6",
+    "created_at": "2026-01-30T08:53:41.506Z",
+    "updated_at": "2026-01-30T08:53:41.506Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "fileBlock",
+          "attrs": {
+            "asset_id": "5ea52463-d3cb-4a02-8841-1901ae23ab24",
+            "file_name": "openai.ts",
+            "mime": "application/octet-stream",
+            "size": 808,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

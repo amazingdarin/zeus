@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "e86d0142-cbc9-4dde-9e97-f91fe1041d2b",
+    "schema_version": "v1",
+    "title": "geometry",
+    "slug": "geometry",
+    "path": "docs/设计文档/frontend/src/components/planner/mindmap/geometry.json",
+    "parent_id": "0b4f69ae-8096-46ea-a32b-16ae1c5e1018",
+    "created_at": "2026-01-30T08:53:41.996Z",
+    "updated_at": "2026-01-30T08:53:41.996Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "fileBlock",
+          "attrs": {
+            "asset_id": "120f2dcf-f483-4a98-8c31-05be4872858e",
+            "file_name": "geometry.ts",
+            "mime": "application/octet-stream",
+            "size": 700,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

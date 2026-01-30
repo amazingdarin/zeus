@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "8fa8d0bb-87ec-4ccd-942f-502ba079da0f",
+    "schema_version": "v1",
+    "title": "api",
+    "slug": "api",
+    "path": "docs/设计文档/frontend/src/lib/api.json",
+    "parent_id": "6a779327-00dc-4655-8004-843d87e445c7",
+    "created_at": "2026-01-30T08:53:42.014Z",
+    "updated_at": "2026-01-30T08:53:42.014Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "fileBlock",
+          "attrs": {
+            "asset_id": "dd3bc8be-0f6c-4231-98cc-b95e743e4a28",
+            "file_name": "api.ts",
+            "mime": "application/octet-stream",
+            "size": 20153,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

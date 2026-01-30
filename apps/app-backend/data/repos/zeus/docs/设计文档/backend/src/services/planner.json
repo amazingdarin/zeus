@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "id": "a67cab8b-7af5-4c37-a1b1-e0add8a1275e",
+    "schema_version": "v1",
+    "title": "planner",
+    "slug": "planner",
+    "path": "docs/设计文档/backend/src/services/planner.json",
+    "parent_id": "0b008abf-fae1-4f62-ad51-afa12490ddd1",
+    "created_at": "2026-01-30T08:53:40.785Z",
+    "updated_at": "2026-01-30T08:53:40.785Z",
+    "extra": {
+      "status": "draft",
+      "tags": [],
+      "doc_type": "folder"
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": []
+    }
+  }
+}

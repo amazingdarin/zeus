@@ -1,0 +1,33 @@
+{
+  "meta": {
+    "id": "9b45e8bc-63c4-4bca-b2b3-557d738d79c0",
+    "schema_version": "v1",
+    "title": "smartnotes2",
+    "slug": "smartnotes2",
+    "path": "docs/设计文档/assets/smartnotes/smartnotes2.json",
+    "parent_id": "0c36a7ed-f4ed-4cf5-aef3-0d55f09c87f2",
+    "created_at": "2026-01-30T08:53:40.979Z",
+    "updated_at": "2026-01-30T08:53:40.979Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "\n\nSmartNotes\nQuestion :Notes :\nDate :\nSummary :"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

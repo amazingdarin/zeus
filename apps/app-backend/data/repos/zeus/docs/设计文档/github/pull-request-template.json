@@ -1,0 +1,43 @@
+{
+  "meta": {
+    "id": "b958b22c-30fe-450d-a2fb-32d524bbc084",
+    "schema_version": "v1",
+    "title": "pull_request_template",
+    "slug": "pull-request-template",
+    "path": "docs/设计文档/github/pull-request-template.json",
+    "parent_id": "29d88bc9-9748-4dcf-883a-dbd97ffccb20",
+    "created_at": "2026-01-30T08:53:40.809Z",
+    "updated_at": "2026-01-30T08:53:40.809Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "fileBlock",
+          "attrs": {
+            "asset_id": "b85af093-2fb9-4361-bca1-2a0be0856b1c",
+            "file_name": "pull_request_template.md",
+            "mime": "text/markdown",
+            "size": 1483,
+            "file_type": "text"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "## 📋 Description\n<!-- Provide a brief description of the changes in this PR -->\n\n## 🔄 Type of Change\n<!-- Mark the relevant option with an \"x\" -->\n- [ ] 🐛 Bug fix (non-breaking change which fixes an issue)\n- [ ] ✨ New feature (non-breaking change which adds functionality)\n- [ ] 💥 Breaking change (fix or feature that would cause existing functionality to not work as expected)\n- [ ] 📚 Documentation update\n- [ ] 🎨 Style/UI changes\n- [ ] ♻️ Code refactoring\n- [ ] ⚡ Performance improvements\n- [ ] 🧪 Test updates\n- [ ] 🔧 Build/CI changes\n\n## 🧪 Testing\n<!-- Describe the tests you ran and/or added -->\n- [ ] I have tested this change locally\n- [ ] I have added tests that prove my fix is effective or that my feature works\n- [ ] New and existing unit tests pass locally with my changes\n\n## 📱 Screenshots (if applicable)\n<!-- Add screenshots for UI changes -->\n\n## 🔍 Code Review Checklist\n<!-- For reviewers -->\n- [ ] Code follows the project's coding standards\n- [ ] Self-review of the code has been performed\n- [ ] Code is properly commented, particularly in hard-to-understand areas\n- [ ] Changes generate no new warnings\n- [ ] Any dependent changes have been merged and published\n\n## 📚 Related Issues\n<!-- Link any related issues using \"Closes #issue_number\" or \"Fixes #issue_number\" -->\n\n## 🚀 Deployment Notes\n<!-- Any special deployment considerations -->\n\n## 📋 Additional Context\n<!-- Add any other context about the PR here -->\n"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

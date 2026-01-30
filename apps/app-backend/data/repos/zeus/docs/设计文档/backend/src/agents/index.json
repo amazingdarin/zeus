@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "a8be5b0f-b0ff-49fd-955b-e1f7355a3220",
+    "schema_version": "v1",
+    "title": "index",
+    "slug": "index",
+    "path": "docs/设计文档/backend/src/agents/index.json",
+    "parent_id": "a69f32f3-b462-49a5-b701-f669346cf4ad",
+    "created_at": "2026-01-30T08:53:40.990Z",
+    "updated_at": "2026-01-30T08:53:40.990Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "fileBlock",
+          "attrs": {
+            "asset_id": "b12e7d56-b63e-4da1-98e6-d3b11748c789",
+            "file_name": "index.ts",
+            "mime": "application/octet-stream",
+            "size": 101,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

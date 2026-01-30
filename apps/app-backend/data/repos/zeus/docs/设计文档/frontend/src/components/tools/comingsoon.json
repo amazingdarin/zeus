@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "9c65d500-3363-4498-8294-d59cc4d93806",
+    "schema_version": "v1",
+    "title": "ComingSoon",
+    "slug": "comingsoon",
+    "path": "docs/设计文档/frontend/src/components/tools/comingsoon.json",
+    "parent_id": "1913589f-110f-4cd7-ad19-f6758dd6ebbe",
+    "created_at": "2026-01-30T08:53:42.009Z",
+    "updated_at": "2026-01-30T08:53:42.009Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "fileBlock",
+          "attrs": {
+            "asset_id": "e5757995-615e-4dd1-bf46-ff653ac02ae0",
+            "file_name": "ComingSoon.tsx",
+            "mime": "application/octet-stream",
+            "size": 6040,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

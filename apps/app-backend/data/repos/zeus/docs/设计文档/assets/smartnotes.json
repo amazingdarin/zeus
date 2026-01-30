@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "id": "0c36a7ed-f4ed-4cf5-aef3-0d55f09c87f2",
+    "schema_version": "v1",
+    "title": "smartnotes",
+    "slug": "smartnotes",
+    "path": "docs/设计文档/assets/smartnotes.json",
+    "parent_id": "2e6c816a-46a6-4eeb-a7e8-36d81bc677c1",
+    "created_at": "2026-01-30T08:53:40.767Z",
+    "updated_at": "2026-01-30T08:53:40.767Z",
+    "extra": {
+      "status": "draft",
+      "tags": [],
+      "doc_type": "folder"
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": []
+    }
+  }
+}

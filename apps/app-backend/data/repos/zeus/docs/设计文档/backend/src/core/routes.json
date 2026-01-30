@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "id": "26003516-8787-4438-858e-ff4b7f917dc8",
+    "schema_version": "v1",
+    "title": "routes",
+    "slug": "routes",
+    "path": "docs/设计文档/backend/src/core/routes.json",
+    "parent_id": "da5b3ff9-da4d-411a-98e9-142ee3072649",
+    "created_at": "2026-01-30T08:53:40.781Z",
+    "updated_at": "2026-01-30T08:53:40.781Z",
+    "extra": {
+      "status": "draft",
+      "tags": [],
+      "doc_type": "folder"
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": []
+    }
+  }
+}

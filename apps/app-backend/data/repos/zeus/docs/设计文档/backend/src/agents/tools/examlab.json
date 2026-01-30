@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "6b29786d-c816-43db-bd21-971969ce033a",
+    "schema_version": "v1",
+    "title": "examlab",
+    "slug": "examlab",
+    "path": "docs/设计文档/backend/src/agents/tools/examlab.json",
+    "parent_id": "beaefb42-ede9-4ba0-94d4-9d391cfbfcd3",
+    "created_at": "2026-01-30T08:53:41.014Z",
+    "updated_at": "2026-01-30T08:53:41.014Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "fileBlock",
+          "attrs": {
+            "asset_id": "b045bec0-6af3-4eeb-a813-5ff2f51517e5",
+            "file_name": "examlab.ts",
+            "mime": "application/octet-stream",
+            "size": 513,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

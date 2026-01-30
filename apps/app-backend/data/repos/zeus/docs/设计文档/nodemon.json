@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "a44d1cbe-f6ba-495a-b857-004a80dbb581",
+    "schema_version": "v1",
+    "title": "nodemon",
+    "slug": "nodemon",
+    "path": "docs/设计文档/nodemon.json",
+    "parent_id": "077f1154-2a19-4e8f-872c-8884492e57f4",
+    "created_at": "2026-01-30T08:53:42.046Z",
+    "updated_at": "2026-01-30T08:53:42.046Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "fileBlock",
+          "attrs": {
+            "asset_id": "cba83689-3271-4fc2-a90f-88af2e1f9957",
+            "file_name": "nodemon.json",
+            "mime": "application/json",
+            "size": 142,
+            "file_type": "text"
+          }
+        }
+      ]
+    }
+  }
+}

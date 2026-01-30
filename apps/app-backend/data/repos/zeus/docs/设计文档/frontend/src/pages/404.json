@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "8f571e60-5ef8-48d2-bed5-aedeb8780eda",
+    "schema_version": "v1",
+    "title": "404",
+    "slug": "404",
+    "path": "docs/设计文档/frontend/src/pages/404.json",
+    "parent_id": "2cabab43-fb6f-423e-b9ff-71af48d06239",
+    "created_at": "2026-01-30T08:53:42.016Z",
+    "updated_at": "2026-01-30T08:53:42.016Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "fileBlock",
+          "attrs": {
+            "asset_id": "a02e8ac4-0604-4192-acee-ae76f66d1d8c",
+            "file_name": "404.tsx",
+            "mime": "application/octet-stream",
+            "size": 7916,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

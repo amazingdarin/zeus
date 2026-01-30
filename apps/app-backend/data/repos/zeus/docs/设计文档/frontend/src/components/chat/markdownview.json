@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "ef106d20-2855-4db2-a919-b85bc1dff95a",
+    "schema_version": "v1",
+    "title": "MarkdownView",
+    "slug": "markdownview",
+    "path": "docs/设计文档/frontend/src/components/chat/markdownview.json",
+    "parent_id": "399a5b45-2681-47e6-bf3b-9cb612f611bf",
+    "created_at": "2026-01-30T08:53:41.986Z",
+    "updated_at": "2026-01-30T08:53:41.986Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "fileBlock",
+          "attrs": {
+            "asset_id": "11e76a8a-16c1-4cbb-8bd1-9499b278d72d",
+            "file_name": "MarkdownView.tsx",
+            "mime": "application/octet-stream",
+            "size": 2424,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

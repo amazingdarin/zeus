@@ -17,7 +17,7 @@ export type ImportGitRequest = {
   branch?: string;
   subdir?: string;
   parent_id?: string;
-  // New options for Smart Import
+  // Options for Smart Import
   smart_import?: boolean;
   smart_import_types?: SmartImportType[];
   file_types?: FileTypeFilter[];
@@ -108,7 +108,7 @@ const isExtensionAllowed = (ext: string, allowedExtensions: Set<string> | null):
 };
 
 /**
- * Check if a file should use smart import (markdown conversion)
+ * Check if a file should use smart import (convert to tiptap with content)
  */
 const shouldSmartImport = (
   ext: string,
@@ -132,6 +132,20 @@ const shouldSmartImport = (
   }
 
   return { enabled: false, type: null };
+};
+
+/**
+ * Collect all parent directory paths for a file
+ */
+const collectParentPaths = (filePath: string | null): string[] => {
+  const paths: string[] = [];
+  let current = filePath;
+  while (current) {
+    paths.push(current);
+    const parentPath = path.dirname(current);
+    current = parentPath === "." || parentPath === current ? null : parentPath;
+  }
+  return paths;
 };
 
 export const importGit = async (
@@ -168,17 +182,44 @@ export const importGit = async (
       converted: 0,
       fallback: 0,
     };
+
+    // Step 1: Filter files by allowed extensions
+    const filteredFiles: FileEntry[] = [];
+    for (const file of files) {
+      if (!isExtensionAllowed(file.ext, allowedExtensions)) {
+        result.skipped += 1;
+        continue;
+      }
+      filteredFiles.push(file);
+    }
+
+    // Step 2: Collect all directories that contain filtered files
+    const requiredDirs = new Set<string>();
+    for (const file of filteredFiles) {
+      const parentPaths = collectParentPaths(file.parent);
+      for (const p of parentPaths) {
+        requiredDirs.add(p);
+      }
+    }
+
+    // Step 3: Filter directories to only include those with matching files
+    const filteredDirs = directories.filter((dir) => requiredDirs.has(dir.path));
+
+    // Step 4: Create directories
     const directoryMap = new Map<string, string>();
 
     let rootParentId = parentId;
     if (rootTitle) {
-      const rootId = await createFolder(projectKey, rootTitle, parentId);
-      directoryMap.set(".", rootId);
-      rootParentId = rootId;
-      result.directories += 1;
+      // Only create root folder if there are files to import
+      if (filteredFiles.length > 0) {
+        const rootId = await createFolder(projectKey, rootTitle, parentId);
+        directoryMap.set(".", rootId);
+        rootParentId = rootId;
+        result.directories += 1;
+      }
     }
 
-    for (const dir of directories) {
+    for (const dir of filteredDirs) {
       const parentKey = dir.parent ?? ".";
       const resolvedParent =
         parentKey === "." ? rootParentId : (directoryMap.get(parentKey) ?? rootParentId);
@@ -187,14 +228,9 @@ export const importGit = async (
       result.directories += 1;
     }
 
-    for (const file of files) {
-      if (result.files + result.skipped >= MAX_FILES) {
-        result.skipped += 1;
-        continue;
-      }
-
-      // Check if extension is allowed
-      if (!isExtensionAllowed(file.ext, allowedExtensions)) {
+    // Step 5: Import files
+    for (const file of filteredFiles) {
+      if (result.files >= MAX_FILES) {
         result.skipped += 1;
         continue;
       }
@@ -214,37 +250,30 @@ export const importGit = async (
       const smartResult = shouldSmartImport(file.ext, smartImport, smartImportTypes);
 
       if (smartResult.enabled) {
-        // Smart import: convert to markdown and create document with file block
+        // Smart import: convert to tiptap document with file block + content
         try {
           const markdown = await convertFileToMarkdown(file.ext, content);
-          if (!markdown) {
-            // Fallback: upload as asset and create file block
-            await createDocumentWithAsset(projectKey, file, content, resolvedParent);
-            result.fallback += 1;
-          } else {
+          if (markdown) {
             // Upload as asset first
             const assetMeta = await uploadAsset(projectKey, file, content);
-            // Create document with file block + markdown content
+            // Create document with file block + converted content
             await createSmartDocument(projectKey, file.name, resolvedParent, markdown, assetMeta);
             result.converted += 1;
+          } else {
+            // Conversion failed, fallback to regular file import
+            await createDocumentWithAsset(projectKey, file, content, resolvedParent);
+            result.fallback += 1;
           }
         } catch (err) {
           console.error("Smart import error:", err);
-          // Fallback to asset upload
+          // Fallback to regular file import
           await createDocumentWithAsset(projectKey, file, content, resolvedParent);
           result.fallback += 1;
         }
       } else {
-        // Regular import: try to convert to markdown, or upload as asset
-        const markdown = await convertFileToMarkdown(file.ext, content);
-        if (markdown) {
-          await createDocument(projectKey, file.name, resolvedParent, markdown);
-          result.converted += 1;
-        } else {
-          // Upload as asset and create file block document
-          await createDocumentWithAsset(projectKey, file, content, resolvedParent);
-          result.fallback += 1;
-        }
+        // Regular import: upload as asset and create document with file block only
+        await createDocumentWithAsset(projectKey, file, content, resolvedParent);
+        result.fallback += 1;
       }
       result.files += 1;
     }
@@ -295,10 +324,11 @@ const scanEntries = async (
 };
 
 const convertFileToMarkdown = async (ext: string, content: Buffer): Promise<string> => {
-  if (["md", "markdown", "txt"].includes(ext)) {
+  const lowerExt = ext.toLowerCase();
+  if (["md", "markdown"].includes(lowerExt)) {
     return content.toString("utf-8");
   }
-  if (["docx", "pdf", "html"].includes(ext)) {
+  if (["docx", "pdf"].includes(lowerExt)) {
     try {
       const result = await convertDocument(
         "",
@@ -379,41 +409,6 @@ const createFolder = async (
   return saved.meta.id;
 };
 
-const createDocument = async (
-  projectKey: string,
-  title: string,
-  parentId: string,
-  markdown: string,
-): Promise<void> => {
-  const doc: Document = {
-    meta: {
-      id: uuidv4(),
-      schema_version: "v1",
-      title,
-      slug: "",
-      path: "",
-      parent_id: parentId,
-      created_at: "",
-      updated_at: "",
-      extra: {
-        status: "draft",
-        tags: [],
-      },
-    },
-    body: {
-      type: "tiptap",
-      content: buildPlainTextDoc(markdown),
-    },
-  };
-
-  const saved = await documentStore.save(projectKey, doc);
-
-  // Index asynchronously
-  knowledgeSearch.indexDocument(projectKey, saved).catch((err) => {
-    console.error("Index error:", err);
-  });
-};
-
 const createDocumentWithAsset = async (
   projectKey: string,
   file: FileEntry,
@@ -423,7 +418,7 @@ const createDocumentWithAsset = async (
   // Upload as asset
   const assetMeta = await uploadAsset(projectKey, file, content);
 
-  // Create document with file block
+  // Create document with file block only
   const doc: Document = {
     meta: {
       id: uuidv4(),
@@ -460,9 +455,9 @@ const createSmartDocument = async (
   markdown: string,
   assetMeta: { id: string; filename: string; mime: string; size: number },
 ): Promise<void> => {
-  // Create document with file block at top, followed by markdown content
+  // Create document with file block at top, followed by converted content
   const fileBlock = buildFileBlockNode(assetMeta);
-  const markdownContent = buildPlainTextDoc(markdown);
+  const tiptapContent = markdownToTiptap(markdown);
 
   const doc: Document = {
     meta: {
@@ -485,9 +480,7 @@ const createSmartDocument = async (
         type: "doc",
         content: [
           fileBlock,
-          ...(Array.isArray((markdownContent as any).content)
-            ? (markdownContent as any).content
-            : []),
+          ...(Array.isArray(tiptapContent.content) ? tiptapContent.content : []),
         ],
       },
     },
@@ -502,23 +495,49 @@ const createSmartDocument = async (
 };
 
 /**
- * Build a simple Tiptap document with the text content
+ * Convert markdown text to tiptap JSON structure
  */
-function buildPlainTextDoc(text: string): unknown {
-  return {
-    type: "doc",
-    content: [
-      {
-        type: "paragraph",
-        content: [
-          {
-            type: "text",
-            text,
-          },
-        ],
-      },
-    ],
-  };
+function markdownToTiptap(markdown: string): { type: string; content: unknown[] } {
+  // Simple conversion: split by paragraphs
+  const paragraphs = markdown.split(/\n\n+/).filter((p) => p.trim());
+  const content: unknown[] = [];
+
+  for (const para of paragraphs) {
+    const trimmed = para.trim();
+    if (!trimmed) continue;
+
+    // Check for headings
+    const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    if (headingMatch) {
+      content.push({
+        type: "heading",
+        attrs: { level: headingMatch[1].length },
+        content: [{ type: "text", text: headingMatch[2] }],
+      });
+      continue;
+    }
+
+    // Check for code blocks
+    if (trimmed.startsWith("```")) {
+      const lines = trimmed.split("\n");
+      const lang = lines[0].replace(/^```/, "").trim();
+      const code = lines.slice(1, -1).join("\n");
+      content.push({
+        type: "codeBlock",
+        attrs: { language: lang || null },
+        content: [{ type: "text", text: code }],
+      });
+      continue;
+    }
+
+    // Regular paragraph
+    content.push({
+      type: "paragraph",
+      content: [{ type: "text", text: trimmed }],
+    });
+  }
+
+  return { type: "doc", content };
 }
 
 /**

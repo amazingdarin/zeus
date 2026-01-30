@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "50728e27-a664-4caf-86b4-9154692f0051",
+    "schema_version": "v1",
+    "title": "Planner",
+    "slug": "planner",
+    "path": "docs/设计文档/frontend/src/components/planner/planner.json",
+    "parent_id": "e7c28bec-0a5b-407a-bfc8-5156eccd0726",
+    "created_at": "2026-01-30T08:53:41.997Z",
+    "updated_at": "2026-01-30T08:53:41.997Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "fileBlock",
+          "attrs": {
+            "asset_id": "95fb3b42-0181-49b7-a98f-f5a7a7181eac",
+            "file_name": "Planner.tsx",
+            "mime": "application/octet-stream",
+            "size": 20838,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

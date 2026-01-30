@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "id": "a69f32f3-b462-49a5-b701-f669346cf4ad",
+    "schema_version": "v1",
+    "title": "agents",
+    "slug": "agents",
+    "path": "docs/设计文档/backend/src/agents.json",
+    "parent_id": "59d07526-19ef-4571-961a-830f8bc8b374",
+    "created_at": "2026-01-30T08:53:40.771Z",
+    "updated_at": "2026-01-30T08:53:40.771Z",
+    "extra": {
+      "status": "draft",
+      "tags": [],
+      "doc_type": "folder"
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": []
+    }
+  }
+}

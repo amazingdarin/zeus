@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "id": "5e3f0c9c-2bbf-4408-a17a-9152a57eb050",
+    "schema_version": "v1",
+    "title": "frontend",
+    "slug": "frontend",
+    "path": "docs/设计文档/frontend.json",
+    "parent_id": "077f1154-2a19-4e8f-872c-8884492e57f4",
+    "created_at": "2026-01-30T08:53:40.756Z",
+    "updated_at": "2026-01-30T08:53:40.756Z",
+    "extra": {
+      "status": "draft",
+      "tags": [],
+      "doc_type": "folder"
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": []
+    }
+  }
+}
