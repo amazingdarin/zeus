@@ -971,22 +971,30 @@ function DocumentPage() {
         documentHierarchyCache.delete(cacheKey);
         documentHierarchyPromiseCache.delete(cacheKey);
       }
-      // Navigate to parent or root
+      // Clear children cache for deleted documents
+      setChildrenByParent((prev) => {
+        const next = { ...prev };
+        for (const deletedId of result.deleted_ids) {
+          delete next[deletedId];
+        }
+        return next;
+      });
+      // Navigate to /documents (blank page)
+      navigate("/documents");
+      // Refresh the document tree
+      await loadRootDocuments(resolvedProjectKey);
+      // If there was a parent, refresh its children too
       const parentId = activeDocument.parentId;
       if (parentId && parentId !== "root") {
-        navigate(`/documents/${encodeURIComponent(parentId)}`);
-      } else {
-        navigate("/documents");
+        await loadChildren(resolvedProjectKey, parentId, { force: true });
       }
-      // Trigger sidebar refresh
-      sideNavRefreshTriggerRef.current += 1;
     } catch (err) {
       console.error("Delete failed:", err);
       alert(err instanceof Error ? err.message : "Failed to delete document");
     } finally {
       setDeleting(false);
     }
-  }, [resolvedProjectKey, activeDocument, deleting, navigate]);
+  }, [resolvedProjectKey, activeDocument, deleting, navigate, loadRootDocuments, loadChildren]);
 
   const handleOpenNew = () => {
     if (!allowChildActions) {
