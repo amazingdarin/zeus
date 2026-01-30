@@ -17,6 +17,8 @@
     "multer": "^1.4.5-lts.1",
     "mime-types": "^2.1.35",
     "pdf-parse": "^1.1.1",
+    "pg": "^8.13.1",
+    "pgvector": "^0.2.0",
     "simple-git": "^3.28.0",
     "uuid": "^11.0.5",
     "node-fetch": "^3.3.2",
@@ -26,6 +28,7 @@
     "@types/express": "^4.17.21",
     "@types/multer": "^1.4.12",
     "@types/node": "^22.13.0",
+    "@types/pg": "^8.11.10",
     "@types/uuid": "^10.0.0",
     "tsx": "^4.19.2",
     "typescript": "~5.8.3"

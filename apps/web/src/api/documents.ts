@@ -204,7 +204,7 @@ export const importDocument = async (
   formData: FormData,
 ): Promise<void> => {
     const response = await apiFetch(
-        `/api/app/projects/${encodeURIComponent(projectKey)}/documents/import`,
+        `/api/projects/${encodeURIComponent(projectKey)}/documents/import`,
         {
             method: "POST",
             body: formData,
@@ -234,7 +234,7 @@ export const importGit = async (
   payload: ImportGitRequest,
 ): Promise<ImportGitResult> => {
   const response = await apiFetch(
-    `/api/app/projects/${encodeURIComponent(projectKey)}/documents/import-git`,
+    `/api/projects/${encodeURIComponent(projectKey)}/documents/import-git`,
     {
       method: "POST",
       headers: {
@@ -267,7 +267,7 @@ export const fetchUrlHtml = async (
   url: string,
 ): Promise<FetchUrlResult> => {
   const response = await apiFetch(
-    `/api/app/projects/${encodeURIComponent(projectKey)}/documents/fetch-url`,
+    `/api/projects/${encodeURIComponent(projectKey)}/documents/fetch-url`,
     {
       method: "POST",
       headers: {

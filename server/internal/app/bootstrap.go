@@ -5,9 +5,6 @@ import (
 	"os"
 	"time"
 
-	docsvc "zeus/internal/modules/document/service/document"
-	embeddingsvc "zeus/internal/modules/knowledge/service/embedding"
-	fulltextsvc "zeus/internal/modules/knowledge/service/fulltext"
 	projectsvc "zeus/internal/modules/project/service/project"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -19,17 +16,11 @@ import (
 	"zeus/internal/config"
 	corelog "zeus/internal/core/log"
 	coremiddleware "zeus/internal/core/middleware"
-	"zeus/internal/infra/assetcontent"
-	"zeus/internal/infra/assetmeta"
 	clients3 "zeus/internal/infra/client/s3"
-	"zeus/internal/infra/embedding"
 	"zeus/internal/infra/gitadmin"
 	"zeus/internal/infra/gitclient"
 	ingestions3 "zeus/internal/infra/ingestion/s3"
-	"zeus/internal/infra/localstorage"
 	httpsession "zeus/internal/infra/session"
-	svcasset "zeus/internal/modules/document/service/asset"
-	"zeus/internal/modules/document/service/importer"
 	projectrepo "zeus/internal/modules/project/repository/postgres"
 	"zeus/internal/repository"
 	"zeus/internal/repository/postgres"
@@ -124,29 +115,10 @@ func BuildRouter(ctx context.Context) *gin.Engine {
 	gitAdmin := InitGitAdmin()
 	gitClientManager := InitGitClientManager(ctx)
 	db := InitDB(ctx)
-	s3Client, _ := InitS3(ctx)
+	_, _ = InitS3(ctx)
 	repos := InitRepository(db, gitClientManager)
 
-	assetMetaRoot := Getenv("ZEUS_ASSET_META_ROOT", config.AppConfig.Asset.MetaRoot)
-	localFileStorage := localstorage.NewLocalAssetStorage(assetMetaRoot)
-	assetMetaStore := assetmeta.NewFileStore(assetMetaRoot)
-	assetReader := assetcontent.NewReader(s3Client)
-	assetSvc := svcasset.NewService(localFileStorage, assetMetaStore, assetReader, repos)
-
 	projectSvc := projectsvc.NewService(repos, gitAdmin, gitClientManager)
-	documentSvc := docsvc.NewService(config.AppConfig.Git.RepoRoot)
-	gitImporter := importer.NewGitImporter(
-		documentSvc,
-		config.AppConfig.Git.RepoRoot,
-		config.AppConfig.Git.SessionRepoRoot,
-		config.AppConfig.Git.DefaultBranch,
-	)
-	fulltextSvc := fulltextsvc.NewService(repos, documentSvc)
-	embeddingResolver := embedding.NewConfigRuntimeResolver()
-	embedder := embedding.NewOpenAICompatibleEmbedder(embeddingResolver)
-	embeddingSvc := embeddingsvc.NewService(embedder, repos.KnowledgeEmbedding, documentSvc)
-	documentSvc.RegisterHooks(fulltextSvc.DocumentHooks())
-	documentSvc.RegisterHooks(embeddingSvc.DocumentHooks())
 	sessionManager := httpsession.NewSessionManager(nil)
 
 	router := gin.Default()
@@ -155,10 +127,7 @@ func BuildRouter(ctx context.Context) *gin.Engine {
 	router.Use(coremiddleware.SessionMiddleware(sessionManager))
 	handler.RegisterRoutes(
 		router,
-		assetSvc,
 		projectSvc,
-		documentSvc,
-		gitImporter,
 	)
 
 	return router

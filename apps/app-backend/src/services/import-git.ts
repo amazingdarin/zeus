@@ -3,8 +3,10 @@ import path from "node:path";
 import simpleGit from "simple-git";
 import { v4 as uuidv4 } from "uuid";
 
-import { convertDocument } from "./convert";
-import { createCoreDocument } from "./documents";
+import { convertDocument } from "./convert.js";
+import { documentStore } from "../storage/document-store.js";
+import { knowledgeSearch } from "../knowledge/search.js";
+import type { Document } from "../storage/types.js";
 
 type ImportGitRequest = {
   repo_url?: string;
@@ -37,7 +39,10 @@ type FileEntry = {
 const MAX_FILES = 2000;
 const MAX_BYTES = 2 * 1024 * 1024;
 
-export const importGit = async (projectKey: string, req: ImportGitRequest): Promise<ImportGitResult> => {
+export const importGit = async (
+  projectKey: string,
+  req: ImportGitRequest,
+): Promise<ImportGitResult> => {
   const repoUrl = String(req.repo_url ?? "").trim();
   if (!repoUrl.startsWith("http://") && !repoUrl.startsWith("https://")) {
     throw new Error("repo_url must be http or https");
@@ -70,7 +75,8 @@ export const importGit = async (projectKey: string, req: ImportGitRequest): Prom
 
   for (const dir of directories) {
     const parentKey = dir.parent ?? ".";
-    const resolvedParent = parentKey === "." ? rootParentId : directoryMap.get(parentKey) ?? rootParentId;
+    const resolvedParent =
+      parentKey === "." ? rootParentId : (directoryMap.get(parentKey) ?? rootParentId);
     const folderId = await createFolder(projectKey, dir.name, resolvedParent);
     directoryMap.set(dir.path, folderId);
     result.directories += 1;
@@ -87,7 +93,9 @@ export const importGit = async (projectKey: string, req: ImportGitRequest): Prom
       continue;
     }
     const content = await readFile(file.fullPath);
-    const resolvedParent = file.parent ? directoryMap.get(file.parent) ?? rootParentId : rootParentId;
+    const resolvedParent = file.parent
+      ? (directoryMap.get(file.parent) ?? rootParentId)
+      : rootParentId;
     const markdown = await convertFileToMarkdown(file.ext, content);
     if (!markdown) {
       result.skipped += 1;
@@ -101,7 +109,9 @@ export const importGit = async (projectKey: string, req: ImportGitRequest): Prom
   return result;
 };
 
-const scanEntries = async (baseDir: string): Promise<{ directories: DirectoryEntry[]; files: FileEntry[] }> => {
+const scanEntries = async (
+  baseDir: string,
+): Promise<{ directories: DirectoryEntry[]; files: FileEntry[] }> => {
   const directories: DirectoryEntry[] = [];
   const files: FileEntry[] = [];
 
@@ -165,20 +175,41 @@ const convertFileToMarkdown = async (ext: string, content: Buffer): Promise<stri
   return "";
 };
 
-const createFolder = async (projectKey: string, title: string, parentId: string): Promise<string> => {
-  const response = await createCoreDocument(projectKey, {
-    title,
-    parent_id: parentId,
-    extra: {
-      status: "draft",
-      tags: [],
-      doc_type: "folder",
+const createFolder = async (
+  projectKey: string,
+  title: string,
+  parentId: string,
+): Promise<string> => {
+  const doc: Document = {
+    meta: {
+      id: uuidv4(),
+      schema_version: "v1",
+      title,
+      slug: "",
+      path: "",
+      parent_id: parentId,
+      created_at: "",
+      updated_at: "",
+      extra: {
+        status: "draft",
+        tags: [],
+        doc_type: "folder",
+      },
     },
-  }, {
-    type: "tiptap",
-    content: { type: "doc", content: [] },
+    body: {
+      type: "tiptap",
+      content: { type: "doc", content: [] },
+    },
+  };
+
+  const saved = await documentStore.save(projectKey, doc);
+
+  // Index asynchronously
+  knowledgeSearch.indexDocument(projectKey, saved).catch((err) => {
+    console.error("Index error:", err);
   });
-  return String(response.meta?.id ?? response.id ?? uuidv4());
+
+  return saved.meta.id;
 };
 
 const createDocument = async (
@@ -187,15 +218,51 @@ const createDocument = async (
   parentId: string,
   markdown: string,
 ): Promise<void> => {
-  await createCoreDocument(projectKey, {
-    title,
-    parent_id: parentId,
-    extra: {
-      status: "draft",
-      tags: [],
+  const doc: Document = {
+    meta: {
+      id: uuidv4(),
+      schema_version: "v1",
+      title,
+      slug: "",
+      path: "",
+      parent_id: parentId,
+      created_at: "",
+      updated_at: "",
+      extra: {
+        status: "draft",
+        tags: [],
+      },
     },
-  }, {
-    type: "markdown",
-    content: markdown,
+    body: {
+      type: "tiptap",
+      content: buildPlainTextDoc(markdown),
+    },
+  };
+
+  const saved = await documentStore.save(projectKey, doc);
+
+  // Index asynchronously
+  knowledgeSearch.indexDocument(projectKey, saved).catch((err) => {
+    console.error("Index error:", err);
   });
 };
+
+/**
+ * Build a simple Tiptap document with the text content
+ */
+function buildPlainTextDoc(text: string): unknown {
+  return {
+    type: "doc",
+    content: [
+      {
+        type: "paragraph",
+        content: [
+          {
+            type: "text",
+            text,
+          },
+        ],
+      },
+    ],
+  };
+}

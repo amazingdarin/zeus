@@ -1,22 +1,41 @@
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").trim();
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").trim();
-const appBackendUrl = (import.meta.env.VITE_APP_BACKEND_URL ?? "").trim();
-const useProxy = Boolean(import.meta.env.DEV && (apiBaseUrl || appBackendUrl));
+const appBackendUrl = (import.meta.env.VITE_APP_BACKEND_URL ?? "http://localhost:4870").trim();
+const useProxy = Boolean(import.meta.env.DEV);
 
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, "");
 const trimLeadingSlash = (value: string) => value.replace(/^\/+/, "");
 
+/**
+ * Check if a path should be routed to app-backend
+ */
+const isAppBackendPath = (path: string): boolean => {
+  // Explicit app-backend prefix
+  if (path.startsWith("/api/app")) return true;
+  // Document operations now handled by app-backend
+  if (path.match(/^\/api\/projects\/[^/]+\/documents/)) return true;
+  // Knowledge search
+  if (path.match(/^\/api\/projects\/[^/]+\/knowledge/)) return true;
+  // Asset operations
+  if (path.match(/^\/api\/projects\/[^/]+\/assets/)) return true;
+  return false;
+};
+
 export const buildApiUrl = (path: string) => {
   const normalizedPath = `/${trimLeadingSlash(path)}`;
-  const appBackendPath = normalizedPath.startsWith("/api/app")
-    ? normalizedPath.replace("/api/app", "")
-    : "";
-  if (appBackendPath) {
-    if (useProxy || !appBackendUrl) {
-      return appBackendPath.startsWith("/") ? appBackendPath : `/${appBackendPath}`;
+  
+  if (isAppBackendPath(normalizedPath)) {
+    // Route to app-backend
+    const appPath = normalizedPath.startsWith("/api/app")
+      ? normalizedPath.replace("/api/app", "/api")
+      : normalizedPath;
+    if (useProxy) {
+      // In dev mode with proxy, use relative path
+      return appPath;
     }
-    return `${trimTrailingSlash(appBackendUrl)}${appBackendPath}`;
+    return `${trimTrailingSlash(appBackendUrl)}${appPath}`;
   }
+  
+  // Route to Go server (projects, system, etc.)
   if (useProxy || !apiBaseUrl) {
     return normalizedPath;
   }

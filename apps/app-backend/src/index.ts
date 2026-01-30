@@ -1,7 +1,8 @@
 import express from "express";
 import cors from "cors";
 
-import { buildRouter } from "./router";
+import { initPool } from "./db/postgres.js";
+import { buildRouter } from "./router.js";
 
 const app = express();
 const port = Number(process.env.APP_BACKEND_PORT ?? 4870);
@@ -18,6 +19,18 @@ app.use(
 
 app.use("/api", buildRouter());
 
-app.listen(port, () => {
-  console.log(`[app-backend] listening on :${port}`);
-});
+// Initialize database pool and start server
+const start = async () => {
+  try {
+    await initPool();
+    console.log("[app-backend] PostgreSQL pool initialized");
+  } catch (err) {
+    console.warn("[app-backend] PostgreSQL not available, knowledge indexing disabled:", err);
+  }
+
+  app.listen(port, () => {
+    console.log(`[app-backend] listening on :${port}`);
+  });
+};
+
+start();

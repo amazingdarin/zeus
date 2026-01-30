@@ -1,7 +1,6 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-01-30
-**Commit:** 565f62f
 **Branch:** main
 
 ## OVERVIEW
@@ -10,8 +9,8 @@ Zeus 是一个智能文档管理系统，采用分层架构设计：
 
 | 层级 | 目录 | 技术栈 | 职责 |
 |------|------|--------|------|
-| 平台后端 | server/ | Go (Gin/GORM/Postgres) | 多租户、项目管理、知识库索引、认证授权 |
-| 应用后端 | apps/app-backend/ | TypeScript (Express) | 文件操作、Git导入、文档转换、LLM交互 |
+| 平台后端 | server/ | Go (Gin/GORM/Postgres) | 多租户、项目管理、认证授权 |
+| 应用后端 | apps/app-backend/ | TypeScript (Express) | 文档 CRUD、知识库索引、文件转换、Git导入 |
 | 应用前端 | apps/web/ | React/Vite/Ant Design | Web 端用户界面 |
 | 桌面应用 | apps/desktop/ | Tauri (Rust) | 桌面端外壳 |
 
@@ -20,9 +19,9 @@ Zeus 是一个智能文档管理系统，采用分层架构设计：
 ## STRUCTURE
 ```
 ./
-├── server/              # Go 平台后端 (多租户/项目/知识库)
+├── server/              # Go 平台后端 (多租户/项目管理)
 ├── apps/
-│   ├── app-backend/     # TypeScript 应用后端 (文件/Git/LLM)
+│   ├── app-backend/     # TypeScript 应用后端 (文档/知识库/Git/LLM)
 │   ├── web/             # React 应用前端
 │   └── desktop/         # Tauri 桌面外壳
 ├── packages/
@@ -43,43 +42,57 @@ Go 服务端，负责平台级功能：
 server/internal/
 ├── api/handler/         # Gin HTTP 路由与处理器
 ├── modules/
-│   ├── project/         # 项目管理 (多租户)
-│   ├── document/        # 文档元数据管理
-│   └── knowledge/       # 知识库索引 (向量/全文检索)
+│   └── project/         # 项目管理 (多租户)
 ├── repository/          # 数据访问层 (Postgres)
-├── infra/               # 外部适配器 (Git/S3/Embedding)
+├── infra/               # 外部适配器 (Git/S3)
 └── domain/              # 领域模型
 ```
 
 | 模块 | 路径 | 职责 |
 |------|------|------|
 | 项目管理 | modules/project | 项目 CRUD、系统配置 |
-| 文档服务 | modules/document | 文档/文件夹元数据、层级结构 |
-| 知识索引 | modules/knowledge | 向量嵌入、全文检索、语义搜索 |
 | Git 客户端 | infra/gitclient | Git 仓库读写操作 |
 | 对象存储 | infra/objectstorage | S3/本地文件存储 |
 
 ### 应用后端 (apps/app-backend/)
 
-TypeScript Express 服务，负责应用层业务：
+TypeScript Express 服务，负责核心业务：
 
 ```
 apps/app-backend/src/
 ├── index.ts             # 服务入口
 ├── router.ts            # API 路由定义
+├── db/
+│   └── postgres.ts      # PostgreSQL 连接池
+├── storage/
+│   ├── types.ts         # 文档类型定义
+│   ├── document-store.ts # 文档 CRUD (文件系统)
+│   └── index-manager.ts # 内存索引管理
+├── knowledge/
+│   ├── chunker.ts       # 文档分块
+│   ├── fulltext-index.ts # 全文索引 (tsvector)
+│   ├── embedding-index.ts # 向量索引 (pgvector)
+│   └── search.ts        # 统一搜索接口
 └── services/
     ├── convert.ts       # 文档格式转换 (docx/pdf/html → markdown)
-    ├── documents.ts     # 文档创建辅助
     ├── fetch-url.ts     # URL 抓取与解析
     └── import-git.ts    # Git 仓库批量导入
 ```
 
 | API | 功能 |
 |-----|------|
-| POST /api/projects/:key/convert | 文档格式转换 |
+| GET /api/projects/:key/documents | 列出子文档 |
+| GET /api/projects/:key/documents/:id | 获取文档 |
+| GET /api/projects/:key/documents/:id/hierarchy | 获取层级链 |
+| POST /api/projects/:key/documents | 创建文档 |
+| PUT /api/projects/:key/documents/:id | 更新文档 |
+| DELETE /api/projects/:key/documents/:id | 删除文档 |
+| PATCH /api/projects/:key/documents/:id/move | 移动文档 |
 | POST /api/projects/:key/documents/import | 文件导入 |
 | POST /api/projects/:key/documents/import-git | Git 仓库导入 |
 | POST /api/projects/:key/documents/fetch-url | URL 抓取 |
+| POST /api/projects/:key/convert | 文档格式转换 |
+| POST /api/projects/:key/knowledge/search | 知识库搜索 |
 
 ### 应用前端 (apps/web/)
 
@@ -108,9 +121,11 @@ apps/web/src/
 |------|------|------|
 | Go 服务入口 | server/cmd/zeus/main.go | 启动 HTTP 服务 |
 | Go 服务装配 | server/internal/app/bootstrap.go | DI + 路由注册 |
-| Go API 路由 | server/internal/api/handler/router.go | /api/* 路由定义 |
+| Go API 路由 | server/internal/api/handler/router.go | 项目管理路由 |
 | 应用后端入口 | apps/app-backend/src/index.ts | Express 服务启动 |
-| 应用后端路由 | apps/app-backend/src/router.ts | /api/* 路由定义 |
+| 应用后端路由 | apps/app-backend/src/router.ts | 文档/知识库 API 路由 |
+| 文档存储 | apps/app-backend/src/storage/ | 文档 CRUD + 索引管理 |
+| 知识库索引 | apps/app-backend/src/knowledge/ | 全文/向量索引 |
 | 前端入口 | apps/web/src/main.tsx | React 应用入口 |
 | 文档编辑器 | packages/doc-editor/src | Tiptap 编辑器库 |
 | 数据库 Schema | ddl/sql/init.sql | 表结构 + 索引 |
@@ -126,24 +141,38 @@ apps/web/src/
 | main | func | server/cmd/zeus/main.go | 启动服务 |
 | BuildRouter | func | server/internal/app/bootstrap.go | DI + 路由组装 |
 | RegisterRoutes | func | server/internal/api/handler/router.go | 注册 Gin 路由 |
-| DocumentService | interface | modules/document/service | 文档服务接口 |
-| KnowledgeService | interface | modules/knowledge/service | 知识库服务接口 |
+| ProjectService | interface | modules/project/service | 项目管理接口 |
 
 ### 应用后端关键符号
 
 | 符号 | 类型 | 位置 | 作用 |
 |------|------|------|------|
 | buildRouter | func | apps/app-backend/src/router.ts | 构建 Express 路由 |
+| documentStore | object | apps/app-backend/src/storage/document-store.ts | 文档 CRUD |
+| indexManager | class | apps/app-backend/src/storage/index-manager.ts | 内存索引管理 |
+| fulltextIndex | object | apps/app-backend/src/knowledge/fulltext-index.ts | 全文索引 |
+| embeddingIndex | object | apps/app-backend/src/knowledge/embedding-index.ts | 向量索引 |
+| knowledgeSearch | object | apps/app-backend/src/knowledge/search.ts | 统一搜索 |
 | convertDocument | func | apps/app-backend/src/services/convert.ts | 文档格式转换 |
 | importGit | func | apps/app-backend/src/services/import-git.ts | Git 仓库导入 |
-| fetchUrl | func | apps/app-backend/src/services/fetch-url.ts | URL 抓取 |
 
 ## CONVENTIONS
 
 ### 架构规范
-- 分层架构：api → service → domain → repository/infra
-- Repository 接口定义在 `server/internal/repository`，Postgres 实现在 `postgres/` 子目录
-- 领域模型是纯结构体，不含 IO 操作
+- Go server 仅负责多租户/项目管理，不处理文档操作
+- 文档操作全部由 app-backend 处理
+- 前端统一通过 app-backend 访问 API
+
+### 存储结构
+文档存储在文件系统中：
+```
+{REPO_ROOT}/{projectKey}/docs/
+├── api-guide.json           # 文档内容
+├── api-guide/               # 子文档目录
+│   ├── authentication.json
+│   └── .index               # 排序索引 ["doc-id-1", "doc-id-2"]
+└── .index
+```
 
 ### 代码风格
 - Go: 标准 Go 风格，使用 GORM 作为 ORM
@@ -157,10 +186,9 @@ apps/web/src/
 
 ## ANTI-PATTERNS
 
-- **禁止** 在 service 层直接使用 GORM，必须通过 repository
-- **禁止** 直接调用 git CLI，使用 `infra/gitclient` 封装
+- **禁止** 在 Go server 中处理文档操作，应使用 app-backend
 - **禁止** 删除 `apps/desktop/src/main.rs` 中的 Windows 控制台抑制标志
-- **禁止** 在前端直接调用平台后端 API，应通过应用后端中转
+- **禁止** 在前端直接调用 Go server 的文档 API
 
 ## COMMANDS
 
@@ -185,6 +213,17 @@ NAMESPACE=test make clean-all       # 清理命名空间
 
 # 测试
 make test-integration         # 运行集成测试
+```
+
+## ENVIRONMENT VARIABLES
+
+### App Backend
+```bash
+APP_BACKEND_PORT=4870          # 服务端口
+DATABASE_URL=postgres://...    # PostgreSQL 连接字符串
+EMBEDDING_API_URL=http://...   # Embedding API 地址
+EMBEDDING_MODEL=nomic-embed-text # Embedding 模型名
+REPO_ROOT=./data/repos         # 文档存储根目录
 ```
 
 ## NOTES
