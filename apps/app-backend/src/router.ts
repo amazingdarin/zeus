@@ -872,6 +872,45 @@ export const buildRouter = () => {
   });
 
   /**
+   * Fetch models from Ollama API
+   * GET /llm/ollama/models?baseUrl=http://localhost:11434
+   */
+  router.get("/llm/ollama/models", async (req: Request, res: Response) => {
+    try {
+      const baseUrl = (req.query.baseUrl as string) || "http://localhost:11434";
+      const apiUrl = `${baseUrl.replace(/\/v1\/?$/, "")}/api/tags`;
+      
+      const response = await fetch(apiUrl, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(5000),
+      });
+
+      if (!response.ok) {
+        error(res, "OLLAMA_ERROR", `Ollama API error: ${response.status}`, response.status);
+        return;
+      }
+
+      const data = await response.json() as { models?: Array<{ name: string; model: string; size: number; modified_at: string }> };
+      const models = (data.models || []).map((m) => ({
+        id: m.name.replace(/:latest$/, ""),
+        name: m.name,
+        size: m.size,
+        modifiedAt: m.modified_at,
+      }));
+
+      success(res, models);
+    } catch (err) {
+      if (err instanceof Error && err.name === "TimeoutError") {
+        error(res, "OLLAMA_TIMEOUT", "Ollama 服务连接超时，请确保 Ollama 正在运行", 504);
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Failed to fetch Ollama models";
+      error(res, "OLLAMA_ERROR", message, 500);
+    }
+  });
+
+  /**
    * Get available provider types (static list)
    * GET /llm/provider-types
    */
@@ -908,8 +947,9 @@ export const buildRouter = () => {
         requiresApiKey: false,
         supportsBaseUrl: true,
         requiresBaseUrl: true,
-        defaultBaseUrl: "http://localhost:11434/v1",
-        defaultModels: ["llama3.2", "llama3.1", "qwen2.5", "deepseek-r1", "nomic-embed-text"],
+        defaultBaseUrl: "http://localhost:11434",
+        defaultModels: [],
+        dynamicModels: true,
       },
       {
         id: "openai-compatible",

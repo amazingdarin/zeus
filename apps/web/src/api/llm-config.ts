@@ -56,6 +56,17 @@ export type ProviderType = {
   requiresBaseUrl?: boolean;
   defaultBaseUrl?: string;
   defaultModels: string[];
+  dynamicModels?: boolean;
+};
+
+/**
+ * Ollama model info
+ */
+export type OllamaModel = {
+  id: string;
+  name: string;
+  size: number;
+  modifiedAt: string;
 };
 
 /**
@@ -148,4 +159,12 @@ export async function testConfig(id: string): Promise<TestResult> {
 export async function getProviderTypes(): Promise<ProviderType[]> {
   const response = await apiFetch("/api/llm/provider-types");
   return parseResponse<ProviderType[]>(response);
+}
+
+/**
+ * Fetch models from Ollama
+ */
+export async function fetchOllamaModels(baseUrl: string): Promise<OllamaModel[]> {
+  const response = await apiFetch(`/api/llm/ollama/models?baseUrl=${encodeURIComponent(baseUrl)}`);
+  return parseResponse<OllamaModel[]>(response);
 }

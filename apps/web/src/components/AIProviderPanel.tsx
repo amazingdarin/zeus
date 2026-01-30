@@ -9,6 +9,7 @@ import {
   CloudServerOutlined,
   ApiOutlined,
   DesktopOutlined,
+  SyncOutlined,
 } from "@ant-design/icons";
 
 import {
@@ -18,11 +19,23 @@ import {
   deleteConfig,
   testConfig,
   getProviderTypes,
+  fetchOllamaModels,
   type ProviderConfig,
   type ProviderConfigInput,
   type ProviderType,
   type LLMProviderId,
+  type OllamaModel,
 } from "../api/llm-config";
+
+/**
+ * Format file size
+ */
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
 
 /**
  * Get icon for provider type
@@ -54,6 +67,8 @@ function AIProviderPanel() {
   const [selectedType, setSelectedType] = useState<LLMProviderId | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
+  const [loadingOllamaModels, setLoadingOllamaModels] = useState(false);
   const [form] = Form.useForm();
 
   /**
@@ -100,6 +115,10 @@ function AIProviderPanel() {
       enabled: config.enabled,
     });
     setModalVisible(true);
+    // Load Ollama models when editing Ollama provider
+    if (config.providerId === "ollama" && config.baseUrl) {
+      loadOllamaModels(config.baseUrl);
+    }
   };
 
   /**
@@ -189,6 +208,26 @@ function AIProviderPanel() {
   };
 
   /**
+   * Load Ollama models from the API
+   */
+  const loadOllamaModels = useCallback(async (baseUrl: string) => {
+    setLoadingOllamaModels(true);
+    try {
+      const models = await fetchOllamaModels(baseUrl);
+      setOllamaModels(models);
+      if (models.length > 0) {
+        message.success(`已加载 ${models.length} 个模型`);
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "加载模型失败";
+      message.error(errorMsg);
+      setOllamaModels([]);
+    } finally {
+      setLoadingOllamaModels(false);
+    }
+  }, []);
+
+  /**
    * Handle provider type selection
    */
   const handleSelectType = (providerId: LLMProviderId) => {
@@ -197,6 +236,10 @@ function AIProviderPanel() {
     // Pre-fill default values
     if (typeInfo?.defaultBaseUrl) {
       form.setFieldValue("baseUrl", typeInfo.defaultBaseUrl);
+      // Auto-load Ollama models
+      if (providerId === "ollama") {
+        loadOllamaModels(typeInfo.defaultBaseUrl);
+      }
     }
   };
 
@@ -238,16 +281,54 @@ function AIProviderPanel() {
             extra={typeInfo.requiresBaseUrl ? "该提供商必须填写此项" : "可选，用于自定义接口地址"}
             rules={typeInfo.requiresBaseUrl ? [{ required: true, message: "API 地址为必填项" }] : undefined}
           >
-            <Input placeholder={typeInfo.defaultBaseUrl || "https://api.example.com/v1"} />
+            <Input 
+              placeholder={typeInfo.defaultBaseUrl || "https://api.example.com/v1"}
+              onBlur={(e) => {
+                // Auto-refresh Ollama models when baseUrl changes
+                if (selectedType === "ollama" && e.target.value) {
+                  loadOllamaModels(e.target.value);
+                }
+              }}
+            />
           </Form.Item>
         )}
 
         <Form.Item
           name="defaultModel"
-          label="默认模型"
-          extra="可选，用于测试连接和作为回退模型"
+          label={
+            <span>
+              默认模型
+              {selectedType === "ollama" && (
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<SyncOutlined spin={loadingOllamaModels} />}
+                  onClick={() => {
+                    const baseUrl = form.getFieldValue("baseUrl") || typeInfo?.defaultBaseUrl;
+                    if (baseUrl) loadOllamaModels(baseUrl);
+                  }}
+                  style={{ marginLeft: 8, padding: 0 }}
+                >
+                  刷新
+                </Button>
+              )}
+            </span>
+          }
+          extra={selectedType === "ollama" ? "从 Ollama 服务获取已安装的模型" : "可选，用于测试连接和作为回退模型"}
         >
-          {typeInfo?.defaultModels && typeInfo.defaultModels.length > 0 ? (
+          {selectedType === "ollama" ? (
+            <Select
+              placeholder={loadingOllamaModels ? "正在加载模型..." : "选择一个模型"}
+              allowClear
+              showSearch
+              loading={loadingOllamaModels}
+              options={ollamaModels.map((m) => ({ 
+                label: `${m.id} (${formatSize(m.size)})`, 
+                value: m.id 
+              }))}
+              notFoundContent={loadingOllamaModels ? <Spin size="small" /> : "未找到模型，请确保 Ollama 正在运行"}
+            />
+          ) : typeInfo?.defaultModels && typeInfo.defaultModels.length > 0 ? (
             <Select
               placeholder="选择一个模型"
               allowClear
