@@ -144,13 +144,16 @@ body {
   flex-direction: column;
   gap: 16px;
   height: 100%;
-  overflow: auto;
+  overflow: visible;
+  position: relative;
+  z-index: 10;
 }
 
 .sidebar.compact {
   width: 56px;
   padding: 16px 10px;
   align-items: center;
+  overflow: visible;
 }
 
 .project-selector {
