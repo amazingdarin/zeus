@@ -11,7 +11,11 @@ run-server:
 	cd server && go run ./cmd/zeus
 
 run-app-backend:
-	cd apps/app-backend && npm run dev
+	@if [ -f apps/app-backend/.env ]; then \
+		export $$(cat apps/app-backend/.env | grep -v '^#' | xargs) && cd apps/app-backend && npm run dev; \
+	else \
+		cd apps/app-backend && npm run dev; \
+	fi
 
 run-app-web:
 	cd apps/web && npm run dev
