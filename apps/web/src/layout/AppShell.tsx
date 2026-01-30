@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
+import { FileTextOutlined } from "@ant-design/icons";
 
 import Sidebar from "../components/Sidebar";
 import ModelSettingsModal from "../components/ModelSettingsModal";
@@ -19,22 +20,15 @@ type AppShellProps = {
 };
 
 const navItems = [
-  { label: "Document", to: "/documents", icon: "D" },
+  { label: "Document", to: "/documents", icon: <FileTextOutlined /> },
 ];
 
 function AppShell({ children }: AppShellProps) {
   const location = useLocation();
-  const [collapsed, setCollapsed] = useState(false);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const [modelRuntimes, setModelRuntimes] = useState<ModelRuntime[]>([]);
   const [modelSettingsLoading, setModelSettingsLoading] = useState(false);
   const [modelSettingsError, setModelSettingsError] = useState<string | null>(null);
-  const layoutStyle = useMemo(
-    () => ({
-      "--sidebar-width": collapsed ? "72px" : "240px",
-    }),
-    [collapsed],
-  );
 
   const activeIndex = useMemo(() => {
     const path = location.pathname;
@@ -83,20 +77,18 @@ function AppShell({ children }: AppShellProps) {
   }, []);
 
   return (
-    <div className="app-shell" style={layoutStyle as CSSProperties}>
+    <div className="app-shell">
       <header className="topbar">
         <div className="topbar-logo">Zeus</div>
         <div className="topbar-actions">
           <TopBarModelButton onOpen={() => setModelSettingsOpen(true)} />
         </div>
       </header>
-      <div className={`app-body${collapsed ? " compact" : ""}`}>
+      <div className="app-body compact">
         <Sidebar
           items={navItems}
           activeIndex={activeIndex}
           settingsActive={settingsActive}
-          collapsed={collapsed}
-          onToggleCollapse={() => setCollapsed((prev) => !prev)}
         />
         <main className="content">{children}</main>
       </div>
