@@ -72,7 +72,7 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  padding-top: 64px;
+  padding-top: 48px;
   overflow: hidden;
 }
 
@@ -80,11 +80,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  padding: 0 24px;
-  height: 64px;
+  padding: 0 20px;
+  height: 48px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  box-shadow: var(--shadow);
   position: fixed;
   top: 0;
   left: 0;
@@ -94,9 +93,9 @@ body {
 
 .topbar-logo {
   font-family: var(--font-serif);
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.3px;
 }
 
 .topbar-actions {
@@ -127,8 +126,8 @@ body {
   display: grid;
   grid-template-columns: 240px 1fr;
   flex: 1;
-  min-height: calc(100vh - 64px);
-  height: calc(100vh - 64px);
+  min-height: calc(100vh - 48px);
+  height: calc(100vh - 48px);
   overflow: hidden;
 }
 
