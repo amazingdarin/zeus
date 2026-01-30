@@ -604,6 +604,7 @@ body {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid transparent;
   color: inherit;
+  width: 100%;
   padding: 10px;
   border-radius: 12px;
   cursor: pointer;
@@ -611,6 +612,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
 }
 
 .sidebar-menu-item .anticon {
