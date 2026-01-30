@@ -1,0 +1,8 @@
+{
+  "name": "zeus",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ]
+}

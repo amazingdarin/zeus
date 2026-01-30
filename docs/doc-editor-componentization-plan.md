@@ -23,13 +23,13 @@
 
 ### 组件库包
 
-- `frontend/packages/doc-editor`（核心包）
+- `packages/doc-editor`（核心包）
   - 对外暴露 `DocEditor`、`DocViewer`、`useDocEditor`、基础 primitives/hooks/utils/extensions
   - 样式入口：`@zeus/doc-editor/styles`
 
 ### OpenAPI 功能
 
-- OpenAPI nodes/extensions + viewer 合并进 `frontend/packages/doc-editor`
+- OpenAPI nodes/extensions + viewer 合并进 `packages/doc-editor`
   - 对外入口：`@zeus/doc-editor`
   - 支持 `source_type: "url" | "json" | "yaml"`
   - 支持 `fetcher` 自定义请求（默认 `window.fetch`）
@@ -81,7 +81,7 @@ export function OpenApiPlugin(options?: OpenApiPluginOptions): Extension[]
 ## 样式策略
 
 - 将 `DocEditor/styles/_variables.scss` 与 `_keyframe-animations.scss` 作为核心样式入口
-- 在 `frontend/packages/doc-editor/src/styles/index.scss` 汇总所有组件样式
+- 在 `packages/doc-editor/src/styles/index.scss` 汇总所有组件样式
 - 使用方显式引入：
 
 ```ts
@@ -96,11 +96,11 @@ import "@zeus/doc-editor/styles"
 
 ## 迁移影响点
 
-- `frontend/zeus` 侧的 `DocEditor` 相关 alias 移除
+- `apps/web` 侧的 `DocEditor` 相关 alias 移除
 - `RichTextEditor` → `DocEditor`，`RichTextViewer` → `DocViewer`
 - 样式引用由 `App.css` 内部路径改为 `@zeus/doc-editor/styles`
 - OpenAPI 相关逻辑迁移后通过插件引入
-- 前端代码全部归拢至 `frontend/zeus`，自研组件归拢至 `frontend/packages`
+- 前端代码全部归拢至 `apps/web`，自研组件归拢至 `packages`
 
 ## 风险与注意事项
 

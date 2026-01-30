@@ -53,7 +53,7 @@ ProjectA/
 }
 ```
 
-### Go 结构体 (`internal/domain/docstore`)
+### Go 结构体 (`server/internal/domain/docstore`)
 
 ```go
 type Document struct {

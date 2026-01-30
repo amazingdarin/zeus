@@ -156,12 +156,12 @@ New table `provider_credential`:
 
 ## Integration Points (Zeus)
 
-- `internal/config/config.go`: add new security fields.
-- `internal/util`: add envelope encryption helpers and key manager.
-- `internal/repository`: add provider credential repository + mapper.
-- `internal/service`: add provider registry + auth services.
-- `internal/api/handler`: add provider + connection endpoints.
-- `cmd/zeus/main.go`: wire services into router.
+- `server/internal/config/config.go`: add new security fields.
+- `server/internal/util`: add envelope encryption helpers and key manager.
+- `server/internal/repository`: add provider credential repository + mapper.
+- `server/internal/service`: add provider registry + auth services.
+- `server/internal/api/handler`: add provider + connection endpoints.
+- `server/cmd/zeus/main.go`: wire services into router.
 - `ddl/sql/init.sql`: add new tables (`provider_connection`, `provider_credential`).
 
 ## Backward Compatibility

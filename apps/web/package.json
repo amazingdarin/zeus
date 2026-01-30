@@ -1,0 +1,9 @@
+{
+  "name": "zeus-web",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@zeus/doc-editor": "workspace:*",
+    "@zeus/shared": "workspace:*"
+  }
+}

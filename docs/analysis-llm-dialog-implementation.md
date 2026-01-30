@@ -334,7 +334,7 @@ type Platform = {
 桌面版启动独立的服务端进程：
 
 ```rust
-// packages/desktop/src-tauri/src/lib.rs
+// apps/desktop/src/lib.rs
 fn spawn_sidecar(app: &AppHandle, port: u32, password: &str) -> CommandChild {
     let (mut rx, child) = cli::create_command(app, format!("serve --port {port}"))
         .env("OPENCODE_SERVER_PASSWORD", password)
@@ -415,7 +415,7 @@ const createStorage = (name: string) => {
 使用 Job Object 确保子进程随主进程退出：
 
 ```rust
-// packages/desktop/src-tauri/src/job_object.rs
+// apps/desktop/src/job_object.rs
 pub struct JobObject(HANDLE)
 
 impl JobObject {
@@ -444,7 +444,7 @@ impl JobObject {
 防止多个实例同时运行：
 
 ```rust
-// packages/desktop/src-tauri/src/lib.rs
+// apps/desktop/src/lib.rs
 .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_focus()
@@ -521,10 +521,10 @@ const Titlebar = () => {
 | 文件                                           | 说明                     |
 | ---------------------------------------------- | ------------------------ |
 | `packages/desktop/src/index.tsx`               | 入口文件和 Platform 实现 |
-| `packages/desktop/src-tauri/src/lib.rs`        | Rust 主模块              |
-| `packages/desktop/src-tauri/src/cli.rs`        | CLI 启动和安装           |
-| `packages/desktop/src-tauri/src/job_object.rs` | Windows 进程管理         |
-| `packages/desktop/src-tauri/tauri.conf.json`   | Tauri 配置               |
+| `apps/desktop/src/lib.rs`         | Rust 主模块              |
+| `apps/desktop/src/cli.rs`         | CLI 启动和安装           |
+| `apps/desktop/src/job_object.rs`  | Windows 进程管理         |
+| `apps/desktop/tauri.conf.json`    | Tauri 配置               |
 
 ### 服务端
 

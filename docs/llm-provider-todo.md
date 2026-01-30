@@ -45,7 +45,7 @@
 
 ## Phase 5: Integration
 
-- [ ] Wire services into `cmd/zeus/main.go`
+- [ ] Wire services into `server/cmd/zeus/main.go`
 - [ ] Update runtime resolution to use provider credentials when available
 - [ ] Add usage tracking for `last_used_at`/`last_used_by`
 

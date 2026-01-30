@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
+    "baseUrl": "..",
     "target": "ES2020",
     "useDefineForClassFields": true,
     "lib": [
@@ -10,7 +10,7 @@
     ],
     "module": "ESNext",
     "skipLibCheck": true,
-    /* Bundler mode */
+    
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
@@ -19,18 +19,18 @@
     "jsx": "react-jsx",
     "paths": {
       "@/*": [
-        "zeus/src/*"
+        "apps/web/src/*"
       ]
     },
-    /* Linting */
+    
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
   "include": [
-    "zeus/src",
-    "packages/doc-editor/src"
+    "../apps/web/src",
+    "../packages/doc-editor/src"
   ],
   "references": [
     {

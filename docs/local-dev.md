@@ -31,7 +31,7 @@ The project includes an automation script `scripts/dev-skill.sh` that provides t
 - **Usage**: `scripts/dev-skill.sh watch-sql`
 
 ### 🚀 Skill 2: Code Auto-Deploy
-- **Trigger**: Changes to `cmd/`, `internal/` (Backend) or `frontend/` (Frontend)
+- **Trigger**: Changes to `server/cmd/`, `server/internal/` (Backend) or `apps/web/` (Frontend)
 - **Backend Action**: Kills existing process, recompiles via `make run-backend`.
 - **Frontend Action**: Vite handles HMR automatically. If config changes, restart via `make run-frontend`.
 - **Usage**: `scripts/dev-skill.sh watch-code`

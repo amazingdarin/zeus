@@ -47,10 +47,10 @@ export default defineConfig(async ({ mode }) => {
     },
     resolve: {
       alias: {
-        "@": path.resolve(__dirname, "zeus/src"),
+        "@": path.resolve(__dirname, "../apps/web/src"),
       },
     },
-    root: path.resolve(__dirname, "zeus"),
-    publicDir: path.resolve(__dirname, "zeus/public"),
+    root: path.resolve(__dirname, "../apps/web"),
+    publicDir: path.resolve(__dirname, "../apps/web/public"),
   };
 });
