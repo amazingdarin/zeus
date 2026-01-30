@@ -1458,11 +1458,13 @@ function DocumentPage() {
         </div>
       );
     }
-    if (loading) {
-      return <div className="doc-viewer-state">Loading document...</div>;
-    }
-    if (error) {
+    // Show error only if not loading and we have an error
+    if (error && !loading) {
       return <div className="doc-viewer-error">{error}</div>;
+    }
+    // Show loading only if we don't have any document to show yet
+    if (loading && !activeDocument) {
+      return <div className="doc-viewer-state">Loading document...</div>;
     }
     if (!activeDocument) {
       return <div className="doc-viewer-state">No document available</div>;
