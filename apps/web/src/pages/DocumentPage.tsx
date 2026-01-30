@@ -403,10 +403,13 @@ function DocumentPage() {
    */
   const loadFullTree = useCallback(
     async (projectKey: string) => {
+      console.log('[loadFullTree] called for project:', projectKey);
       rootLoadAttemptRef.current = projectKey;
       setRootLoading(true);
       try {
+        console.log('[loadFullTree] fetching tree...');
         const tree = await fetchDocumentTree(projectKey);
+        console.log('[loadFullTree] tree fetched, items:', tree.length);
         if (projectKeyRef.current !== projectKey) {
           return;
         }
@@ -414,7 +417,8 @@ function DocumentPage() {
         setRootDocuments(rootDocs);
         childrenByParentRef.current = childrenMap;
         setChildrenByParent(childrenMap);
-      } catch {
+      } catch (err) {
+        console.error('[loadFullTree] error:', err);
         if (projectKeyRef.current === projectKey) {
           setRootDocuments([]);
           childrenByParentRef.current = {};
@@ -431,6 +435,12 @@ function DocumentPage() {
 
   // Keep loadRootDocuments as alias for backward compatibility
   const loadRootDocuments = loadFullTree;
+
+  // Use ref to store latest loadFullTree to avoid effect dependency issues
+  const loadFullTreeRef = useRef(loadFullTree);
+  useEffect(() => {
+    loadFullTreeRef.current = loadFullTree;
+  }, [loadFullTree]);
 
   const getDocumentHierarchy = useCallback(async (projectKey: string, documentId: string) => {
     const requestKey = `${projectKey}:${documentId}`;
@@ -551,14 +561,23 @@ function DocumentPage() {
   // Load tree once when entering the page or switching projects
   useEffect(() => {
     const projectKey = resolvedProjectKey || null;
+    console.log('[tree-effect] triggered', { 
+      projectKey, 
+      rootLoadAttemptRef: rootLoadAttemptRef.current,
+      willLoad: projectKey && rootLoadAttemptRef.current !== projectKey
+    });
     if (!projectKey) {
       return;
     }
     // Only load if we haven't loaded for this project yet
     if (rootLoadAttemptRef.current !== projectKey) {
-      void loadFullTree(projectKey);
+      console.log('[tree-effect] loading tree for project:', projectKey);
+      void loadFullTreeRef.current(projectKey);
+    } else {
+      console.log('[tree-effect] skipping - already loaded for project:', projectKey);
     }
-  }, [resolvedProjectKey, loadFullTree]);
+    // Only depend on resolvedProjectKey - use ref for the function
+  }, [resolvedProjectKey]);
 
   // Expand to the selected document (runs after tree is loaded)
   useEffect(() => {
