@@ -548,35 +548,43 @@ function DocumentPage() {
     navigate(`/documents/${encodeURIComponent(firstDoc.id)}`, { replace: true });
   }, [navigate, resolvedDocumentId, resolvedProjectKey, rootDocuments, rootLoading]);
 
+  // Load tree once when entering the page or switching projects
   useEffect(() => {
     const projectKey = resolvedProjectKey || null;
     if (!projectKey) {
       return;
     }
-    const ensureRootLoaded = async () => {
-      if (rootLoadAttemptRef.current !== projectKey) {
-        await loadRootDocuments(projectKey);
+    // Only load if we haven't loaded for this project yet
+    if (rootLoadAttemptRef.current !== projectKey) {
+      void loadFullTree(projectKey);
+    }
+  }, [resolvedProjectKey, loadFullTree]);
+
+  // Expand to the selected document (runs after tree is loaded)
+  useEffect(() => {
+    const projectKey = resolvedProjectKey || null;
+    if (!projectKey || !resolvedDocumentId) {
+      return;
+    }
+    // Wait until tree is loaded for this project
+    if (rootLoadAttemptRef.current !== projectKey || rootLoading) {
+      return;
+    }
+    // Use ref to access latest docParentMap without dependency
+    const currentDocParentMap = docParentMap;
+    if (currentDocParentMap.has(resolvedDocumentId)) {
+      const ancestors = buildAncestorsFromMap(resolvedDocumentId, currentDocParentMap);
+      if (ancestors.length > 0) {
+        const expanded: Record<string, boolean> = {};
+        ancestors.forEach((id) => {
+          expanded[id] = true;
+        });
+        setExpandedIds((prev) => ({ ...prev, ...expanded }));
       }
-    };
-    const expandToDocument = async () => {
-      await ensureRootLoaded();
-      if (projectKeyRef.current !== projectKey) {
-        return;
-      }
-      if (!resolvedDocumentId) {
-        return;
-      }
-      if (docParentMap.has(resolvedDocumentId)) {
-        const ancestors = buildAncestorsFromMap(resolvedDocumentId, docParentMap);
-        if (ancestors.length > 0) {
-          const expanded: Record<string, boolean> = {};
-          ancestors.forEach((id) => {
-            expanded[id] = true;
-          });
-          setExpandedIds((prev) => ({ ...prev, ...expanded }));
-        }
-        return;
-      }
+      return;
+    }
+    // If document not in tree, fetch its hierarchy to expand ancestors
+    const expandViaHierarchy = async () => {
       try {
         const hierarchyIds = await loadAncestorChain(projectKey, resolvedDocumentId);
         const ancestors = hierarchyIds
@@ -596,21 +604,14 @@ function DocumentPage() {
             expanded[id] = true;
           });
           setExpandedIds((prev) => ({ ...prev, ...expanded }));
-          // No need to load children - they're already loaded with the full tree
         }
       } catch {
-        return;
+        // Ignore errors
       }
     };
-    void expandToDocument();
-  }, [
-    buildAncestorsFromMap,
-    docParentMap,
-    loadAncestorChain,
-    loadRootDocuments,
-    resolvedDocumentId,
-    resolvedProjectKey,
-  ]);
+    void expandViaHierarchy();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedProjectKey, resolvedDocumentId, rootLoading]);
 
   const handleToggle = useCallback(
     (doc: KnowledgeBaseDocument) => {
