@@ -4,13 +4,20 @@ HELM_NAMESPACE ?= zeus
 NAMESPACE ?= $(HELM_NAMESPACE)
 CONFIG_PATH ?= /tmp/zeus-$(NAMESPACE)/config.yaml
 
-.PHONY: run-backend run-frontend install uninstall dev-install build-postgres-image build-backend-image build-frontend-image start-deps start-deps-dev stop-deps stop-deps-dev clean-deps start-all stop-all clean-all test-integration
+.PHONY: run-server run-app-backend run-app-web run-app-desktop install uninstall dev-install build-postgres-image build-backend-image build-frontend-image start-deps start-deps-dev stop-deps stop-deps-dev clean-deps start-all stop-all clean-all test-integration
 
-run-backend:
+# Development run commands
+run-server:
 	go run ./server/cmd/zeus
 
-run-frontend:
+run-app-backend:
+	cd apps/app-backend && npm run dev
+
+run-app-web:
 	cd apps/web && npm run dev
+
+run-app-desktop:
+	cd apps/desktop && cargo tauri dev
 
 install:
 	helm dependency build $(HELM_CHART)

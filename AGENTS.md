@@ -166,9 +166,10 @@ apps/web/src/
 
 ```bash
 # 开发运行
-make run-backend              # 运行 Go 平台后端
-make run-frontend             # 运行 React 前端 (apps/web)
-cd apps/app-backend && npm run dev  # 运行应用后端
+make run-server               # 运行 Go 平台后端
+make run-app-backend          # 运行 TypeScript 应用后端
+make run-app-web              # 运行 React 前端
+make run-app-desktop          # 运行 Tauri 桌面应用
 
 # Docker 镜像构建
 make build-postgres-image     # 构建 Postgres 镜像 (含中文分词)
