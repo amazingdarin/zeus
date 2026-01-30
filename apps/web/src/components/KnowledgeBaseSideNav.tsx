@@ -1,4 +1,4 @@
-import { useMemo, useState, type DragEvent } from "react";
+import { useMemo, useState, memo, type DragEvent } from "react";
 import { DownOutlined, RightOutlined } from "@ant-design/icons";
 
 export type KnowledgeBaseDocument = {
@@ -33,7 +33,7 @@ type KnowledgeBaseSideNavProps = {
   onMove: (request: KnowledgeBaseMoveRequest) => void;
 };
 
-function KnowledgeBaseSideNav({
+const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
   documents,
   childrenByParent,
   expandedIds,
@@ -304,7 +304,7 @@ function KnowledgeBaseSideNav({
       )}
     </aside>
   );
-}
+});
 
 export default KnowledgeBaseSideNav;
 

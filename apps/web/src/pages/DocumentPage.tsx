@@ -267,6 +267,7 @@ function DocumentPage() {
   const [childrenByParent, setChildrenByParent] = useState<
     Record<string, KnowledgeBaseDocument[]>
   >({});
+  const childrenByParentRef = useRef<Record<string, KnowledgeBaseDocument[]>>({});
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
   const [loadingIds, setLoadingIds] = useState<Record<string, boolean>>({});
   const [rootLoading, setRootLoading] = useState(false);
@@ -415,7 +416,8 @@ function DocumentPage() {
 
   const loadChildren = useCallback(
     async (projectKey: string, parentId: string, options?: { force?: boolean }) => {
-      const hasLoaded = Object.prototype.hasOwnProperty.call(childrenByParent, parentId);
+      // Use ref to check if loaded to avoid dependency on state
+      const hasLoaded = Object.prototype.hasOwnProperty.call(childrenByParentRef.current, parentId);
       if (!options?.force && hasLoaded) {
         return;
       }
@@ -428,10 +430,16 @@ function DocumentPage() {
         if (projectKeyRef.current !== projectKey) {
           return;
         }
-        setChildrenByParent((prev) => ({ ...prev, [parentId]: docs }));
+        setChildrenByParent((prev) => {
+          childrenByParentRef.current = { ...prev, [parentId]: docs };
+          return childrenByParentRef.current;
+        });
       } catch {
         if (projectKeyRef.current === projectKey) {
-          setChildrenByParent((prev) => ({ ...prev, [parentId]: [] }));
+          setChildrenByParent((prev) => {
+            childrenByParentRef.current = { ...prev, [parentId]: [] };
+            return childrenByParentRef.current;
+          });
         }
       } finally {
         if (projectKeyRef.current === projectKey) {
@@ -439,7 +447,7 @@ function DocumentPage() {
         }
       }
     },
-    [childrenByParent, fetchDocuments, updateLoadingIds],
+    [fetchDocuments, updateLoadingIds],
   );
 
   const getDocumentHierarchy = useCallback(async (projectKey: string, documentId: string) => {
@@ -519,6 +527,7 @@ function DocumentPage() {
     // Only reset tree state when project changes
     setRootDocuments([]);
     setChildrenByParent({});
+    childrenByParentRef.current = {};
     setExpandedIds({});
     setLoadingIds({});
     loadingIdsRef.current = {};
@@ -1000,6 +1009,7 @@ function DocumentPage() {
         for (const deletedId of result.deleted_ids) {
           delete next[deletedId];
         }
+        childrenByParentRef.current = next;
         return next;
       });
       setExpandedIds((prev) => {
@@ -1016,7 +1026,10 @@ function DocumentPage() {
       // If there was a parent, refresh its children too
       if (parentId && parentId !== "root") {
         const children = await fetchDocuments(resolvedProjectKey, parentId);
-        setChildrenByParent((prev) => ({ ...prev, [parentId]: children }));
+        setChildrenByParent((prev) => {
+          childrenByParentRef.current = { ...prev, [parentId]: children };
+          return childrenByParentRef.current;
+        });
         // If parent now has no children, collapse it
         if (children.length === 0) {
           setExpandedIds((prev) => {
