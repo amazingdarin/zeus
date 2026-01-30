@@ -8,6 +8,7 @@ import {
   RobotOutlined,
   CloudServerOutlined,
   ApiOutlined,
+  DesktopOutlined,
 } from "@ant-design/icons";
 
 import {
@@ -34,6 +35,8 @@ function getProviderIcon(providerId: LLMProviderId) {
       return <CloudServerOutlined />;
     case "google":
       return <ApiOutlined />;
+    case "ollama":
+      return <DesktopOutlined />;
     default:
       return <CloudServerOutlined />;
   }
@@ -186,6 +189,18 @@ function AIProviderPanel() {
   };
 
   /**
+   * Handle provider type selection
+   */
+  const handleSelectType = (providerId: LLMProviderId) => {
+    setSelectedType(providerId);
+    const typeInfo = providerTypes.find((t) => t.id === providerId);
+    // Pre-fill default values
+    if (typeInfo?.defaultBaseUrl) {
+      form.setFieldValue("baseUrl", typeInfo.defaultBaseUrl);
+    }
+  };
+
+  /**
    * Render the selected provider type's configuration form
    */
   const renderForm = () => {
@@ -193,6 +208,7 @@ function AIProviderPanel() {
 
     const typeInfo = getTypeInfo(selectedType);
     const isEditing = !!editingConfig;
+    const requiresApiKey = typeInfo?.requiresApiKey ?? true;
 
     return (
       <Form form={form} layout="vertical" onFinish={handleSubmit}>
@@ -201,17 +217,19 @@ function AIProviderPanel() {
           label="显示名称"
           rules={[{ required: true, message: "请输入显示名称" }]}
         >
-          <Input placeholder="我的 OpenAI 连接" />
+          <Input placeholder={`我的 ${typeInfo?.name || ""} 连接`} />
         </Form.Item>
 
-        <Form.Item
-          name="apiKey"
-          label="API 密钥"
-          extra={isEditing ? "留空则保持现有密钥不变" : undefined}
-          rules={[{ required: !isEditing, message: "API 密钥为必填项" }]}
-        >
-          <Input.Password placeholder="sk-..." />
-        </Form.Item>
+        {requiresApiKey && (
+          <Form.Item
+            name="apiKey"
+            label="API 密钥"
+            extra={isEditing ? "留空则保持现有密钥不变" : undefined}
+            rules={[{ required: !isEditing, message: "API 密钥为必填项" }]}
+          >
+            <Input.Password placeholder="sk-..." />
+          </Form.Item>
+        )}
 
         {typeInfo?.supportsBaseUrl && (
           <Form.Item
@@ -220,7 +238,7 @@ function AIProviderPanel() {
             extra={typeInfo.requiresBaseUrl ? "该提供商必须填写此项" : "可选，用于自定义接口地址"}
             rules={typeInfo.requiresBaseUrl ? [{ required: true, message: "API 地址为必填项" }] : undefined}
           >
-            <Input placeholder="https://api.example.com/v1" />
+            <Input placeholder={typeInfo.defaultBaseUrl || "https://api.example.com/v1"} />
           </Form.Item>
         )}
 
@@ -344,7 +362,7 @@ function AIProviderPanel() {
                 <div
                   key={type.id}
                   className={`provider-type-card${selectedType === type.id ? " selected" : ""}`}
-                  onClick={() => setSelectedType(type.id)}
+                  onClick={() => handleSelectType(type.id)}
                 >
                   <div className="provider-type-card-icon">{getProviderIcon(type.id)}</div>
                   <div className="provider-type-card-name">{type.name}</div>

@@ -9,6 +9,7 @@ export type LLMProviderId =
   | "openai"
   | "anthropic"
   | "google"
+  | "ollama"
   | "openai-compatible";
 
 /**

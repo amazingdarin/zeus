@@ -902,6 +902,16 @@ export const buildRouter = () => {
         defaultModels: ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
       },
       {
+        id: "ollama",
+        name: "Ollama",
+        description: "本地 Ollama 服务 (Llama, Qwen, DeepSeek 等)",
+        requiresApiKey: false,
+        supportsBaseUrl: true,
+        requiresBaseUrl: true,
+        defaultBaseUrl: "http://localhost:11434/v1",
+        defaultModels: ["llama3.2", "llama3.1", "qwen2.5", "deepseek-r1", "nomic-embed-text"],
+      },
+      {
         id: "openai-compatible",
         name: "OpenAI Compatible",
         description: "Any OpenAI-compatible API (DeepSeek, Qwen, Moonshot, etc.)",

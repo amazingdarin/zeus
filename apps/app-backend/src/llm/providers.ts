@@ -133,6 +133,48 @@ const DEFAULT_MODELS: Record<LLMProviderId, LLMModelConfig[]> = {
       capabilities: ["embedding"],
     },
   ],
+  ollama: [
+    {
+      id: "llama3.2",
+      name: "Llama 3.2",
+      providerId: "ollama",
+      capabilities: ["chat"],
+      contextWindow: 128000,
+    },
+    {
+      id: "llama3.1",
+      name: "Llama 3.1",
+      providerId: "ollama",
+      capabilities: ["chat"],
+      contextWindow: 128000,
+    },
+    {
+      id: "qwen2.5",
+      name: "Qwen 2.5",
+      providerId: "ollama",
+      capabilities: ["chat"],
+      contextWindow: 32000,
+    },
+    {
+      id: "deepseek-r1",
+      name: "DeepSeek R1",
+      providerId: "ollama",
+      capabilities: ["chat"],
+      contextWindow: 64000,
+    },
+    {
+      id: "nomic-embed-text",
+      name: "Nomic Embed Text",
+      providerId: "ollama",
+      capabilities: ["embedding"],
+    },
+    {
+      id: "mxbai-embed-large",
+      name: "mxbai Embed Large",
+      providerId: "ollama",
+      capabilities: ["embedding"],
+    },
+  ],
   "openai-compatible": [],
 };
 
@@ -192,6 +234,19 @@ class ProviderRegistry {
         apiKey: googleKey,
         enabled: true,
         models: DEFAULT_MODELS.google,
+      });
+    }
+
+    // Ollama (local, no API key required)
+    const ollamaUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434/v1";
+    // Always enable Ollama if OLLAMA_BASE_URL is set, or check if localhost is available
+    if (process.env.OLLAMA_BASE_URL) {
+      this.providers.set("ollama", {
+        id: "ollama",
+        name: "Ollama (本地)",
+        baseUrl: ollamaUrl,
+        enabled: true,
+        models: DEFAULT_MODELS.ollama,
       });
     }
 
@@ -348,6 +403,15 @@ class ProviderRegistry {
         });
         return google(modelId);
       }
+      case "ollama": {
+        // Ollama uses OpenAI-compatible API, no API key required
+        const openai = createOpenAI({
+          apiKey: apiKey || "ollama", // Ollama doesn't need a real key, but SDK requires one
+          baseURL: baseUrl || config?.baseUrl || "http://localhost:11434/v1",
+          compatibility: "compatible",
+        });
+        return openai(modelId);
+      }
       case "openai-compatible": {
         // For OpenAI-compatible providers, use OpenAI SDK with custom baseUrl
         const openai = createOpenAI({
@@ -392,6 +456,15 @@ class ProviderRegistry {
           apiKey: apiKey || config?.apiKey,
           baseURL: baseUrl || config?.baseUrl,
           compatibility: providerId === "openai-compatible" ? "compatible" : "strict",
+        });
+        return openai.embedding(modelId);
+      }
+      case "ollama": {
+        // Ollama uses OpenAI-compatible embedding API
+        const openai = createOpenAI({
+          apiKey: apiKey || "ollama",
+          baseURL: baseUrl || config?.baseUrl || "http://localhost:11434/v1",
+          compatibility: "compatible",
         });
         return openai.embedding(modelId);
       }

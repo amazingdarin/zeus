@@ -7,7 +7,7 @@ import { apiFetch } from "../config/api";
 /**
  * LLM Provider IDs
  */
-export type LLMProviderId = "openai" | "anthropic" | "google" | "openai-compatible";
+export type LLMProviderId = "openai" | "anthropic" | "google" | "ollama" | "openai-compatible";
 
 /**
  * Provider configuration status
@@ -54,6 +54,7 @@ export type ProviderType = {
   requiresApiKey: boolean;
   supportsBaseUrl: boolean;
   requiresBaseUrl?: boolean;
+  defaultBaseUrl?: string;
   defaultModels: string[];
 };
 
