@@ -841,6 +841,7 @@ export const buildRouter = () => {
 
       // Try a simple chat request
       try {
+        console.log(`[test] Testing provider=${config.providerId} model=${model} baseUrl=${config.baseUrl}`);
         const result = await llmGateway.chat({
           provider: config.providerId,
           model,
@@ -853,6 +854,7 @@ export const buildRouter = () => {
         // Update status to active
         await configStore.updateStatus(id, "active");
         
+        console.log(`[test] Success: ${result.content.substring(0, 50)}`);
         success(res, {
           success: true,
           model,
@@ -861,6 +863,7 @@ export const buildRouter = () => {
       } catch (testErr) {
         // Update status to error
         const errorMessage = testErr instanceof Error ? testErr.message : "Test failed";
+        console.error(`[test] Failed:`, testErr);
         await configStore.updateStatus(id, "error", errorMessage);
         
         error(res, "TEST_FAILED", errorMessage);
