@@ -523,7 +523,7 @@ function DocumentPage() {
     setExpandedIds({});
     setLoadingIds({});
     loadingIdsRef.current = {};
-    rootLoadAttemptRef.current = null;
+    rootLoadAttemptRef.current = null;  // Reset so tree will reload
     setRootLoading(false);
     initialRedirectRef.current = false;
     
@@ -536,12 +536,8 @@ function DocumentPage() {
     if (isProjectSwitch) {
       navigate("/documents", { replace: true });
     }
-    
-    if (!projectKey) {
-      return;
-    }
-    loadRootDocuments(projectKey);
-  }, [loadRootDocuments, navigate, resolvedProjectKey]);
+    // Tree loading is handled by the separate effect below
+  }, [navigate, resolvedProjectKey]);
 
   useEffect(() => {
     if (!resolvedProjectKey || !rootDocuments.length || resolvedDocumentId) {
