@@ -14,12 +14,14 @@ type SidebarProps = {
   items: SidebarItem[];
   activeIndex?: number;
   settingsActive?: boolean;
+  onSettingsClick?: () => void;
 };
 
 function Sidebar({
   items,
   activeIndex = 0,
   settingsActive = false,
+  onSettingsClick,
 }: SidebarProps) {
   return (
     <aside className="sidebar compact">
@@ -46,13 +48,14 @@ function Sidebar({
         })}
       </nav>
       <div className="sidebar-spacer" />
-      <Link
+      <button
+        type="button"
         className={`sidebar-menu-item${settingsActive ? " active" : ""}`}
-        to="/settings/providers"
-        title="Settings"
+        onClick={onSettingsClick}
+        title="设置"
       >
         <SettingOutlined />
-      </Link>
+      </button>
     </aside>
   );
 }

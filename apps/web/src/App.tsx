@@ -4,7 +4,6 @@ import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import AppShell from "./layout/AppShell";
 import DocumentPage from "./pages/DocumentPage";
 import NewDocumentPage from "./pages/NewDocumentPage";
-import SettingsPage from "./pages/SettingsPage";
 import { ProjectProvider } from "./context/ProjectContext";
 import { ensureSystemSession } from "./config/api";
 import "./App.css";
@@ -40,7 +39,6 @@ function App() {
             <Route path="/documents/:documentId" element={<DocumentPage />} />
             <Route path="/knowledge" element={<Navigate to="/documents" replace />} />
             <Route path="/documents/new" element={<NewDocumentPage />} />
-            <Route path="/settings/providers" element={<SettingsPage />} />
           </Routes>
         </AppShell>
       </HashRouter>

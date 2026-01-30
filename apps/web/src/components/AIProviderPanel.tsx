@@ -50,6 +50,7 @@ function AIProviderPanel() {
   const [editingConfig, setEditingConfig] = useState<ProviderConfig | null>(null);
   const [selectedType, setSelectedType] = useState<LLMProviderId | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
 
   /**
@@ -62,7 +63,7 @@ function AIProviderPanel() {
       setConfigs(configList);
       setProviderTypes(types);
     } catch (err) {
-      message.error("Failed to load provider configurations");
+      message.error("加载配置失败");
     } finally {
       setLoading(false);
     }
@@ -103,18 +104,18 @@ function AIProviderPanel() {
    */
   const handleDelete = async (config: ProviderConfig) => {
     Modal.confirm({
-      title: "Delete Provider Configuration",
-      content: `Are you sure you want to delete "${config.displayName}"?`,
-      okText: "Delete",
+      title: "删除提供商配置",
+      content: `确定要删除 "${config.displayName}" 吗？`,
+      okText: "删除",
       okType: "danger",
-      cancelText: "Cancel",
+      cancelText: "取消",
       onOk: async () => {
         try {
           await deleteConfig(config.id);
-          message.success("Configuration deleted");
+          message.success("配置已删除");
           loadData();
         } catch (err) {
-          message.error("Failed to delete configuration");
+          message.error("删除配置失败");
         }
       },
     });
@@ -128,11 +129,11 @@ function AIProviderPanel() {
     try {
       const result = await testConfig(config.id);
       if (result.success) {
-        message.success(`Connection successful! Tested with ${result.model}`);
+        message.success(`连接成功！测试模型：${result.model}`);
       }
       loadData(); // Refresh to update status
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Test failed";
+      const errorMsg = err instanceof Error ? err.message : "测试失败";
       message.error(errorMsg);
       loadData(); // Refresh to update status
     } finally {
@@ -145,7 +146,7 @@ function AIProviderPanel() {
    */
   const handleSubmit = async (values: Record<string, unknown>) => {
     if (!selectedType) {
-      message.error("Please select a provider type");
+      message.error("请选择一个提供商类型");
       return;
     }
 
@@ -158,19 +159,22 @@ function AIProviderPanel() {
       enabled: values.enabled as boolean ?? true,
     };
 
+    setSubmitting(true);
     try {
       if (editingConfig) {
         await updateConfig(editingConfig.id, input);
-        message.success("Configuration updated");
+        message.success("配置已更新");
       } else {
         await createConfig(input);
-        message.success("Configuration created");
+        message.success("配置已创建");
       }
       setModalVisible(false);
       loadData();
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Save failed";
+      const errorMsg = err instanceof Error ? err.message : "保存失败";
       message.error(errorMsg);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -194,17 +198,17 @@ function AIProviderPanel() {
       <Form form={form} layout="vertical" onFinish={handleSubmit}>
         <Form.Item
           name="displayName"
-          label="Display Name"
-          rules={[{ required: true, message: "Please enter a display name" }]}
+          label="显示名称"
+          rules={[{ required: true, message: "请输入显示名称" }]}
         >
-          <Input placeholder="My OpenAI Connection" />
+          <Input placeholder="我的 OpenAI 连接" />
         </Form.Item>
 
         <Form.Item
           name="apiKey"
-          label="API Key"
-          extra={isEditing ? "Leave blank to keep the existing API key" : undefined}
-          rules={[{ required: !isEditing, message: "API Key is required" }]}
+          label="API 密钥"
+          extra={isEditing ? "留空则保持现有密钥不变" : undefined}
+          rules={[{ required: !isEditing, message: "API 密钥为必填项" }]}
         >
           <Input.Password placeholder="sk-..." />
         </Form.Item>
@@ -212,9 +216,9 @@ function AIProviderPanel() {
         {typeInfo?.supportsBaseUrl && (
           <Form.Item
             name="baseUrl"
-            label="Base URL"
-            extra={typeInfo.requiresBaseUrl ? "Required for this provider" : "Optional, use custom endpoint"}
-            rules={typeInfo.requiresBaseUrl ? [{ required: true, message: "Base URL is required" }] : undefined}
+            label="API 地址"
+            extra={typeInfo.requiresBaseUrl ? "该提供商必须填写此项" : "可选，用于自定义接口地址"}
+            rules={typeInfo.requiresBaseUrl ? [{ required: true, message: "API 地址为必填项" }] : undefined}
           >
             <Input placeholder="https://api.example.com/v1" />
           </Form.Item>
@@ -222,12 +226,12 @@ function AIProviderPanel() {
 
         <Form.Item
           name="defaultModel"
-          label="Default Model"
-          extra="Optional, used for testing and as fallback"
+          label="默认模型"
+          extra="可选，用于测试连接和作为回退模型"
         >
           {typeInfo?.defaultModels && typeInfo.defaultModels.length > 0 ? (
             <Select
-              placeholder="Select a model"
+              placeholder="选择一个模型"
               allowClear
               showSearch
               options={typeInfo.defaultModels.map((m) => ({ label: m, value: m }))}
@@ -237,14 +241,14 @@ function AIProviderPanel() {
           )}
         </Form.Item>
 
-        <Form.Item name="enabled" label="Enabled" valuePropName="checked" initialValue={true}>
+        <Form.Item name="enabled" label="启用" valuePropName="checked" initialValue={true}>
           <Switch />
         </Form.Item>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 24 }}>
-          <Button onClick={() => setModalVisible(false)}>Cancel</Button>
-          <Button type="primary" htmlType="submit">
-            {isEditing ? "Update" : "Create"}
+        <div className="provider-form-actions">
+          <Button onClick={() => setModalVisible(false)}>取消</Button>
+          <Button type="primary" htmlType="submit" loading={submitting}>
+            {isEditing ? "更新" : "创建"}
           </Button>
         </div>
       </Form>
@@ -262,18 +266,18 @@ function AIProviderPanel() {
   return (
     <>
       <div className="settings-content-header">
-        <h2 className="settings-content-title">AI Providers</h2>
+        <h2 className="settings-content-title">AI 提供商</h2>
         <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-          Add Provider
+          添加提供商
         </Button>
       </div>
 
       {configs.length === 0 ? (
         <div className="provider-empty">
           <RobotOutlined className="provider-empty-icon" />
-          <p className="provider-empty-text">No AI providers configured yet</p>
+          <p className="provider-empty-text">尚未配置任何 AI 提供商</p>
           <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-            Add Your First Provider
+            添加第一个提供商
           </Button>
         </div>
       ) : (
@@ -291,15 +295,15 @@ function AIProviderPanel() {
                 <div className="provider-card-details">
                   <div className="provider-card-status">
                     <span className={`provider-card-status-dot ${config.status}`} />
-                    <span>{config.status === "active" ? "Active" : config.status === "error" ? "Error" : "Unknown"}</span>
+                    <span>{config.status === "active" ? "正常" : config.status === "error" ? "错误" : "未知"}</span>
                   </div>
-                  {config.defaultModel && <span>Model: {config.defaultModel}</span>}
-                  {config.apiKeyMasked && <span>Key: {config.apiKeyMasked}</span>}
-                  {!config.enabled && <span style={{ color: "#ef4444" }}>Disabled</span>}
+                  {config.defaultModel && <span>模型：{config.defaultModel}</span>}
+                  {config.apiKeyMasked && <span>密钥：{config.apiKeyMasked}</span>}
+                  {!config.enabled && <span className="provider-disabled-tag">已禁用</span>}
                 </div>
                 {config.lastError && (
-                  <div style={{ fontSize: 12, color: "#ef4444", marginTop: 4 }}>
-                    Error: {config.lastError}
+                  <div className="provider-error-msg">
+                    错误：{config.lastError}
                   </div>
                 )}
               </div>
@@ -308,13 +312,13 @@ function AIProviderPanel() {
                   icon={<ThunderboltOutlined />}
                   loading={testingId === config.id}
                   onClick={() => handleTest(config)}
-                  title="Test Connection"
+                  title="测试连接"
                 />
-                <Button icon={<EditOutlined />} onClick={() => handleEdit(config)} title="Edit" />
+                <Button icon={<EditOutlined />} onClick={() => handleEdit(config)} title="编辑" />
                 <Button
                   icon={<DeleteOutlined />}
                   onClick={() => handleDelete(config)}
-                  title="Delete"
+                  title="删除"
                 />
               </div>
             </div>
@@ -323,18 +327,17 @@ function AIProviderPanel() {
       )}
 
       <Modal
-        title={editingConfig ? "Edit Provider" : "Add Provider"}
+        title={editingConfig ? "编辑提供商" : "添加提供商"}
         open={modalVisible}
         onCancel={() => setModalVisible(false)}
         footer={null}
         width={500}
-        className="provider-modal"
         destroyOnClose
       >
         {!selectedType && !editingConfig ? (
           <>
-            <p style={{ color: "rgba(255,255,255,0.6)", marginBottom: 16 }}>
-              Select a provider type:
+            <p className="provider-type-hint">
+              选择一个提供商类型：
             </p>
             <div className="provider-type-grid">
               {providerTypes.map((type) => (

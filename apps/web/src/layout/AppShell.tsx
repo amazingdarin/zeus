@@ -4,6 +4,7 @@ import { FileTextOutlined } from "@ant-design/icons";
 
 import Sidebar from "../components/Sidebar";
 import ModelSettingsModal from "../components/ModelSettingsModal";
+import SettingsModal from "../components/SettingsModal";
 import TopBarModelButton from "../components/TopBarModelButton";
 import ChatDock from "../components/ChatDock";
 import type { ModelRuntimeInput } from "../api/model";
@@ -26,6 +27,7 @@ const navItems = [
 function AppShell({ children }: AppShellProps) {
   const location = useLocation();
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [modelRuntimes, setModelRuntimes] = useState<ModelRuntime[]>([]);
   const [modelSettingsLoading, setModelSettingsLoading] = useState(false);
   const [modelSettingsError, setModelSettingsError] = useState<string | null>(null);
@@ -34,10 +36,6 @@ function AppShell({ children }: AppShellProps) {
     const path = location.pathname;
     const index = navItems.findIndex((item) => item.to && path.startsWith(item.to));
     return index === -1 ? -1 : index;
-  }, [location.pathname]);
-
-  const settingsActive = useMemo(() => {
-    return location.pathname.startsWith("/settings");
   }, [location.pathname]);
 
   const loadModelSettings = useCallback(async () => {
@@ -88,7 +86,8 @@ function AppShell({ children }: AppShellProps) {
         <Sidebar
           items={navItems}
           activeIndex={activeIndex}
-          settingsActive={settingsActive}
+          settingsActive={settingsOpen}
+          onSettingsClick={() => setSettingsOpen(true)}
         />
         <main className="content">{children}</main>
       </div>
@@ -103,6 +102,10 @@ function AppShell({ children }: AppShellProps) {
         onRefreshModels={handleRefreshModels}
         onTestRuntime={handleTestRuntime}
         onSaveRuntime={handleSaveRuntime}
+      />
+      <SettingsModal
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
       />
     </div>
   );

@@ -21,7 +21,7 @@ type SettingsMenuProps = {
 function SettingsMenu({ items, activeKey, onSelect }: SettingsMenuProps) {
   return (
     <nav className="settings-menu">
-      <div className="settings-menu-title">Settings</div>
+      <div className="settings-menu-title">设置</div>
       {items.map((item) => (
         <button
           key={item.key}
