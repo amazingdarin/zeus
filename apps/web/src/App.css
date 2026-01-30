@@ -2859,7 +2859,7 @@ body {
   grid-template-columns: repeat(3, 1fr);
   gap: 12px;
   margin-bottom: 24px;
-  max-height: 280px;
+  max-height: 350px;
   overflow-y: auto;
   padding-right: 4px;
 }

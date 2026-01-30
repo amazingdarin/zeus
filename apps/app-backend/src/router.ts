@@ -830,10 +830,10 @@ export const buildRouter = () => {
       try {
         if (configType === "embedding") {
           // Test embedding
-          await llmGateway.embed({
-            input: "test",
-            model: config.defaultModel,
-            providerId: config.providerId,
+          await llmGateway.generateEmbeddings({
+            inputs: ["test"],
+            model: config.defaultModel || "nomic-embed-text",
+            provider: config.providerId,
             apiKey: config.apiKey,
             baseUrl: config.baseUrl,
           });
@@ -841,8 +841,8 @@ export const buildRouter = () => {
           // Test LLM chat
           await llmGateway.chat({
             messages: [{ role: "user", content: "Hi" }],
-            model: config.defaultModel,
-            providerId: config.providerId,
+            model: config.defaultModel || "gpt-4o",
+            provider: config.providerId,
             apiKey: config.apiKey,
             baseUrl: config.baseUrl,
           });
