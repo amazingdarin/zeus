@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "276ecf91-56cc-4a94-a394-8d9071ebeec9",
+    "schema_version": "v1",
+    "title": "transcriber",
+    "slug": "transcriber",
+    "path": "docs/test-upload-1/pagelm/backend/src/core/routes/transcriber.json",
+    "parent_id": "32d8ef6f-9f76-4692-a70e-f58ced342cff",
+    "created_at": "2026-01-30T09:15:25.772Z",
+    "updated_at": "2026-01-30T09:15:25.772Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "efea6583-15da-4c0a-a340-5a273223bc01",
+            "file_name": "transcriber.ts",
+            "mime": "application/octet-stream",
+            "size": 4372,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

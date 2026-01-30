@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "e5b82079-ca48-4e89-a71a-2f573cb26dcc",
+    "schema_version": "v1",
+    "title": "chat",
+    "slug": "chat",
+    "path": "docs/test-upload-1/pagelm/backend/src/utils/chat/chat.json",
+    "parent_id": "57245bc4-bd40-49a1-acc7-7cd41386e67d",
+    "created_at": "2026-01-30T09:15:25.789Z",
+    "updated_at": "2026-01-30T09:15:25.789Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "acf33b3a-4cff-4018-aed6-1936a22fcb3c",
+            "file_name": "chat.ts",
+            "mime": "application/octet-stream",
+            "size": 1415,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

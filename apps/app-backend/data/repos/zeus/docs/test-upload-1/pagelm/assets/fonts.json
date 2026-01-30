@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "id": "63051b97-5cd9-4cf4-ac75-1707addee2d9",
+    "schema_version": "v1",
+    "title": "fonts",
+    "slug": "fonts",
+    "path": "docs/test-upload-1/pagelm/assets/fonts.json",
+    "parent_id": "99d8afac-94dc-40cf-aff2-a502ea68ba8d",
+    "created_at": "2026-01-30T09:15:25.670Z",
+    "updated_at": "2026-01-30T09:15:25.670Z",
+    "extra": {
+      "status": "draft",
+      "tags": [],
+      "doc_type": "folder"
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": []
+    }
+  }
+}

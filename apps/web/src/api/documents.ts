@@ -177,6 +177,34 @@ export const moveDocument = async (
     }
 };
 
+export type DeleteDocumentResult = {
+    deleted_ids: string[];
+    count: number;
+};
+
+export const deleteDocument = async (
+    projectKey: string,
+    docId: string,
+    recursive = true,
+): Promise<DeleteDocumentResult> => {
+    const params = new URLSearchParams();
+    if (recursive) {
+        params.set("recursive", "true");
+    }
+    const response = await apiFetch(
+        `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(docId)}?${params.toString()}`,
+        {
+            method: "DELETE",
+        },
+    );
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.message || "Failed to delete document");
+    }
+    const payload = await response.json();
+    return payload?.data ?? { deleted_ids: [], count: 0 };
+};
+
 export const uploadDocument = async (
     projectKey: string,
     formData: FormData,

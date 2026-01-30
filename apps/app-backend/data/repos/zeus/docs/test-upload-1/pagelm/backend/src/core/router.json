@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "5214bca8-f656-48bb-89e4-05e1da98b88d",
+    "schema_version": "v1",
+    "title": "router",
+    "slug": "router",
+    "path": "docs/test-upload-1/pagelm/backend/src/core/router.json",
+    "parent_id": "50802abd-604b-4050-858a-e722ff8deeef",
+    "created_at": "2026-01-30T09:15:25.762Z",
+    "updated_at": "2026-01-30T09:15:25.762Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "69c2ebdf-c7e4-4221-b768-b8ab5a5b8e6b",
+            "file_name": "router.ts",
+            "mime": "application/octet-stream",
+            "size": 768,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

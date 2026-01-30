@@ -1,0 +1,91 @@
+{
+  "meta": {
+    "id": "fe000262-be97-4807-a69e-52e79acdd922",
+    "schema_version": "v1",
+    "title": "GOVERNANCE",
+    "slug": "governance",
+    "path": "docs/test/pagelm/governance.json",
+    "parent_id": "37bb6ac7-7224-4eaf-a1ee-4fdd67db7b92",
+    "created_at": "2026-01-30T09:16:07.235Z",
+    "updated_at": "2026-01-30T09:16:07.235Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "09fe7932-43c3-4270-92e8-b6e2c77caf24",
+            "file_name": "GOVERNANCE.md",
+            "mime": "text/markdown",
+            "size": 1328,
+            "file_type": "text"
+          }
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 1
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "PageLM Governance"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "## Stewardship\n- **Primary Maintainer**: nullure (morven, <https://demon142.net>) is the sole project owner.\n- All strategic, architectural, and release decisions ultimately rest with nullure.\n- Other contributors provide input through issues and pull requests but do not hold decision-making authority."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "## Decision Process\n1. Community discussion happens openly (issues, discussions, PR threads).\n2. nullure reviews proposals, provides direction, and approves or rejects changes.\n3. Once nullure approves, changes may be merged. Without explicit approval, changes cannot land."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "## File Integrity\n- `GOVERNANCE.md` is authoritative only when authored or directly approved by nullure.\n- Any modification to this file made by someone other than nullure is **invalid** and should be reverted or resubmitted for nullure’s confirmation.\n- Repository maintainers should verify the commit history of this file to ensure nullure’s authorship before relying on its contents."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "## Updates\n- Governance updates are initiated and finalized exclusively by nullure.\n- Contributors with suggestions should open an issue and await explicit guidance from nullure before preparing a patch."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "This structure keeps the project aligned with nullure’s vision while welcoming community contributions under clear stewardship."
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

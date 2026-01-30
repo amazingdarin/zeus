@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "id": "e53d79d8-1d96-454f-9010-eef294dd76e2",
+    "schema_version": "v1",
+    "title": "Tools",
+    "slug": "tools",
+    "path": "docs/test-upload-1/pagelm/frontend/src/components/tools.json",
+    "parent_id": "44956270-f44b-417b-a64d-1f2a2943439d",
+    "created_at": "2026-01-30T09:15:25.699Z",
+    "updated_at": "2026-01-30T09:15:25.699Z",
+    "extra": {
+      "status": "draft",
+      "tags": [],
+      "doc_type": "folder"
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": []
+    }
+  }
+}

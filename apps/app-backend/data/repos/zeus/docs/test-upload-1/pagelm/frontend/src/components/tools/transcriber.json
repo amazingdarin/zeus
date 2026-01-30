@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "df2841a0-2791-4590-aa22-406d31d963f5",
+    "schema_version": "v1",
+    "title": "Transcriber",
+    "slug": "transcriber",
+    "path": "docs/test-upload-1/pagelm/frontend/src/components/tools/transcriber.json",
+    "parent_id": "e53d79d8-1d96-454f-9010-eef294dd76e2",
+    "created_at": "2026-01-30T09:15:25.879Z",
+    "updated_at": "2026-01-30T09:15:25.879Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "38ac3664-fdf4-4e3b-ba00-599ab7bb7555",
+            "file_name": "Transcriber.tsx",
+            "mime": "application/octet-stream",
+            "size": 19353,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

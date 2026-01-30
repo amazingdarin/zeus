@@ -1,0 +1,35 @@
+{
+  "meta": {
+    "id": "d8b9eeeb-e8ff-4aaa-9a67-3fc6e8e2c7e9",
+    "schema_version": "v1",
+    "title": "smartnotes1",
+    "slug": "smartnotes1",
+    "path": "docs/test-upload-1/pagelm/assets/smartnotes/smartnotes1.json",
+    "parent_id": "fe744ecd-7d48-4b63-b310-3d4655ae7501",
+    "created_at": "2026-01-30T09:15:25.737Z",
+    "updated_at": "2026-01-30T09:15:25.737Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "7ffefa34-567d-43ff-8acf-d30119fb1997",
+            "file_name": "smartnotes1.pdf",
+            "mime": "application/pdf",
+            "size": 13417,
+            "file_type": "office",
+            "office_type": "pdf"
+          }
+        }
+      ]
+    }
+  }
+}

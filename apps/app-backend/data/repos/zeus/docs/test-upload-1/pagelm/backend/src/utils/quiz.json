@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "id": "2769f761-3fde-4018-a420-8f2be9ecdb18",
+    "schema_version": "v1",
+    "title": "quiz",
+    "slug": "quiz",
+    "path": "docs/test-upload-1/pagelm/backend/src/utils/quiz.json",
+    "parent_id": "199ba8d6-0497-4ad4-a9e9-a828fe3d8fa9",
+    "created_at": "2026-01-30T09:15:25.693Z",
+    "updated_at": "2026-01-30T09:15:25.693Z",
+    "extra": {
+      "status": "draft",
+      "tags": [],
+      "doc_type": "folder"
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": []
+    }
+  }
+}

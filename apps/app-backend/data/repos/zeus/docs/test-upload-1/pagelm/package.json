@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "6f67c4a0-9804-4f2e-ace4-02bf19d360c1",
+    "schema_version": "v1",
+    "title": "package",
+    "slug": "package",
+    "path": "docs/test-upload-1/pagelm/package.json",
+    "parent_id": "cdd90fde-d1dc-46a8-b4cc-bfdd8c6ebee1",
+    "created_at": "2026-01-30T09:15:25.923Z",
+    "updated_at": "2026-01-30T09:15:25.923Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "c6793a4e-e67c-40b7-9cb5-e2040614a4e7",
+            "file_name": "package.json",
+            "mime": "application/json",
+            "size": 1345,
+            "file_type": "text"
+          }
+        }
+      ]
+    }
+  }
+}

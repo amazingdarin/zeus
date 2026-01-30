@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "ba0d1914-202f-4a79-9bd9-1c8ca47995cf",
+    "schema_version": "v1",
+    "title": "engine",
+    "slug": "engine",
+    "path": "docs/test-upload-1/pagelm/frontend/src/components/planner/mindmap/engine.json",
+    "parent_id": "07a73350-7371-483b-94cf-8462b20dc6d7",
+    "created_at": "2026-01-30T09:15:25.853Z",
+    "updated_at": "2026-01-30T09:15:25.853Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "92860aab-7ebe-441b-9028-73d69a36ce88",
+            "file_name": "engine.ts",
+            "mime": "application/octet-stream",
+            "size": 2254,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

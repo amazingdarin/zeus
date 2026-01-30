@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "id": "649830f0-8f24-4252-ab61-81a3be4cfcf2",
+    "schema_version": "v1",
+    "title": "ai",
+    "slug": "ai",
+    "path": "docs/test-upload-1/pagelm/backend/src/lib/ai.json",
+    "parent_id": "e7b0e25c-623f-4df2-ba9d-51819346a221",
+    "created_at": "2026-01-30T09:15:25.685Z",
+    "updated_at": "2026-01-30T09:15:25.685Z",
+    "extra": {
+      "status": "draft",
+      "tags": [],
+      "doc_type": "folder"
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": []
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "ddc75c27-453e-4401-b7db-8ef8ebf6c53b",
+    "schema_version": "v1",
+    "title": "LoadingIndicator",
+    "slug": "loadingindicator",
+    "path": "docs/test-upload-1/pagelm/frontend/src/components/chat/loadingindicator.json",
+    "parent_id": "5f85fb8d-3bed-4b39-ad69-88f0dbad7915",
+    "created_at": "2026-01-30T09:15:25.842Z",
+    "updated_at": "2026-01-30T09:15:25.842Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "e1aa2ad4-1607-47bf-812c-01a8a20f6fa0",
+            "file_name": "LoadingIndicator.tsx",
+            "mime": "application/octet-stream",
+            "size": 861,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

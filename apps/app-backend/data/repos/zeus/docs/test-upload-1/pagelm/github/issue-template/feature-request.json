@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "5f23425c-4f08-4cca-9660-ce922084bbc6",
+    "schema_version": "v1",
+    "title": "feature_request",
+    "slug": "feature-request",
+    "path": "docs/test-upload-1/pagelm/github/issue-template/feature-request.json",
+    "parent_id": "523b9159-a44e-474a-a1b4-cf05c13666e4",
+    "created_at": "2026-01-30T09:15:25.709Z",
+    "updated_at": "2026-01-30T09:15:25.709Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "70d998b5-9711-49d1-97bb-ec4ff50d5cc4",
+            "file_name": "feature_request.yml",
+            "mime": "application/x-yaml",
+            "size": 2230,
+            "file_type": "text"
+          }
+        }
+      ]
+    }
+  }
+}

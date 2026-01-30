@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "id": "1573134a-5868-4eaf-a756-f2e1f2167225",
+    "schema_version": "v1",
+    "title": "podcast",
+    "slug": "podcast",
+    "path": "docs/test-upload-1/pagelm/backend/src/services/podcast.json",
+    "parent_id": "f4ffbbd7-d857-4045-a58c-c066d200c67c",
+    "created_at": "2026-01-30T09:15:25.688Z",
+    "updated_at": "2026-01-30T09:15:25.688Z",
+    "extra": {
+      "status": "draft",
+      "tags": [],
+      "doc_type": "folder"
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": []
+    }
+  }
+}

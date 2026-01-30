@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "8ff8bbd6-383c-4c8a-b013-70fd38106704",
+    "schema_version": "v1",
+    "title": "runtime",
+    "slug": "runtime",
+    "path": "docs/test-upload-1/pagelm/backend/src/agents/runtime.json",
+    "parent_id": "2c706f06-0e67-4d5f-9979-fc2d313f1a26",
+    "created_at": "2026-01-30T09:15:25.748Z",
+    "updated_at": "2026-01-30T09:15:25.748Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "eb3ee552-92ef-4f84-ba43-54bfc76d8a5a",
+            "file_name": "runtime.ts",
+            "mime": "application/octet-stream",
+            "size": 1733,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

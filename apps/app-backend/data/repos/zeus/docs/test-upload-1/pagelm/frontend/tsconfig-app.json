@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "efe49631-a714-41fe-b5da-2fd7c8916766",
+    "schema_version": "v1",
+    "title": "tsconfig.app",
+    "slug": "tsconfig-app",
+    "path": "docs/test-upload-1/pagelm/frontend/tsconfig-app.json",
+    "parent_id": "00fb5b30-7a69-48f2-8d5c-1581de469fcc",
+    "created_at": "2026-01-30T09:15:25.902Z",
+    "updated_at": "2026-01-30T09:15:25.902Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "9f748f53-bf15-4d66-84b7-d48b6a2a2e5f",
+            "file_name": "tsconfig.app.json",
+            "mime": "application/json",
+            "size": 702,
+            "file_type": "text"
+          }
+        }
+      ]
+    }
+  }
+}

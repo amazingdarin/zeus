@@ -1,0 +1,106 @@
+{
+  "meta": {
+    "id": "5df94d91-6f09-4340-941b-ceb3ebd1791f",
+    "schema_version": "v1",
+    "title": "pull_request_template",
+    "slug": "pull-request-template",
+    "path": "docs/test/pagelm/github/pull-request-template.json",
+    "parent_id": "e01d7520-d178-4bc9-aa61-1cbfab0826e1",
+    "created_at": "2026-01-30T09:16:07.221Z",
+    "updated_at": "2026-01-30T09:16:07.221Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "49134206-5dbc-4c61-b048-78e0b44a961e",
+            "file_name": "pull_request_template.md",
+            "mime": "text/markdown",
+            "size": 1483,
+            "file_type": "text"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "## 📋 Description\n<!-- Provide a brief description of the changes in this PR -->"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "## 🔄 Type of Change\n<!-- Mark the relevant option with an \"x\" -->\n- [ ] 🐛 Bug fix (non-breaking change which fixes an issue)\n- [ ] ✨ New feature (non-breaking change which adds functionality)\n- [ ] 💥 Breaking change (fix or feature that would cause existing functionality to not work as expected)\n- [ ] 📚 Documentation update\n- [ ] 🎨 Style/UI changes\n- [ ] ♻️ Code refactoring\n- [ ] ⚡ Performance improvements\n- [ ] 🧪 Test updates\n- [ ] 🔧 Build/CI changes"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "## 🧪 Testing\n<!-- Describe the tests you ran and/or added -->\n- [ ] I have tested this change locally\n- [ ] I have added tests that prove my fix is effective or that my feature works\n- [ ] New and existing unit tests pass locally with my changes"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "## 📱 Screenshots (if applicable)\n<!-- Add screenshots for UI changes -->"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "## 🔍 Code Review Checklist\n<!-- For reviewers -->\n- [ ] Code follows the project's coding standards\n- [ ] Self-review of the code has been performed\n- [ ] Code is properly commented, particularly in hard-to-understand areas\n- [ ] Changes generate no new warnings\n- [ ] Any dependent changes have been merged and published"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "## 📚 Related Issues\n<!-- Link any related issues using \"Closes #issue_number\" or \"Fixes #issue_number\" -->"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "## 🚀 Deployment Notes\n<!-- Any special deployment considerations -->"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "## 📋 Additional Context\n<!-- Add any other context about the PR here -->"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

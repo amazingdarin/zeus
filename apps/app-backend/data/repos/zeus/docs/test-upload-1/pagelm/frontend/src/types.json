@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "id": "de2a5f1a-9e80-488b-8ccf-e2cfd848b844",
+    "schema_version": "v1",
+    "title": "types",
+    "slug": "types",
+    "path": "docs/test-upload-1/pagelm/frontend/src/types.json",
+    "parent_id": "349b5e2c-aca8-4077-bc39-2bb46efa25a3",
+    "created_at": "2026-01-30T09:15:25.683Z",
+    "updated_at": "2026-01-30T09:15:25.683Z",
+    "extra": {
+      "status": "draft",
+      "tags": [],
+      "doc_type": "folder"
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": []
+    }
+  }
+}

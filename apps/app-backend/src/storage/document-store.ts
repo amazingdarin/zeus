@@ -226,15 +226,62 @@ export const documentStore = {
   },
 
   /**
-   * Delete a document
+   * Delete a document (optionally recursive)
+   * Returns the list of deleted document IDs
    */
-  async delete(projectKey: string, docId: string): Promise<void> {
+  async delete(projectKey: string, docId: string, recursive = false): Promise<string[]> {
     const root = projectRoot(projectKey);
     await indexManager.ensure(projectKey, root);
 
     const cached = indexManager.get(projectKey, docId);
     if (!cached) {
       throw new DocumentNotFoundError(docId);
+    }
+
+    const deletedIds: string[] = [];
+
+    // If recursive, delete children first
+    if (recursive) {
+      const childIds = await this.collectAllDescendantIds(projectKey, docId);
+      // Delete from bottom-up (children first)
+      for (const childId of childIds.reverse()) {
+        await this.deleteSingle(projectKey, childId);
+        deletedIds.push(childId);
+      }
+    }
+
+    // Delete the document itself
+    await this.deleteSingle(projectKey, docId);
+    deletedIds.push(docId);
+
+    return deletedIds;
+  },
+
+  /**
+   * Collect all descendant document IDs (for recursive deletion)
+   */
+  async collectAllDescendantIds(projectKey: string, parentId: string): Promise<string[]> {
+    const children = await this.getChildren(projectKey, parentId);
+    const ids: string[] = [];
+
+    for (const child of children) {
+      ids.push(child.id);
+      // Recursively collect descendants
+      const descendants = await this.collectAllDescendantIds(projectKey, child.id);
+      ids.push(...descendants);
+    }
+
+    return ids;
+  },
+
+  /**
+   * Delete a single document (no recursion)
+   */
+  async deleteSingle(projectKey: string, docId: string): Promise<void> {
+    const root = projectRoot(projectKey);
+    const cached = indexManager.get(projectKey, docId);
+    if (!cached) {
+      return; // Already deleted or doesn't exist
     }
 
     const fullPath = path.join(root, cached.path);
@@ -248,7 +295,7 @@ export const documentStore = {
       }
     }
 
-    // Remove companion directory
+    // Remove companion directory (contains children)
     const ext = path.extname(fullPath);
     const companionDir = fullPath.slice(0, -ext.length);
     await rm(companionDir, { recursive: true, force: true });

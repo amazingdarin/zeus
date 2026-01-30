@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "id": "32d8ef6f-9f76-4692-a70e-f58ced342cff",
+    "schema_version": "v1",
+    "title": "routes",
+    "slug": "routes",
+    "path": "docs/test-upload-1/pagelm/backend/src/core/routes.json",
+    "parent_id": "50802abd-604b-4050-858a-e722ff8deeef",
+    "created_at": "2026-01-30T09:15:25.684Z",
+    "updated_at": "2026-01-30T09:15:25.684Z",
+    "extra": {
+      "status": "draft",
+      "tags": [],
+      "doc_type": "folder"
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": []
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "f4d707b7-4a93-4832-9f7b-369d5593de27",
+    "schema_version": "v1",
+    "title": "schibsted_grotesk",
+    "slug": "schibsted-grotesk",
+    "path": "docs/test-upload-1/pagelm/frontend/public/fonts/schibsted-grotesk.json",
+    "parent_id": "e76277c9-87b9-4675-90a0-0774c01044fa",
+    "created_at": "2026-01-30T09:15:25.824Z",
+    "updated_at": "2026-01-30T09:15:25.824Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "b2f3ac7b-35b8-4736-b484-a35389c837a2",
+            "file_name": "schibsted_grotesk.woff2",
+            "mime": "application/octet-stream",
+            "size": 46764,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

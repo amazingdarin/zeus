@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "id": "e01d7520-d178-4bc9-aa61-1cbfab0826e1",
+    "schema_version": "v1",
+    "title": ".github",
+    "slug": "github",
+    "path": "docs/test/pagelm/github.json",
+    "parent_id": "37bb6ac7-7224-4eaf-a1ee-4fdd67db7b92",
+    "created_at": "2026-01-30T09:16:07.217Z",
+    "updated_at": "2026-01-30T09:16:07.217Z",
+    "extra": {
+      "status": "draft",
+      "tags": [],
+      "doc_type": "folder"
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": []
+    }
+  }
+}

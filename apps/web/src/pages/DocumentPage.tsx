@@ -23,6 +23,7 @@ import {
   applyProposal,
   moveDocument,
   createDocument,
+  deleteDocument,
   fetchUrlHtml,
   importGit,
   type DocumentListItem,
@@ -221,6 +222,7 @@ function DocumentPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [diffData, setDiffData] = useState<{ metaDiff: string; contentDiff: string } | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
@@ -942,6 +944,50 @@ function DocumentPage() {
     requestRebuild(withSummary);
   };
 
+  const handleDelete = useCallback(async () => {
+    if (!resolvedProjectKey || !activeDocument) {
+      return;
+    }
+    if (deleting) {
+      return;
+    }
+    // Show confirmation dialog
+    const hasChildren = activeDocument.docType === "dir";
+    const confirmMessage = hasChildren
+      ? `Are you sure you want to delete "${activeDocument.title}" and all its sub-documents? This action cannot be undone.`
+      : `Are you sure you want to delete "${activeDocument.title}"? This action cannot be undone.`;
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      const result = await deleteDocument(resolvedProjectKey, activeDocument.id, true);
+      console.log("Document deleted:", result);
+      // Clear caches for deleted documents
+      for (const deletedId of result.deleted_ids) {
+        const cacheKey = `${resolvedProjectKey}:${deletedId}`;
+        documentCache.delete(cacheKey);
+        documentPromiseCache.delete(cacheKey);
+        documentHierarchyCache.delete(cacheKey);
+        documentHierarchyPromiseCache.delete(cacheKey);
+      }
+      // Navigate to parent or root
+      const parentId = activeDocument.parentId;
+      if (parentId && parentId !== "root") {
+        navigate(`/documents/${encodeURIComponent(parentId)}`);
+      } else {
+        navigate("/documents");
+      }
+      // Trigger sidebar refresh
+      sideNavRefreshTriggerRef.current += 1;
+    } catch (err) {
+      console.error("Delete failed:", err);
+      alert(err instanceof Error ? err.message : "Failed to delete document");
+    } finally {
+      setDeleting(false);
+    }
+  }, [resolvedProjectKey, activeDocument, deleting, navigate]);
+
   const handleOpenNew = () => {
     if (!allowChildActions) {
       return;
@@ -1460,13 +1506,16 @@ function DocumentPage() {
           mode="view"
           allowChildActions={allowChildActions}
           allowEdit={Boolean(activeDocument)}
+          allowDelete={Boolean(activeDocument)}
           allowRebuild={Boolean(activeDocument)}
           rebuilding={rebuilding}
+          deleting={deleting}
           onEdit={handleEdit}
           onSave={() => { }}
           onCancel={() => { }}
           onNew={handleOpenNew}
           onImport={() => handleOpenImportWithMode("file")}
+          onDelete={handleDelete}
           onRebuild={handleRebuild}
           onExport={activeDocument ? handleExport : undefined}
         />

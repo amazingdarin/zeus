@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "fafd1803-e7bc-4e29-8360-887b679595e4",
+    "schema_version": "v1",
+    "title": "ReviewModal",
+    "slug": "reviewmodal",
+    "path": "docs/test-upload-1/pagelm/frontend/src/components/quiz/reviewmodal.json",
+    "parent_id": "8db0af4f-436c-4739-828b-02a04e32331a",
+    "created_at": "2026-01-30T09:15:25.864Z",
+    "updated_at": "2026-01-30T09:15:25.864Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "a8122752-08e5-4c47-8d22-120cf8e27ec5",
+            "file_name": "ReviewModal.tsx",
+            "mime": "application/octet-stream",
+            "size": 3868,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

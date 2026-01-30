@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "b3a18ca8-7eae-4ef3-8e51-d03f819a611d",
+    "schema_version": "v1",
+    "title": "types",
+    "slug": "types",
+    "path": "docs/test-upload-1/pagelm/backend/src/agents/types.json",
+    "parent_id": "2c706f06-0e67-4d5f-9979-fc2d313f1a26",
+    "created_at": "2026-01-30T09:15:25.757Z",
+    "updated_at": "2026-01-30T09:15:25.757Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "3db51a9d-fd75-4485-89f4-8be0042fac19",
+            "file_name": "types.ts",
+            "mime": "application/octet-stream",
+            "size": 984,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

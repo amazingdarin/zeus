@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "b147ac12-87dc-4483-b804-bc5426fcaeb4",
+    "schema_version": "v1",
+    "title": "llm",
+    "slug": "llm",
+    "path": "docs/test-upload-1/pagelm/backend/src/utils/llm/llm.json",
+    "parent_id": "10e7b6b8-1761-4d6e-bfaa-03005d845b35",
+    "created_at": "2026-01-30T09:15:25.795Z",
+    "updated_at": "2026-01-30T09:15:25.795Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "1453500e-bfdf-4b4e-9386-c4dfd906df92",
+            "file_name": "llm.ts",
+            "mime": "application/octet-stream",
+            "size": 121,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

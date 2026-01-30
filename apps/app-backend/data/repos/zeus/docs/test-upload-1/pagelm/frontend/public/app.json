@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "61534c86-76cc-4d23-9027-dd0292a85bfb",
+    "schema_version": "v1",
+    "title": "app",
+    "slug": "app",
+    "path": "docs/test-upload-1/pagelm/frontend/public/app.json",
+    "parent_id": "7630177c-9d2c-4898-b245-fe95338d8e1a",
+    "created_at": "2026-01-30T09:15:25.823Z",
+    "updated_at": "2026-01-30T09:15:25.823Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "197eece1-3f16-441d-a284-0368bd967892",
+            "file_name": "app.css",
+            "mime": "application/octet-stream",
+            "size": 591,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

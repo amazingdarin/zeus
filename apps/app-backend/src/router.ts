@@ -246,20 +246,24 @@ export const buildRouter = () => {
   });
 
   /**
-   * Delete a document
-   * DELETE /projects/:projectKey/documents/:docId
+   * Delete a document (optionally recursive)
+   * DELETE /projects/:projectKey/documents/:docId?recursive=true
    */
   router.delete("/projects/:projectKey/documents/:docId", async (req: Request, res: Response) => {
     try {
       const { projectKey, docId } = req.params;
-      await documentStore.delete(projectKey, docId);
+      const recursive = req.query.recursive === "true";
+      
+      const deletedIds = await documentStore.delete(projectKey, docId, recursive);
 
-      // Remove from index asynchronously
-      knowledgeSearch.removeDocument(projectKey, docId).catch((err) => {
-        console.error("Remove index error:", err);
-      });
+      // Remove all deleted documents from index asynchronously
+      for (const deletedId of deletedIds) {
+        knowledgeSearch.removeDocument(projectKey, deletedId).catch((err) => {
+          console.error("Remove index error:", err);
+        });
+      }
 
-      success(res, null);
+      success(res, { deleted_ids: deletedIds, count: deletedIds.length });
     } catch (err) {
       if (err instanceof DocumentNotFoundError) {
         error(res, "NOT_FOUND", err.message, 404);

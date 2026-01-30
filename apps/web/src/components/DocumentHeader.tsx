@@ -11,13 +11,16 @@ type DocumentHeaderProps = {
   mode: "view" | "edit";
   allowChildActions?: boolean;
   allowEdit?: boolean;
+  allowDelete?: boolean;
   allowRebuild?: boolean;
   rebuilding?: boolean;
+  deleting?: boolean;
   onEdit: () => void;
   onSave: () => void;
   onCancel: () => void;
   onNew: () => void;
   onImport: () => void;
+  onDelete?: () => void;
   onRebuild?: () => void;
   onExport?: () => void;
 };
@@ -27,13 +30,16 @@ function DocumentHeader({
   mode,
   allowChildActions = true,
   allowEdit = true,
+  allowDelete = false,
   allowRebuild = false,
   rebuilding = false,
+  deleting = false,
   onEdit,
   onSave,
   onCancel,
   onNew,
   onImport,
+  onDelete,
   onRebuild,
   onExport,
 }: DocumentHeaderProps) {
@@ -70,6 +76,14 @@ function DocumentHeader({
   const handleCancel = () => {
     handleCloseMenu();
     onCancel();
+  };
+
+  const handleDelete = () => {
+    if (!onDelete) {
+      return;
+    }
+    handleCloseMenu();
+    onDelete();
   };
 
   const handleRebuild = () => {
@@ -194,6 +208,16 @@ function DocumentHeader({
                 {onExport ? (
                   <button className="kb-menu-item" type="button" onClick={handleExport}>
                     Export
+                  </button>
+                ) : null}
+                {allowDelete && onDelete ? (
+                  <button
+                    className="kb-menu-item kb-menu-item-danger"
+                    type="button"
+                    onClick={handleDelete}
+                    disabled={deleting}
+                  >
+                    {deleting ? "Deleting..." : "Delete"}
                   </button>
                 ) : null}
               </>

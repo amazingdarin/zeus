@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "954b3924-1fb4-4491-b0d9-1dbad8ba6e91",
+    "schema_version": "v1",
+    "title": "eslint.config",
+    "slug": "eslint-config",
+    "path": "docs/test-upload-1/pagelm/frontend/eslint-config.json",
+    "parent_id": "00fb5b30-7a69-48f2-8d5c-1581de469fcc",
+    "created_at": "2026-01-30T09:15:25.817Z",
+    "updated_at": "2026-01-30T09:15:25.817Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "e6c362bb-d53a-4888-85ee-5c098d101007",
+            "file_name": "eslint.config.js",
+            "mime": "application/octet-stream",
+            "size": 610,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}

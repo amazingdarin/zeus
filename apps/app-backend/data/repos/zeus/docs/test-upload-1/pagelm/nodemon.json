@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "8219d24b-4386-4648-812d-0ba7066b777f",
+    "schema_version": "v1",
+    "title": "nodemon",
+    "slug": "nodemon",
+    "path": "docs/test-upload-1/pagelm/nodemon.json",
+    "parent_id": "cdd90fde-d1dc-46a8-b4cc-bfdd8c6ebee1",
+    "created_at": "2026-01-30T09:15:25.920Z",
+    "updated_at": "2026-01-30T09:15:25.920Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "f9f5571a-45d2-4e03-83b2-79af4f1dc0d7",
+            "file_name": "nodemon.json",
+            "mime": "application/json",
+            "size": 142,
+            "file_type": "text"
+          }
+        }
+      ]
+    }
+  }
+}
