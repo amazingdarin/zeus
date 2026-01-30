@@ -415,7 +415,8 @@ class ProviderRegistry {
           baseURL: ollamaBaseUrl,
           compatibility: "compatible",
         });
-        return openai(modelId);
+        // Use .chat() to force chat completions API instead of responses API
+        return openai.chat(modelId);
       }
       case "openai-compatible": {
         // For OpenAI-compatible providers, use OpenAI SDK with custom baseUrl
