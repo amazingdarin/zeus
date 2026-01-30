@@ -185,10 +185,6 @@ body {
   box-shadow: var(--shadow-lg);
   z-index: 1000;
   min-width: 180px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: #2a2f36;
-  z-index: 10;
 }
 
 .project-selector-menu.compact {
