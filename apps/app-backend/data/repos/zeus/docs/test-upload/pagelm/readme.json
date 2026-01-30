@@ -1,0 +1,802 @@
+{
+  "meta": {
+    "id": "836a0ac0-1cbd-4c1e-81c4-ba2c8a1e3de8",
+    "schema_version": "v1",
+    "title": "README",
+    "slug": "readme",
+    "path": "docs/test-upload/pagelm/readme.json",
+    "parent_id": "a428f8ec-f0ba-46c0-ab70-ea72fa99e484",
+    "created_at": "2026-01-30T09:02:38.973Z",
+    "updated_at": "2026-01-30T09:02:38.973Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "fileBlock",
+          "attrs": {
+            "asset_id": "0785aeb4-637b-4a90-9b3b-b33bd933ce1b",
+            "file_name": "README.md",
+            "mime": "text/markdown",
+            "size": 9318,
+            "file_type": "text"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "<div align=\"center\">\n  \n<img width=\"full\" height=\"auto\" alt=\"pagelm\" src=\"https://github.com/user-attachments/assets/d3133be1-1931-4132-9301-3596ebb21122\" />"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 1
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "PageLM"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**An open source AI powered education platform that transforms study materials into interactive learning experiences, slightly inspired by NotebookLM**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[Report Bug](https://github.com/caviraOSS/pagelm/issues) • [Request Feature](https://github.com/caviraOSS/pagelm/issues) • [Discord server](https://discord.gg/P7HaRayqTh)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "</div>"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "<p align=\"center\">\n  <a href=\"LICENSE\"><img src=\"https://img.shields.io/badge/License-PageLM%20Community%20License-blueviolet.svg\" alt=\"License: PageLM Community License\"></a>\n  <a href=\"https://nodejs.org/\"><img src=\"https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg\" alt=\"Node.js Version\"></a>\n  <a href=\"https://reactjs.org/\"><img src=\"https://img.shields.io/badge/React-18+-blue.svg\" alt=\"React\"></a>\n  <a href=\"https://www.typescriptlang.org/\"><img src=\"https://img.shields.io/badge/TypeScript-5.0+-blue.svg\" alt=\"TypeScript\"></a>\n  <a href=\"https://discord.gg/P7HaRayqTh\"><img alt=\"Discord\" src=\"https://img.shields.io/discord/1379682804849180844?label=Discord%20server\"></a>\n</p>"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "---"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 1
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "**🔥 Spread the Word!**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "<p align=\"center\">\n  <a href=\"https://twitter.com/intent/tweet?text=🤯%20Found%20the%20open%2Dsource%20NotebookLM%20killer%3A%20PageLM%21%20It%20turns%20PDFs%20into%20quizzes%2C%20flashcards%2C%20and%20podcasts.%20Stop%20paying%20for%20study%20tools%21&url=https%3A%2F%2Fgithub.com%2FCaviraOSS%2FPageLM&hashtags=ai,opensource,education,llm\"><img src=\"https://img.shields.io/badge/Share%20on%20X-000000?style=for-the-badge&logo=x&logoColor=white\" alt=\"Share on X\"></a>\n  &nbsp;\n  <a href=\"https://www.linkedin.com/shareArticle?url=https%3A%2F%2Fgithub.com%2FCaviraOSS%2FPageLM&title=PageLM%3A%20The%20Open%2DSource%20NotebookLM%20Alternative%20for%20Students&summary=PageLM%20is%20an%20AI%20platform%20that%20transforms%20lecture%20notes%20and%20PDFs%20into%20interactive%20quizzes%20and%20AI%20podcasts.%20A%20great%20example%20of%20full%2Dstack%20AI%20development%20%28Node%2FReact%2FLangChain%29.\"><img src=\"https://img.shields.io/badge/Share%20on%20LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white\" alt=\"Share on LinkedIn\"></a>\n  &nbsp;\n  <a href=\"https://reddit.com/submit?url=https%3A%2F%2Fgithub.com%2FCaviraOSS%2FPageLM&title=PageLM%3A%20Open%20Source%20AI%20Notebook%20that%20creates%20Quizzes%2C%20Flashcards%2C%20and%20Podcasts\"><img src=\"https://img.shields.io/badge/Share%20on%20Reddit-FF4500?style=for-the-badge&logo=reddit&logoColor=white\" alt=\"Share on Reddit\"></a>\n  &nbsp;\n  <a href=\"https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fgithub.com%2FCaviraOSS%2FPageLM&t=Show%20HN%3A%20PageLM%20%E2%80%93%20Open%20Source%20NotebookLM%20Alternative%20(React%2FNode%2FLangChain)\"><img src=\"https://img.shields.io/badge/Hacker%20News-FF6600?style=for-the-badge&logo=y-combinator&logoColor=white\" alt=\"Submit to Hacker News\"></a>\n  &nbsp;\n  <a href=\"https://dev.to/new/share?url=https%3A%2F%2Fgithub.com%2FCaviraOSS%2FPageLM&title=PageLM%3A%20An%20Open%20Source%20AI%20Education%20Platform%20for%20Quizzes%20and%20Podcasts&prefill=I%20came%20across%20PageLM%20and%20was%20impressed%20by%20its%20architecture%20(Node.js%2FReact%2FLangChain).%20It's%20a%20full%2Dstack%20AI%20platform%20that%20supports%20Ollama%20and%20generates%20structured%20learning%20tools%20like%20ExamLab%20and%20AI%20Podcasts.%20Check%20it%20out%20and%20star%20the%20repo!%0D%0A%0D%0A**Link%20to%20Repo:**%20https%3A%2F%2Fgithub.com%2FCaviraOSS%2FPageLM\"><img src=\"https://img.shields.io/badge/Share%20on%20DEV%20Community-0A0A0A?style=for-the-badge&logo=dev.to&logoColor=white\" alt=\"Share on DEV Community\"></a>\n</p>"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "</div>"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Demo"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "<img src=\".github/pagelm.png\" alt=\"PageLM Demo\"/>"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "https://github.com/user-attachments/assets/98fae4ef-c2b7-4ad2-bfe9-1e0665eb4d71"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "<video width=\"100%\" controls>\n  <source src=\".github/demo.mp4\" type=\"video/mp4\">\n  Your browser does not support the video tag.\n</video>"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "> **Note**: If the video doesn't load above, you can [download the demo video directly](.github/demo.mp4)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "---"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "🚀 Features"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "PageLM converts study material into **interactive resources** including quizzes, flashcards, structured notes, and podcasts.  \nThe platform provides a modern interface for students, educators, and researchers to **enhance learning efficiency** using state-of-the-art LLMs and TTS systems."
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Learning Tools"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- **Contextual Chat** – Ask questions about uploaded documents (PDF, DOCX, Markdown, TXT)\n- **SmartNotes** – Generate Cornell-style notes automatically from topics or uploaded content\n- **Flashcards** – Extract non-overlapping flashcards for spaced repetition\n- **Quizzes** – Create interactive quizzes with hints, explanations, and scoring\n- **AI Podcast** – Convert notes and topics into engaging audio content for learning on the go\n- **Voice Transcribe** - Convert lecture recordings and voice notes into organized, searchable study materials instantly.\n- **Homework Planner** - Plans your Homework Smartly using AI, Assists if your stuck.\n- **ExamLab** - Simulate any exam, get feedback, and be prepared for the exam\n- **Debate** - Debate with AI to improve your Debate skills.\n- **Study Companion** - A personalised AI Companion that assists you."
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Supported AI Models"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Google Gemini • OpenAI GPT • Anthropic Claude • xAI Grok • Ollama (local) • OpenRouter"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Embedding Providers"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- OpenAI • Gemini • Ollama"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Technical Highlights"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- WebSocket streaming for real-time chat, notes, and podcast generation\n- JSON or vector database support for embeddings and retrieval\n- File-based persistent storage for generated content\n- Markdown-based outputs for structured answers and notes\n- Configurable multi-provider setup for LLMs and TTS engines"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "---"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "🛠️ Technology Stack"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "| Component      | Technology                               |\n| -------------- | ---------------------------------------- |\n| **Backend**    | Node.js, TypeScript, LangChain, Langraph |\n| **Frontend**   | Vite, React, TailwindCSS                 |\n| **Database**   | JSON (default), optional vector DB       |\n| **AI/ML**      | Multiple LLM providers, embeddings       |\n| **Audio**      | Edge TTS, ElevenLabs, Google TTS         |\n| **Deployment** | Docker, Docker Compose                   |\n| **Docs**       | pdf-lib, mammoth, pdf-parse              |"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "---"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "⚡ Getting Started"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Prerequisites"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Node.js v21.18+\n- npm or pnpm\n- ffmpeg (required for podcast audio)\n- Docker (optional)"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Local Development"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": "bash"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "# Clone the repository\ngit clone https://github.com/caviraOSS/pagelm.git"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "# Linux:\n  chmod 777 ./setup.sh\n  ./setup.sh"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "# Windows:\n  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser\n  ./setup.ps1"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "# Manual (Both Linux/Windows):\n  # Install dependencies\n  cd backend\n  npm install\n  cd ../frontend\n  npm install"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "# Setup environment\n  cd ..\n  npm i -g nodemon\n  cp .env.example .env\n  # Make sure to configure API keys and settings in .env"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "# Run these two commands in separate terminals but inside the project directory.\n  # Run backend\n  cd backend\n  npm run dev"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "# Run frontend\n  cd frontend\n  npm run dev\n```"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "👉 Access at: **http://localhost:5173**"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Docker Deployment"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": "bash"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "# Development"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "# Production\ndocker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build\n```"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Frontend: http://localhost:5173 (dev) / http://localhost:8080 (prod)\n- Backend: http://localhost:5000"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "---"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "⚙️ Configuration"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "All configuration is handled via environment variables:"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- **LLM Provider** – Choose your model backend\n- **TTS Engine** – Select speech service for podcasts\n- **Database Backend** – JSON or vector DB\n- **File Upload Limits** – Customize size/format limits"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "See `.env.example` for all options."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "---"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "👥 Community"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Join our [Discord](https://discord.gg/P7HaRayqTh) community to connect, share ideas, and take part in exciting discussions!"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "---"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "🤝 Contributing"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "We welcome all contributions."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "1. Fork the repository\n2. Create a feature branch (`git checkout -b feature/new-feature`)\n3. Commit changes (`git commit -m \"Add feature\"`)\n4. Push (`git push origin feature/new-feature`)\n5. Open a Pull Request"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**Guidelines:**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Follow code style and conventions\n- Add tests where needed\n- Update docs for new features\n- Ensure all tests pass before PR"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "---"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "💡 Areas to Contribute"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- AI model integrations\n- Mobile app support\n- Performance improvements\n- Accessibility features\n- Docs & tutorials"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "---"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "💖 Support the Project"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "If you find PageLM useful, please consider supporting:"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**Ethereum (ERC-20)**:"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "0x5a12e3f48b6d761a120bc3cd0977e208c362a74e"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Your support helps fund ongoing development and hosting."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "---"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "📜 License"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Licensed under the **CaviraOSS Community License**.  \nFree to use, share, and modify for personal and educational purposes.  \nCommercial use or resale requires prior written permission from CaviraOSS."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "See [LICENSE](LICENSE.md) for full terms."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "---"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "<div align=\"center\">"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**Built with ❤️ by CaviraOSS and contributors**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "⭐ Star us on [GitHub](https://github.com/CaviraOSS/pagelm) if this project helps you!"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "</div>"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

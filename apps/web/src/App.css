@@ -2060,6 +2060,17 @@ body {
   background: var(--accent-dark);
 }
 
+.btn.primary:disabled {
+  background: rgba(31, 35, 40, 0.15);
+  color: rgba(31, 35, 40, 0.4);
+  cursor: not-allowed;
+}
+
+.btn.ghost:disabled {
+  color: rgba(31, 35, 40, 0.4);
+  cursor: not-allowed;
+}
+
 .new-doc-page {
   display: flex;
   flex-direction: column;
