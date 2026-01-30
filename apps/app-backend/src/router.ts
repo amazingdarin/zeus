@@ -22,6 +22,7 @@ import {
   type EmbeddingOptions,
   type ProviderConfigInput,
   type LLMProviderId,
+  type ConfigType,
 } from "./llm/index.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -712,6 +713,153 @@ export const buildRouter = () => {
     } catch (err) {
       const message = err instanceof Error ? err.message : "List configs failed";
       error(res, "LIST_CONFIGS_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Get provider configuration by type (llm or embedding)
+   * GET /llm/configs/type/:configType
+   */
+  router.get("/llm/configs/type/:configType", async (req: Request, res: Response) => {
+    try {
+      const { configType } = req.params;
+      
+      if (configType !== "llm" && configType !== "embedding") {
+        error(res, "INVALID_TYPE", "configType must be 'llm' or 'embedding'");
+        return;
+      }
+      
+      const config = await configStore.getByType(configType as ConfigType);
+      success(res, config); // Returns null if not found, which is valid
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Get config failed";
+      error(res, "GET_CONFIG_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Set (upsert) provider configuration by type
+   * PUT /llm/configs/type/:configType
+   */
+  router.put("/llm/configs/type/:configType", async (req: Request, res: Response) => {
+    try {
+      const { configType } = req.params;
+      const input = req.body as Omit<ProviderConfigInput, "configType">;
+      
+      if (configType !== "llm" && configType !== "embedding") {
+        error(res, "INVALID_TYPE", "configType must be 'llm' or 'embedding'");
+        return;
+      }
+      
+      if (!input.providerId || !input.displayName) {
+        error(res, "INVALID_REQUEST", "providerId and displayName are required");
+        return;
+      }
+
+      // Validate provider ID
+      const validProviders: LLMProviderId[] = ["openai", "anthropic", "google", "ollama", "openai-compatible"];
+      if (!validProviders.includes(input.providerId)) {
+        error(res, "INVALID_PROVIDER", `Invalid provider: ${input.providerId}`);
+        return;
+      }
+
+      const config = await configStore.upsertByType(configType as ConfigType, input);
+      
+      // Refresh provider registry
+      await providerRegistry.refresh();
+      
+      success(res, config);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Upsert config failed";
+      error(res, "UPSERT_CONFIG_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Delete provider configuration by type
+   * DELETE /llm/configs/type/:configType
+   */
+  router.delete("/llm/configs/type/:configType", async (req: Request, res: Response) => {
+    try {
+      const { configType } = req.params;
+      
+      if (configType !== "llm" && configType !== "embedding") {
+        error(res, "INVALID_TYPE", "configType must be 'llm' or 'embedding'");
+        return;
+      }
+      
+      const deleted = await configStore.deleteByType(configType as ConfigType);
+      
+      if (!deleted) {
+        error(res, "NOT_FOUND", "Configuration not found", 404);
+        return;
+      }
+      
+      // Refresh provider registry
+      await providerRegistry.refresh();
+      
+      success(res, { deleted: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Delete config failed";
+      error(res, "DELETE_CONFIG_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Test provider configuration by type
+   * POST /llm/configs/type/:configType/test
+   */
+  router.post("/llm/configs/type/:configType/test", async (req: Request, res: Response) => {
+    try {
+      const { configType } = req.params;
+      
+      if (configType !== "llm" && configType !== "embedding") {
+        error(res, "INVALID_TYPE", "configType must be 'llm' or 'embedding'");
+        return;
+      }
+      
+      // Get the configuration with decrypted API key
+      const config = await configStore.getInternalByType(configType as ConfigType);
+      
+      if (!config) {
+        error(res, "NOT_FOUND", "Configuration not found", 404);
+        return;
+      }
+      
+      // Test based on config type
+      try {
+        if (configType === "embedding") {
+          // Test embedding
+          await llmGateway.embed({
+            input: "test",
+            model: config.defaultModel,
+            providerId: config.providerId,
+            apiKey: config.apiKey,
+            baseUrl: config.baseUrl,
+          });
+        } else {
+          // Test LLM chat
+          await llmGateway.chat({
+            messages: [{ role: "user", content: "Hi" }],
+            model: config.defaultModel,
+            providerId: config.providerId,
+            apiKey: config.apiKey,
+            baseUrl: config.baseUrl,
+          });
+        }
+        
+        await configStore.updateStatus(config.id, "active");
+        const updated = await configStore.getByType(configType as ConfigType);
+        success(res, { success: true, config: updated });
+      } catch (testErr) {
+        const testMessage = testErr instanceof Error ? testErr.message : "Test failed";
+        await configStore.updateStatus(config.id, "error", testMessage);
+        const updated = await configStore.getByType(configType as ConfigType);
+        success(res, { success: false, error: testMessage, config: updated });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Test config failed";
+      error(res, "TEST_CONFIG_FAILED", message, 500);
     }
   });
 

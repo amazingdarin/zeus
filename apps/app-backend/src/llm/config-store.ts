@@ -11,10 +11,16 @@ import { encrypt, decrypt, maskApiKey, isMaskedKey } from "../utils/crypto.js";
 import type { LLMProviderId } from "./types.js";
 
 /**
+ * Configuration type: LLM for chat/completion, embedding for embeddings
+ */
+export type ConfigType = "llm" | "embedding";
+
+/**
  * Provider configuration as stored in database
  */
 export type ProviderConfigRow = {
   id: string;
+  config_type: string;
   provider_id: string;
   display_name: string;
   base_url: string | null;
@@ -34,6 +40,7 @@ export type ProviderConfigRow = {
  */
 export type ProviderConfig = {
   id: string;
+  configType: ConfigType;
   providerId: LLMProviderId;
   displayName: string;
   baseUrl?: string;
@@ -52,6 +59,7 @@ export type ProviderConfig = {
  */
 export type ProviderConfigInput = {
   id?: string;
+  configType?: ConfigType;
   providerId: LLMProviderId;
   displayName: string;
   baseUrl?: string;
@@ -73,6 +81,7 @@ export type ProviderConfigInternal = ProviderConfig & {
 function mapRowToConfig(row: ProviderConfigRow): ProviderConfig {
   return {
     id: row.id,
+    configType: row.config_type as ConfigType,
     providerId: row.provider_id as LLMProviderId,
     displayName: row.display_name,
     baseUrl: row.base_url || undefined,
@@ -233,6 +242,66 @@ export const configStore = {
   },
 
   /**
+   * Get configuration by type (llm or embedding)
+   */
+  async getByType(configType: ConfigType): Promise<ProviderConfig | null> {
+    try {
+      const result = await query<ProviderConfigRow>(
+        `SELECT * FROM llm_provider_config WHERE config_type = $1`,
+        [configType],
+      );
+
+      dbAvailable = true;
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      const row = result.rows[0];
+      const config = mapRowToConfig(row);
+      if (row.api_key_cipher && row.api_key_iv) {
+        try {
+          const apiKey = decrypt(row.api_key_cipher, row.api_key_iv);
+          config.apiKeyMasked = maskApiKey(apiKey);
+        } catch {
+          config.apiKeyMasked = "[encrypted]";
+        }
+      }
+      return config;
+    } catch (err) {
+      if (err && typeof err === "object" && "code" in err && err.code === "ECONNREFUSED") {
+        dbAvailable = false;
+        return null;
+      }
+      throw err;
+    }
+  },
+
+  /**
+   * Get internal configuration by type (with decrypted API key)
+   */
+  async getInternalByType(configType: ConfigType): Promise<ProviderConfigInternal | null> {
+    try {
+      const result = await query<ProviderConfigRow>(
+        `SELECT * FROM llm_provider_config WHERE config_type = $1`,
+        [configType],
+      );
+
+      dbAvailable = true;
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      return mapRowToInternalConfig(result.rows[0]);
+    } catch (err) {
+      if (err && typeof err === "object" && "code" in err && err.code === "ECONNREFUSED") {
+        dbAvailable = false;
+        return null;
+      }
+      throw err;
+    }
+  },
+
+  /**
    * Create a new configuration
    */
   async create(input: ProviderConfigInput): Promise<ProviderConfig> {
@@ -241,6 +310,7 @@ export const configStore = {
     }
 
     const id = input.id || uuidv4();
+    const configType = input.configType || "llm";
     const now = new Date();
 
     // Encrypt API key if provided
@@ -255,10 +325,11 @@ export const configStore = {
     try {
       await query(
         `INSERT INTO llm_provider_config 
-          (id, provider_id, display_name, base_url, default_model, api_key_cipher, api_key_iv, enabled, status, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          (id, config_type, provider_id, display_name, base_url, default_model, api_key_cipher, api_key_iv, enabled, status, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
         [
           id,
+          configType,
           input.providerId,
           input.displayName,
           input.baseUrl || null,
@@ -286,6 +357,44 @@ export const configStore = {
       throw new Error("Failed to create configuration");
     }
     return config;
+  },
+
+  /**
+   * Upsert (create or update) configuration by type
+   * Since only one config per type is allowed, this will replace existing config
+   */
+  async upsertByType(configType: ConfigType, input: Omit<ProviderConfigInput, "configType">): Promise<ProviderConfig> {
+    // Check if config exists for this type
+    const existing = await this.getByType(configType);
+    
+    if (existing) {
+      // Update existing config
+      return this.update(existing.id, input);
+    } else {
+      // Create new config
+      return this.create({ ...input, configType });
+    }
+  },
+
+  /**
+   * Delete configuration by type
+   */
+  async deleteByType(configType: ConfigType): Promise<boolean> {
+    if (!dbAvailable) {
+      throw new Error("Database not available. Please ensure PostgreSQL is running.");
+    }
+
+    try {
+      const result = await query(`DELETE FROM llm_provider_config WHERE config_type = $1`, [configType]);
+      dbAvailable = true;
+      return (result.rowCount ?? 0) > 0;
+    } catch (err) {
+      if (err && typeof err === "object" && "code" in err && err.code === "ECONNREFUSED") {
+        dbAvailable = false;
+        throw new Error("Database not available. Please ensure PostgreSQL is running.");
+      }
+      throw err;
+    }
   },
 
   /**

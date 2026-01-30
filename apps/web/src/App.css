@@ -2925,6 +2925,115 @@ body {
   margin-top: 4px;
 }
 
+/* Provider Sections - Two Cards Layout */
+.provider-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.provider-section-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.provider-section-card .ant-card-head {
+  border-bottom: 1px solid var(--border);
+  min-height: 44px;
+  padding: 0 16px;
+}
+
+.provider-section-card .ant-card-head-title {
+  padding: 12px 0;
+}
+
+.provider-section-card .ant-card-extra {
+  padding: 8px 0;
+}
+
+.provider-section-card .ant-card-body {
+  padding: 16px;
+}
+
+.provider-section-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.provider-section-header > span:first-child {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.provider-section-desc {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.provider-config-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.provider-config-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.provider-config-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.provider-config-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.provider-config-type {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(31, 35, 40, 0.08);
+  color: var(--muted);
+}
+
+.provider-config-details {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--muted);
+  padding-left: 48px;
+  flex-wrap: wrap;
+}
+
+.provider-config-model,
+.provider-config-key {
+  color: var(--muted);
+}
+
+.provider-empty-hint {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 8px 0;
+}
+
 /* Settings responsive adjustments */
 @media (max-width: 768px) {
   .settings-modal-container {

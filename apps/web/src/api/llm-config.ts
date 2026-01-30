@@ -10,6 +10,11 @@ import { apiFetch } from "../config/api";
 export type LLMProviderId = "openai" | "anthropic" | "google" | "ollama" | "openai-compatible";
 
 /**
+ * Configuration type: LLM for chat/completion, embedding for embeddings
+ */
+export type ConfigType = "llm" | "embedding";
+
+/**
  * Provider configuration status
  */
 export type ProviderConfigStatus = "active" | "error" | "unknown";
@@ -19,6 +24,7 @@ export type ProviderConfigStatus = "active" | "error" | "unknown";
  */
 export type ProviderConfig = {
   id: string;
+  configType: ConfigType;
   providerId: LLMProviderId;
   displayName: string;
   baseUrl?: string;
@@ -104,6 +110,49 @@ export async function listConfigs(): Promise<ProviderConfig[]> {
 export async function getConfig(id: string): Promise<ProviderConfig> {
   const response = await apiFetch(`/api/llm/configs/${encodeURIComponent(id)}`);
   return parseResponse<ProviderConfig>(response);
+}
+
+/**
+ * Get provider configuration by type (llm or embedding)
+ */
+export async function getConfigByType(configType: ConfigType): Promise<ProviderConfig | null> {
+  const response = await apiFetch(`/api/llm/configs/type/${configType}`);
+  return parseResponse<ProviderConfig | null>(response);
+}
+
+/**
+ * Set (upsert) provider configuration by type
+ */
+export async function setConfigByType(
+  configType: ConfigType,
+  input: ProviderConfigInput,
+): Promise<ProviderConfig> {
+  const response = await apiFetch(`/api/llm/configs/type/${configType}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return parseResponse<ProviderConfig>(response);
+}
+
+/**
+ * Delete provider configuration by type
+ */
+export async function deleteConfigByType(configType: ConfigType): Promise<void> {
+  const response = await apiFetch(`/api/llm/configs/type/${configType}`, {
+    method: "DELETE",
+  });
+  await parseResponse<{ deleted: boolean }>(response);
+}
+
+/**
+ * Test provider configuration by type
+ */
+export async function testConfigByType(configType: ConfigType): Promise<TestResult> {
+  const response = await apiFetch(`/api/llm/configs/type/${configType}/test`, {
+    method: "POST",
+  });
+  return parseResponse<TestResult>(response);
 }
 
 /**

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, Form, Input, Modal, Select, Switch, message, Spin } from "antd";
+import { Button, Form, Input, Modal, Select, Switch, message, Spin, Card } from "antd";
 import {
   PlusOutlined,
   EditOutlined,
@@ -13,11 +13,10 @@ import {
 } from "@ant-design/icons";
 
 import {
-  listConfigs,
-  createConfig,
-  updateConfig,
-  deleteConfig,
-  testConfig,
+  getConfigByType,
+  setConfigByType,
+  deleteConfigByType,
+  testConfigByType,
   getProviderTypes,
   fetchOllamaModels,
   type ProviderConfig,
@@ -25,6 +24,7 @@ import {
   type ProviderType,
   type LLMProviderId,
   type OllamaModel,
+  type ConfigType,
 } from "../api/llm-config";
 
 /**
@@ -59,13 +59,14 @@ function getProviderIcon(providerId: LLMProviderId) {
  * AI Provider configuration panel
  */
 function AIProviderPanel() {
-  const [configs, setConfigs] = useState<ProviderConfig[]>([]);
+  const [llmConfig, setLlmConfig] = useState<ProviderConfig | null>(null);
+  const [embeddingConfig, setEmbeddingConfig] = useState<ProviderConfig | null>(null);
   const [providerTypes, setProviderTypes] = useState<ProviderType[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
-  const [editingConfig, setEditingConfig] = useState<ProviderConfig | null>(null);
-  const [selectedType, setSelectedType] = useState<LLMProviderId | null>(null);
-  const [testingId, setTestingId] = useState<string | null>(null);
+  const [editingType, setEditingType] = useState<ConfigType | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<LLMProviderId | null>(null);
+  const [testingType, setTestingType] = useState<ConfigType | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
   const [loadingOllamaModels, setLoadingOllamaModels] = useState(false);
@@ -77,8 +78,13 @@ function AIProviderPanel() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [configList, types] = await Promise.all([listConfigs(), getProviderTypes()]);
-      setConfigs(configList);
+      const [llm, embedding, types] = await Promise.all([
+        getConfigByType("llm"),
+        getConfigByType("embedding"),
+        getProviderTypes(),
+      ]);
+      setLlmConfig(llm);
+      setEmbeddingConfig(embedding);
       setProviderTypes(types);
     } catch (err) {
       message.error("加载配置失败");
@@ -92,48 +98,44 @@ function AIProviderPanel() {
   }, [loadData]);
 
   /**
-   * Open modal to add new configuration
+   * Open modal to add/edit configuration
    */
-  const handleAdd = () => {
-    setEditingConfig(null);
-    setSelectedType(null);
+  const handleOpenModal = (configType: ConfigType, existingConfig?: ProviderConfig | null) => {
+    setEditingType(configType);
     form.resetFields();
-    setModalVisible(true);
-  };
-
-  /**
-   * Open modal to edit existing configuration
-   */
-  const handleEdit = (config: ProviderConfig) => {
-    setEditingConfig(config);
-    setSelectedType(config.providerId);
-    form.setFieldsValue({
-      displayName: config.displayName,
-      baseUrl: config.baseUrl,
-      defaultModel: config.defaultModel,
-      apiKey: "", // Don't fill in the API key
-      enabled: config.enabled,
-    });
-    setModalVisible(true);
-    // Load Ollama models when editing Ollama provider
-    if (config.providerId === "ollama" && config.baseUrl) {
-      loadOllamaModels(config.baseUrl);
+    
+    if (existingConfig) {
+      setSelectedProvider(existingConfig.providerId);
+      form.setFieldsValue({
+        displayName: existingConfig.displayName,
+        baseUrl: existingConfig.baseUrl,
+        defaultModel: existingConfig.defaultModel,
+        apiKey: "", // Don't fill in the API key
+        enabled: existingConfig.enabled,
+      });
+      // Load Ollama models when editing Ollama provider
+      if (existingConfig.providerId === "ollama" && existingConfig.baseUrl) {
+        loadOllamaModels(existingConfig.baseUrl);
+      }
+    } else {
+      setSelectedProvider(null);
     }
+    setModalVisible(true);
   };
 
   /**
    * Delete a configuration
    */
-  const handleDelete = async (config: ProviderConfig) => {
+  const handleDelete = async (configType: ConfigType, displayName: string) => {
     Modal.confirm({
-      title: "删除提供商配置",
-      content: `确定要删除 "${config.displayName}" 吗？`,
+      title: "删除配置",
+      content: `确定要删除 "${displayName}" 吗？`,
       okText: "删除",
       okType: "danger",
       cancelText: "取消",
       onOk: async () => {
         try {
-          await deleteConfig(config.id);
+          await deleteConfigByType(configType);
           message.success("配置已删除");
           loadData();
         } catch (err) {
@@ -146,12 +148,14 @@ function AIProviderPanel() {
   /**
    * Test a configuration
    */
-  const handleTest = async (config: ProviderConfig) => {
-    setTestingId(config.id);
+  const handleTest = async (configType: ConfigType) => {
+    setTestingType(configType);
     try {
-      const result = await testConfig(config.id);
+      const result = await testConfigByType(configType);
       if (result.success) {
-        message.success(`连接成功！测试模型：${result.model}`);
+        message.success(`连接成功！`);
+      } else {
+        message.error(`连接失败`);
       }
       loadData(); // Refresh to update status
     } catch (err) {
@@ -159,7 +163,7 @@ function AIProviderPanel() {
       message.error(errorMsg);
       loadData(); // Refresh to update status
     } finally {
-      setTestingId(null);
+      setTestingType(null);
     }
   };
 
@@ -167,13 +171,13 @@ function AIProviderPanel() {
    * Handle form submission
    */
   const handleSubmit = async (values: Record<string, unknown>) => {
-    if (!selectedType) {
+    if (!selectedProvider || !editingType) {
       message.error("请选择一个提供商类型");
       return;
     }
 
     const input: ProviderConfigInput = {
-      providerId: selectedType,
+      providerId: selectedProvider,
       displayName: values.displayName as string,
       baseUrl: (values.baseUrl as string) || undefined,
       defaultModel: (values.defaultModel as string) || undefined,
@@ -183,13 +187,8 @@ function AIProviderPanel() {
 
     setSubmitting(true);
     try {
-      if (editingConfig) {
-        await updateConfig(editingConfig.id, input);
-        message.success("配置已更新");
-      } else {
-        await createConfig(input);
-        message.success("配置已创建");
-      }
+      await setConfigByType(editingType, input);
+      message.success("配置已保存");
       setModalVisible(false);
       loadData();
     } catch (err) {
@@ -230,8 +229,8 @@ function AIProviderPanel() {
   /**
    * Handle provider type selection
    */
-  const handleSelectType = (providerId: LLMProviderId) => {
-    setSelectedType(providerId);
+  const handleSelectProvider = (providerId: LLMProviderId) => {
+    setSelectedProvider(providerId);
     const typeInfo = providerTypes.find((t) => t.id === providerId);
     // Pre-fill default values
     if (typeInfo?.defaultBaseUrl) {
@@ -244,13 +243,96 @@ function AIProviderPanel() {
   };
 
   /**
+   * Render a provider config card
+   */
+  const renderConfigCard = (configType: ConfigType, config: ProviderConfig | null, title: string, description: string) => {
+    const isConfigured = !!config;
+    const typeInfo = config ? getTypeInfo(config.providerId) : null;
+
+    return (
+      <Card 
+        className="provider-section-card"
+        title={
+          <div className="provider-section-header">
+            <span>{title}</span>
+            <span className="provider-section-desc">{description}</span>
+          </div>
+        }
+        extra={
+          isConfigured ? (
+            <div className="provider-card-actions">
+              <Button
+                icon={<ThunderboltOutlined />}
+                loading={testingType === configType}
+                onClick={() => handleTest(configType)}
+                title="测试连接"
+                size="small"
+              />
+              <Button 
+                icon={<EditOutlined />} 
+                onClick={() => handleOpenModal(configType, config)} 
+                title="编辑"
+                size="small"
+              />
+              <Button
+                icon={<DeleteOutlined />}
+                onClick={() => handleDelete(configType, config.displayName)}
+                title="删除"
+                size="small"
+              />
+            </div>
+          ) : (
+            <Button 
+              type="primary" 
+              icon={<PlusOutlined />} 
+              onClick={() => handleOpenModal(configType)}
+              size="small"
+            >
+              配置
+            </Button>
+          )
+        }
+      >
+        {isConfigured ? (
+          <div className="provider-config-info">
+            <div className="provider-config-row">
+              <span className="provider-config-icon">{getProviderIcon(config.providerId)}</span>
+              <span className="provider-config-name">{config.displayName}</span>
+              <span className="provider-config-type">{typeInfo?.name || config.providerId}</span>
+            </div>
+            <div className="provider-config-details">
+              <div className="provider-card-status">
+                <span className={`provider-card-status-dot ${config.status}`} />
+                <span>{config.status === "active" ? "正常" : config.status === "error" ? "错误" : "未测试"}</span>
+              </div>
+              {config.defaultModel && <span className="provider-config-model">模型：{config.defaultModel}</span>}
+              {config.apiKeyMasked && <span className="provider-config-key">密钥：{config.apiKeyMasked}</span>}
+              {!config.enabled && <span className="provider-disabled-tag">已禁用</span>}
+            </div>
+            {config.lastError && (
+              <div className="provider-error-msg">
+                错误：{config.lastError}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="provider-empty-hint">
+            尚未配置，点击右上角按钮添加
+          </div>
+        )}
+      </Card>
+    );
+  };
+
+  /**
    * Render the selected provider type's configuration form
    */
   const renderForm = () => {
-    if (!selectedType) return null;
+    if (!selectedProvider) return null;
 
-    const typeInfo = getTypeInfo(selectedType);
-    const isEditing = !!editingConfig;
+    const typeInfo = getTypeInfo(selectedProvider);
+    const existingConfig = editingType === "llm" ? llmConfig : embeddingConfig;
+    const isEditing = !!existingConfig;
     const requiresApiKey = typeInfo?.requiresApiKey ?? true;
 
     return (
@@ -285,7 +367,7 @@ function AIProviderPanel() {
               placeholder={typeInfo.defaultBaseUrl || "https://api.example.com/v1"}
               onBlur={(e) => {
                 // Auto-refresh Ollama models when baseUrl changes
-                if (selectedType === "ollama" && e.target.value) {
+                if (selectedProvider === "ollama" && e.target.value) {
                   loadOllamaModels(e.target.value);
                 }
               }}
@@ -298,7 +380,7 @@ function AIProviderPanel() {
           label={
             <span>
               默认模型
-              {selectedType === "ollama" && (
+              {selectedProvider === "ollama" && (
                 <Button
                   type="link"
                   size="small"
@@ -314,9 +396,9 @@ function AIProviderPanel() {
               )}
             </span>
           }
-          extra={selectedType === "ollama" ? "从 Ollama 服务获取已安装的模型" : "可选，用于测试连接和作为回退模型"}
+          extra={selectedProvider === "ollama" ? "从 Ollama 服务获取已安装的模型" : "可选，用于测试连接和作为回退模型"}
         >
-          {selectedType === "ollama" ? (
+          {selectedProvider === "ollama" ? (
             <Select
               placeholder={loadingOllamaModels ? "正在加载模型..." : "选择一个模型"}
               allowClear
@@ -347,7 +429,7 @@ function AIProviderPanel() {
         <div className="provider-form-actions">
           <Button onClick={() => setModalVisible(false)}>取消</Button>
           <Button type="primary" htmlType="submit" loading={submitting}>
-            {isEditing ? "更新" : "创建"}
+            保存
           </Button>
         </div>
       </Form>
@@ -362,78 +444,38 @@ function AIProviderPanel() {
     );
   }
 
+  const existingConfig = editingType === "llm" ? llmConfig : embeddingConfig;
+
   return (
     <>
       <div className="settings-content-header">
         <h2 className="settings-content-title">AI 提供商</h2>
-        <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-          添加提供商
-        </Button>
       </div>
 
-      {configs.length === 0 ? (
-        <div className="provider-empty">
-          <RobotOutlined className="provider-empty-icon" />
-          <p className="provider-empty-text">尚未配置任何 AI 提供商</p>
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-            添加第一个提供商
-          </Button>
-        </div>
-      ) : (
-        <div className="provider-list">
-          {configs.map((config) => (
-            <div key={config.id} className="provider-card">
-              <div className="provider-card-icon">{getProviderIcon(config.providerId)}</div>
-              <div className="provider-card-content">
-                <div className="provider-card-header">
-                  <span className="provider-card-name">{config.displayName}</span>
-                  <span className="provider-card-type">
-                    {getTypeInfo(config.providerId)?.name || config.providerId}
-                  </span>
-                </div>
-                <div className="provider-card-details">
-                  <div className="provider-card-status">
-                    <span className={`provider-card-status-dot ${config.status}`} />
-                    <span>{config.status === "active" ? "正常" : config.status === "error" ? "错误" : "未知"}</span>
-                  </div>
-                  {config.defaultModel && <span>模型：{config.defaultModel}</span>}
-                  {config.apiKeyMasked && <span>密钥：{config.apiKeyMasked}</span>}
-                  {!config.enabled && <span className="provider-disabled-tag">已禁用</span>}
-                </div>
-                {config.lastError && (
-                  <div className="provider-error-msg">
-                    错误：{config.lastError}
-                  </div>
-                )}
-              </div>
-              <div className="provider-card-actions">
-                <Button
-                  icon={<ThunderboltOutlined />}
-                  loading={testingId === config.id}
-                  onClick={() => handleTest(config)}
-                  title="测试连接"
-                />
-                <Button icon={<EditOutlined />} onClick={() => handleEdit(config)} title="编辑" />
-                <Button
-                  icon={<DeleteOutlined />}
-                  onClick={() => handleDelete(config)}
-                  title="删除"
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="provider-sections">
+        {renderConfigCard(
+          "llm",
+          llmConfig,
+          "大语言模型 (LLM)",
+          "用于对话、内容生成等功能"
+        )}
+        {renderConfigCard(
+          "embedding",
+          embeddingConfig,
+          "Embedding 模型",
+          "用于知识库向量检索"
+        )}
+      </div>
 
       <Modal
-        title={editingConfig ? "编辑提供商" : "添加提供商"}
+        title={existingConfig ? "编辑提供商" : "添加提供商"}
         open={modalVisible}
         onCancel={() => setModalVisible(false)}
         footer={null}
         width={500}
         destroyOnClose
       >
-        {!selectedType && !editingConfig ? (
+        {!selectedProvider && !existingConfig ? (
           <>
             <p className="provider-type-hint">
               选择一个提供商类型：
@@ -442,8 +484,8 @@ function AIProviderPanel() {
               {providerTypes.map((type) => (
                 <div
                   key={type.id}
-                  className={`provider-type-card${selectedType === type.id ? " selected" : ""}`}
-                  onClick={() => handleSelectType(type.id)}
+                  className={`provider-type-card${selectedProvider === type.id ? " selected" : ""}`}
+                  onClick={() => handleSelectProvider(type.id)}
                 >
                   <div className="provider-type-card-icon">{getProviderIcon(type.id)}</div>
                   <div className="provider-type-card-name">{type.name}</div>

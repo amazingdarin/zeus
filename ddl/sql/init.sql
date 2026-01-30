@@ -115,7 +115,8 @@ ON knowledge_embedding_index USING ivfflat (embedding vector_l2_ops);
 CREATE TABLE llm_provider_config
 (
     id              TEXT PRIMARY KEY,
-    provider_id     TEXT NOT NULL,              -- openai, anthropic, google, openai-compatible
+    config_type     TEXT NOT NULL DEFAULT 'llm', -- llm, embedding
+    provider_id     TEXT NOT NULL,              -- openai, anthropic, google, ollama, openai-compatible
     display_name    TEXT NOT NULL,
     base_url        TEXT,
     default_model   TEXT,
@@ -126,8 +127,12 @@ CREATE TABLE llm_provider_config
     last_error      TEXT,
     last_tested_at  TIMESTAMPTZ,
     created_at      TIMESTAMPTZ DEFAULT now(),
-    updated_at      TIMESTAMPTZ DEFAULT now()
+    updated_at      TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (config_type)                        -- only one config per type
 );
 
 CREATE INDEX IF NOT EXISTS idx_llm_provider_config_provider
 ON llm_provider_config (provider_id);
+
+CREATE INDEX IF NOT EXISTS idx_llm_provider_config_type
+ON llm_provider_config (config_type);
