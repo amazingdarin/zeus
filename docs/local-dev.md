@@ -6,7 +6,7 @@
 
 | Component | Detail |
 |-----------|--------|
-| **Version** | `0.1.0` (from `frontend/package.json`) |
+| **Version** | `0.1.0` (from `apps/web/package.json`) |
 | **Backend Port** | `:8080` |
 | **Frontend Port** | `:5173` (Vite) |
 | **Project Root** | `/Users/darin/mine/code/zeus` |

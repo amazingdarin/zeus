@@ -16,8 +16,7 @@ This document describes the current modular structure and shared foundations.
 │   │   ├── infra/            # External IO adapters
 │   │   ├── repository/       # Data access (shared + non-module repos)
 │   │   └── service/          # Cross-cutting services (non-module)
-├── frontend/                 # React + Tauri tooling
-├── apps/                     # Web/Tauri apps
+├── apps/                     # Web/Desktop apps + app-backend
 └── docs/                     # Docs
 ```
 
@@ -43,19 +42,12 @@ Each module is a bounded context with its own API, service, and repository layer
 
 ```
 server/internal/modules/
-├── project/
-│   ├── api/                  # Project handlers
-│   ├── service/              # ProjectService implementation
-│   └── repository/           # Project repository + postgres impl
-├── document/
-│   ├── api/                  # Document handlers
-│   └── service/              # Docstore + index manager
-└── knowledge/
-    ├── api/                  # Knowledge handlers + change proposals
-    ├── service/              # KnowledgeService implementation
-    └── search/
-        ├── api/              # Search handler
-        └── service/          # Search service
+└── project/
+    ├── api/                  # Project handlers
+    ├── service/              # ProjectService implementation
+    └── repository/           # Project repository + postgres impl
+
+Note: document and knowledge modules have been migrated to apps/app-backend/
 ```
 
 ### Module Interaction
