@@ -516,24 +516,25 @@ function DocumentPage() {
     prevProjectKeyRef.current = projectKey;
     projectKeyRef.current = projectKey;
     
-    // Only reset tree state when project changes
-    setRootDocuments([]);
-    setChildrenByParent({});
-    childrenByParentRef.current = {};
-    setExpandedIds({});
-    setLoadingIds({});
-    loadingIdsRef.current = {};
-    rootLoadAttemptRef.current = null;  // Reset so tree will reload
-    setRootLoading(false);
-    initialRedirectRef.current = false;
-    
-    // Clear current document state
-    setDocument(null);
-    setError(null);
-    setLoading(false);
-    
-    // Navigate to blank page when switching projects
+    // Only reset state when project actually changes
     if (isProjectSwitch) {
+      // Reset tree state
+      setRootDocuments([]);
+      setChildrenByParent({});
+      childrenByParentRef.current = {};
+      setExpandedIds({});
+      setLoadingIds({});
+      loadingIdsRef.current = {};
+      rootLoadAttemptRef.current = null;  // Reset so tree will reload
+      setRootLoading(false);
+      initialRedirectRef.current = false;
+      
+      // Clear current document state
+      setDocument(null);
+      setError(null);
+      setLoading(false);
+      
+      // Navigate to blank page when switching projects
       navigate("/documents", { replace: true });
     }
     // Tree loading is handled by the separate effect below
