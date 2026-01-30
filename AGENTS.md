@@ -10,36 +10,36 @@ Go backend (Gin/GORM/Postgres) + React/Vite/Tauri frontend, deployed via Helm wi
 ## STRUCTURE
 ```
 ./
-├── cmd/                 # Go entrypoint
-├── internal/            # backend layers (api/domain/infra/repository/service)
-├── frontend/            # React app + Tauri shell + packages
+├── server/              # Go backend (cmd/internal/tests/config)
+├── frontend/            # React tooling (vite/tsconfig)
+├── apps/                # Web + desktop apps
+├── packages/            # Shared packages
 ├── deploy/              # Helm charts + Dockerfiles
 ├── ddl/sql/             # DB schema init
-├── scripts/             # local setup helpers
-└── resources/           # runtime fixtures (not source)
+└── scripts/             # local setup helpers
 ```
 
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Backend entry | cmd/zeus/main.go | starts HTTP server |
-| Service wiring | internal/app/bootstrap.go | repo + service init |
-| API routes | internal/api/handler/router.go | Gin routes |
+| Backend entry | server/cmd/zeus/main.go | starts HTTP server |
+| Service wiring | server/internal/app/bootstrap.go | repo + service init |
+| API routes | server/internal/api/handler/router.go | Gin routes |
 | DB schema | ddl/sql/init.sql | base schema + indexes |
 | Helm deploy | deploy/helm | charts + values |
-| Frontend app | frontend/zeus/src | React UI |
-| Tauri shell | frontend/src-tauri/src/main.rs | Windows flag DO NOT REMOVE |
+| Frontend app | apps/web/src | React UI |
+| Tauri shell | apps/desktop/src/main.rs | Windows flag DO NOT REMOVE |
 
 ## CODE MAP
 | Symbol | Type | Location | Role |
 |--------|------|----------|------|
-| main | func | cmd/zeus/main.go | boot server |
-| BuildRouter | func | internal/app/bootstrap.go | DI + router |
-| RegisterRoutes | func | internal/api/handler/router.go | API wiring |
+| main | func | server/cmd/zeus/main.go | boot server |
+| BuildRouter | func | server/internal/app/bootstrap.go | DI + router |
+| RegisterRoutes | func | server/internal/api/handler/router.go | API wiring |
 
 ## CONVENTIONS
 - Clean architecture: api → service → domain → repository/infra.
-- Repository interfaces in internal/repository, Postgres impl in internal/repository/postgres.
+- Repository interfaces in server/internal/repository, Postgres impl in server/internal/repository/postgres.
 - Helm values files: deploy/helm/values.*.yaml (deps/full/dev).
 
 ## ANTI-PATTERNS (THIS PROJECT)
@@ -59,4 +59,4 @@ make test-integration
 ```
 
 ## NOTES
-- Repo contains large build artifacts under frontend/src-tauri/target and fixtures under resources/; ignore for code navigation.
+- Repo contains large build artifacts under apps/desktop/target and fixtures under resources/; ignore for code navigation.
