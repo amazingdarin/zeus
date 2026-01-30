@@ -580,7 +580,7 @@ function buildFileBlockNode(assetMeta: {
 }): unknown {
   const { fileType, officeType } = resolveFileKind(assetMeta.filename, assetMeta.mime);
   return {
-    type: "fileBlock",
+    type: "file_block",  // Use snake_case to match tiptap node name
     attrs: {
       asset_id: assetMeta.id,
       file_name: assetMeta.filename,
