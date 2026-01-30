@@ -10,7 +10,7 @@ run-backend:
 	go run ./server/cmd/zeus
 
 run-frontend:
-	cd frontend && npm run tauri dev
+	cd apps/web && npm run dev
 
 install:
 	helm dependency build $(HELM_CHART)
@@ -30,7 +30,7 @@ build-backend-image:
 	docker build -t zeus:latest -f server/Dockerfile server
 
 build-frontend-image:
-	docker build -t zeus-web:latest -f frontend/Dockerfile .
+	docker build -t zeus-web:latest -f apps/web/Dockerfile apps/web
 
 start-deps:
 	bash ./scripts/gen-config.sh $(NAMESPACE) $(CONFIG_PATH)

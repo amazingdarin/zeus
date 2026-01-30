@@ -16,7 +16,7 @@ export const convertDocument = async (
   form.append("file", file);
 
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/convert?${params.toString()}`,
+    `/api/app/projects/${encodeURIComponent(projectKey)}/convert?${params.toString()}`,
     { method: "POST", body: form },
   );
   if (!response.ok) {

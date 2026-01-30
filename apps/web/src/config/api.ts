@@ -1,11 +1,22 @@
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").trim();
-const useProxy = Boolean(import.meta.env.DEV && apiBaseUrl);
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").trim();
+const appBackendUrl = (import.meta.env.VITE_APP_BACKEND_URL ?? "").trim();
+const useProxy = Boolean(import.meta.env.DEV && (apiBaseUrl || appBackendUrl));
 
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, "");
 const trimLeadingSlash = (value: string) => value.replace(/^\/+/, "");
 
 export const buildApiUrl = (path: string) => {
   const normalizedPath = `/${trimLeadingSlash(path)}`;
+  const appBackendPath = normalizedPath.startsWith("/api/app")
+    ? normalizedPath.replace("/api/app", "")
+    : "";
+  if (appBackendPath) {
+    if (useProxy || !appBackendUrl) {
+      return appBackendPath.startsWith("/") ? appBackendPath : `/${appBackendPath}`;
+    }
+    return `${trimTrailingSlash(appBackendUrl)}${appBackendPath}`;
+  }
   if (useProxy || !apiBaseUrl) {
     return normalizedPath;
   }
