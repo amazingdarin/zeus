@@ -306,6 +306,33 @@ export const documentStore = {
 
     // Remove from in-memory index
     indexManager.remove(projectKey, docId);
+
+    // If parent directory is now empty (except for .index), remove it
+    // This converts the parent document from "dir" back to "file"
+    await this.cleanupEmptyParentDir(parentDir, root);
+  },
+
+  /**
+   * Remove empty parent directory to convert parent doc from "dir" to "file"
+   */
+  async cleanupEmptyParentDir(dir: string, root: string): Promise<void> {
+    // Don't remove the root docs directory
+    const docsDir = path.join(root, "docs");
+    if (dir === docsDir || !dir.startsWith(docsDir)) {
+      return;
+    }
+
+    try {
+      const entries = await readdir(dir);
+      // Directory is "empty" if it only contains .index file or is truly empty
+      const nonIndexEntries = entries.filter((e) => e !== ".index");
+      if (nonIndexEntries.length === 0) {
+        // Remove the directory (including .index if present)
+        await rm(dir, { recursive: true, force: true });
+      }
+    } catch {
+      // Directory doesn't exist or can't be read, ignore
+    }
   },
 
   /**
