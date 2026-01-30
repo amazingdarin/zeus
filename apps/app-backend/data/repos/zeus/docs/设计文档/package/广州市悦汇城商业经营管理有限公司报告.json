@@ -1,0 +1,44 @@
+{
+  "meta": {
+    "id": "5e70aa5c-3296-415b-b62c-6aee2126194b",
+    "schema_version": "v1",
+    "title": "广州市悦汇城商业经营管理有限公司报告",
+    "slug": "广州市悦汇城商业经营管理有限公司报告",
+    "path": "docs/设计文档/package/广州市悦汇城商业经营管理有限公司报告.json",
+    "parent_id": "027aa8e0-69f7-4055-bafe-681a9a1bd400",
+    "created_at": "2026-01-30T08:02:49.014Z",
+    "updated_at": "2026-01-30T08:02:49.014Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "meta": {
+        "zeus": true,
+        "format": "tiptap",
+        "schema_version": 1,
+        "editor": "tiptap",
+        "created_at": "2026-01-30T08:02:49.001Z",
+        "updated_at": "2026-01-30T08:02:49.001Z"
+      },
+      "content": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "file_block",
+            "attrs": {
+              "asset_id": "f85603a6-7a60-4dcf-b55a-8d6b2e17a18a",
+              "file_name": "广州市悦汇城商业经营管理有限公司报告.pdf",
+              "mime": "application/pdf",
+              "size": 394832,
+              "file_type": ""
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -506,7 +506,13 @@ export const buildRouter = () => {
         }
         
         res.setHeader("Content-Type", result.meta.mime);
-        res.setHeader("Content-Disposition", `inline; filename="${result.meta.filename}"`);
+        // Use RFC 5987 encoding for non-ASCII filenames
+        const asciiFilename = result.meta.filename.replace(/[^\x20-\x7E]/g, "_");
+        const encodedFilename = encodeURIComponent(result.meta.filename);
+        res.setHeader(
+          "Content-Disposition",
+          `inline; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`
+        );
         res.send(result.buffer);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Get content failed";
