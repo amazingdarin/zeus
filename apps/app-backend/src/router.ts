@@ -327,7 +327,63 @@ export const buildRouter = () => {
   );
 
   /**
-   * Import file as document
+   * Upload file as document (creates a document directly)
+   * POST /projects/:projectKey/documents/upload
+   */
+  router.post(
+    "/projects/:projectKey/documents/upload",
+    upload.single("file"),
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey } = req.params;
+        const file = req.file;
+        if (!file) {
+          error(res, "INVALID_REQUEST", "file is required");
+          return;
+        }
+        const parentId = String(req.query.parent_id ?? "root");
+        const sourceType = String(req.body?.source_type ?? "").trim().toLowerCase();
+        const from = sourceType || file.originalname.split(".").pop() || "";
+        
+        // Convert the file to markdown
+        const converted = await convertDocument(projectKey, file, from, "markdown");
+        
+        // Create a document with the converted content
+        const title = file.originalname.replace(/\.[^/.]+$/, "") || "Untitled";
+        const doc: Document = {
+          meta: {
+            id: uuidv4(),
+            schema_version: "v1",
+            title,
+            slug: "",
+            path: "",
+            parent_id: parentId,
+            created_at: "",
+            updated_at: "",
+          },
+          body: {
+            type: "markdown",
+            content: converted.content,
+          },
+        };
+        
+        const saved = await documentStore.save(projectKey, doc);
+        
+        // Index the document asynchronously
+        knowledgeSearch.indexDocument(projectKey, saved).catch((err) => {
+          console.error("Index error:", err);
+        });
+        
+        success(res, { meta: saved.meta, body: saved.body }, 201);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Upload failed";
+        error(res, "UPLOAD_FAILED", message);
+      }
+    },
+  );
+
+  /**
+   * Import file as document (returns converted content without saving)
    * POST /projects/:projectKey/documents/import
    */
   router.post(

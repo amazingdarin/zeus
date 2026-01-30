@@ -52,5 +52,24 @@ export const convertDocument = async (
     return { content: file.buffer.toString("utf-8"), output_type: "markdown" };
   }
 
-  throw new Error("unsupported conversion type");
+  // For JSON and other text files, return content as-is wrapped in code block
+  if (source === "json" || source === "yaml" || source === "yml" || source === "xml" || source === "csv") {
+    const content = file.buffer.toString("utf-8");
+    return { 
+      content: `\`\`\`${source}\n${content}\n\`\`\``, 
+      output_type: "markdown" 
+    };
+  }
+
+  // For code files, wrap in code block
+  const codeExtensions = ["js", "ts", "jsx", "tsx", "py", "go", "rs", "java", "c", "cpp", "h", "hpp", "css", "scss", "less", "sql", "sh", "bash", "zsh", "vue", "svelte"];
+  if (codeExtensions.includes(source)) {
+    const content = file.buffer.toString("utf-8");
+    return { 
+      content: `\`\`\`${source}\n${content}\n\`\`\``, 
+      output_type: "markdown" 
+    };
+  }
+
+  throw new Error(`unsupported file type: ${source}`);
 };
