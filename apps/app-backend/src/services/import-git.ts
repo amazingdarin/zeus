@@ -148,6 +148,20 @@ const collectParentPaths = (filePath: string | null): string[] => {
   return paths;
 };
 
+/**
+ * Extract repository name from Git URL
+ */
+const extractRepoName = (repoUrl: string): string => {
+  // Remove trailing .git if present
+  let url = repoUrl.trim().replace(/\.git$/, "");
+  // Remove trailing slash
+  url = url.replace(/\/$/, "");
+  // Extract the last path segment
+  const segments = url.split("/");
+  const name = segments[segments.length - 1] || "git-import";
+  return name;
+};
+
 export const importGit = async (
   projectKey: string,
   req: ImportGitRequest,
@@ -172,7 +186,6 @@ export const importGit = async (
     await git.clone(repoUrl, tempDir, ["--depth=1", "--branch", branch]);
 
     const baseDir = subdir ? path.join(tempDir, subdir) : tempDir;
-    const rootTitle = subdir ? path.basename(subdir) : "";
     const { directories, files } = await scanEntries(baseDir);
 
     const result: ImportGitResult = {
@@ -208,15 +221,16 @@ export const importGit = async (
     // Step 4: Create directories
     const directoryMap = new Map<string, string>();
 
+    // Always create a root folder with the Git repo name
+    const repoName = extractRepoName(repoUrl);
     let rootParentId = parentId;
-    if (rootTitle) {
-      // Only create root folder if there are files to import
-      if (filteredFiles.length > 0) {
-        const rootId = await createFolder(projectKey, rootTitle, parentId);
-        directoryMap.set(".", rootId);
-        rootParentId = rootId;
-        result.directories += 1;
-      }
+    
+    if (filteredFiles.length > 0) {
+      // Create the Git project root folder
+      const repoFolderId = await createFolder(projectKey, repoName, parentId);
+      directoryMap.set(".", repoFolderId);
+      rootParentId = repoFolderId;
+      result.directories += 1;
     }
 
     for (const dir of filteredDirs) {
