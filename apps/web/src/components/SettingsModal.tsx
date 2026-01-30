@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
-import { RobotOutlined, SettingOutlined, CloseOutlined } from "@ant-design/icons";
+import { RobotOutlined, SettingOutlined, CloseOutlined, BgColorsOutlined } from "@ant-design/icons";
 
 import SettingsMenu, { type SettingsMenuItem } from "./SettingsMenu";
 import AIProviderPanel from "./AIProviderPanel";
+import AppearancePanel from "./AppearancePanel";
 
 /**
  * Settings menu items
@@ -13,12 +14,11 @@ const SETTINGS_MENU_ITEMS: SettingsMenuItem[] = [
     label: "AI 提供商",
     icon: <RobotOutlined />,
   },
-  // Future settings sections can be added here
-  // {
-  //   key: "general",
-  //   label: "通用设置",
-  //   icon: <SettingOutlined />,
-  // },
+  {
+    key: "appearance",
+    label: "外观",
+    icon: <BgColorsOutlined />,
+  },
 ];
 
 type SettingsModalProps = {
@@ -67,6 +67,8 @@ function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     switch (activeKey) {
       case "ai-providers":
         return <AIProviderPanel />;
+      case "appearance":
+        return <AppearancePanel />;
       default:
         return (
           <div className="settings-empty">
