@@ -2622,7 +2622,7 @@ body {
 
 .settings-modal-container {
   width: min(900px, 92vw);
-  max-height: min(680px, 85vh);
+  height: min(600px, 80vh);
   background: var(--surface);
   color: var(--ink);
   border-radius: 18px;
@@ -3095,7 +3095,7 @@ body {
 @media (max-width: 768px) {
   .settings-modal-container {
     width: 96vw;
-    max-height: 90vh;
+    height: 85vh;
     border-radius: 12px;
   }
 
