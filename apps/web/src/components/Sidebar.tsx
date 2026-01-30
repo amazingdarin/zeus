@@ -26,32 +26,28 @@ function Sidebar({
       <ProjectSelector collapsed={true} />
       <nav className="sidebar-nav">
         {items.map((item, index) => {
-          const className = `sidebar-link${
+          const className = `sidebar-menu-item${
             index === activeIndex ? " active" : ""
           }`;
 
           if (item.to) {
             return (
               <Link key={item.label} className={className} to={item.to} title={item.label}>
-                <span className="sidebar-icon" aria-hidden="true">
-                  {item.icon}
-                </span>
+                {item.icon}
               </Link>
             );
           }
 
           return (
             <button key={item.label} className={className} type="button" title={item.label}>
-              <span className="sidebar-icon" aria-hidden="true">
-                {item.icon}
-              </span>
+              {item.icon}
             </button>
           );
         })}
       </nav>
       <div className="sidebar-spacer" />
       <Link
-        className={`sidebar-config${settingsActive ? " active" : ""}`}
+        className={`sidebar-menu-item${settingsActive ? " active" : ""}`}
         to="/settings/providers"
         title="Settings"
       >

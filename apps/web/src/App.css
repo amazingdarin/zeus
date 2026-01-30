@@ -596,99 +596,36 @@ body {
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
 }
 
-.sidebar-link {
+.sidebar-menu-item {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid transparent;
   color: inherit;
-  text-align: left;
-  padding: 10px 12px;
+  padding: 10px;
   border-radius: 12px;
   cursor: pointer;
-  font-weight: 500;
   text-decoration: none;
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
 }
 
-.sidebar-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
+.sidebar-menu-item .anticon {
   font-size: 18px;
-  background: rgba(255, 255, 255, 0.14);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 700;
 }
 
-.sidebar-label {
-  flex: 1;
-}
-
-.sidebar.compact .sidebar-link {
-  justify-content: center;
-  padding: 10px;
-}
-
-.sidebar.compact .sidebar-label {
-  display: none;
-}
-
-.sidebar-link:hover {
+.sidebar-menu-item:hover {
   border-color: rgba(255, 255, 255, 0.25);
   background: rgba(255, 255, 255, 0.16);
 }
 
-.sidebar-link.active {
+.sidebar-menu-item.active {
   border-color: rgba(255, 255, 255, 0.35);
   background: rgba(255, 255, 255, 0.22);
   color: #ffffff;
-}
-
-.sidebar-config {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid transparent;
-  color: inherit;
-  text-align: left;
-  padding: 10px 12px;
-  border-radius: 12px;
-  cursor: pointer;
-  font-weight: 500;
-  text-decoration: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.sidebar-config .anticon {
-  font-size: 16px;
-}
-
-.sidebar-config:hover {
-  border-color: rgba(255, 255, 255, 0.25);
-  background: rgba(255, 255, 255, 0.16);
-}
-
-.sidebar-config.active {
-  border-color: rgba(255, 255, 255, 0.35);
-  background: rgba(255, 255, 255, 0.22);
-  color: #ffffff;
-}
-
-.sidebar.compact .sidebar-config {
-  justify-content: center;
-  padding: 10px;
-}
-
-.sidebar.compact .sidebar-config .sidebar-label {
-  display: none;
 }
 
 .block-ref-picker {
