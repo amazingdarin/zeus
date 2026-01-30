@@ -503,8 +503,17 @@ function DocumentPage() {
     [],
   );
 
+  // Track previous project key to detect project switch
+  const prevProjectKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
     const projectKey = resolvedProjectKey || null;
+    const prevProjectKey = prevProjectKeyRef.current;
+    
+    // Detect project switch (not initial load)
+    const isProjectSwitch = prevProjectKey !== null && prevProjectKey !== projectKey;
+    
+    prevProjectKeyRef.current = projectKey;
     projectKeyRef.current = projectKey;
     setRootDocuments([]);
     setChildrenByParent({});
@@ -514,11 +523,23 @@ function DocumentPage() {
     rootLoadAttemptRef.current = null;
     setRootLoading(false);
     initialRedirectRef.current = false;
+    
+    // Clear current document state
+    setDocument(null);
+    setError(null);
+    setLoading(false);
+    
+    // Navigate to blank page when switching projects (if we have a document selected)
+    if (isProjectSwitch && resolvedDocumentId) {
+      navigate("/documents", { replace: true });
+      return;
+    }
+    
     if (!projectKey) {
       return;
     }
     loadRootDocuments(projectKey);
-  }, [loadRootDocuments, resolvedProjectKey]);
+  }, [loadRootDocuments, navigate, resolvedDocumentId, resolvedProjectKey]);
 
   useEffect(() => {
     if (!resolvedProjectKey || !rootDocuments.length || resolvedDocumentId) {
