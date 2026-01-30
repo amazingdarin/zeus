@@ -107,18 +107,68 @@ function mapRowToInternalConfig(row: ProviderConfigRow): ProviderConfigInternal 
   return config;
 }
 
+/** Track if database is available */
+let dbAvailable = true;
+
 export const configStore = {
+  /**
+   * Check if database is available
+   */
+  isDbAvailable(): boolean {
+    return dbAvailable;
+  },
+
   /**
    * List all provider configurations
    */
   async list(): Promise<ProviderConfig[]> {
-    const result = await query<ProviderConfigRow>(
-      `SELECT * FROM llm_provider_config ORDER BY created_at ASC`,
-    );
+    try {
+      const result = await query<ProviderConfigRow>(
+        `SELECT * FROM llm_provider_config ORDER BY created_at ASC`,
+      );
 
-    return result.rows.map((row) => {
+      dbAvailable = true;
+      return result.rows.map((row) => {
+        const config = mapRowToConfig(row);
+        // Show masked key if API key exists
+        if (row.api_key_cipher && row.api_key_iv) {
+          try {
+            const apiKey = decrypt(row.api_key_cipher, row.api_key_iv);
+            config.apiKeyMasked = maskApiKey(apiKey);
+          } catch {
+            config.apiKeyMasked = "[encrypted]";
+          }
+        }
+        return config;
+      });
+    } catch (err) {
+      // Check if this is a connection error
+      if (err && typeof err === "object" && "code" in err && err.code === "ECONNREFUSED") {
+        dbAvailable = false;
+        console.warn("Database not available, returning empty config list");
+        return [];
+      }
+      throw err;
+    }
+  },
+
+  /**
+   * Get a single configuration by ID
+   */
+  async get(id: string): Promise<ProviderConfig | null> {
+    try {
+      const result = await query<ProviderConfigRow>(
+        `SELECT * FROM llm_provider_config WHERE id = $1`,
+        [id],
+      );
+
+      dbAvailable = true;
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      const row = result.rows[0];
       const config = mapRowToConfig(row);
-      // Show masked key if API key exists
       if (row.api_key_cipher && row.api_key_iv) {
         try {
           const apiKey = decrypt(row.api_key_cipher, row.api_key_iv);
@@ -128,66 +178,68 @@ export const configStore = {
         }
       }
       return config;
-    });
-  },
-
-  /**
-   * Get a single configuration by ID
-   */
-  async get(id: string): Promise<ProviderConfig | null> {
-    const result = await query<ProviderConfigRow>(
-      `SELECT * FROM llm_provider_config WHERE id = $1`,
-      [id],
-    );
-
-    if (result.rows.length === 0) {
-      return null;
-    }
-
-    const row = result.rows[0];
-    const config = mapRowToConfig(row);
-    if (row.api_key_cipher && row.api_key_iv) {
-      try {
-        const apiKey = decrypt(row.api_key_cipher, row.api_key_iv);
-        config.apiKeyMasked = maskApiKey(apiKey);
-      } catch {
-        config.apiKeyMasked = "[encrypted]";
+    } catch (err) {
+      if (err && typeof err === "object" && "code" in err && err.code === "ECONNREFUSED") {
+        dbAvailable = false;
+        return null;
       }
+      throw err;
     }
-    return config;
   },
 
   /**
    * Get a configuration with decrypted API key (for internal use)
    */
   async getInternal(id: string): Promise<ProviderConfigInternal | null> {
-    const result = await query<ProviderConfigRow>(
-      `SELECT * FROM llm_provider_config WHERE id = $1`,
-      [id],
-    );
+    try {
+      const result = await query<ProviderConfigRow>(
+        `SELECT * FROM llm_provider_config WHERE id = $1`,
+        [id],
+      );
 
-    if (result.rows.length === 0) {
-      return null;
+      dbAvailable = true;
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      return mapRowToInternalConfig(result.rows[0]);
+    } catch (err) {
+      if (err && typeof err === "object" && "code" in err && err.code === "ECONNREFUSED") {
+        dbAvailable = false;
+        return null;
+      }
+      throw err;
     }
-
-    return mapRowToInternalConfig(result.rows[0]);
   },
 
   /**
    * Get all enabled configurations with decrypted API keys (for provider registry)
    */
   async listEnabled(): Promise<ProviderConfigInternal[]> {
-    const result = await query<ProviderConfigRow>(
-      `SELECT * FROM llm_provider_config WHERE enabled = true ORDER BY created_at ASC`,
-    );
+    try {
+      const result = await query<ProviderConfigRow>(
+        `SELECT * FROM llm_provider_config WHERE enabled = true ORDER BY created_at ASC`,
+      );
 
-    return result.rows.map(mapRowToInternalConfig);
+      dbAvailable = true;
+      return result.rows.map(mapRowToInternalConfig);
+    } catch (err) {
+      if (err && typeof err === "object" && "code" in err && err.code === "ECONNREFUSED") {
+        dbAvailable = false;
+        return [];
+      }
+      throw err;
+    }
   },
 
   /**
    * Create a new configuration
    */
   async create(input: ProviderConfigInput): Promise<ProviderConfig> {
+    if (!dbAvailable) {
+      throw new Error("Database not available. Please ensure PostgreSQL is running.");
+    }
+
     const id = input.id || uuidv4();
     const now = new Date();
 
@@ -200,24 +252,34 @@ export const configStore = {
       apiKeyIv = encrypted.iv;
     }
 
-    await query(
-      `INSERT INTO llm_provider_config 
-        (id, provider_id, display_name, base_url, default_model, api_key_cipher, api_key_iv, enabled, status, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-      [
-        id,
-        input.providerId,
-        input.displayName,
-        input.baseUrl || null,
-        input.defaultModel || null,
-        apiKeyCipher,
-        apiKeyIv,
-        input.enabled !== false,
-        "unknown",
-        now,
-        now,
-      ],
-    );
+    try {
+      await query(
+        `INSERT INTO llm_provider_config 
+          (id, provider_id, display_name, base_url, default_model, api_key_cipher, api_key_iv, enabled, status, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [
+          id,
+          input.providerId,
+          input.displayName,
+          input.baseUrl || null,
+          input.defaultModel || null,
+          apiKeyCipher,
+          apiKeyIv,
+          input.enabled !== false,
+          "unknown",
+          now,
+          now,
+        ],
+      );
+
+      dbAvailable = true;
+    } catch (err) {
+      if (err && typeof err === "object" && "code" in err && err.code === "ECONNREFUSED") {
+        dbAvailable = false;
+        throw new Error("Database not available. Please ensure PostgreSQL is running.");
+      }
+      throw err;
+    }
 
     const config = await this.get(id);
     if (!config) {
@@ -230,6 +292,10 @@ export const configStore = {
    * Update an existing configuration
    */
   async update(id: string, input: Partial<ProviderConfigInput>): Promise<ProviderConfig> {
+    if (!dbAvailable) {
+      throw new Error("Database not available. Please ensure PostgreSQL is running.");
+    }
+
     // Get existing config to check if it exists
     const existing = await this.get(id);
     if (!existing) {
@@ -288,10 +354,19 @@ export const configStore = {
     // Add id as the last parameter
     values.push(id);
 
-    await query(
-      `UPDATE llm_provider_config SET ${updates.join(", ")} WHERE id = $${paramIndex}`,
-      values,
-    );
+    try {
+      await query(
+        `UPDATE llm_provider_config SET ${updates.join(", ")} WHERE id = $${paramIndex}`,
+        values,
+      );
+      dbAvailable = true;
+    } catch (err) {
+      if (err && typeof err === "object" && "code" in err && err.code === "ECONNREFUSED") {
+        dbAvailable = false;
+        throw new Error("Database not available. Please ensure PostgreSQL is running.");
+      }
+      throw err;
+    }
 
     const config = await this.get(id);
     if (!config) {
@@ -304,8 +379,21 @@ export const configStore = {
    * Delete a configuration
    */
   async delete(id: string): Promise<boolean> {
-    const result = await query(`DELETE FROM llm_provider_config WHERE id = $1`, [id]);
-    return (result.rowCount ?? 0) > 0;
+    if (!dbAvailable) {
+      throw new Error("Database not available. Please ensure PostgreSQL is running.");
+    }
+
+    try {
+      const result = await query(`DELETE FROM llm_provider_config WHERE id = $1`, [id]);
+      dbAvailable = true;
+      return (result.rowCount ?? 0) > 0;
+    } catch (err) {
+      if (err && typeof err === "object" && "code" in err && err.code === "ECONNREFUSED") {
+        dbAvailable = false;
+        throw new Error("Database not available. Please ensure PostgreSQL is running.");
+      }
+      throw err;
+    }
   },
 
   /**
@@ -316,11 +404,26 @@ export const configStore = {
     status: "active" | "error" | "unknown",
     lastError?: string,
   ): Promise<void> {
-    await query(
-      `UPDATE llm_provider_config 
-       SET status = $1, last_error = $2, last_tested_at = $3, updated_at = $4 
-       WHERE id = $5`,
-      [status, lastError || null, new Date(), new Date(), id],
-    );
+    if (!dbAvailable) {
+      console.warn("Database not available, skipping status update");
+      return;
+    }
+
+    try {
+      await query(
+        `UPDATE llm_provider_config 
+         SET status = $1, last_error = $2, last_tested_at = $3, updated_at = $4 
+         WHERE id = $5`,
+        [status, lastError || null, new Date(), new Date(), id],
+      );
+      dbAvailable = true;
+    } catch (err) {
+      if (err && typeof err === "object" && "code" in err && err.code === "ECONNREFUSED") {
+        dbAvailable = false;
+        console.warn("Database not available, skipping status update");
+        return;
+      }
+      throw err;
+    }
   },
 };
