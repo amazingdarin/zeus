@@ -1,0 +1,19 @@
+{
+  "meta": {
+    "id": "9c7be6e6-c5b5-4cb0-9fd4-e24963610a96",
+    "schema_version": "v1",
+    "title": "Test",
+    "slug": "test",
+    "path": "docs/test.json",
+    "parent_id": "root",
+    "created_at": "2026-01-30T07:10:25.151Z",
+    "updated_at": "2026-01-30T07:10:25.151Z"
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": []
+    }
+  }
+}

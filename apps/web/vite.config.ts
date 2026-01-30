@@ -1,65 +1,86 @@
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
+import http from "node:http";
+import https from "node:https";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
+
+// Pattern to match app-backend routes
+const isAppBackendRoute = (url: string): boolean => {
+  return (
+    /^\/api\/projects\/[^/]+\/documents/.test(url) ||
+    /^\/api\/projects\/[^/]+\/knowledge/.test(url) ||
+    /^\/api\/projects\/[^/]+\/assets/.test(url) ||
+    /^\/api\/projects\/[^/]+\/convert/.test(url) ||
+    url.startsWith("/api/app")
+  );
+};
+
+function createApiProxyPlugin(apiTarget: string, appBackendTarget: string): Plugin {
+  return {
+    name: "api-proxy",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = req.url || "";
+        
+        if (!url.startsWith("/api")) {
+          return next();
+        }
+
+        // Determine target
+        const isAppBackend = isAppBackendRoute(url);
+        const targetUrl = new URL(isAppBackend ? appBackendTarget : apiTarget);
+        
+        // Rewrite path for /api/app
+        let targetPath = url;
+        if (url.startsWith("/api/app")) {
+          targetPath = url.replace("/api/app", "/api");
+        }
+
+        // Create proxy request
+        const options: http.RequestOptions = {
+          hostname: targetUrl.hostname,
+          port: targetUrl.port || (targetUrl.protocol === "https:" ? 443 : 80),
+          path: targetPath,
+          method: req.method,
+          headers: {
+            ...req.headers,
+            host: targetUrl.host,
+          },
+        };
+
+        const proxyReq = (targetUrl.protocol === "https:" ? https : http).request(
+          options,
+          (proxyRes) => {
+            res.writeHead(proxyRes.statusCode || 500, proxyRes.headers);
+            proxyRes.pipe(res, { end: true });
+          }
+        );
+
+        proxyReq.on("error", (err) => {
+          console.error("Proxy error:", err.message);
+          res.writeHead(502);
+          res.end("Bad Gateway");
+        });
+
+        req.pipe(proxyReq, { end: true });
+      });
+    },
+  };
+}
 
 export default defineConfig(async ({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const apiTarget = (env.VITE_API_BASE_URL ?? "http://localhost:8080").trim();
   const appBackendTarget = (env.VITE_APP_BACKEND_URL ?? "http://localhost:4870").trim();
-  const proxy: Record<string, any> = {};
-
-  if (mode !== "production") {
-    // App-backend handles document, knowledge, and asset APIs
-    const appBackendRoutes = [
-      "/api/projects/:projectKey/documents",
-      "/api/projects/:projectKey/knowledge",
-      "/api/projects/:projectKey/assets",
-      "/api/app",
-    ];
-
-    // Custom proxy matcher for app-backend routes
-    proxy["/api"] = {
-      target: apiTarget,
-      changeOrigin: true,
-      secure: false,
-      configure: (proxyInstance: any) => {
-        proxyInstance.on("proxyReq", (proxyReq: any, req: any) => {
-          const url = req.url || "";
-          // Route document, knowledge, asset APIs to app-backend
-          if (
-            url.match(/^\/api\/projects\/[^/]+\/documents/) ||
-            url.match(/^\/api\/projects\/[^/]+\/knowledge/) ||
-            url.match(/^\/api\/projects\/[^/]+\/assets/) ||
-            url.startsWith("/api/app")
-          ) {
-            const appUrl = url.startsWith("/api/app")
-              ? url.replace("/api/app", "/api")
-              : url;
-            proxyReq.path = appUrl;
-            proxyReq.setHeader("host", new URL(appBackendTarget).host);
-          }
-        });
-      },
-      router: (req: any) => {
-        const url = req.url || "";
-        if (
-          url.match(/^\/api\/projects\/[^/]+\/documents/) ||
-          url.match(/^\/api\/projects\/[^/]+\/knowledge/) ||
-          url.match(/^\/api\/projects\/[^/]+\/assets/) ||
-          url.startsWith("/api/app")
-        ) {
-          return appBackendTarget;
-        }
-        return apiTarget;
-      },
-    };
-  }
 
   return {
-    plugins: [react()],
+    plugins: [
+      react(),
+      mode !== "production" && createApiProxyPlugin(apiTarget, appBackendTarget),
+    ].filter(Boolean),
     clearScreen: false,
     server: {
       port: 1420,
@@ -72,7 +93,6 @@ export default defineConfig(async ({ mode }) => {
             port: 1421,
           }
         : undefined,
-      proxy,
     },
     resolve: {
       alias: {
