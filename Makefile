@@ -8,7 +8,7 @@ CONFIG_PATH ?= /tmp/zeus-$(NAMESPACE)/config.yaml
 
 # Development run commands
 run-server:
-	go run ./server/cmd/zeus
+	cd server && go run ./cmd/zeus
 
 run-app-backend:
 	cd apps/app-backend && npm run dev
@@ -82,5 +82,5 @@ clean-all:
 
 test-integration:
 	$(MAKE) start-deps NAMESPACE=zeus-test
-	ZEUS_CONFIG_PATH=/tmp/zeus-zeus-test/config.yaml go test ./server/internal/... -run Integration -v || ( $(MAKE) clean-all NAMESPACE=zeus-test; exit 1 )
+	cd server && ZEUS_CONFIG_PATH=/tmp/zeus-zeus-test/config.yaml go test ./internal/... -run Integration -v || ( $(MAKE) clean-all NAMESPACE=zeus-test; exit 1 )
 	$(MAKE) clean-all NAMESPACE=zeus-test
