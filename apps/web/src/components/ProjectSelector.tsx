@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { ReloadOutlined } from "@ant-design/icons";
+import { useEffect, useState, useRef } from "react";
 
 import { type Project, useProjectContext } from "../context/ProjectContext";
 import CreateProjectModal from "./CreateProjectModal";
@@ -11,7 +10,7 @@ type ProjectSelectorProps = {
   collapsed?: boolean;
 };
 
-function ProjectSelector({ collapsed: _collapsed = false }: ProjectSelectorProps) {
+function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
   const [open, setOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
@@ -19,12 +18,21 @@ function ProjectSelector({ collapsed: _collapsed = false }: ProjectSelectorProps
   const [rebuildTaskId, setRebuildTaskId] = useState<string | null>(null);
   const [rebuildStatus, setRebuildStatus] = useState<string | null>(null);
   const { projects, currentProject, setCurrentProject, reloadProjects } = useProjectContext();
+  const containerRef = useRef<HTMLDivElement>(null);
 
+  // Close dropdown when clicking outside
   useEffect(() => {
-    if (currentProject) {
-      console.log("project_key:", currentProject.key);
-    }
-  }, [currentProject]);
+    if (!open) return;
+    
+    const handleClickOutside = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
 
   const availableProjects = projects;
   const activeProject = currentProject ?? availableProjects[0] ?? null;
@@ -137,7 +145,7 @@ function ProjectSelector({ collapsed: _collapsed = false }: ProjectSelectorProps
   };
 
   return (
-    <div className="project-selector compact">
+    <div className="project-selector compact" ref={containerRef}>
       <button
         className="sidebar-menu-item"
         type="button"

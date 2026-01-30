@@ -174,8 +174,14 @@ body {
   right: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  min-width: 180px;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: #2a2f36;
@@ -183,20 +189,23 @@ body {
 }
 
 .project-selector-menu.compact {
-  left: 100%;
+  left: calc(100% + 8px);
+  top: 0;
   right: auto;
-  width: 200px;
+  min-width: 200px;
 }
 
 .project-selector-item {
   text-align: left;
-  border: 1px solid transparent;
+  border: none;
   background: transparent;
-  color: inherit;
-  padding: 8px 10px;
-  border-radius: 10px;
+  color: var(--ink);
+  padding: 8px 12px;
+  border-radius: 8px;
   cursor: pointer;
+  font-size: 13px;
   font-weight: 500;
+  transition: background 0.15s ease;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -216,23 +225,23 @@ body {
 }
 
 .project-selector-item:hover {
-  border-color: rgba(255, 255, 255, 0.25);
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--hover-bg);
 }
 
 .project-selector-item.active {
-  border-color: rgba(255, 255, 255, 0.35);
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--active-bg);
+  color: var(--accent);
 }
 
 .project-selector-add {
-  font-weight: 600;
+  font-weight: 500;
+  color: var(--accent);
 }
 
 .project-selector-divider {
   height: 1px;
-  margin: 4px 6px;
-  background: rgba(255, 255, 255, 0.12);
+  margin: 4px 8px;
+  background: var(--border);
 }
 
 .modal-overlay {
