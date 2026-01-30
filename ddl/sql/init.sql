@@ -110,3 +110,24 @@ ON knowledge_embedding_index (project_key);
 
 CREATE INDEX IF NOT EXISTS idx_kei_embedding
 ON knowledge_embedding_index USING ivfflat (embedding vector_l2_ops);
+
+-- LLM Provider Configuration
+CREATE TABLE llm_provider_config
+(
+    id              TEXT PRIMARY KEY,
+    provider_id     TEXT NOT NULL,              -- openai, anthropic, google, openai-compatible
+    display_name    TEXT NOT NULL,
+    base_url        TEXT,
+    default_model   TEXT,
+    api_key_cipher  TEXT,                       -- AES-256-GCM encrypted
+    api_key_iv      TEXT,                       -- initialization vector
+    enabled         BOOLEAN DEFAULT true,
+    status          TEXT DEFAULT 'unknown',     -- active, error, unknown
+    last_error      TEXT,
+    last_tested_at  TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    updated_at      TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_provider_config_provider
+ON llm_provider_config (provider_id);

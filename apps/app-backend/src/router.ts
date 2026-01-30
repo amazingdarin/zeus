@@ -15,9 +15,13 @@ import { knowledgeSearch } from "./knowledge/search.js";
 import { assetStore } from "./storage/asset-store.js";
 import {
   llmGateway,
+  configStore,
+  providerRegistry,
   type ChatOptions,
   type CompletionOptions,
   type EmbeddingOptions,
+  type ProviderConfigInput,
+  type LLMProviderId,
 } from "./llm/index.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -693,5 +697,240 @@ export const buildRouter = () => {
     }
   });
 
+  // ============================================
+  // LLM Provider Configuration APIs
+  // ============================================
+
+  /**
+   * List all provider configurations
+   * GET /llm/configs
+   */
+  router.get("/llm/configs", async (_req: Request, res: Response) => {
+    try {
+      const configs = await configStore.list();
+      success(res, configs);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "List configs failed";
+      error(res, "LIST_CONFIGS_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Get a single provider configuration
+   * GET /llm/configs/:id
+   */
+  router.get("/llm/configs/:id", async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const config = await configStore.get(id);
+      
+      if (!config) {
+        error(res, "NOT_FOUND", "Configuration not found", 404);
+        return;
+      }
+      
+      success(res, config);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Get config failed";
+      error(res, "GET_CONFIG_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Create a new provider configuration
+   * POST /llm/configs
+   */
+  router.post("/llm/configs", async (req: Request, res: Response) => {
+    try {
+      const input = req.body as ProviderConfigInput;
+      
+      if (!input.providerId || !input.displayName) {
+        error(res, "INVALID_REQUEST", "providerId and displayName are required");
+        return;
+      }
+
+      // Validate provider ID
+      const validProviders: LLMProviderId[] = ["openai", "anthropic", "google", "openai-compatible"];
+      if (!validProviders.includes(input.providerId)) {
+        error(res, "INVALID_PROVIDER", `Invalid provider: ${input.providerId}`);
+        return;
+      }
+
+      const config = await configStore.create(input);
+      
+      // Refresh provider registry
+      await providerRegistry.refresh();
+      
+      success(res, config, 201);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Create config failed";
+      error(res, "CREATE_CONFIG_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Update a provider configuration
+   * PUT /llm/configs/:id
+   */
+  router.put("/llm/configs/:id", async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const input = req.body as Partial<ProviderConfigInput>;
+
+      const config = await configStore.update(id, input);
+      
+      // Refresh provider registry
+      await providerRegistry.refresh();
+      
+      success(res, config);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("not found")) {
+        error(res, "NOT_FOUND", err.message, 404);
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Update config failed";
+      error(res, "UPDATE_CONFIG_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Delete a provider configuration
+   * DELETE /llm/configs/:id
+   */
+  router.delete("/llm/configs/:id", async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const deleted = await configStore.delete(id);
+      
+      if (!deleted) {
+        error(res, "NOT_FOUND", "Configuration not found", 404);
+        return;
+      }
+      
+      // Refresh provider registry
+      await providerRegistry.refresh();
+      
+      success(res, { deleted: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Delete config failed";
+      error(res, "DELETE_CONFIG_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Test a provider configuration
+   * POST /llm/configs/:id/test
+   */
+  router.post("/llm/configs/:id/test", async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      
+      // Get the configuration with decrypted API key
+      const config = await configStore.getInternal(id);
+      if (!config) {
+        error(res, "NOT_FOUND", "Configuration not found", 404);
+        return;
+      }
+
+      // Get model to test with
+      const model = config.defaultModel || getDefaultModelForProvider(config.providerId);
+      if (!model) {
+        error(res, "NO_MODEL", "No model configured for testing");
+        return;
+      }
+
+      // Try a simple chat request
+      try {
+        const result = await llmGateway.chat({
+          provider: config.providerId,
+          model,
+          messages: [{ role: "user", content: "Hello" }],
+          maxTokens: 10,
+          apiKey: config.apiKey,
+          baseUrl: config.baseUrl,
+        });
+
+        // Update status to active
+        await configStore.updateStatus(id, "active");
+        
+        success(res, {
+          success: true,
+          model,
+          response: result.content.substring(0, 100),
+        });
+      } catch (testErr) {
+        // Update status to error
+        const errorMessage = testErr instanceof Error ? testErr.message : "Test failed";
+        await configStore.updateStatus(id, "error", errorMessage);
+        
+        error(res, "TEST_FAILED", errorMessage);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Test failed";
+      error(res, "TEST_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Get available provider types (static list)
+   * GET /llm/provider-types
+   */
+  router.get("/llm/provider-types", (_req: Request, res: Response) => {
+    const types = [
+      {
+        id: "openai",
+        name: "OpenAI",
+        description: "OpenAI GPT models (GPT-4, GPT-3.5, etc.)",
+        requiresApiKey: true,
+        supportsBaseUrl: true,
+        defaultModels: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
+      },
+      {
+        id: "anthropic",
+        name: "Anthropic",
+        description: "Anthropic Claude models",
+        requiresApiKey: true,
+        supportsBaseUrl: true,
+        defaultModels: ["claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
+      },
+      {
+        id: "google",
+        name: "Google",
+        description: "Google Gemini models",
+        requiresApiKey: true,
+        supportsBaseUrl: true,
+        defaultModels: ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+      },
+      {
+        id: "openai-compatible",
+        name: "OpenAI Compatible",
+        description: "Any OpenAI-compatible API (DeepSeek, Qwen, Moonshot, etc.)",
+        requiresApiKey: true,
+        supportsBaseUrl: true,
+        requiresBaseUrl: true,
+        defaultModels: [],
+      },
+    ];
+    success(res, types);
+  });
+
   return router;
 };
+
+/**
+ * Get default model for a provider (for testing)
+ */
+function getDefaultModelForProvider(providerId: LLMProviderId): string | null {
+  switch (providerId) {
+    case "openai":
+      return "gpt-4o-mini";
+    case "anthropic":
+      return "claude-3-5-haiku-20241022";
+    case "google":
+      return "gemini-1.5-flash";
+    case "openai-compatible":
+      return null; // Must be configured
+    default:
+      return null;
+  }
+}

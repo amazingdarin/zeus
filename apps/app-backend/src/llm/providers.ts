@@ -2,6 +2,7 @@
  * LLM Provider Registry
  *
  * Manages provider initialization and model resolution using Vercel AI SDK.
+ * Supports both environment variable configuration and database-backed configuration.
  */
 
 import { createOpenAI } from "@ai-sdk/openai";
@@ -14,6 +15,7 @@ import type {
   ProviderInfo,
   ModelInfo,
 } from "./types.js";
+import { configStore, type ProviderConfigInternal } from "./config-store.js";
 
 /**
  * Default model configurations
@@ -135,10 +137,19 @@ const DEFAULT_MODELS: Record<LLMProviderId, LLMModelConfig[]> = {
 };
 
 /**
+ * Database-backed provider configuration (keyed by config id)
+ */
+type DbProviderConfig = ProviderConfigInternal & {
+  configId: string;
+};
+
+/**
  * Provider registry singleton
  */
 class ProviderRegistry {
   private providers = new Map<LLMProviderId, LLMProviderConfig>();
+  private dbConfigs = new Map<string, DbProviderConfig>(); // keyed by config id
+  private dbInitialized = false;
 
   constructor() {
     this.initializeFromEnv();
@@ -229,6 +240,55 @@ class ProviderRegistry {
   }
 
   /**
+   * Load provider configurations from database
+   */
+  async loadFromDatabase(): Promise<void> {
+    try {
+      const configs = await configStore.listEnabled();
+      this.dbConfigs.clear();
+
+      for (const config of configs) {
+        this.dbConfigs.set(config.id, {
+          ...config,
+          configId: config.id,
+        });
+      }
+
+      this.dbInitialized = true;
+    } catch (err) {
+      console.error("Failed to load provider configs from database:", err);
+    }
+  }
+
+  /**
+   * Refresh database configurations
+   */
+  async refresh(): Promise<void> {
+    await this.loadFromDatabase();
+  }
+
+  /**
+   * Get a database-backed config by its ID
+   */
+  getDbConfig(configId: string): DbProviderConfig | undefined {
+    return this.dbConfigs.get(configId);
+  }
+
+  /**
+   * Get a database-backed config's credentials for runtime use
+   */
+  async getConfigCredentials(
+    configId: string,
+  ): Promise<{ apiKey?: string; baseUrl?: string } | null> {
+    const config = await configStore.getInternal(configId);
+    if (!config) return null;
+    return {
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl,
+    };
+  }
+
+  /**
    * Get a provider configuration
    */
   getConfig(providerId: LLMProviderId): LLMProviderConfig | undefined {
@@ -245,41 +305,54 @@ class ProviderRegistry {
 
   /**
    * Get the AI SDK provider instance for chat/completion
+   * Supports both static (env) and dynamic (db) configurations
    */
   getLanguageModel(
     providerId: LLMProviderId,
     modelId: string,
-    options?: { baseUrl?: string; apiKey?: string },
+    options?: { baseUrl?: string; apiKey?: string; configId?: string },
   ) {
+    // If configId is provided, try to get credentials from database config
+    let apiKey = options?.apiKey;
+    let baseUrl = options?.baseUrl;
+
+    if (options?.configId) {
+      const dbConfig = this.dbConfigs.get(options.configId);
+      if (dbConfig) {
+        apiKey = apiKey || dbConfig.apiKey;
+        baseUrl = baseUrl || dbConfig.baseUrl;
+      }
+    }
+
     const config = this.providers.get(providerId);
 
     switch (providerId) {
       case "openai": {
         const openai = createOpenAI({
-          apiKey: options?.apiKey || config?.apiKey,
-          baseURL: options?.baseUrl || config?.baseUrl,
+          apiKey: apiKey || config?.apiKey,
+          baseURL: baseUrl || config?.baseUrl,
         });
         return openai(modelId);
       }
       case "anthropic": {
         const anthropic = createAnthropic({
-          apiKey: options?.apiKey || config?.apiKey,
-          baseURL: options?.baseUrl || config?.baseUrl,
+          apiKey: apiKey || config?.apiKey,
+          baseURL: baseUrl || config?.baseUrl,
         });
         return anthropic(modelId);
       }
       case "google": {
         const google = createGoogleGenerativeAI({
-          apiKey: options?.apiKey || config?.apiKey,
-          baseURL: options?.baseUrl || config?.baseUrl,
+          apiKey: apiKey || config?.apiKey,
+          baseURL: baseUrl || config?.baseUrl,
         });
         return google(modelId);
       }
       case "openai-compatible": {
         // For OpenAI-compatible providers, use OpenAI SDK with custom baseUrl
         const openai = createOpenAI({
-          apiKey: options?.apiKey || config?.apiKey || "",
-          baseURL: options?.baseUrl || config?.baseUrl || "",
+          apiKey: apiKey || config?.apiKey || "",
+          baseURL: baseUrl || config?.baseUrl || "",
           compatibility: "compatible",
         });
         return openai(modelId);
@@ -291,28 +364,41 @@ class ProviderRegistry {
 
   /**
    * Get the AI SDK embedding model instance
+   * Supports both static (env) and dynamic (db) configurations
    */
   getEmbeddingModel(
     providerId: LLMProviderId,
     modelId: string,
-    options?: { baseUrl?: string; apiKey?: string },
+    options?: { baseUrl?: string; apiKey?: string; configId?: string },
   ) {
+    // If configId is provided, try to get credentials from database config
+    let apiKey = options?.apiKey;
+    let baseUrl = options?.baseUrl;
+
+    if (options?.configId) {
+      const dbConfig = this.dbConfigs.get(options.configId);
+      if (dbConfig) {
+        apiKey = apiKey || dbConfig.apiKey;
+        baseUrl = baseUrl || dbConfig.baseUrl;
+      }
+    }
+
     const config = this.providers.get(providerId);
 
     switch (providerId) {
       case "openai":
       case "openai-compatible": {
         const openai = createOpenAI({
-          apiKey: options?.apiKey || config?.apiKey,
-          baseURL: options?.baseUrl || config?.baseUrl,
+          apiKey: apiKey || config?.apiKey,
+          baseURL: baseUrl || config?.baseUrl,
           compatibility: providerId === "openai-compatible" ? "compatible" : "strict",
         });
         return openai.embedding(modelId);
       }
       case "google": {
         const google = createGoogleGenerativeAI({
-          apiKey: options?.apiKey || config?.apiKey,
-          baseURL: options?.baseUrl || config?.baseUrl,
+          apiKey: apiKey || config?.apiKey,
+          baseURL: baseUrl || config?.baseUrl,
         });
         return google.textEmbeddingModel(modelId);
       }
@@ -321,6 +407,13 @@ class ProviderRegistry {
       default:
         throw new Error(`Unknown provider: ${providerId}`);
     }
+  }
+
+  /**
+   * List all database-backed configurations
+   */
+  listDbConfigs(): DbProviderConfig[] {
+    return Array.from(this.dbConfigs.values());
   }
 
   /**
