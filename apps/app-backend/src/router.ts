@@ -750,7 +750,7 @@ export const buildRouter = () => {
       }
 
       // Validate provider ID
-      const validProviders: LLMProviderId[] = ["openai", "anthropic", "google", "openai-compatible"];
+      const validProviders: LLMProviderId[] = ["openai", "anthropic", "google", "ollama", "openai-compatible"];
       if (!validProviders.includes(input.providerId)) {
         error(res, "INVALID_PROVIDER", `Invalid provider: ${input.providerId}`);
         return;
