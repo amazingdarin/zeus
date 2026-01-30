@@ -2856,16 +2856,36 @@ body {
 /* Provider Type Grid - Light Theme */
 .provider-type-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
   margin-bottom: 24px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.provider-type-grid::-webkit-scrollbar {
+  width: 6px;
+}
+
+.provider-type-grid::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.provider-type-grid::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 3px;
+}
+
+.provider-type-grid::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .provider-type-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 20px;
+  border-radius: 12px;
+  padding: 16px 12px;
   cursor: pointer;
   transition: all 0.15s ease;
   text-align: center;
@@ -2883,21 +2903,22 @@ body {
 }
 
 .provider-type-card-icon {
-  font-size: 32px;
+  font-size: 28px;
   color: var(--accent);
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .provider-type-card-name {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--ink);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .provider-type-card-desc {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
+  line-height: 1.3;
 }
 
 .provider-type-hint {
@@ -3065,7 +3086,13 @@ body {
   }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 600px) {
+  .provider-type-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 400px) {
   .provider-type-grid {
     grid-template-columns: 1fr;
   }
