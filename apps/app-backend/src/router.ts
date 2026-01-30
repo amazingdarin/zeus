@@ -102,6 +102,21 @@ export const buildRouter = () => {
   });
 
   /**
+   * Get the full document tree (all documents with nested children)
+   * GET /projects/:projectKey/documents/tree
+   */
+  router.get("/projects/:projectKey/documents/tree", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const tree = await documentStore.getFullTree(projectKey);
+      success(res, tree);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Get tree failed";
+      error(res, "TREE_FAILED", message, 500);
+    }
+  });
+
+  /**
    * Get a document by ID
    * GET /projects/:projectKey/documents/:docId
    */

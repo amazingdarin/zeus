@@ -461,6 +461,42 @@ export const documentStore = {
   },
 
   /**
+   * Get the full document tree recursively
+   */
+  async getFullTree(projectKey: string): Promise<TreeItem[]> {
+    const root = projectRoot(projectKey);
+    await indexManager.ensure(projectKey, root);
+
+    const buildTree = async (parentId: string): Promise<TreeItem[]> => {
+      const children = await this.getChildren(projectKey, parentId);
+      const result: TreeItem[] = [];
+
+      for (const child of children) {
+        const item: TreeItem = {
+          id: child.id,
+          slug: child.slug,
+          title: child.title,
+          kind: child.kind,
+        };
+
+        // If this item has children (is a directory), recursively get them
+        if (child.kind === "dir") {
+          const subChildren = await buildTree(child.id);
+          if (subChildren.length > 0) {
+            item.children = subChildren;
+          }
+        }
+
+        result.push(item);
+      }
+
+      return result;
+    };
+
+    return buildTree("root");
+  },
+
+  /**
    * Get the hierarchy chain from root to document
    */
   async getHierarchy(projectKey: string, docId: string): Promise<DocumentMeta[]> {

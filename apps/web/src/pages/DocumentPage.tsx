@@ -18,7 +18,7 @@ import RichTextViewer from "../components/RichTextViewer";
 import {
   fetchDocument,
   fetchDocumentHierarchy,
-  fetchDocumentList,
+  fetchDocumentTree,
   fetchProposalDiff,
   applyProposal,
   moveDocument,
@@ -26,8 +26,8 @@ import {
   deleteDocument,
   fetchUrlHtml,
   importGit,
-  type DocumentListItem,
   type DocumentDetail,
+  type DocumentTreeItem,
 } from "../api/documents";
 import { rebuildDocumentRag } from "../api/projects";
 import { uploadAsset } from "../api/assets";
@@ -345,26 +345,18 @@ function DocumentPage() {
 
   const isSmartImportTypeSelected = (type: SmartImportType) => smartImportTypes.has(type);
 
-  const mapDocument = useCallback(
-    (item: DocumentListItem, parentId: string): KnowledgeBaseDocument => {
-      const rawType = String(
-        item.doc_type ?? item.meta?.doc_type ?? item.type ?? "",
-      ).toLowerCase();
-      let normalizedType =
-        rawType === "origin" || rawType === "requirement" ? "document" : rawType;
-      if (!normalizedType) {
-        normalizedType = "document";
-      }
-      const kind = String(item.kind ?? "").toLowerCase();
-      const hasChild =
-        kind === "dir" || Boolean((item as { has_child?: boolean }).has_child);
+  /**
+   * Convert a tree item to KnowledgeBaseDocument format
+   */
+  const treeItemToDocument = useCallback(
+    (item: DocumentTreeItem, parentId: string): KnowledgeBaseDocument => {
       return {
-        id: String(item.meta?.id ?? item.id ?? ""),
-        title: String(item.meta?.title ?? item.title ?? item.slug ?? ""),
-        type: normalizedType,
+        id: item.id,
+        title: item.title || "Untitled",
+        type: "document",
         parentId,
-        kind,
-        hasChild,
+        kind: item.kind,
+        hasChild: item.kind === "dir",
         order: 0,
         storageObjectId: "",
       };
@@ -372,30 +364,61 @@ function DocumentPage() {
     [],
   );
 
-  const fetchDocuments = useCallback(
-    async (projectKey: string, parentId: string) => {
-      const items = await fetchDocumentList(projectKey, parentId);
-      const normalizedParent = parentId ? parentId.trim() : "";
-      return items
-        .map((item) => mapDocument(item, normalizedParent))
-        .filter((doc) => doc.id);
+  /**
+   * Flatten a nested tree into rootDocuments and childrenByParent
+   */
+  const flattenTree = useCallback(
+    (tree: DocumentTreeItem[], parentId: string = ""): {
+      rootDocs: KnowledgeBaseDocument[];
+      childrenMap: Record<string, KnowledgeBaseDocument[]>;
+    } => {
+      const rootDocs: KnowledgeBaseDocument[] = [];
+      const childrenMap: Record<string, KnowledgeBaseDocument[]> = {};
+
+      const processItems = (items: DocumentTreeItem[], parent: string) => {
+        const docs = items.map((item) => treeItemToDocument(item, parent));
+        
+        if (parent === "") {
+          rootDocs.push(...docs);
+        } else {
+          childrenMap[parent] = docs;
+        }
+
+        // Process children recursively
+        for (const item of items) {
+          if (item.children && item.children.length > 0) {
+            processItems(item.children, item.id);
+          }
+        }
+      };
+
+      processItems(tree, parentId);
+      return { rootDocs, childrenMap };
     },
-    [mapDocument],
+    [treeItemToDocument],
   );
 
-  const loadRootDocuments = useCallback(
+  /**
+   * Load the full document tree at once
+   */
+  const loadFullTree = useCallback(
     async (projectKey: string) => {
       rootLoadAttemptRef.current = projectKey;
       setRootLoading(true);
       try {
-        const docs = await fetchDocuments(projectKey, "");
+        const tree = await fetchDocumentTree(projectKey);
         if (projectKeyRef.current !== projectKey) {
           return;
         }
-        setRootDocuments(docs);
+        const { rootDocs, childrenMap } = flattenTree(tree);
+        setRootDocuments(rootDocs);
+        childrenByParentRef.current = childrenMap;
+        setChildrenByParent(childrenMap);
       } catch {
         if (projectKeyRef.current === projectKey) {
           setRootDocuments([]);
+          childrenByParentRef.current = {};
+          setChildrenByParent({});
         }
       } finally {
         if (projectKeyRef.current === projectKey) {
@@ -403,52 +426,11 @@ function DocumentPage() {
         }
       }
     },
-    [fetchDocuments],
+    [flattenTree],
   );
 
-  const updateLoadingIds = useCallback((parentId: string, value: boolean) => {
-    setLoadingIds((prev) => {
-      const next = { ...prev, [parentId]: value };
-      loadingIdsRef.current = next;
-      return next;
-    });
-  }, []);
-
-  const loadChildren = useCallback(
-    async (projectKey: string, parentId: string, options?: { force?: boolean }) => {
-      // Use ref to check if loaded to avoid dependency on state
-      const hasLoaded = Object.prototype.hasOwnProperty.call(childrenByParentRef.current, parentId);
-      if (!options?.force && hasLoaded) {
-        return;
-      }
-      if (loadingIdsRef.current[parentId]) {
-        return;
-      }
-      updateLoadingIds(parentId, true);
-      try {
-        const docs = await fetchDocuments(projectKey, parentId);
-        if (projectKeyRef.current !== projectKey) {
-          return;
-        }
-        setChildrenByParent((prev) => {
-          childrenByParentRef.current = { ...prev, [parentId]: docs };
-          return childrenByParentRef.current;
-        });
-      } catch {
-        if (projectKeyRef.current === projectKey) {
-          setChildrenByParent((prev) => {
-            childrenByParentRef.current = { ...prev, [parentId]: [] };
-            return childrenByParentRef.current;
-          });
-        }
-      } finally {
-        if (projectKeyRef.current === projectKey) {
-          updateLoadingIds(parentId, false);
-        }
-      }
-    },
-    [fetchDocuments, updateLoadingIds],
-  );
+  // Keep loadRootDocuments as alias for backward compatibility
+  const loadRootDocuments = loadFullTree;
 
   const getDocumentHierarchy = useCallback(async (projectKey: string, documentId: string) => {
     const requestKey = `${projectKey}:${documentId}`;
@@ -614,9 +596,7 @@ function DocumentPage() {
             expanded[id] = true;
           });
           setExpandedIds((prev) => ({ ...prev, ...expanded }));
-          for (const ancestorId of uniqueAncestors) {
-            await loadChildren(projectKey, ancestorId);
-          }
+          // No need to load children - they're already loaded with the full tree
         }
       } catch {
         return;
@@ -627,24 +607,20 @@ function DocumentPage() {
     buildAncestorsFromMap,
     docParentMap,
     loadAncestorChain,
-    loadChildren,
     loadRootDocuments,
     resolvedDocumentId,
     resolvedProjectKey,
   ]);
 
   const handleToggle = useCallback(
-    async (doc: KnowledgeBaseDocument) => {
-      if (!resolvedProjectKey || !doc.hasChild) {
+    (doc: KnowledgeBaseDocument) => {
+      if (!doc.hasChild) {
         return;
       }
-      const nextExpanded = !expandedIds[doc.id];
-      if (nextExpanded) {
-        await loadChildren(resolvedProjectKey, doc.id);
-      }
-      setExpandedIds((prev) => ({ ...prev, [doc.id]: nextExpanded }));
+      // Just toggle expanded state - children are already loaded
+      setExpandedIds((prev) => ({ ...prev, [doc.id]: !prev[doc.id] }));
     },
-    [expandedIds, loadChildren, resolvedProjectKey],
+    [],
   );
 
   const handleDocumentsChanged = useCallback(
@@ -652,15 +628,15 @@ function DocumentPage() {
       if (!resolvedProjectKey) {
         return;
       }
+      // Reload the full tree when documents change
+      await loadFullTree(resolvedProjectKey);
+      // Keep the parent expanded
       const normalizedParent = parentId.trim();
-      if (!normalizedParent || isRootDocumentId(normalizedParent)) {
-        await loadRootDocuments(resolvedProjectKey);
-        return;
+      if (normalizedParent && !isRootDocumentId(normalizedParent)) {
+        setExpandedIds((prev) => ({ ...prev, [normalizedParent]: true }));
       }
-      setExpandedIds((prev) => ({ ...prev, [normalizedParent]: true }));
-      await loadChildren(resolvedProjectKey, normalizedParent, { force: true });
     },
-    [loadChildren, loadRootDocuments, resolvedProjectKey],
+    [loadFullTree, resolvedProjectKey],
   );
 
   const refreshParent = useCallback(
@@ -668,15 +644,15 @@ function DocumentPage() {
       if (!resolvedProjectKey) {
         return;
       }
+      // Reload the full tree
+      await loadFullTree(resolvedProjectKey);
+      // Keep the parent expanded
       const normalized = parentId.trim();
-      if (!normalized || isRootDocumentId(normalized)) {
-        await loadRootDocuments(resolvedProjectKey);
-        return;
+      if (normalized && !isRootDocumentId(normalized)) {
+        setExpandedIds((prev) => ({ ...prev, [normalized]: true }));
       }
-      setExpandedIds((prev) => ({ ...prev, [normalized]: true }));
-      await loadChildren(resolvedProjectKey, normalized, { force: true });
     },
-    [loadChildren, loadRootDocuments, resolvedProjectKey],
+    [loadFullTree, resolvedProjectKey],
   );
 
   const handleMove = useCallback(
@@ -1021,23 +997,11 @@ function DocumentPage() {
       });
       // Navigate to /documents (blank page)
       navigate("/documents");
-      // Refresh the document tree
-      await loadRootDocuments(resolvedProjectKey);
-      // If there was a parent, refresh its children too
-      if (parentId && parentId !== "root") {
-        const children = await fetchDocuments(resolvedProjectKey, parentId);
-        setChildrenByParent((prev) => {
-          childrenByParentRef.current = { ...prev, [parentId]: children };
-          return childrenByParentRef.current;
-        });
-        // If parent now has no children, collapse it
-        if (children.length === 0) {
-          setExpandedIds((prev) => {
-            const next = { ...prev };
-            delete next[parentId];
-            return next;
-          });
-        }
+      // Refresh the full document tree
+      await loadFullTree(resolvedProjectKey);
+      // Keep the parent expanded if it still has children
+      if (parentId && parentId !== "root" && childrenByParentRef.current[parentId]?.length > 0) {
+        setExpandedIds((prev) => ({ ...prev, [parentId]: true }));
       }
     } catch (err) {
       console.error("Delete failed:", err);
@@ -1045,7 +1009,7 @@ function DocumentPage() {
     } finally {
       setDeleting(false);
     }
-  }, [resolvedProjectKey, activeDocument, deleting, navigate, loadRootDocuments, fetchDocuments]);
+  }, [resolvedProjectKey, activeDocument, deleting, navigate, loadFullTree]);
 
   const handleOpenNew = () => {
     if (!allowChildActions) {

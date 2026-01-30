@@ -105,6 +105,25 @@ export const fetchDocumentList = async (projectKey: string, parentId: string): P
     return Array.isArray(payload?.data) ? payload.data : [];
 };
 
+export type DocumentTreeItem = {
+    id: string;
+    slug: string;
+    title: string;
+    kind: "file" | "dir";
+    children?: DocumentTreeItem[];
+};
+
+export const fetchDocumentTree = async (projectKey: string): Promise<DocumentTreeItem[]> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeURIComponent(projectKey)}/documents/tree`,
+    );
+    if (!response.ok) {
+        throw new Error("Failed to load document tree");
+    }
+    const payload = await response.json();
+    return Array.isArray(payload?.data) ? payload.data : [];
+};
+
 export const fetchDocument = async (projectKey: string, documentId: string): Promise<DocumentDetail> => {
     const response = await apiFetch(
         `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
