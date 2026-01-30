@@ -4,7 +4,7 @@ Repository interfaces and storage-specific implementations.
 
 ## STRUCTURE
 ```
-internal/repository/
+server/internal/repository/
 ├── *.go                 # repository interfaces
 ├── postgres/            # GORM repositories
 │   ├── model/           # GORM models
@@ -17,10 +17,10 @@ internal/repository/
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Interfaces | internal/repository/*.go | domain-facing contracts |
-| Postgres impl | internal/repository/postgres | GORM + CRUD |
-| Mappers | internal/repository/postgres/mapper | JSON encode/decode helpers |
-| Git knowledge | internal/repository/git | file-based knowledge source |
+| Interfaces | server/internal/repository/*.go | domain-facing contracts |
+| Postgres impl | server/internal/repository/postgres | GORM + CRUD |
+| Mappers | server/internal/repository/postgres/mapper | JSON encode/decode helpers |
+| Git knowledge | server/internal/repository/git | file-based knowledge source |
 
 ## CONVENTIONS
 - Interface in root, implementation in `postgres/`.

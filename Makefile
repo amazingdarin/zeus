@@ -7,7 +7,7 @@ CONFIG_PATH ?= /tmp/zeus-$(NAMESPACE)/config.yaml
 .PHONY: run-backend run-frontend install uninstall dev-install build-postgres-image build-backend-image build-frontend-image start-deps start-deps-dev stop-deps stop-deps-dev clean-deps start-all stop-all clean-all test-integration
 
 run-backend:
-	go run ./cmd/zeus
+	go run ./server/cmd/zeus
 
 run-frontend:
 	cd frontend && npm run tauri dev
@@ -27,7 +27,7 @@ build-postgres-image:
 	docker build -t zeus/postgres:pg15-zhparser -f deploy/postgres/Dockerfile .
 
 build-backend-image:
-	docker build -t zeus:latest -f Dockerfile .
+	docker build -t zeus:latest -f server/Dockerfile server
 
 build-frontend-image:
 	docker build -t zeus-web:latest -f frontend/Dockerfile .
@@ -75,5 +75,5 @@ clean-all:
 
 test-integration:
 	$(MAKE) start-deps NAMESPACE=zeus-test
-	ZEUS_CONFIG_PATH=/tmp/zeus-zeus-test/config.yaml go test ./internal/... -run Integration -v || ( $(MAKE) clean-all NAMESPACE=zeus-test; exit 1 )
+	ZEUS_CONFIG_PATH=/tmp/zeus-zeus-test/config.yaml go test ./server/internal/... -run Integration -v || ( $(MAKE) clean-all NAMESPACE=zeus-test; exit 1 )
 	$(MAKE) clean-all NAMESPACE=zeus-test

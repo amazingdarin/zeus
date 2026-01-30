@@ -4,7 +4,7 @@ Document-level indexing services (fulltext + embedding) with document hooks.
 
 ## STRUCTURE
 ```
-internal/modules/knowledge/service/
+server/internal/modules/knowledge/service/
 ├── fulltext/    # fulltext index + hooks
 ├── embedding/   # embedding index + chunking + hooks
 ├── index.go     # shared index interfaces

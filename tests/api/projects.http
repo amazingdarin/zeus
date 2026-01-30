@@ -1,9 +1,0 @@
-### Create project
-POST http://localhost:8080/api/projects
-Content-Type: application/json
-
-{
-  "key": "demo-project4",
-  "name": "Demo Project4",
-  "description": "Example project for API testing"
-}

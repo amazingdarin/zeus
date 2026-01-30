@@ -11,7 +11,7 @@ POSTGRES_DB="zeus"
 export PGPASSWORD="zeus"
 
 WATCH_SQL_DIR="ddl/sql"
-WATCH_BACKEND_DIRS="cmd internal"
+WATCH_BACKEND_DIRS="server/cmd server/internal"
 
 function log() {
     echo "[Zeus-Skill] $(date '+%H:%M:%S') $1"
@@ -40,7 +40,7 @@ function restart_backend() {
     log "⚡️ Backend Code Change detected. Recompiling..."
     
     # Kill existing zeus process if running
-    pkill -f "cmd/zeus" || true
+    pkill -f "server/cmd/zeus" || true
     
     # Re-run make command in background
     # We use make run-backend but need to ensure it doesn't block if we want to keep watching

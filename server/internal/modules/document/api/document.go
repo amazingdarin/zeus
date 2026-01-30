@@ -12,6 +12,7 @@ import (
 	httpfetch "zeus/internal/infra/ingestion/httpfetch"
 	service2 "zeus/internal/modules/document/service"
 	svc "zeus/internal/modules/document/service/document"
+	"zeus/internal/modules/document/service/importer"
 	"zeus/internal/modules/project/service"
 
 	"github.com/gin-gonic/gin"
@@ -24,16 +25,19 @@ type DocumentHandler struct {
 	projectSvc  service.ProjectService
 	documentSvc service2.DocumentService
 	fetcher     *httpfetch.Fetcher
+	gitImporter *importer.GitImporter
 }
 
 func NewDocumentHandler(
 	projectSvc service.ProjectService,
 	documentSvc service2.DocumentService,
+	gitImporter *importer.GitImporter,
 ) *DocumentHandler {
 	return &DocumentHandler{
 		projectSvc:  projectSvc,
 		documentSvc: documentSvc,
 		fetcher:     httpfetch.NewFetcher(httpfetch.FetcherConfig{}),
+		gitImporter: gitImporter,
 	}
 }
 
@@ -346,6 +350,50 @@ func (h *DocumentHandler) Import(c *gin.Context) {
 		Data: types.DocumentDTO{
 			Meta: doc.Meta,
 			Body: doc.Body,
+		},
+	})
+}
+
+func (h *DocumentHandler) ImportGit(c *gin.Context) {
+	projectKey := c.Param("project_key")
+	if projectKey == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{Code: "MISSING_PROJECT_KEY", Message: "project_key is required"})
+		return
+	}
+
+	var req types.ImportGitRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{Code: "INVALID_REQUEST", Message: "invalid request body"})
+		return
+	}
+
+	if _, err := h.projectSvc.GetByKey(c.Request.Context(), projectKey); err != nil {
+		c.JSON(http.StatusNotFound, types.ErrorResponse{Code: "PROJECT_NOT_FOUND", Message: err.Error()})
+		return
+	}
+	if h.gitImporter == nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Code: "IMPORT_FAILED", Message: "git importer not available"})
+		return
+	}
+
+	result, err := h.gitImporter.Import(c.Request.Context(), projectKey, importer.GitImportRequest{
+		RepoURL:  req.RepoURL,
+		Branch:   req.Branch,
+		Subdir:   req.Subdir,
+		ParentID: req.ParentID,
+	})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{Code: "IMPORT_FAILED", Message: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, types.ImportGitResponse{
+		Code:    "OK",
+		Message: "success",
+		Data: types.ImportGitResult{
+			Directories: result.Directories,
+			Files:       result.Files,
+			Skipped:     result.Skipped,
 		},
 	})
 }

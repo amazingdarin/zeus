@@ -29,6 +29,7 @@ import (
 	"zeus/internal/infra/localstorage"
 	httpsession "zeus/internal/infra/session"
 	svcasset "zeus/internal/modules/document/service/asset"
+	"zeus/internal/modules/document/service/importer"
 	projectrepo "zeus/internal/modules/project/repository/postgres"
 	"zeus/internal/repository"
 	"zeus/internal/repository/postgres"
@@ -134,6 +135,12 @@ func BuildRouter(ctx context.Context) *gin.Engine {
 
 	projectSvc := projectsvc.NewService(repos, gitAdmin, gitClientManager)
 	documentSvc := docsvc.NewService(config.AppConfig.Git.RepoRoot)
+	gitImporter := importer.NewGitImporter(
+		documentSvc,
+		config.AppConfig.Git.RepoRoot,
+		config.AppConfig.Git.SessionRepoRoot,
+		config.AppConfig.Git.DefaultBranch,
+	)
 	fulltextSvc := fulltextsvc.NewService(repos, documentSvc)
 	embeddingResolver := embedding.NewConfigRuntimeResolver()
 	embedder := embedding.NewOpenAICompatibleEmbedder(embeddingResolver)
@@ -151,6 +158,7 @@ func BuildRouter(ctx context.Context) *gin.Engine {
 		assetSvc,
 		projectSvc,
 		documentSvc,
+		gitImporter,
 	)
 
 	return router
