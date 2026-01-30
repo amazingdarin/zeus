@@ -12,8 +12,24 @@ import {
 } from "./storage/document-store.js";
 import type { Document, CreateDocumentRequest, MoveDocumentRequest, SearchQuery } from "./storage/types.js";
 import { knowledgeSearch } from "./knowledge/search.js";
+import { assetStore } from "./storage/asset-store.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
+
+/**
+ * Determine asset kind from MIME type
+ */
+function getAssetKind(mime: string): string {
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  if (mime === "application/pdf") return "pdf";
+  if (mime.includes("word") || mime.includes("document")) return "document";
+  if (mime.includes("sheet") || mime.includes("excel")) return "spreadsheet";
+  if (mime.includes("presentation") || mime.includes("powerpoint")) return "presentation";
+  if (mime.startsWith("text/")) return "text";
+  return "file";
+}
 
 /**
  * Standard API response helper
@@ -404,6 +420,102 @@ export const buildRouter = () => {
       } catch (err) {
         const message = err instanceof Error ? err.message : "Import failed";
         error(res, "IMPORT_FAILED", message);
+      }
+    },
+  );
+
+  // ============================================
+  // Asset APIs
+  // ============================================
+
+  /**
+   * Upload an asset (image, file, etc.)
+   * POST /projects/:projectKey/assets/import
+   */
+  router.post(
+    "/projects/:projectKey/assets/import",
+    upload.single("file"),
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey } = req.params;
+        const file = req.file;
+        if (!file) {
+          error(res, "INVALID_REQUEST", "file is required");
+          return;
+        }
+        
+        const meta = await assetStore.save(
+          projectKey,
+          file.originalname,
+          file.mimetype,
+          file.buffer
+        );
+        
+        success(res, {
+          asset_id: meta.id,
+          filename: meta.filename,
+          mime: meta.mime,
+          size: meta.size,
+        }, 201);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Upload failed";
+        error(res, "UPLOAD_FAILED", message);
+      }
+    },
+  );
+
+  /**
+   * Get asset content
+   * GET /projects/:projectKey/assets/:assetId/content
+   */
+  router.get(
+    "/projects/:projectKey/assets/:assetId/content",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, assetId } = req.params;
+        const result = await assetStore.getContent(projectKey, assetId);
+        
+        if (!result) {
+          error(res, "NOT_FOUND", "Asset not found", 404);
+          return;
+        }
+        
+        res.setHeader("Content-Type", result.meta.mime);
+        res.setHeader("Content-Disposition", `inline; filename="${result.meta.filename}"`);
+        res.send(result.buffer);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Get content failed";
+        error(res, "GET_CONTENT_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Get asset kind/info
+   * GET /projects/:projectKey/assets/:assetId/kind
+   */
+  router.get(
+    "/projects/:projectKey/assets/:assetId/kind",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, assetId } = req.params;
+        const meta = await assetStore.getMeta(projectKey, assetId);
+        
+        if (!meta) {
+          error(res, "NOT_FOUND", "Asset not found", 404);
+          return;
+        }
+        
+        success(res, {
+          asset_id: meta.id,
+          filename: meta.filename,
+          mime: meta.mime,
+          size: meta.size,
+          kind: getAssetKind(meta.mime),
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Get kind failed";
+        error(res, "GET_KIND_FAILED", message, 500);
       }
     },
   );
