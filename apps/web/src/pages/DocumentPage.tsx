@@ -515,6 +515,8 @@ function DocumentPage() {
     
     prevProjectKeyRef.current = projectKey;
     projectKeyRef.current = projectKey;
+    
+    // Only reset tree state when project changes
     setRootDocuments([]);
     setChildrenByParent({});
     setExpandedIds({});
@@ -529,17 +531,16 @@ function DocumentPage() {
     setError(null);
     setLoading(false);
     
-    // Navigate to blank page when switching projects (if we have a document selected)
-    if (isProjectSwitch && resolvedDocumentId) {
+    // Navigate to blank page when switching projects
+    if (isProjectSwitch) {
       navigate("/documents", { replace: true });
-      return;
     }
     
     if (!projectKey) {
       return;
     }
     loadRootDocuments(projectKey);
-  }, [loadRootDocuments, navigate, resolvedDocumentId, resolvedProjectKey]);
+  }, [loadRootDocuments, navigate, resolvedProjectKey]);
 
   useEffect(() => {
     if (!resolvedProjectKey || !rootDocuments.length || resolvedDocumentId) {
