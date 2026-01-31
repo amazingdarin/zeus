@@ -400,7 +400,7 @@ function DocumentPage() {
         type: "document",
         parentId,
         kind: item.kind,
-        hasChild: item.kind === "dir",
+        hasChild: !!(item.children && item.children.length > 0),
         order: 0,
         storageObjectId: "",
       };
