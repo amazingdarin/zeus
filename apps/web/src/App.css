@@ -4583,14 +4583,14 @@ body {
 }
 
 .optimize-btn-primary {
-  background: var(--accent);
-  border: 1px solid var(--accent);
+  background: #3b82f6;
+  border: 1px solid #3b82f6;
   color: #fff;
 }
 
 .optimize-btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background: #2563eb;
+  border-color: #2563eb;
 }
 
 /* Responsive for optimize modal */
