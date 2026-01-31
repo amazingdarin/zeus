@@ -4091,10 +4091,12 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+  width: 100%;
 }
 
 .chat-dock-textarea {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 36px;
   max-height: 120px;
   padding: 8px 0;
