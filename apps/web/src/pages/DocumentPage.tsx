@@ -1244,6 +1244,7 @@ function DocumentPage() {
 
   const handleCloseImport = () => {
     setImportModalOpen(false);
+    setSelectedFiles([]);
     setUploading(false);
     setUploadTotal(0);
     setUploadCompleted(0);
@@ -1255,6 +1256,13 @@ function DocumentPage() {
     setGitBranch("main");
     setGitSubdir("");
     setGitLogEntries([]);
+    // Reset file inputs
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+    if (folderInputRef.current) {
+      folderInputRef.current.value = "";
+    }
   };
 
   const handleFilePick = () => {
@@ -1270,6 +1278,8 @@ function DocumentPage() {
     setSelectedFiles(files);
     setImportStatus({ type: "idle" });
     setUploadSummary(null);
+    // Reset input value so the same file can be selected again
+    event.target.value = "";
   };
 
   const handleModeChange = (nextMode: "file" | "folder" | "url" | "git") => {
