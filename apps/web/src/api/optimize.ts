@@ -2,7 +2,7 @@
  * Document Optimization API Client
  */
 
-import { apiFetch, API_BASE } from "../config/api";
+import { apiFetch, buildApiUrl } from "../config/api";
 import type { JSONContent } from "@tiptap/react";
 
 // ============================================================================
@@ -101,7 +101,7 @@ export const buildOptimizeStreamUrl = (
   docId: string,
   taskId: string,
 ): string => {
-  return `${API_BASE}/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(docId)}/optimize/${encodeURIComponent(taskId)}/stream`;
+  return buildApiUrl(`/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(docId)}/optimize/${encodeURIComponent(taskId)}/stream`);
 };
 
 /**
