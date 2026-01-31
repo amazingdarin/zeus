@@ -1321,7 +1321,10 @@ export const buildRouter = () => {
         if (chunk.type === "delta") {
           res.write(`event: assistant.delta\ndata: ${JSON.stringify(chunk.content)}\n\n`);
         } else if (chunk.type === "done") {
-          res.write(`event: assistant.done\ndata: ${JSON.stringify({ message: chunk.message })}\n\n`);
+          res.write(`event: assistant.done\ndata: ${JSON.stringify({
+            message: chunk.message,
+            sources: chunk.sources || [],
+          })}\n\n`);
         } else if (chunk.type === "error") {
           res.write(`event: run.error\ndata: ${JSON.stringify({ error: chunk.error })}\n\n`);
         }

@@ -30,11 +30,19 @@ type ChatArtifact = {
   data?: Record<string, unknown>;
 };
 
+type SourceReference = {
+  docId: string;
+  title: string;
+  snippet: string;
+  score: number;
+};
+
 type ChatMessage = {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
   artifacts?: ChatArtifact[];
+  sources?: SourceReference[];
   timestamp: number;
 };
 
@@ -68,16 +76,19 @@ const parsePayload = (raw: string) => {
 
 const normalizeDonePayload = (
   payload: unknown,
-): { message: string; artifacts: ChatArtifact[] } => {
+): { message: string; artifacts: ChatArtifact[]; sources: SourceReference[] } => {
   if (!payload || typeof payload !== "object") {
-    return { message: "", artifacts: [] };
+    return { message: "", artifacts: [], sources: [] };
   }
-  const data = payload as { message?: unknown; artifacts?: unknown };
+  const data = payload as { message?: unknown; artifacts?: unknown; sources?: unknown };
   const message = typeof data.message === "string" ? data.message : "";
   const artifacts = Array.isArray(data.artifacts)
     ? (data.artifacts as ChatArtifact[])
     : [];
-  return { message, artifacts };
+  const sources = Array.isArray(data.sources)
+    ? (data.sources as SourceReference[])
+    : [];
+  return { message, artifacts, sources };
 };
 
 // Simple markdown rendering (bold, italic, code, links)
@@ -200,6 +211,21 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
   const assistantBufferRef = useRef("");
   const resizeStartRef = useRef<{ y: number; height: number } | null>(null);
 
+  // Track which messages have expanded sources
+  const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
+
+  const toggleSourcesExpanded = useCallback((messageId: string) => {
+    setExpandedSources((prev) => {
+      const next = new Set(prev);
+      if (next.has(messageId)) {
+        next.delete(messageId);
+      } else {
+        next.add(messageId);
+      }
+      return next;
+    });
+  }, []);
+
   const canSend = useMemo(() => {
     return !isGenerating && input.trim().length > 0 && projectKey !== "";
   }, [isGenerating, input, projectKey]);
@@ -270,10 +296,15 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
   }, [closeStream]);
 
   const appendMessage = useCallback(
-    (role: ChatMessage["role"], content: string, artifacts?: ChatArtifact[]) => {
+    (
+      role: ChatMessage["role"],
+      content: string,
+      artifacts?: ChatArtifact[],
+      sources?: SourceReference[],
+    ) => {
       setMessages((prev) => [
         ...prev,
-        { id: createId(), role, content, artifacts, timestamp: Date.now() },
+        { id: createId(), role, content, artifacts, sources, timestamp: Date.now() },
       ]);
     },
     [],
@@ -290,15 +321,19 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
   }, []);
 
   const commitAssistantBuffer = useCallback(
-    (artifacts?: ChatArtifact[], fallbackMessage?: string) => {
+    (
+      artifacts?: ChatArtifact[],
+      fallbackMessage?: string,
+      sources?: SourceReference[],
+    ) => {
       const content = assistantBufferRef.current;
       const trimmed = content.trim();
       if (trimmed) {
-        appendMessage("assistant", content, artifacts);
+        appendMessage("assistant", content, artifacts, sources);
       } else if (fallbackMessage?.trim()) {
-        appendMessage("assistant", fallbackMessage, artifacts);
+        appendMessage("assistant", fallbackMessage, artifacts, sources);
       } else if (artifacts && artifacts.length > 0) {
-        appendMessage("assistant", "", artifacts);
+        appendMessage("assistant", "", artifacts, sources);
       }
       resetAssistantBuffer();
     },
@@ -377,9 +412,9 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
       source.addEventListener("assistant.done", (event) => {
         hasCustomEventsRef.current = true;
         const payload = parsePayload((event as MessageEvent).data);
-        const { message: doneMessage, artifacts } = normalizeDonePayload(payload);
+        const { message: doneMessage, artifacts, sources } = normalizeDonePayload(payload);
         setIsGenerating(false);
-        commitAssistantBuffer(artifacts, doneMessage);
+        commitAssistantBuffer(artifacts, doneMessage, sources);
         closeStream();
       });
 
@@ -416,7 +451,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
         const donePayload = normalizeDonePayload(payload);
         if (donePayload.message || donePayload.artifacts.length > 0) {
           setIsGenerating(false);
-          commitAssistantBuffer(donePayload.artifacts, donePayload.message);
+          commitAssistantBuffer(donePayload.artifacts, donePayload.message, donePayload.sources);
           closeStream();
           return;
         }
@@ -596,6 +631,44 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     );
   };
 
+  const renderSources = (messageId: string, sources?: SourceReference[]) => {
+    if (!sources || sources.length === 0) return null;
+
+    const isExpanded = expandedSources.has(messageId);
+
+    return (
+      <div className="chat-sources">
+        <button
+          type="button"
+          className="chat-sources-toggle"
+          onClick={() => toggleSourcesExpanded(messageId)}
+        >
+          <span className="chat-sources-icon">📚</span>
+          <span className="chat-sources-label">
+            引用了 {sources.length} 个文档
+          </span>
+          <span className={`chat-sources-arrow ${isExpanded ? "expanded" : ""}`}>
+            {isExpanded ? <DownOutlined /> : <UpOutlined />}
+          </span>
+        </button>
+        {isExpanded && (
+          <div className="chat-sources-list">
+            {sources.map((source, index) => (
+              <div
+                key={`${source.docId}-${index}`}
+                className="chat-source-item"
+                onClick={() => handleDocumentNavigate(source.docId)}
+              >
+                <div className="chat-source-title">{source.title}</div>
+                <div className="chat-source-snippet">{source.snippet}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <section className="chat-dock-bottom">
       {/* Expanded Panel */}
@@ -707,6 +780,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
                           : msg.content}
                       </div>
                       {renderArtifacts(msg.artifacts)}
+                      {msg.role === "assistant" && renderSources(msg.id, msg.sources)}
                     </div>
                   </div>
                 ))}

@@ -1,9 +1,19 @@
 import { v4 as uuidv4 } from "uuid";
 import { configStore, llmGateway, type ProviderConfigInternal } from "../llm/index.js";
+import { knowledgeSearch } from "../knowledge/search.js";
+import { documentStore } from "../storage/document-store.js";
+import type { SearchResult } from "../storage/types.js";
 
 export type ChatMessage = {
   role: "user" | "assistant" | "system";
   content: string;
+};
+
+export type SourceReference = {
+  docId: string;
+  title: string;
+  snippet: string;
+  score: number;
 };
 
 export type ChatRun = {
@@ -21,6 +31,7 @@ export type ChatStreamChunk = {
   content?: string;
   message?: string;
   error?: string;
+  sources?: SourceReference[];
 };
 
 // In-memory storage for active chat runs
@@ -129,15 +140,45 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
   run.status = "running";
   run.updatedAt = Date.now();
 
+  // Track sources for RAG
+  let sources: SourceReference[] = [];
+
   try {
+    // Extract user's latest message for knowledge search
+    const userQuery = run.messages[run.messages.length - 1]?.content || "";
+
+    // Search knowledge base for relevant context
+    let ragContext = "";
+    try {
+      const searchResults = await knowledgeSearch.search(
+        run.projectKey,
+        run.projectKey,
+        {
+          text: userQuery,
+          mode: "hybrid",
+          limit: 5,
+        },
+      );
+
+      if (searchResults.length > 0) {
+        const contextData = await buildContextFromResults(run.projectKey, searchResults);
+        ragContext = contextData.text;
+        sources = contextData.sources;
+        console.log(`[chat] RAG: Found ${sources.length} relevant documents for query`);
+      }
+    } catch (searchErr) {
+      // Log but don't fail - continue without RAG context
+      console.warn("[chat] Knowledge search failed:", searchErr);
+    }
+
     // Build messages for the LLM
     const llmMessages = run.messages.map((m) => ({
       role: m.role as "user" | "assistant" | "system",
       content: m.content,
     }));
 
-    // Add system prompt
-    const systemPrompt = buildSystemPrompt(run.projectKey);
+    // Add system prompt with RAG context
+    const systemPrompt = buildSystemPromptWithContext(run.projectKey, ragContext);
     const messagesWithSystem = [
       { role: "system" as const, content: systemPrompt },
       ...llmMessages,
@@ -169,7 +210,7 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
     run.status = "completed";
     run.updatedAt = Date.now();
 
-    yield { type: "done", message: fullResponse };
+    yield { type: "done", message: fullResponse, sources };
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : "Chat failed";
     console.error("[chat] Stream error:", errorMessage);
@@ -182,10 +223,52 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
 }
 
 /**
- * Build system prompt for the project context
+ * Build context from search results
  */
-function buildSystemPrompt(projectKey: string): string {
-  return `你是 Zeus 文档管理系统的智能助手。当前项目: ${projectKey}
+async function buildContextFromResults(
+  projectKey: string,
+  results: SearchResult[],
+): Promise<{ text: string; sources: SourceReference[] }> {
+  const sources: SourceReference[] = [];
+  const contextParts: string[] = [];
+
+  for (const result of results) {
+    // Try to get document title
+    let title = result.metadata?.title || "";
+    if (!title) {
+      try {
+        const doc = await documentStore.get(projectKey, result.doc_id);
+        title = doc.meta.title || result.doc_id;
+      } catch {
+        title = result.doc_id;
+      }
+    }
+
+    sources.push({
+      docId: result.doc_id,
+      title,
+      snippet: result.snippet,
+      score: result.score,
+    });
+
+    // Build context text
+    contextParts.push(`【${title}】\n${result.snippet}`);
+  }
+
+  return {
+    text: contextParts.join("\n\n---\n\n"),
+    sources,
+  };
+}
+
+/**
+ * Build system prompt with RAG context
+ */
+function buildSystemPromptWithContext(projectKey: string, context: string): string {
+  const basePrompt = `你是 Zeus 文档管理系统的智能助手。当前项目: ${projectKey}`;
+
+  if (!context) {
+    return `${basePrompt}
 
 你的职责:
 1. 帮助用户管理和编辑文档
@@ -193,6 +276,20 @@ function buildSystemPrompt(projectKey: string): string {
 3. 提供文档写作建议
 
 请用中文回复，除非用户使用其他语言。保持回答简洁、专业。`;
+  }
+
+  return `${basePrompt}
+
+## 相关文档内容
+以下是与用户问题相关的文档片段，请基于这些内容回答：
+
+${context}
+
+## 回答要求
+1. 优先使用上述文档内容回答问题
+2. 如果文档内容不足以回答，可以结合通用知识补充
+3. 引用具体文档时说明来源
+4. 使用中文回答，保持专业简洁`;
 }
 
 /**
