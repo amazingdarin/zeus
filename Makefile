@@ -49,15 +49,14 @@ PADDLEOCR_CONTAINER := zeus-paddleocr
 PADDLEOCR_PORT ?= 8001
 
 build-paddleocr-image:
-	@echo "Building PaddleOCR Docker image (linux/amd64)..."
-	docker build --platform linux/amd64 -t $(PADDLEOCR_IMAGE) -f deploy/paddleocr/Dockerfile .
+	@echo "Building PaddleOCR Docker image..."
+	docker build -t $(PADDLEOCR_IMAGE) -f deploy/paddleocr/Dockerfile .
 	@echo "PaddleOCR image built: $(PADDLEOCR_IMAGE)"
 
 run-paddleocr-docker:
 	@echo "Starting PaddleOCR container on port $(PADDLEOCR_PORT)..."
 	@docker rm -f $(PADDLEOCR_CONTAINER) 2>/dev/null || true
 	docker run -d \
-		--platform linux/amd64 \
 		--name $(PADDLEOCR_CONTAINER) \
 		-p $(PADDLEOCR_PORT):8001 \
 		--restart unless-stopped \
