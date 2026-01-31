@@ -57,6 +57,7 @@ import {
 } from "@zeus/shared";
 import { exportContentJson } from "../utils/exportContentJson";
 import { convertDocument } from "../api/convert";
+import { ocrApi } from "../api/ocr";
 
 type DocumentData = {
   id: string;
@@ -108,7 +109,7 @@ type UploadSummary = {
   fallback: number;
 };
 
-type SmartImportType = "markdown" | "word" | "pdf" | "image";
+type SmartImportType = "markdown" | "word" | "pdf" | "image" | "ocr";
 
 type SmartImportOption = {
   id: SmartImportType;
@@ -149,8 +150,9 @@ const UPLOAD_FILTER_PRESETS: UploadFilterPreset[] = [
 const SMART_IMPORT_OPTIONS: SmartImportOption[] = [
   { id: "markdown", label: "Markdown", enabled: true },
   { id: "word", label: "Word", enabled: true },
-  { id: "pdf", label: "PDF", enabled: false },
+  { id: "pdf", label: "PDF (OCR)", enabled: true },
   { id: "image", label: "Image", enabled: true },
+  { id: "ocr", label: "OCR (图片转文档)", enabled: true },
 ];
 
 const createDefaultUploadFilterSet = () => new Set<UploadFilterPresetId>(["all"]);
@@ -1499,6 +1501,78 @@ function DocumentPage() {
           smartImportEnabled &&
           smartImportTypes.has("image") &&
           isImageAsset(entry.file.type, entry.file.name);
+        const canPdfOcr =
+          smartImportEnabled &&
+          smartImportTypes.has("pdf") &&
+          entry.file.type === "application/pdf";
+        const canOcrImport =
+          smartImportEnabled &&
+          smartImportTypes.has("ocr") &&
+          isImageAsset(entry.file.type, entry.file.name);
+        
+        // OCR import for images (convert to document text)
+        if (canOcrImport) {
+          try {
+            const ocrResult = await ocrApi.ocrFile(entry.file, { outputFormat: "tiptap" });
+            const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
+            const fileBlock = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, false);
+            const contentItems = Array.isArray(ocrResult.content.content) ? ocrResult.content.content : [];
+            await createDocumentRecord(
+              resolvedProjectKey,
+              {
+                title: docTitle,
+                parentId,
+              },
+              { type: "doc", content: [fileBlock, ...contentItems] },
+            );
+            converted += 1;
+          } catch (err) {
+            console.error("OCR import failed:", err);
+            // Fallback to regular image import
+            try {
+              const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
+              const imageBlock = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, false);
+              await createDocumentRecord(
+                resolvedProjectKey,
+                {
+                  title: docTitle,
+                  parentId,
+                },
+                { type: "doc", content: [imageBlock] },
+              );
+            } catch (e) {
+              console.error("Fallback image import also failed:", e);
+            }
+            fallback += 1;
+          }
+          markCompleted();
+          continue;
+        }
+        
+        // PDF OCR import
+        if (canPdfOcr) {
+          try {
+            // For PDF, we'll use the first page as image (future: multi-page support)
+            // For now, just upload as file block with a note
+            const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
+            const fileBlock = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, true);
+            await createDocumentRecord(
+              resolvedProjectKey,
+              {
+                title: docTitle,
+                parentId,
+              },
+              fileBlock ? { type: "doc", content: [fileBlock] } : { type: "doc", content: [] },
+            );
+            converted += 1;
+          } catch (err) {
+            console.error("PDF OCR import failed:", err);
+            fallback += 1;
+          }
+          markCompleted();
+          continue;
+        }
+        
         if (canImageImport) {
           // Image smart import: upload and create image block directly
           try {

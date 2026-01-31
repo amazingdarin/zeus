@@ -42,7 +42,7 @@ export async function chat(options: ChatOptions): Promise<ChatResponse> {
       model,
       messages: options.messages.map((m) => ({
         role: m.role,
-        content: m.content,
+        content: m.content as any, // Support both string and multimodal content
       })),
       temperature: options.temperature,
       maxTokens: options.maxTokens,
@@ -94,7 +94,7 @@ export async function chatStream(options: ChatOptions) {
     model,
     messages: options.messages.map((m) => ({
       role: m.role,
-      content: m.content,
+      content: m.content as any, // Support both string and multimodal content
     })),
     temperature: options.temperature,
     maxTokens: options.maxTokens,

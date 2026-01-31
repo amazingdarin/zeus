@@ -1410,6 +1410,62 @@ export const buildRouter = () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
+  // OCR API
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Parse image using OCR with vision LLM
+   * POST /ocr/parse
+   */
+  router.post("/ocr/parse", async (req: Request, res: Response) => {
+    try {
+      const { image, output_format, language } = req.body as {
+        image?: string;
+        output_format?: "tiptap" | "markdown";
+        language?: string;
+      };
+
+      if (!image || typeof image !== "string") {
+        error(res, "INVALID_REQUEST", "image is required (base64 data URL or HTTP URL)");
+        return;
+      }
+
+      // Dynamic import to avoid circular dependency
+      const { ocrService } = await import("./services/ocr.js");
+
+      const result = await ocrService.parseImage({
+        image,
+        outputFormat: output_format,
+        language,
+      });
+
+      success(res, {
+        content: result.content,
+        markdown: result.markdown,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "OCR failed";
+      console.error("[OCR API] Error:", message, err);
+      error(res, "OCR_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Check if vision OCR is available
+   * GET /ocr/available
+   */
+  router.get("/ocr/available", async (_req: Request, res: Response) => {
+    try {
+      const { ocrService } = await import("./services/ocr.js");
+      const available = await ocrService.isVisionAvailable();
+      success(res, { available });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Check failed";
+      error(res, "CHECK_FAILED", message, 500);
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Chat API (project-scoped)
   // ─────────────────────────────────────────────────────────────────────────
 

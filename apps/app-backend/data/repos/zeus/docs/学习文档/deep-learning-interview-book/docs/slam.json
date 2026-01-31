@@ -6,8 +6,8 @@
     "slug": "slam",
     "path": "docs/学习文档/deep-learning-interview-book/docs/slam.json",
     "parent_id": "f8016af0-e745-4c00-abd8-8ab0fe55291b",
-    "created_at": "2026-01-31T02:03:13.878Z",
-    "updated_at": "2026-01-31T02:03:13.878Z",
+    "created_at": "2026-01-31T08:56:14.486Z",
+    "updated_at": "2026-01-31T08:56:14.486Z",
     "extra": {
       "status": "draft",
       "tags": []
@@ -16,1342 +16,2469 @@
   "body": {
     "type": "tiptap",
     "content": {
-      "type": "doc",
-      "content": [
-        {
-          "type": "file_block",
-          "attrs": {
-            "asset_id": "ca4c1007-f082-4c55-8f42-1f046ec48a7f",
-            "file_name": "SLAM.md",
-            "mime": "text/markdown",
-            "size": 9589,
-            "file_type": "text"
+      "meta": {
+        "zeus": true,
+        "format": "tiptap",
+        "schema_version": 1,
+        "editor": "tiptap",
+        "created_at": "2026-01-31T08:56:14.475Z",
+        "updated_at": "2026-01-31T08:56:14.475Z"
+      },
+      "content": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "c558294e-dee4-4c2d-8bb5-c827e4ab0395",
+              "textAlign": null,
+              "level": 1
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "SLAM"
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "a486747e-39a5-4e15-90a6-7213ca1e4090",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "什么是回环检测？"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "eb58d07b-0a81-4665-86c5-bcb828107e58",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "在同步定位与地图构建（SLAM）过程中，随着机器人路径的不断延伸，位姿估计会累积误差。尽管可通过局部优化或全局优化手段进行校正，但回环检测（Loop Closure Detection）是另一种关键机制，用于显著降低此类累积误差。"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "9859e56f-8422-4651-a345-d30b11bfe8ab",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "回环检测，又称闭环检测，是指机器人识别当前所处场景是否曾被访问过，从而实现地图闭环的能力。简言之，当机器人在环境中反复转弯、探索时，若能识别出“此地我曾来过”，即可将当前观测与历史地图进行匹配，进而修正轨迹和地图。"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "e12e5265-6ea1-4d84-9c80-ecd6aff86735",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "image",
+                "attrs": {
+                  "src": "https://pics7.baidu.com/feed/5d6034a85edf8db1706dc3e5e911a450574e74a3.jpeg?token=e91bd2f35b019651adc6afd189299adc&s=58223D72FB16E41B925111CA000030B1",
+                  "alt": "",
+                  "title": null,
+                  "width": null,
+                  "height": null
+                }
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "fa6ccfcd-0ce1-4f53-ad7b-3acbd8f94613",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "回环检测之所以成为SLAM中的核心挑战，原因在于：成功的回环检测可大幅减小累积误差，提升机器人在避障与导航任务中的精度与鲁棒性；而错误的回环判定则可能导致地图严重扭曲甚至失效。因此，在大尺度或复杂场景的地图构建中，可靠的回环检测机制至关重要。"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "7a8554d8-18e5-4d02-ab4a-6c5c6faadd4c",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "image",
+                "attrs": {
+                  "src": "https://pics2.baidu.com/feed/b64543a98226cffc9be2a83f59333394f703ea2e.jpeg?token=a7b8727032e84b8ce80da800c9103352&s=18A07D32FB9EC41B9A5191CA010070B1",
+                  "alt": "",
+                  "title": null,
+                  "width": null,
+                  "height": null
+                }
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "07ea36df-e435-417e-be22-96152377c3f3",
+              "textAlign": null,
+              "level": 3
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "如何提升回环检测能力？"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "a463c586-4dee-4d92-8159-249821eacf8f",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "提升回环检测性能的关键在于算法层面的优化。目前主流方法包括基于图优化的SLAM框架、词袋模型（Bag-of-Words, BoW）以及深度学习技术。"
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "9c2ab8e8-c399-44b5-b07a-cb346f4ba39b",
+              "textAlign": null,
+              "level": 4
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "基于图优化的SLAM算法"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "58b1acc2-81f8-4db0-b1e5-5e9b8b06fe19",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "SLAM 3.0 代表了回环检测能力的一次重要突破。该系统采用图优化（Graph-based Optimization）框架进行建图，通过整合图像信息并构建拓扑图，在机器人重返已探索区域时，能够主动触发闭环检测。"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "360fb68d-6946-4d93-b794-f98eaec8c5c0",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "一旦检测到新的回环约束，SLAM 3.0 利用 Bundle Adjustment（BA）等非线性优化算法对位姿图进行全局修正，从而有效消除累积误差，生成更一致、可靠的地图。"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "43be07d8-7df1-4aa1-a9a0-ea0fc36da373",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "image",
+                "attrs": {
+                  "src": "https://pic.rmb.bdstatic.com/e6d07a3b236b181a2e841cad692cfe738868.gif",
+                  "alt": "",
+                  "title": null,
+                  "width": null,
+                  "height": null
+                }
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "b0b5dd9f-14ad-46d1-ba58-eee0c37a823f",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "其闭环逻辑遵循以下原则："
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "cbc2e4e9-0268-4018-8393-7f4a5e328998"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "ce539f4f-0506-4cdc-bace-235f80bf4440",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "marks": [
+                          {
+                            "type": "bold"
+                          }
+                        ],
+                        "text": "先小闭环，后大闭环"
+                      },
+                      {
+                        "type": "text",
+                        "text": "：优先处理局部重复路径，再扩展至全局；"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "25adfefd-3603-4d27-a3b5-52910fa66e6d"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "9c141341-fcec-4f6d-94c7-ec7180b0103c",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "marks": [
+                          {
+                            "type": "bold"
+                          }
+                        ],
+                        "text": "选择特征丰富的区域作为闭环候选点"
+                      },
+                      {
+                        "type": "text",
+                        "text": "；"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "37c74664-1058-4915-9507-0ffebae26b29"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "942dd629-c78e-4e9b-99f3-cdcba4f2351a",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "marks": [
+                          {
+                            "type": "bold"
+                          }
+                        ],
+                        "text": "鼓励机器人多次经过重合路径"
+                      },
+                      {
+                        "type": "text",
+                        "text": "，以完善闭环细节。"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "2ede737b-e208-4eb5-bbba-4841f5216e25",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "即使在超大场景下，该策略也能确保地图的完整性与一致性。"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "12427ff0-a598-49a0-af76-681e8729d8ab",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "image",
+                "attrs": {
+                  "src": "https://pic.rmb.bdstatic.com/bf0120f757d04cb41fe0a88cf7106e781035.gif",
+                  "alt": "",
+                  "title": null,
+                  "width": null,
+                  "height": null
+                }
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "c5d71673-f4e4-4090-9052-96bb518f7fa9",
+              "textAlign": null,
+              "level": 4
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "词袋模型（Bag-of-Words）"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "f1120d97-c0a6-47ba-8b14-0dc8c5ce2327",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "除算法架构升级外，词袋模型是提升回环检测效率的另一成熟方案。其核心思想是将图像帧转化为高维特征向量，并通过相似性度量判断是否为同一地点。"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "9ec9997b-6a24-4e8c-aab4-ec148761ebaa",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "具体流程如下："
+              }
+            ]
+          },
+          {
+            "type": "orderedList",
+            "attrs": {
+              "start": 1,
+              "type": null
+            },
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "8e1dbe1c-4688-42c6-883b-353b45c4eb22"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "7afe1ec7-29b8-4908-ac32-67b6c87b3249",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "marks": [
+                          {
+                            "type": "bold"
+                          }
+                        ],
+                        "text": "特征提取"
+                      },
+                      {
+                        "type": "text",
+                        "text": "：从每帧图像中提取关键点及其描述子（如ORB、SIFT），描述子通常为多维向量；"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "03b4d791-da6d-42ec-ba53-e6e9138f64dd"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "facbe3aa-a971-47b4-aa0c-cd01554120f4",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "marks": [
+                          {
+                            "type": "bold"
+                          }
+                        ],
+                        "text": "构建视觉词典"
+                      },
+                      {
+                        "type": "text",
+                        "text": "：对大量描述子进行聚类（如K-means），形成固定大小的词汇表（例如1000个“单词”）；"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "3e83adbb-437b-43ec-984a-a1f5fae95061"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "d405693f-2cee-411f-8a04-606fae30f385",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "marks": [
+                          {
+                            "type": "bold"
+                          }
+                        ],
+                        "text": "组织搜索结构"
+                      },
+                      {
+                        "type": "text",
+                        "text": "：将词典组织为树形结构（如KD-Tree或Ferns），以支持高效检索。"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "ef4213c8-2130-4603-b35f-9187e1fd502b",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "image",
+                "attrs": {
+                  "src": "https://pics2.baidu.com/feed/dcc451da81cb39dbf01f6b6a32247020aa1830e1.jpeg?token=1fee428452676dc67055fef815994db2&s=58A23C72D17ACDCC545521DA0000A0B2",
+                  "alt": "",
+                  "title": null,
+                  "width": null,
+                  "height": null
+                }
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "33266559-71b9-4baa-b182-aee39060e904",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "该结构可将特征匹配的时间复杂度降至对数级别，显著加速回环检测过程。"
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "adb573f5-b03e-4087-8aa7-d0d702320da3",
+              "textAlign": null,
+              "level": 4
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "相似度计算与TF-IDF"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "2343b18a-8bbb-448f-8687-8e7013129225",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "回环检测本质上是基于外观的图像相似性判断。直接使用像素差或L2范数易受光照、视角变化影响，因此需引入更鲁棒的相似度度量方法，如TF-IDF（Term Frequency–Inverse Document Frequency）。"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "4e478206-c41f-47b4-b983-38491fd333dd"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "45f52c68-55bd-4b8b-940d-3af742fa01af",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "marks": [
+                          {
+                            "type": "bold"
+                          }
+                        ],
+                        "text": "TF（词频）"
+                      },
+                      {
+                        "type": "text",
+                        "text": "：衡量某特征在单帧图像中出现的频率。设图像A中单词 $ W_i $ 出现 $ N $ 次，总词数为 $ n $，则"
+                      },
+                      {
+                        "type": "hardBreak"
+                      },
+                      {
+                        "type": "text",
+                        "text": "$$ \\text{TF}(W_i) = \\frac{N}{n} $$"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "dcadac7b-7d9d-4ee0-94a7-7b4394ff20ed"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "f728640e-7bdc-42a0-b772-ac8559432bfe",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "marks": [
+                          {
+                            "type": "bold"
+                          }
+                        ],
+                        "text": "IDF（逆文档频率）"
+                      },
+                      {
+                        "type": "text",
+                        "text": "：反映某特征在整个数据集中的稀有程度。设总帧数为 $ n $，包含 $ W_i $ 的帧数为 $ N_i $，则"
+                      },
+                      {
+                        "type": "hardBreak"
+                      },
+                      {
+                        "type": "text",
+                        "text": "$$ \\text{IDF}(W_i) = \\log\\left(\\frac{n}{N_i}\\right) $$"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "8b060660-4618-43ba-a745-d3ea27f73c6e"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "9d32acfa-f1f5-4dae-a904-0f4b4e0b0ba3",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "marks": [
+                          {
+                            "type": "bold"
+                          }
+                        ],
+                        "text": "权重计算"
+                      },
+                      {
+                        "type": "text",
+                        "text": "：每个单词的最终权重为"
+                      },
+                      {
+                        "type": "hardBreak"
+                      },
+                      {
+                        "type": "text",
+                        "text": "$$ \\text{Weight}(W_i) = \\text{TF}(W_i) \\times \\text{IDF}(W_i) $$"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "cafe532d-937e-4f7a-829b-d2305f6d086f",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "基于上述权重，每帧图像可表示为一个BoW向量。两帧图像 $ A $ 与 $ B $ 的相似度通常采用L1范数计算： $$ s(A, B) = | \\text{BoW}_A - \\text{BoW}_B |_1 $$"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "d2eb73be-9d4c-4c50-a569-1cadec32e656",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "image",
+                "attrs": {
+                  "src": "https://pics1.baidu.com/feed/ac6eddc451da81cb80f8709ab354a91209243106.jpeg?token=f75e49e54183d3339ac1c4c828f6e15d",
+                  "alt": "",
+                  "title": null,
+                  "width": null,
+                  "height": null
+                }
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "65c0effe-a330-46c9-9108-3862ea35d531",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "image",
+                "attrs": {
+                  "src": "https://pics5.baidu.com/feed/c2fdfc039245d68858e66f4d45f0041ad31b242e.jpeg?token=365fdfdeea56c4cccebad181f8538f1c",
+                  "alt": "",
+                  "title": null,
+                  "width": null,
+                  "height": null
+                }
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "01da62d1-bd00-4f9c-9410-7e5b671575f9",
+              "textAlign": null,
+              "level": 4
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "深度学习及其他方法"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "5bc8860c-de9c-483c-b788-9762fc703e1a",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "近年来，回环检测也被建模为模式识别问题，借助深度学习技术（如卷积神经网络、自编码器）提取更具判别性的特征表示。此外，传统机器学习方法（如SVM、决策树）亦可用于分类判断是否构成回环。"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "2c2386aa-351e-493e-8ddc-cca7c861641e",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "无论采用何种方法，"
+              },
+              {
+                "type": "text",
+                "marks": [
+                  {
+                    "type": "bold"
+                  }
+                ],
+                "text": "回环确认后仍需继续运动"
+              },
+              {
+                "type": "text",
+                "text": "，多次遍历重合路径，以采集更多观测数据，进一步优化地图细节。"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "90573f82-a459-467b-bf33-655b06e52c85",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "image",
+                "attrs": {
+                  "src": "https://pic.rmb.bdstatic.com/a3c90a5305dfcfd3c53ee5c39549cda98968.gif",
+                  "alt": "",
+                  "title": null,
+                  "width": null,
+                  "height": null
+                }
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "c9328e9d-5757-425f-83a4-faa1a8639d7e",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "综上所述，回环检测是SLAM系统实现高精度、高一致性地图构建的关键环节，其性能直接影响整体系统的可靠性与实用性。"
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "abface41-b66c-4809-af9a-ae3d95b786fe",
+              "textAlign": null,
+              "level": 3
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "参考资料"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "9949c694-3986-4c5f-b664-5bc58554cb30"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "7b65a392-8f1a-460f-89f2-4e6ec2f96aab",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "marks": [
+                          {
+                            "type": "link",
+                            "attrs": {
+                              "href": "https://baijiahao.baidu.com/s?id=1627227355343777871",
+                              "target": "_blank",
+                              "rel": "noopener noreferrer nofollow",
+                              "class": null
+                            }
+                          }
+                        ],
+                        "text": "SLAM大法之回环检测"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "22b979ca-5654-42e6-914b-7cbcaf769189"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "86a77377-c9be-46af-910f-3eee6a9fba22",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "marks": [
+                          {
+                            "type": "link",
+                            "attrs": {
+                              "href": "https://zhuanlan.zhihu.com/p/68858564",
+                              "target": "_blank",
+                              "rel": "noopener noreferrer nofollow",
+                              "class": null
+                            }
+                          }
+                        ],
+                        "text": "SLAM、定位、建图求职分享"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "bb338c10-94e2-46a9-8033-e6cbeba7b174",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "常用的回环检测方法有哪些？"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "bcd2f62f-9263-4791-9ddb-4cf0ac3bd207"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "d26e8a40-6619-43ac-816b-764b023e199a",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "7f336183-fe22-48de-b071-69dfb0d8759c",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Gauss-Newton 与 Levenberg-Marquardt 算法简介"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "6ae99667-41e3-421e-a3b0-2837b379a099"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "8ab00b88-be5f-45ea-811b-a95069041173",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "b24588dc-90ff-4f31-9821-68d0f3164a21",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Ceres 优化库概述"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "8dd70e66-5125-4001-8a63-5d90ba81d065"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "e0a47901-5004-4a48-92c3-dc3fc780cfa7",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "7026b0f4-9812-4dd0-b443-2a95240afec5",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "卡尔曼滤波与粒子滤波对比"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "dbcd6269-3624-476f-8aea-f08ad7796d90"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "5cba7040-e122-48af-954d-b63af9f31766",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "a2a63423-da08-49ef-af6e-5cdf57cafff6",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "多传感器融合：除视觉外的其他传感方式"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "d18fb8cb-b300-4a6b-aea6-55f6c420ed60"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "80ba13ca-a33f-4847-bcaf-ba151c45dce3",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "b171b69e-496f-49e7-986c-69d31764f930",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "紧耦合与松耦合的定义及优缺点"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "5812ff49-26df-4532-89a3-4c51039a47e5"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "82eb0c90-631e-4b8d-9dc5-055555ed2bc5",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "9d2072f3-ab18-4474-87b1-f2b5fab4a34f",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "室内SLAM与自动驾驶SLAM的差异分析"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "ba8ff36f-0030-4e2b-a8d7-6ea0eff3b9e9"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "694dfff7-9e97-422a-b84a-a859fb6687a2",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "8573d04c-c345-4e18-9ec9-e8ddd046bab7",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "地图点的构建方法"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "a402ce24-44f6-4e07-ab7d-1bf20cd9e51d"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "3299bdf1-4701-41d4-8c96-0ec9b975fc07",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "0a3af4ba-012b-4754-a409-eb50f1315c2b",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "基于连续帧2D匹配构建3D点的策略"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "8bd3a007-bf3e-4ef5-ac1b-89fc3714e743"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "83a478a0-f6ce-47f0-9f96-9114132b1215",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "dce6f5f4-2ab9-4894-9188-68964caee9ef",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "RANSAC模型选择的评估指标"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "fc4c453b-c26c-43cf-93f5-816e8560e5b0"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "cfc7821d-25da-4695-a6ad-3305ecddd727",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "b830df72-a00b-41df-a4f9-3c55f44367f2",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "其他鲁棒估计方法"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "d11b97d3-d19b-40a8-986a-69c0eea14cda",
+              "textAlign": null
+            },
+            "content": [
+              {
+                "type": "image",
+                "attrs": {
+                  "src": "imgs/DLIB-0022.png",
+                  "alt": "",
+                  "title": null,
+                  "width": null,
+                  "height": null
+                }
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "0122c8cd-fd18-44f6-b89b-b25e0983aac9"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "25b17e08-d636-4231-a41e-ae3a4955a0a8",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "afc83964-8db5-40c3-b428-23e6d231a22e",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "常见鲁棒核函数类型"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "228db675-d143-4302-923e-9a6594cf6e7b"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "edf30b93-2da2-416b-88a7-75f26d7ed75d",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "e28ab529-e8dc-476a-a592-c75bab3ec9a7",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "3D地图点的存储与表达方式"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "a6c0eab5-5d19-400a-a2be-5db1d664ffc4"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "59a0c2c9-a612-4c9d-a836-9df7f9ec133b",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "43fedf73-4b36-45d5-9698-5eb592ed3556",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Bundle Adjustment 中相机位姿与地图点收敛速度差异的原因"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "33ad2759-098c-46aa-81ba-1fef58ee8f66"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "213c8a6b-0769-43ce-8b67-bf18d6fbff3f",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "df7931ea-81df-45ff-abbe-a514dd63dca1",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Levenberg-Marquardt 算法中 $\\lambda$ 参数的调整机制"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "2347f7d8-7bb1-407c-9229-d388dbfb0167"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "5f1565dc-d247-432c-8ae4-34fd44e51b40",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "7c45cd61-032e-4b29-b1e6-915fa961a854",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "3D空间位姿的数学表达"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "73da07df-c991-49ab-ac49-7cbeb1d6320a"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "09ea1ef4-f422-4777-8d22-d6f7961a966b",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "e7b92ad0-873e-4bd0-835c-23d728b6a3a0",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "李群与李代数的关系"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "2594c707-d59a-4a98-ab88-ef49c69f1e5f"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "a2715674-ec81-47c6-a55b-961e213b6de8",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "108b0e29-4b23-46bf-ae50-f5db1e619eac",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "单目相机投影模型与畸变模型"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "c2d068d7-d2ad-408f-93dd-07fdb34798d6"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "bfd10e80-dfe2-4a06-82e7-a1933d7f7983",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "80089a84-7679-42e2-abb6-5ce6ec3a5183",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "典型SLAM算法分析（Lidar/Visual）"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "a5f26a1b-d198-4662-9f6d-70797163e8c1"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "68b1c18b-7aef-414e-9af6-2f410de77af5",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "873c8490-a24f-4920-8cdc-c7684c75a462",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "基于Maplab的室内服务机器人地图更新方案"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "f6ec73c8-ef1a-43f7-abf1-65818078690f"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "b992956e-f220-41e3-9942-60f0811e2e15",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "955cfc94-2899-49bd-a3f6-a88071ff6826",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "2D LiDAR平台匀速旋转下的激光数据去畸变实现"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "f9e5c22a-e46b-4608-bec3-0b7a5d2aa11c"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "c5828934-9b71-4e16-a068-42c45b12f1c0",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "6496d7ba-9006-4a1c-abb0-df27557a8e58",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "已知匹配3D点对的相对位姿求解（ICP实现）"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "acbce72c-c116-4c4d-b458-b1ac2696cfd3"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "275e75f4-29b7-458b-b501-acf2bba89eb3",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "6a8b1bc7-50e6-4d2a-87c1-e3e5ff1952af",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "ORB-SLAM初始化阶段同时计算H矩阵与F矩阵的原因"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "ef45f0ec-5ad9-4acd-8528-0bdb2a2a7f8d"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "7ad7315b-34d0-4c24-93e8-eea3715ac840",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "7e43ece2-a49a-49f3-8d5c-034548b145d9",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Dog-Leg 优化算法原理"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "7456354a-80f2-423a-93fe-b01fd33dec23"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "de8ec332-7962-4fd7-b7e0-6feb0f9a7baa",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "9ec4658b-8576-4bbf-8910-cc7b819a5370",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "边缘化、First Estimate Jacobian、一致性与可观性概念解析"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "2f3e426f-8435-45d0-a0c3-ee0ab5d58ba4"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "20fe7179-f818-4a1f-982f-5ff953c292b1",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "89a094ac-f87a-4fbb-b088-bdff4b33702d",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "VINS-Mono 系统的优缺点分析"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "18a7117d-b43a-4e94-b7f6-91e42780aaaa"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "70d6da4f-8c93-4ca0-96df-3fe76899da28",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "daad6a46-308d-4e7d-a0a8-4aa12e5d6b55",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Essential 矩阵与 Fundamental 矩阵定义"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "ab1ad3a3-2e46-4b94-997d-1d7226c7a117"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "7bcf0a91-5461-45c1-8d0e-f22879ee5548",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "afcc590f-8aed-4337-9942-4696e2508465",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "基于连续带位姿帧的车道线世界坐标计算方法"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "877fb732-91f4-4923-825a-08b6e963ea76"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "e2d5452b-5acf-4505-8b74-c134e8a66b13",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "01883c52-3244-4f10-9991-0813f6a8be16",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "高噪声GPS信号下的精准定位策略"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "209b256f-4f00-41f0-a1da-e20d3a47a00c"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "9cef114d-b258-4a49-aa93-dd87f563429c",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "7e2a14c6-a028-4611-9a7a-b0854dc0b391",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "IMU与相机外参标定方法"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "d55b7aa0-7b59-4e6c-afea-371db3fe96dd"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "1b59eb78-93a0-4307-9b7e-9a6badc83edc",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "ff43618d-06be-4d66-99e9-caa869b389fd",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "融合GPS与惯导实现厘米级地图构建"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "756e3eb7-cc7f-4c76-be5c-95bf40b62792"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "6c8c326e-73ef-417a-956b-8f3978a05ddc",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "e4128d98-ada8-4f7c-b50e-4f9d18566c5d",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "H/F矩阵计算中的归一化技巧"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "97df252e-5e43-4881-926d-a9e3199a6b2c"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "1468c7e9-96c9-43b5-9751-63c910b64bb8",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "f818ba81-2c92-414c-a327-85dfb938caf9",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "点云中平面提取算法"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "23bd171b-2d9e-4ea6-8f29-b67443a8bef8"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "eaab60a9-169d-4cba-b680-24f0061d7100",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "65d799e9-e31a-4c3c-8f1a-6da7687c2635",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "基于已知相机-地面关系的图像俯视图生成"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "58f7543f-e3fd-4713-b0e9-f4f3f720c432"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "edf003df-af6b-433d-87dd-11eea2a35313",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "ebc3dcaf-9d43-4da2-96aa-e7b8dd2f23d0",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "RGB-D SLAM 与 RGB SLAM 的核心区别"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "6f5a97e7-ffe2-4015-aa53-e1b60d76268d"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "000ddcef-e68f-4ae1-935f-8c4f1d8e9249",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "5ffbc7ca-2422-41f1-aa51-2b61147c1551",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "长距离送货机器人的定位系统设计"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "f1c32c9d-64ca-4cca-a75e-fabe0b3adf8a"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "a4cb1e86-19b0-4959-991a-d47239abf67e",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "f51ac10c-53c2-4f00-ad81-48ed2fd6c04e",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "ORB特征原理：旋转不变性与BRIEF算子"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "baecec32-55b9-4813-bc37-6859655fa072"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "9ac4efba-c0ea-47e4-a909-f81a63c55588",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "8170a57a-732d-4956-92b3-91b8dcefc332",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "图像去畸变的数学公式与处理流程"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "a0fc9780-0bfc-4780-bb3f-c13ade71623d"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "213f82e7-8521-4c75-b620-85a1efa8c9bf",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "id": "a7d32a9f-b77b-4580-b820-d1659f65faf0",
+              "textAlign": null,
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "ORB-SLAM中的特征提取与均匀化策略"
+              }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "attrs": {
+                  "id": "8f5f6699-5c9b-4f5d-8ac1-cfd2bef991b3"
+                },
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "cf27ba74-acb1-4820-b448-789eeb911c0c",
+                      "textAlign": null
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[ ] TODO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "attrs": {
+              "id": "b3138ba3-6e30-4e5a-82a9-7d05fd02c78f",
+              "textAlign": null
+            }
           }
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "[TOC]"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 1
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "SLAM"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "001 什么是回环检测？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "随着路径的不断延伸，机器人在建图过程中会存在一些累计误差，除了利用局部优化、全局优化等来调整之外，还可以利用回环检测来优化位姿。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "**什么是回环检测？**"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "回环检测，又称闭环检测，是指机器人识别曾到达某场景，使得地图闭环的能力。说的简单点，就是机器人在左转一下，右转一下建图的时候能意识到某个地方是“我”曾经来过的，然后把此刻生成的地图与刚刚生成的地图做匹配。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "![img](https://pics7.baidu.com/feed/5d6034a85edf8db1706dc3e5e911a450574e74a3.jpeg?token=e91bd2f35b019651adc6afd189299adc&s=58223D72FB16E41B925111CA000030B1)"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "回环检测成功"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "回环检测之所以能成为一个难点，是因为：如果回环检测成功，可以显著地减小累积误差，帮助机器人更精准、快速的进行避障导航工作。而错误的检测结果可能使地图变得很糟糕。因此，回环检测在大面积、大场景地图构建上是非常有必要的 。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "![img](https://pics2.baidu.com/feed/b64543a98226cffc9be2a83f59333394f703ea2e.jpeg?token=a7b8727032e84b8ce80da800c9103352&s=18A07D32FB9EC41B9A5191CA010070B1)"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "回环检测失败"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "**如何提升机器人回环检测能力？**"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "那么，怎么才能让机器人的回环检测能力得到一个质的提升呢？首先要有一个算法上的优化。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "**基于图优化的SLAM算法**"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "基于图优化的SLAM 3.0 算是提升机器人回环检测能力的一大突破。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "SLAM 3.0采用图优化的方式进行建图，进行了图片集成与优化处理，当机器人运动到已经探索过的原环境时，SLAM 3.0可依赖内部的拓扑图进行主动式的闭环检测。当发现了新的闭环信息后，SLAM 3.0使用Bundle Adjuestment(BA)等算法对原先的位姿拓扑地图进行修正（即进行图优化），从而能有效的进行闭环后地图的修正，实现更加可靠的环境建图。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "![img](https://pic.rmb.bdstatic.com/e6d07a3b236b181a2e841cad692cfe738868.gif)"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "**SLAM 3.0闭环检测**"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "SLAM 3.0环路闭合逻辑：先小闭环，后大闭环 ；选择特征丰富的点作为闭环点；多走重合之路，完善闭环细节。即使在超大场景下建图，也不慌。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "![img](https://pic.rmb.bdstatic.com/bf0120f757d04cb41fe0a88cf7106e781035.gif)"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "超大场景下建图完整闭合过程"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "**词袋模型**"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "除了SLAM算法的升级和优化之外，现在还有很多系统采用成熟的词袋模型方法来帮助机器人完成闭环，说的简单点就是把帧与帧之间进行特征比配。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "1、从每幅图像中提取特征点和特征描述，特征描述一般是一个多维向量，因此可以计算两个特征描述之间的距离；"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "2、将这些特征描述进行聚类（比如k－means），类别的个数就是词典的单词数，比如1000；也可以用Beyes、SVM等；"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "3、将这些词典组织成树的形式，方便搜索。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "![img](https://pics2.baidu.com/feed/dcc451da81cb39dbf01f6b6a32247020aa1830e1.jpeg?token=1fee428452676dc67055fef815994db2&s=58A23C72D17ACDCC545521DA0000A0B2)"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "利用这个树，就可以将时间复杂度降低到对数级别，大大加速了特征匹配。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "**相似度计算**"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "这种做法是从外观上根据两幅图像的相似性确定回环检测关系，那么，如何确定两个地图之间的相关性呢？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "比如对于图像A和图像B，我们要计算它们之间的相似性评分：s(A,B)。如果单单用两幅图像相减然后取范数，即为： s(A,B)=||AB||s(A,B)=||AB||。但是由于一幅图像在不同角度或者不同光线下其结果会相差很多，所以不使用这个函数。而是使用相似度计算公式。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "这里，我们提供一种方法叫TF-IDF。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "TF的意思是：某特征在一幅图像中经常出现，它的区分度就越高。另一方面，IDF的思想是，某特征在字典中出现的频率越低，则分类图像时的区分度越高。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "对于IDF部分，假设所有特征数量为n，某个节点的Wi所含的数量特征为Ni，那么该单词的IDF为："
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "![img](https://pics1.baidu.com/feed/0824ab18972bd407d62e431f9bbbe7550eb3091a.jpeg?token=3b449375c102872fb24854639a3a99a1&s=0962E412CD62EF2A1A7510DA010070B1)"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "TF是指某个特征在单副图像中出现的频率。假设图像A中单词Wi出现了N次，而一共出现的单词次数是n，那么TF为："
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "![img](https://pics5.baidu.com/feed/3801213fb80e7becf6c2b255cf1cc03c9b506b25.jpeg?token=a99dd74661183b4d0823e4a3bbaf55d7&s=0942E413C562CF2A5ED404DA010070B3)"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "于是Wi的权重等于TF乘IDF之积，即："
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "![img](https://pics6.baidu.com/feed/7aec54e736d12f2e81916a2caff0ac6684356899.jpeg?token=7fcbdbfb05e0c7ec4ec1896bc9bab7d9&s=91306C33C552EF324C79F5DA010060B1)"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "考虑权重以后，对于某副图像，我们可以得到许多个单词，得到BOW："
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "![img](https://pics1.baidu.com/feed/ac6eddc451da81cb80f8709ab354a91209243106.jpeg?token=f75e49e54183d3339ac1c4c828f6e15d)"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "（A表示某幅地图）"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "如何计算俩副图像相似度，这里使用了L1范数形式："
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "![img](https://pics5.baidu.com/feed/c2fdfc039245d68858e66f4d45f0041ad31b242e.jpeg?token=365fdfdeea56c4cccebad181f8538f1c)"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "**深度学习及其他**"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "除了上面的几种方式之外，回环检测也可以建成一个模型识别问题，利用深度学习的方法帮助机器人完成回环检测。比如：决策树、SVM等。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "……"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "最后，当回环出现以后，也不要急着就让机器人停止运动，要继续保持运动，多走重合的路，在已经完成闭合的路径上，进一步扫图完善细节。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "![img](https://pic.rmb.bdstatic.com/a3c90a5305dfcfd3c53ee5c39549cda98968.gif)"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "继续走重合之路，完善闭环细节"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "所以，回环检测在SLAM中的作用也很重要哦。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "**参考资料**"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [SLAM大法之回环检测](https://baijiahao.baidu.com/s?id=1627227355343777871)"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "002 常用的回环检测方法有哪些？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "003 介绍一下Gauss-Netwon和LM算法"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "004 介绍一下Ceres优化库，比如你使用过里面哪些内容？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "005 描述（扩展）卡尔曼滤波与粒子滤波，你自己在用卡尔曼滤波时遇到什么问题没有？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "006 除了视觉传感，还用过其他传感吗？比如GPS，激光雷达"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "007 什么是紧耦合、松耦合？优缺点"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "008 你认为室内SLAM与自动驾驶SLAM有什么区别？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "009 地图点的构建方法有哪些？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "010 如果对于一个3D点，我们在连续帧之间形成了2D特征点之间的匹配，但是这个匹配中可能存在错误的匹配。请问你如何去构建3D点？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "011 RANSAC在选择最佳模型的时候用的metric是什么？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "012 除了RANSAC之外，还有什么鲁棒估计的方法？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "![](imgs/DLIB-0022.png)"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "013 有哪几种鲁棒核函数？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "014 3D地图点是怎么存储的？表达方式？"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "015 给你m相机n个点的bundle adjustment。当我们在仿真的时候，在迭代的时候，相机的位姿会很快的接近真值。而地图点却不能很快的收敛这是为什么呢？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "016 LM算法里面那个 ![\\lambda](https://www.zhihu.com/equation?tex=%5Clambda) 是如何变化的呢？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "017 说一下3D空间的位姿如何去表达?"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "018 介绍一下李群和李代数的关系"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "019 写出单目相机的投影模型，畸变模型"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "020 说一个自己熟悉的SLAM算法，Lidar/Visual slam，说优缺点"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "021 读Maplab，设计室内服务机器人地图更新的方法、流程"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "022 安装2D lidar的平台匀速旋转的时候，去激光数据畸变，写代码"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "023 给两组已经匹配好的3D点，计算相对位姿变换。已知匹配的ICP问题，写代码。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "024 ORB-SLAM初始化的时候为什么要同时计算H矩阵和F矩阵？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "025 说一下Dog-Leg算法"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "026 什么是边缘化？First Estimate Jacobian？一致性？可观性？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "027 说一下VINS-Mono的优缺点"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "028 什么是Essential，Fundamental矩阵？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "029 给定几个连续帧的带有位姿的帧，如何去测量车道线相对于世界坐标系的坐标。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "030 在给定一些有噪声的GPS信号的时候如何去精准的定位？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "031 如何标定IMU与相机之间的外参数？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "032 给你xx误差的GPS，给你xx误差的惯导你怎么得到一个cm级别的地图？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "033 计算H矩阵和F矩阵的时候有什么技巧呢？实际上在问归一化的操作"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "034 给一组点云，从中提取平面"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "035 给一张图片，知道相机与地面之间的相对关系，计算出图的俯视图"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "036 RGB-D的SLAM和RGB的SLAM有什么区别？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "037 机器人从超市门口出发，前往3公里外的小区送货。请你设计一个定位系统，包括传感器的配置、算法的流程，用伪代码写出来"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "038 什么是ORB特征，ORB特征的旋转不变性是如何做的，BRIEF算子是怎么提取的。"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "039 如果把一张图像去畸变，写公式，流程"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "040 ORB-SLAM中的特征是如何提取的？如何均匀化的？"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [ ] TODO"
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "attrs": {
-            "level": 2
-          },
-          "content": [
-            {
-              "type": "text",
-              "text": "参考"
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "content": [
-            {
-              "type": "text",
-              "text": "- [SLAM、定位、建图求职分享](https://zhuanlan.zhihu.com/p/68858564)"
-            }
-          ]
-        }
-      ]
+        ]
+      }
     }
   }
 }

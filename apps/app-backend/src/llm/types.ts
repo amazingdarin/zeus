@@ -47,11 +47,32 @@ export type LLMCapability = "chat" | "completion" | "embedding" | "vision";
 export type ChatRole = "system" | "user" | "assistant" | "tool";
 
 /**
+ * Image content part for vision models
+ */
+export type ImageContentPart = {
+  type: "image";
+  image: string | URL; // base64 data URL or HTTP URL
+};
+
+/**
+ * Text content part
+ */
+export type TextContentPart = {
+  type: "text";
+  text: string;
+};
+
+/**
+ * Multimodal content for vision-capable models
+ */
+export type MessageContent = string | (TextContentPart | ImageContentPart)[];
+
+/**
  * Chat message
  */
 export type ChatMessage = {
   role: ChatRole;
-  content: string;
+  content: MessageContent;
   name?: string;
 };
 
