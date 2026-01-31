@@ -53,6 +53,41 @@
   --warning: #d29922;
 }
 
+/* ========================================
+   Popup Animation Keyframes
+   ======================================== */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes dropdownSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -185,6 +220,7 @@ body {
   box-shadow: var(--shadow-lg);
   z-index: 1000;
   min-width: 180px;
+  animation: dropdownSlide 0.15s ease-out;
 }
 
 .project-selector-menu.compact {
@@ -251,6 +287,8 @@ body {
   align-items: center;
   justify-content: center;
   z-index: 30;
+  animation: fadeIn 0.2s ease-out;
+  backdrop-filter: blur(4px);
 }
 
 .modal-card {
@@ -260,8 +298,8 @@ body {
   border-radius: 18px;
   border: 1px solid var(--border);
   padding: 20px;
-  box-shadow: var(--shadow);
-  transform: translateY(-6vh);
+  box-shadow: var(--shadow-lg);
+  animation: slideUp 0.25s ease-out;
 }
 
 .modal-header {
@@ -1461,8 +1499,9 @@ body {
   border-radius: 12px;
   border: 1px solid var(--border);
   background: var(--surface);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-lg);
   z-index: 6;
+  animation: dropdownSlide 0.15s ease-out;
 }
 
 .kb-menu-item {
@@ -2626,6 +2665,7 @@ body {
   justify-content: center;
   z-index: 1000;
   backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s ease-out;
 }
 
 .settings-modal-container {
@@ -2635,10 +2675,11 @@ body {
   color: var(--ink);
   border-radius: 18px;
   border: 1px solid var(--border);
-  box-shadow: var(--shadow), 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-lg), 0 25px 50px -12px rgba(0, 0, 0, 0.25);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  animation: slideUp 0.25s ease-out;
 }
 
 .settings-modal-header {
