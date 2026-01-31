@@ -1104,9 +1104,25 @@ export const buildRouter = () => {
         hasApiKey: !!config.apiKey,
       });
       
-      // Test based on config type
+      // Test based on config type and provider
       try {
-        if (configType === "embedding") {
+        if (config.providerId === "paddleocr") {
+          // Test PaddleOCR by calling its health endpoint
+          console.log(`[OCR Test] Testing PaddleOCR at ${config.baseUrl}...`);
+          const healthUrl = `${config.baseUrl}/api/ocr/health`;
+          const response = await fetch(healthUrl, { 
+            method: "GET",
+            signal: AbortSignal.timeout(10000),
+          });
+          if (!response.ok) {
+            throw new Error(`PaddleOCR health check failed: ${response.status} ${response.statusText}`);
+          }
+          const data = await response.json() as { status?: string };
+          if (data.status !== "healthy") {
+            throw new Error(`PaddleOCR is not healthy: ${JSON.stringify(data)}`);
+          }
+          console.log(`[OCR Test] PaddleOCR health check passed`);
+        } else if (configType === "embedding") {
           // Test embedding
           console.log(`[LLM Test] Calling embedding API...`);
           await llmGateway.generateEmbeddings({
@@ -1117,7 +1133,7 @@ export const buildRouter = () => {
             baseUrl: config.baseUrl,
           });
         } else {
-          // Test LLM chat
+          // Test LLM chat (for LLM and vision types with LLM providers)
           console.log(`[LLM Test] Calling chat API...`);
           await llmGateway.chat({
             messages: [{ role: "user", content: "Hi" }],
