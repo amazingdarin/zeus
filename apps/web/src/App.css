@@ -1643,7 +1643,6 @@ body {
 .kb-sidebar-empty-area {
   flex: 1;
   min-height: 60px;
-  cursor: pointer;
 }
 
 @keyframes kb-spin {
