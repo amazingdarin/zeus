@@ -103,6 +103,7 @@ echo "data:image/png;base64,..." | python paddleocr_cli.py - --output-format mar
 | `ENABLE_PADDLE_OCR` | 是否启用 PaddleOCR 服务 | false |
 | `PADDLE_OCR_PORT` | PaddleOCR 服务端口 | 8001 |
 | `PADDLE_OCR_URL` | PaddleOCR 服务地址（外部服务时使用） | http://localhost:8001 |
+| `PADDLE_OCR_PYTHON` | Python 解释器路径 | .venv/bin/python3 |
 
 **示例配置**:
 ```env

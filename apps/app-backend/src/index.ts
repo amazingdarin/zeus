@@ -53,12 +53,18 @@ app.use("/api", buildRouter());
  */
 function startPaddleOCR(): void {
   // Path to the PaddleOCR server script
-  const scriptsDir = path.resolve(__dirname, "../../../scripts/ocr");
+  const projectRoot = path.resolve(__dirname, "../../..");
+  const scriptsDir = path.join(projectRoot, "scripts/ocr");
   const serverScript = path.join(scriptsDir, "paddleocr_server.py");
+  
+  // Use virtual environment Python if available, otherwise fall back to system Python
+  const venvPython = path.join(projectRoot, ".venv/bin/python3");
+  const pythonPath = process.env.PADDLE_OCR_PYTHON || venvPython;
 
   console.log(`[app-backend] Starting PaddleOCR service on port ${paddleOCRPort}...`);
+  console.log(`[app-backend] Using Python: ${pythonPath}`);
 
-  paddleOCRProcess = spawn("python3", [serverScript, "--port", String(paddleOCRPort)], {
+  paddleOCRProcess = spawn(pythonPath, [serverScript, "--port", String(paddleOCRPort)], {
     cwd: scriptsDir,
     stdio: ["ignore", "pipe", "pipe"],
     env: {
@@ -88,8 +94,9 @@ function startPaddleOCR(): void {
 
   paddleOCRProcess.on("error", (err) => {
     console.error(`[app-backend] Failed to start PaddleOCR service:`, err.message);
-    console.error(`[app-backend] Make sure Python3 and PaddleOCR dependencies are installed.`);
-    console.error(`[app-backend] See scripts/ocr/README.md for installation instructions.`);
+    console.error(`[app-backend] Python path: ${pythonPath}`);
+    console.error(`[app-backend] To fix this, run: make install-paddleocr`);
+    console.error(`[app-backend] Or set PADDLE_OCR_PYTHON to point to a Python with dependencies installed.`);
     paddleOCRProcess = null;
   });
 
