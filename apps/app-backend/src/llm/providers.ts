@@ -431,7 +431,9 @@ class ProviderRegistry {
           baseURL: effectiveBaseUrl,
           compatibility: "compatible",
         });
-        return openai(modelId);
+        // Use .chat() to force Chat Completions API instead of Responses API
+        // Most OpenAI-compatible providers (DashScope, DeepSeek, etc.) don't support the Responses API
+        return openai.chat(modelId);
       }
       default:
         throw new Error(`Unknown provider: ${providerId}`);
