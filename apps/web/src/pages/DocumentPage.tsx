@@ -2163,7 +2163,7 @@ function DocumentPage() {
                   取消
                 </button>
                 <button
-                  className="btn primary"
+                  className={`btn primary${uploading ? " loading" : ""}`}
                   type="button"
                   onClick={handleImportSubmit}
                   disabled={
@@ -2172,14 +2172,20 @@ function DocumentPage() {
                     (importMode === "git" && !gitRepoUrl.trim())
                   }
                 >
-                  {uploading ? <span className="kb-import-spinner" aria-hidden="true" /> : null}
-                  {importMode === "url"
-                    ? "导入网址"
-                    : importMode === "git"
-                      ? "导入仓库"
-                      : importMode === "folder" && uploading
-                        ? `上传中 ${uploadProgress}%`
-                        : "上传"}
+                  {uploading ? (
+                    <>
+                      <span className="kb-import-spinner" aria-hidden="true" />
+                      {(importMode === "file" || importMode === "folder") && uploadTotal > 0
+                        ? `${uploadProgress}%`
+                        : null}
+                    </>
+                  ) : importMode === "url" ? (
+                    "导入网址"
+                  ) : importMode === "git" ? (
+                    "导入仓库"
+                  ) : (
+                    "上传"
+                  )}
                 </button>
               </div>
             </div>
