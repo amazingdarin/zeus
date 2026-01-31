@@ -29,7 +29,7 @@ import {
   type DocumentDetail,
   type DocumentTreeItem,
 } from "../api/documents";
-import { rebuildDocumentRag } from "../api/projects";
+import { rebuildDocumentRag, rebuildProjectRag } from "../api/projects";
 import { uploadAsset } from "../api/assets";
 import { apiFetch } from "../config/api";
 import { sanitizeFileName } from "../utils/fileName";
@@ -271,6 +271,7 @@ function DocumentPage() {
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
   const [loadingIds, setLoadingIds] = useState<Record<string, boolean>>({});
   const [rootLoading, setRootLoading] = useState(false);
+  const [rebuildingIndex, setRebuildingIndex] = useState(false);
   const projectKeyRef = useRef<string | null>(null);
   const loadingIdsRef = useRef<Record<string, boolean>>({});
   const rootLoadAttemptRef = useRef<string | null>(null);
@@ -636,6 +637,26 @@ function DocumentPage() {
     rootLoadAttemptRef.current = "";
     void loadFullTreeRef.current(resolvedProjectKey);
   }, [resolvedProjectKey, rootLoading]);
+
+  const handleRebuildIndex = useCallback(async () => {
+    if (!resolvedProjectKey || rebuildingIndex) {
+      return;
+    }
+    setRebuildingIndex(true);
+    try {
+      const result = await rebuildProjectRag(resolvedProjectKey);
+      const message = result.failed && result.failed > 0
+        ? `索引重建完成：成功 ${result.succeeded}，失败 ${result.failed}`
+        : `索引重建完成：共处理 ${result.total} 个文档`;
+      // Show a simple alert for now - could be replaced with a toast notification
+      alert(message);
+    } catch (err) {
+      console.error("Rebuild index failed:", err);
+      alert("索引重建失败，请稍后重试");
+    } finally {
+      setRebuildingIndex(false);
+    }
+  }, [resolvedProjectKey, rebuildingIndex]);
 
   const handleDocumentsChanged = useCallback(
     async (parentId: string) => {
@@ -1533,10 +1554,12 @@ function DocumentPage() {
           activeId={resolvedDocumentId || null}
           loadingIds={loadingIds}
           rootLoading={rootLoading}
+          rebuildingIndex={rebuildingIndex}
           onSelect={handleSelectDocument}
           onToggle={handleToggle}
           onMove={handleMove}
           onRefresh={handleRefresh}
+          onRebuildIndex={handleRebuildIndex}
         />
       }
     >

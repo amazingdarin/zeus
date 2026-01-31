@@ -20,8 +20,12 @@ export type RebuildProjectOptions = {
 };
 
 export type RebuildProjectResponse = {
-  task_id: string;
+  task_id?: string;
   status: string;
+  total?: number;
+  succeeded?: number;
+  failed?: number;
+  errors?: Array<{ docId: string; error: string }>;
 };
 
 const parseProject = (item: any): Project => ({
@@ -75,8 +79,12 @@ export const rebuildProjectRag = async (
   const payload = await response.json();
   const data = payload?.data ?? payload ?? {};
   return {
-    task_id: typeof data.task_id === "string" ? data.task_id : "",
+    task_id: typeof data.task_id === "string" ? data.task_id : undefined,
     status: typeof data.status === "string" ? data.status : "pending",
+    total: typeof data.total === "number" ? data.total : undefined,
+    succeeded: typeof data.succeeded === "number" ? data.succeeded : undefined,
+    failed: typeof data.failed === "number" ? data.failed : undefined,
+    errors: Array.isArray(data.errors) ? data.errors : undefined,
   };
 };
 

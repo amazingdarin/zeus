@@ -1,5 +1,6 @@
 import { useMemo, useState, memo, type DragEvent } from "react";
-import { DownOutlined, RightOutlined, ReloadOutlined } from "@ant-design/icons";
+import { DownOutlined, RightOutlined, ReloadOutlined, DatabaseOutlined } from "@ant-design/icons";
+import { Tooltip } from "antd";
 
 export type KnowledgeBaseDocument = {
   id: string;
@@ -28,10 +29,12 @@ type KnowledgeBaseSideNavProps = {
   activeId: string | null;
   loadingIds: Record<string, boolean>;
   rootLoading: boolean;
+  rebuildingIndex?: boolean;
   onSelect: (doc: KnowledgeBaseDocument) => void;
   onToggle: (doc: KnowledgeBaseDocument) => void;
   onMove: (request: KnowledgeBaseMoveRequest) => void;
   onRefresh?: () => void;
+  onRebuildIndex?: () => void;
 };
 
 const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
@@ -41,10 +44,12 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
   activeId,
   loadingIds,
   rootLoading,
+  rebuildingIndex,
   onSelect,
   onToggle,
   onMove,
   onRefresh,
+  onRebuildIndex,
 }: KnowledgeBaseSideNavProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{
@@ -299,16 +304,29 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
     >
       <div className="kb-sidebar-toolbar">
         <div className="kb-sidebar-toolbar-spacer" />
+        {onRebuildIndex && (
+          <Tooltip title="重建索引">
+            <button
+              className="kb-sidebar-toolbar-btn"
+              type="button"
+              onClick={onRebuildIndex}
+              disabled={rebuildingIndex || rootLoading}
+            >
+              <DatabaseOutlined spin={rebuildingIndex} />
+            </button>
+          </Tooltip>
+        )}
         {onRefresh && (
-          <button
-            className="kb-sidebar-toolbar-btn"
-            type="button"
-            onClick={onRefresh}
-            disabled={rootLoading}
-            title="刷新文档树"
-          >
-            <ReloadOutlined spin={rootLoading} />
-          </button>
+          <Tooltip title="刷新文档树">
+            <button
+              className="kb-sidebar-toolbar-btn"
+              type="button"
+              onClick={onRefresh}
+              disabled={rootLoading}
+            >
+              <ReloadOutlined spin={rootLoading} />
+            </button>
+          </Tooltip>
         )}
       </div>
       <div className="kb-sidebar-content">
