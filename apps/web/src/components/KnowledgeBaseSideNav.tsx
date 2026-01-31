@@ -240,8 +240,10 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
   const renderTree = (docs: KnowledgeBaseDocument[], depth: number) => (
     <div className="kb-doc-group">
       {docs.map((doc) => {
-        const isExpanded = Boolean(expandedIds[doc.id]);
-        const children = isExpanded ? childrenByParent[doc.id] ?? [] : [];
+        const childrenData = childrenByParent[doc.id] ?? [];
+        const hasActualChildren = childrenData.length > 0;
+        const isExpanded = Boolean(expandedIds[doc.id]) && hasActualChildren;
+        const children = isExpanded ? childrenData : [];
         const isLoading = Boolean(loadingIds[doc.id]);
         const isDropTarget =
           dropTarget?.id === doc.id ? dropTarget.position : null;
@@ -260,7 +262,7 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
                 onDrop={(event) => handleDrop(event, doc)}
               >
                 <span className="kb-doc-action">
-                  {doc.hasChild ? (
+                  {hasActualChildren ? (
                     <button
                       className="kb-doc-toggle"
                       type="button"
@@ -287,12 +289,9 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
                 ) : null}
               </div>
             </div>
-            {isExpanded ? (
+            {isExpanded && children.length > 0 ? (
               <div className="kb-doc-children">
-                {!isLoading && children.length === 0 ? (
-                  <div className="kb-doc-empty">No items</div>
-                ) : null}
-                {children.length > 0 ? renderTree(children, depth + 1) : null}
+                {renderTree(children, depth + 1)}
               </div>
             ) : null}
           </div>
