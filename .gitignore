@@ -1,5 +1,8 @@
 .idea
 .vscode
 .opencode
+.venv
+.sysphus
+.pnpm-store
 resources
 node_modules
