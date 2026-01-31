@@ -1,8 +1,9 @@
 /**
  * OCR Service
  *
- * Uses LLM vision models to extract and convert document content
- * from images/PDFs to Tiptap JSON format.
+ * Unified OCR interface supporting multiple backends:
+ * 1. LLM Vision Models (OpenAI, Anthropic, etc.)
+ * 2. PaddleOCR-VL (local Python service)
  */
 
 import type { JSONContent } from "@tiptap/core";
@@ -15,21 +16,42 @@ import { providerRegistry } from "../llm/providers.js";
 // ============================================================================
 
 export type OCROutputFormat = "tiptap" | "markdown";
+export type OCRProvider = "llm" | "paddle";
 
 export type OCRRequest = {
   image: string; // base64 data URL or HTTP URL
   outputFormat?: OCROutputFormat;
   language?: string; // zh, en, etc.
+  provider?: OCRProvider; // OCR provider to use
 };
 
 export type OCRResponse = {
   content: JSONContent;
   markdown?: string;
   rawResponse?: string;
+  provider?: string; // Which provider was used
+};
+
+export type OCRProviderStatus = {
+  llm: {
+    available: boolean;
+    model?: string;
+  };
+  paddle: {
+    available: boolean;
+    endpoint?: string;
+  };
 };
 
 // ============================================================================
-// Prompt Templates
+// Configuration
+// ============================================================================
+
+// PaddleOCR service endpoint (configurable via env)
+const PADDLE_OCR_ENDPOINT = process.env.PADDLE_OCR_URL || "http://localhost:8001";
+
+// ============================================================================
+// Prompt Templates (for LLM Vision)
 // ============================================================================
 
 const TIPTAP_SCHEMA_EXAMPLE = `{
@@ -120,7 +142,91 @@ async function getLLMConfig(): Promise<ProviderConfigInternal | null> {
 }
 
 // ============================================================================
-// Core Functions
+// PaddleOCR Service Client
+// ============================================================================
+
+let paddleOCRAvailable: boolean | null = null;
+let paddleOCRCheckTime: number = 0;
+const PADDLE_CHECK_TTL = 30 * 1000; // 30 seconds
+
+/**
+ * Check if PaddleOCR service is available
+ */
+async function checkPaddleOCR(): Promise<boolean> {
+  const now = Date.now();
+  if (paddleOCRAvailable !== null && now - paddleOCRCheckTime < PADDLE_CHECK_TTL) {
+    return paddleOCRAvailable;
+  }
+
+  try {
+    const response = await fetch(`${PADDLE_OCR_ENDPOINT}/api/ocr/health`, {
+      method: "GET",
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      paddleOCRAvailable = data.paddleocr_available === true;
+    } else {
+      paddleOCRAvailable = false;
+    }
+  } catch {
+    paddleOCRAvailable = false;
+  }
+
+  paddleOCRCheckTime = now;
+  return paddleOCRAvailable;
+}
+
+/**
+ * Parse image using PaddleOCR service
+ */
+async function parseWithPaddleOCR(request: OCRRequest): Promise<OCRResponse> {
+  const outputFormat = request.outputFormat || "tiptap";
+
+  console.log(`[OCR] Processing image with PaddleOCR-VL`);
+
+  try {
+    const response = await fetch(`${PADDLE_OCR_ENDPOINT}/api/ocr/parse-base64`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        image: request.image,
+        output_format: outputFormat,
+        language: request.language || "auto",
+      }),
+      signal: AbortSignal.timeout(120000), // 2 minute timeout for OCR
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`PaddleOCR request failed: ${response.status} ${errorText}`);
+    }
+
+    const result = await response.json();
+
+    if (!result.success) {
+      throw new Error(result.error || "PaddleOCR processing failed");
+    }
+
+    console.log(`[OCR] PaddleOCR response received, markdown length: ${result.markdown?.length || 0}`);
+
+    return {
+      content: result.content,
+      markdown: result.markdown,
+      rawResponse: JSON.stringify(result),
+      provider: "PaddleOCR-VL",
+    };
+  } catch (err) {
+    console.error("[OCR] PaddleOCR error:", err);
+    throw new Error(`PaddleOCR failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+  }
+}
+
+// ============================================================================
+// LLM Vision OCR
 // ============================================================================
 
 /**
@@ -172,9 +278,9 @@ function parseOCRResponse(response: string): JSONContent {
 }
 
 /**
- * Perform OCR on an image using vision LLM
+ * Parse image using LLM vision
  */
-export async function parseImage(request: OCRRequest): Promise<OCRResponse> {
+async function parseWithLLMVision(request: OCRRequest): Promise<OCRResponse> {
   const config = await getLLMConfig();
   if (!config || !config.enabled) {
     throw new Error("No LLM provider configured. Please configure an LLM provider in settings.");
@@ -190,7 +296,7 @@ export async function parseImage(request: OCRRequest): Promise<OCRResponse> {
       ? buildMarkdownPrompt(request.language)
       : buildOCRPrompt(request.language);
 
-  console.log(`[OCR] Processing image with ${config.providerId}/${config.defaultModel}`);
+  console.log(`[OCR] Processing image with LLM Vision: ${config.providerId}/${config.defaultModel}`);
 
   // Get the model
   const model = providerRegistry.getLanguageModel(config.providerId, config.defaultModel, {
@@ -221,7 +327,7 @@ export async function parseImage(request: OCRRequest): Promise<OCRResponse> {
     });
 
     const rawResponse = result.text;
-    console.log(`[OCR] Received response, length: ${rawResponse.length}`);
+    console.log(`[OCR] LLM Vision response received, length: ${rawResponse.length}`);
 
     if (outputFormat === "markdown") {
       // For markdown output, we need to convert to Tiptap JSON
@@ -231,6 +337,7 @@ export async function parseImage(request: OCRRequest): Promise<OCRResponse> {
         content,
         markdown: rawResponse,
         rawResponse,
+        provider: `LLM Vision (${config.providerId}/${config.defaultModel})`,
       };
     }
 
@@ -239,11 +346,53 @@ export async function parseImage(request: OCRRequest): Promise<OCRResponse> {
     return {
       content,
       rawResponse,
+      provider: `LLM Vision (${config.providerId}/${config.defaultModel})`,
     };
   } catch (err) {
-    console.error("[OCR] Vision API error:", err);
-    throw new Error(`OCR failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    console.error("[OCR] LLM Vision API error:", err);
+    throw new Error(`LLM Vision OCR failed: ${err instanceof Error ? err.message : "Unknown error"}`);
   }
+}
+
+// ============================================================================
+// Public API
+// ============================================================================
+
+/**
+ * Perform OCR on an image
+ *
+ * This function will automatically select the best available provider:
+ * 1. If provider is specified, use that provider
+ * 2. If PaddleOCR is available, prefer it for better accuracy
+ * 3. Fall back to LLM vision if available
+ */
+export async function parseImage(request: OCRRequest): Promise<OCRResponse> {
+  const preferredProvider = request.provider;
+
+  // If specific provider is requested
+  if (preferredProvider === "paddle") {
+    const paddleAvailable = await checkPaddleOCR();
+    if (!paddleAvailable) {
+      throw new Error("PaddleOCR service is not available. Please start the service or use LLM vision.");
+    }
+    return parseWithPaddleOCR(request);
+  }
+
+  if (preferredProvider === "llm") {
+    return parseWithLLMVision(request);
+  }
+
+  // Auto-select provider
+  // Check PaddleOCR first (better for document parsing)
+  const paddleAvailable = await checkPaddleOCR();
+  if (paddleAvailable) {
+    console.log("[OCR] Using PaddleOCR-VL (auto-selected)");
+    return parseWithPaddleOCR(request);
+  }
+
+  // Fall back to LLM vision
+  console.log("[OCR] Using LLM Vision (auto-selected, PaddleOCR not available)");
+  return parseWithLLMVision(request);
 }
 
 /**
@@ -282,7 +431,41 @@ export async function isVisionAvailable(): Promise<boolean> {
   return visionModels.some((vm) => modelLower.includes(vm.toLowerCase()));
 }
 
+/**
+ * Check if PaddleOCR service is available
+ */
+export async function isPaddleOCRAvailable(): Promise<boolean> {
+  return checkPaddleOCR();
+}
+
+/**
+ * Get status of all OCR providers
+ */
+export async function getProviderStatus(): Promise<OCRProviderStatus> {
+  const [llmConfig, paddleAvailable] = await Promise.all([
+    getLLMConfig(),
+    checkPaddleOCR(),
+  ]);
+
+  const llmAvailable = llmConfig?.enabled && llmConfig?.defaultModel
+    ? await isVisionAvailable()
+    : false;
+
+  return {
+    llm: {
+      available: llmAvailable,
+      model: llmConfig?.defaultModel,
+    },
+    paddle: {
+      available: paddleAvailable,
+      endpoint: PADDLE_OCR_ENDPOINT,
+    },
+  };
+}
+
 export const ocrService = {
   parseImage,
   isVisionAvailable,
+  isPaddleOCRAvailable,
+  getProviderStatus,
 };

@@ -1414,15 +1414,21 @@ export const buildRouter = () => {
   // ─────────────────────────────────────────────────────────────────────────
 
   /**
-   * Parse image using OCR with vision LLM
+   * Parse image using OCR
    * POST /ocr/parse
+   * 
+   * Supports multiple OCR providers:
+   * - llm: Use configured LLM vision model
+   * - paddle: Use PaddleOCR-VL service
+   * - auto (default): Prefer PaddleOCR if available, fallback to LLM
    */
   router.post("/ocr/parse", async (req: Request, res: Response) => {
     try {
-      const { image, output_format, language } = req.body as {
+      const { image, output_format, language, provider } = req.body as {
         image?: string;
         output_format?: "tiptap" | "markdown";
         language?: string;
+        provider?: "llm" | "paddle";
       };
 
       if (!image || typeof image !== "string") {
@@ -1437,11 +1443,13 @@ export const buildRouter = () => {
         image,
         outputFormat: output_format,
         language,
+        provider,
       });
 
       success(res, {
         content: result.content,
         markdown: result.markdown,
+        provider: result.provider,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "OCR failed";
@@ -1462,6 +1470,21 @@ export const buildRouter = () => {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Check failed";
       error(res, "CHECK_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Get OCR provider status
+   * GET /ocr/status
+   */
+  router.get("/ocr/status", async (_req: Request, res: Response) => {
+    try {
+      const { ocrService } = await import("./services/ocr.js");
+      const status = await ocrService.getProviderStatus();
+      success(res, status);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Status check failed";
+      error(res, "STATUS_FAILED", message, 500);
     }
   });
 
