@@ -292,6 +292,8 @@ body {
 }
 
 .modal-card {
+  position: relative;
+  z-index: 1;
   width: min(600px, 92vw);
   background: var(--surface);
   color: var(--ink);
