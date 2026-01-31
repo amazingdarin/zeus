@@ -12,6 +12,7 @@ import {
 } from "./storage/document-store.js";
 import type { Document, CreateDocumentRequest, MoveDocumentRequest, SearchQuery } from "./storage/types.js";
 import { knowledgeSearch } from "./knowledge/search.js";
+import { rebuildTaskManager } from "./knowledge/rebuild-task.js";
 import { assetStore } from "./storage/asset-store.js";
 import {
   llmGateway,
@@ -606,40 +607,102 @@ export const buildRouter = () => {
   // ============================================
 
   /**
-   * Rebuild all document indexes for a project
+   * Start async rebuild of all document indexes for a project
    * POST /projects/:projectKey/rag/rebuild
+   * Returns task ID for progress tracking
    */
   router.post("/projects/:projectKey/rag/rebuild", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
       
+      // Check if rebuild is already running
+      if (rebuildTaskManager.isRunning(projectKey)) {
+        const activeTask = rebuildTaskManager.getActiveTask(projectKey);
+        success(res, {
+          taskId: activeTask?.id,
+          status: activeTask?.status || "running",
+          message: "A rebuild is already in progress",
+        });
+        return;
+      }
+
       // Get all documents for the project
       const documents = await documentStore.getAllDocuments(projectKey);
       
       if (documents.length === 0) {
         success(res, {
+          taskId: null,
           status: "completed",
           total: 0,
           succeeded: 0,
           failed: 0,
-          errors: [],
         });
         return;
       }
 
-      // Rebuild indexes
-      const progress = await knowledgeSearch.rebuildAll(projectKey, documents);
-      
+      // Create task and start async rebuild
+      const task = rebuildTaskManager.create(projectKey, documents.length);
+
+      // Start rebuild in background (don't await)
+      void (async () => {
+        try {
+          await knowledgeSearch.rebuildAll(projectKey, documents, (progress) => {
+            rebuildTaskManager.updateProgress(task.id, {
+              processed: progress.processed,
+              succeeded: progress.succeeded,
+              failed: progress.failed,
+            });
+          });
+          rebuildTaskManager.complete(task.id);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Rebuild failed";
+          rebuildTaskManager.fail(task.id, message);
+        }
+      })();
+
       success(res, {
-        status: "completed",
-        total: progress.total,
-        succeeded: progress.succeeded,
-        failed: progress.failed,
-        errors: progress.errors,
+        taskId: task.id,
+        status: "pending",
+        total: documents.length,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Rebuild failed";
       error(res, "REBUILD_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Get rebuild task status
+   * GET /projects/:projectKey/rag/rebuild/status
+   */
+  router.get("/projects/:projectKey/rag/rebuild/status", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const task = rebuildTaskManager.getActiveTask(projectKey);
+      
+      if (!task) {
+        success(res, {
+          status: "idle",
+          message: "No active rebuild task",
+        });
+        return;
+      }
+
+      success(res, {
+        taskId: task.id,
+        status: task.status,
+        total: task.total,
+        processed: task.processed,
+        succeeded: task.succeeded,
+        failed: task.failed,
+        errors: task.errors,
+        startedAt: task.startedAt,
+        finishedAt: task.finishedAt,
+        error: task.error,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to get status";
+      error(res, "STATUS_FAILED", message, 500);
     }
   });
 

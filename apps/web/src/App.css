@@ -1273,6 +1273,10 @@ body {
   opacity: 0.5;
 }
 
+.kb-sidebar-toolbar-btn.rebuilding {
+  color: var(--accent);
+}
+
 .kb-sidebar-content {
   flex: 1;
   min-height: 0;

@@ -22,6 +22,12 @@ export type KnowledgeBaseMoveRequest = {
   targetParentId: string;
 };
 
+type RebuildProgress = {
+  total: number;
+  processed: number;
+  status: string;
+};
+
 type KnowledgeBaseSideNavProps = {
   documents: KnowledgeBaseDocument[];
   childrenByParent: Record<string, KnowledgeBaseDocument[]>;
@@ -30,6 +36,7 @@ type KnowledgeBaseSideNavProps = {
   loadingIds: Record<string, boolean>;
   rootLoading: boolean;
   rebuildingIndex?: boolean;
+  rebuildProgress?: RebuildProgress | null;
   onSelect: (doc: KnowledgeBaseDocument) => void;
   onToggle: (doc: KnowledgeBaseDocument) => void;
   onMove: (request: KnowledgeBaseMoveRequest) => void;
@@ -45,6 +52,7 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
   loadingIds,
   rootLoading,
   rebuildingIndex,
+  rebuildProgress,
   onSelect,
   onToggle,
   onMove,
@@ -305,9 +313,15 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
       <div className="kb-sidebar-toolbar">
         <div className="kb-sidebar-toolbar-spacer" />
         {onRebuildIndex && (
-          <Tooltip title="重建索引">
+          <Tooltip 
+            title={
+              rebuildingIndex && rebuildProgress
+                ? `重建中：${rebuildProgress.processed}/${rebuildProgress.total}`
+                : "重建索引"
+            }
+          >
             <button
-              className="kb-sidebar-toolbar-btn"
+              className={`kb-sidebar-toolbar-btn${rebuildingIndex ? " rebuilding" : ""}`}
               type="button"
               onClick={onRebuildIndex}
               disabled={rebuildingIndex || rootLoading}

@@ -29,7 +29,7 @@ import {
   type DocumentDetail,
   type DocumentTreeItem,
 } from "../api/documents";
-import { rebuildDocumentRag, rebuildProjectRag } from "../api/projects";
+import { rebuildDocumentRag, rebuildProjectRag, getRebuildStatus } from "../api/projects";
 import { uploadAsset } from "../api/assets";
 import { apiFetch } from "../config/api";
 import { sanitizeFileName } from "../utils/fileName";
@@ -272,6 +272,12 @@ function DocumentPage() {
   const [loadingIds, setLoadingIds] = useState<Record<string, boolean>>({});
   const [rootLoading, setRootLoading] = useState(false);
   const [rebuildingIndex, setRebuildingIndex] = useState(false);
+  const [rebuildProgress, setRebuildProgress] = useState<{
+    total: number;
+    processed: number;
+    status: string;
+  } | null>(null);
+  const rebuildPollingRef = useRef<number | null>(null);
   const projectKeyRef = useRef<string | null>(null);
   const loadingIdsRef = useRef<Record<string, boolean>>({});
   const rootLoadAttemptRef = useRef<string | null>(null);
@@ -638,25 +644,96 @@ function DocumentPage() {
     void loadFullTreeRef.current(resolvedProjectKey);
   }, [resolvedProjectKey, rootLoading]);
 
+  // Stop polling for rebuild status
+  const stopRebuildPolling = useCallback(() => {
+    if (rebuildPollingRef.current) {
+      window.clearInterval(rebuildPollingRef.current);
+      rebuildPollingRef.current = null;
+    }
+  }, []);
+
+  // Poll for rebuild status
+  const pollRebuildStatus = useCallback(async (projectKey: string) => {
+    try {
+      const status = await getRebuildStatus(projectKey);
+      
+      if (status.status === "running" || status.status === "pending") {
+        setRebuildProgress({
+          total: status.total || 0,
+          processed: status.processed || 0,
+          status: status.status,
+        });
+      } else if (status.status === "completed") {
+        stopRebuildPolling();
+        setRebuildingIndex(false);
+        setRebuildProgress(null);
+        const message = status.failed && status.failed > 0
+          ? `索引重建完成：成功 ${status.succeeded}，失败 ${status.failed}`
+          : `索引重建完成：共处理 ${status.total} 个文档`;
+        alert(message);
+      } else if (status.status === "failed") {
+        stopRebuildPolling();
+        setRebuildingIndex(false);
+        setRebuildProgress(null);
+        alert(`索引重建失败：${status.error || "未知错误"}`);
+      } else {
+        // idle or unknown status
+        stopRebuildPolling();
+        setRebuildingIndex(false);
+        setRebuildProgress(null);
+      }
+    } catch (err) {
+      console.error("Poll rebuild status failed:", err);
+    }
+  }, [stopRebuildPolling]);
+
   const handleRebuildIndex = useCallback(async () => {
     if (!resolvedProjectKey || rebuildingIndex) {
       return;
     }
     setRebuildingIndex(true);
+    setRebuildProgress({ total: 0, processed: 0, status: "pending" });
+    
     try {
       const result = await rebuildProjectRag(resolvedProjectKey);
-      const message = result.failed && result.failed > 0
-        ? `索引重建完成：成功 ${result.succeeded}，失败 ${result.failed}`
-        : `索引重建完成：共处理 ${result.total} 个文档`;
-      // Show a simple alert for now - could be replaced with a toast notification
-      alert(message);
+      
+      if (result.status === "completed") {
+        // Synchronous completion (no documents or already done)
+        setRebuildingIndex(false);
+        setRebuildProgress(null);
+        const message = result.total === 0
+          ? "没有文档需要索引"
+          : `索引重建完成：共处理 ${result.total} 个文档`;
+        alert(message);
+        return;
+      }
+
+      // Start polling for progress
+      setRebuildProgress({
+        total: result.total || 0,
+        processed: 0,
+        status: result.status,
+      });
+      
+      // Poll every 1 second
+      rebuildPollingRef.current = window.setInterval(() => {
+        void pollRebuildStatus(resolvedProjectKey);
+      }, 1000);
+      
     } catch (err) {
       console.error("Rebuild index failed:", err);
-      alert("索引重建失败，请稍后重试");
-    } finally {
       setRebuildingIndex(false);
+      setRebuildProgress(null);
+      alert("索引重建失败，请稍后重试");
     }
-  }, [resolvedProjectKey, rebuildingIndex]);
+  }, [resolvedProjectKey, rebuildingIndex, pollRebuildStatus]);
+
+  // Cleanup polling on unmount or project change
+  useEffect(() => {
+    return () => {
+      stopRebuildPolling();
+    };
+  }, [stopRebuildPolling]);
 
   const handleDocumentsChanged = useCallback(
     async (parentId: string) => {
@@ -1555,6 +1632,7 @@ function DocumentPage() {
           loadingIds={loadingIds}
           rootLoading={rootLoading}
           rebuildingIndex={rebuildingIndex}
+          rebuildProgress={rebuildProgress}
           onSelect={handleSelectDocument}
           onToggle={handleToggle}
           onMove={handleMove}
