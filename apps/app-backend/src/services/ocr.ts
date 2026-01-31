@@ -222,7 +222,7 @@ async function checkPaddleOCR(): Promise<{ available: boolean; endpoint: string 
 
     if (response.ok) {
       const data = await response.json();
-      const available = data.paddleocr_available === true || data.status === "ok";
+      const available = data.paddleocr_available === true || data.status === "healthy" || data.status === "ok";
       paddleOCRCache = { available, endpoint, timestamp: now };
       return { available, endpoint };
     } else {

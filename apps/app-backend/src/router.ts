@@ -1486,14 +1486,17 @@ export const buildRouter = () => {
   });
 
   /**
-   * Check if vision OCR is available
+   * Check if any OCR provider is available (LLM vision or PaddleOCR)
    * GET /ocr/available
    */
   router.get("/ocr/available", async (_req: Request, res: Response) => {
     try {
       const { ocrService } = await import("./services/ocr.js");
-      const available = await ocrService.isVisionAvailable();
-      success(res, { available });
+      const [visionAvailable, paddleAvailable] = await Promise.all([
+        ocrService.isVisionAvailable(),
+        ocrService.isPaddleOCRAvailable(),
+      ]);
+      success(res, { available: visionAvailable || paddleAvailable });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Check failed";
       error(res, "CHECK_FAILED", message, 500);
