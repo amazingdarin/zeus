@@ -8,7 +8,7 @@ import { v4 as uuidv4 } from "uuid";
 import type { JSONContent } from "@tiptap/core";
 import { configStore, llmGateway, type ProviderConfigInternal } from "../llm/index.js";
 import { documentStore } from "../storage/document-store.js";
-import { tiptapJsonToMarkdown, markdownToTiptapJson } from "@zeus/shared";
+import { tiptapJsonToMarkdown, markdownToTiptapJson } from "../utils/markdown.js";
 
 // ============================================================================
 // Types
