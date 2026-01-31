@@ -3821,9 +3821,21 @@ body {
 }
 
 [data-theme="dark"] .ant-message-notice-content {
-  background: var(--surface-elevated);
-  color: var(--ink);
-  box-shadow: var(--shadow-lg);
+  background: #1c2128 !important;
+  color: #e6edf3 !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5) !important;
+}
+
+[data-theme="dark"] .ant-message-notice-content .ant-message-error,
+[data-theme="dark"] .ant-message-notice-content .ant-message-success,
+[data-theme="dark"] .ant-message-notice-content .ant-message-warning,
+[data-theme="dark"] .ant-message-notice-content .ant-message-info {
+  color: #e6edf3 !important;
+}
+
+/* Form hint/extra text in dark mode */
+[data-theme="dark"] .ant-form-item-extra {
+  color: #8b949e !important;
 }
 
 [data-theme="dark"] .ant-spin-dot-item {
