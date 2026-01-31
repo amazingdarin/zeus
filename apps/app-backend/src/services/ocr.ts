@@ -47,28 +47,19 @@ export type OCRProviderStatus = {
 // Configuration
 // ============================================================================
 
-// Default PaddleOCR service endpoint (can be overridden by vision config)
-const DEFAULT_PADDLE_OCR_PORT = process.env.PADDLE_OCR_PORT || "8001";
-const DEFAULT_PADDLE_OCR_ENDPOINT = process.env.PADDLE_OCR_URL || `http://localhost:${DEFAULT_PADDLE_OCR_PORT}`;
-
 /**
- * Get PaddleOCR endpoint from vision config or fallback to env/default
+ * Get PaddleOCR endpoint from vision config
+ * PaddleOCR is now configured via settings (vision config), not env vars
  */
 async function getPaddleOCREndpoint(): Promise<string | null> {
   const visionConfig = await getVisionConfig();
   
-  // If vision config is paddleocr provider, use its baseUrl
+  // Only use PaddleOCR if configured in settings
   if (visionConfig && visionConfig.enabled && visionConfig.providerId === "paddleocr") {
-    return visionConfig.baseUrl || DEFAULT_PADDLE_OCR_ENDPOINT;
+    return visionConfig.baseUrl || null;
   }
   
-  // Fall back to env/default only if no vision config or it's not paddleocr
-  // Return null if ENABLE_PADDLE_OCR is false
-  if (process.env.ENABLE_PADDLE_OCR === "false") {
-    return null;
-  }
-  
-  return DEFAULT_PADDLE_OCR_ENDPOINT;
+  return null;
 }
 
 // ============================================================================
@@ -481,13 +472,6 @@ export async function parseImage(request: OCRRequest): Promise<OCRResponse> {
   if (llmConfig && llmConfig.enabled && llmConfig.providerId !== "paddleocr") {
     console.log("[OCR] Using LLM Vision");
     return parseWithLLMVision(request);
-  }
-
-  // Last resort: try default PaddleOCR endpoint
-  const defaultPaddle = await checkPaddleOCR();
-  if (defaultPaddle.available && defaultPaddle.endpoint) {
-    console.log("[OCR] Trying default PaddleOCR");
-    return parseWithPaddleOCR(request, defaultPaddle.endpoint);
   }
 
   throw new Error("没有可用的 OCR 服务。请在设置中配置 OCR 文档识别模型或 PaddleOCR 服务。");
