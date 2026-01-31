@@ -3721,9 +3721,11 @@ body {
 
 .chat-dock-bottom {
   position: fixed;
-  left: calc(var(--sidebar-width, 240px) + 24px);
-  right: 24px;
+  left: 50%;
+  transform: translateX(-50%);
   bottom: 20px;
+  width: 720px;
+  max-width: calc(100% - 48px);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -4072,7 +4074,7 @@ body {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 8px 8px 8px 16px;
+  padding: 8px 12px 8px 16px;
   box-shadow: 
     0 8px 24px rgba(0, 0, 0, 0.1),
     0 4px 8px rgba(0, 0, 0, 0.06);
@@ -4088,7 +4090,7 @@ body {
 .chat-dock-input-wrapper {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
 }
 
 .chat-dock-textarea {
@@ -4118,7 +4120,8 @@ body {
 .chat-dock-bar-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .chat-dock-send-btn {
