@@ -2,7 +2,7 @@
   --tiptap-input-placeholder: var(--tt-gray-light-a-400);
 }
 
-.dark {
+[data-theme="dark"] {
   --tiptap-input-placeholder: var(--tt-gray-dark-a-400);
 }
 

@@ -49,17 +49,11 @@ import { LinkPreviewButton } from "../../ui/link-preview-button"
 import { ListDropdownMenu } from "../../ui/list-dropdown-menu"
 import { BlockquoteButton } from "../../ui/blockquote-button"
 import { CodeBlockButton } from "../../ui/code-block-button"
-import { OpenApiDropdownMenu } from "../../ui/openapi-dropdown-menu"
 import {
   ColorHighlightPopover,
   ColorHighlightPopoverContent,
   ColorHighlightPopoverButton,
 } from "../../ui/color-highlight-popover"
-import {
-  LinkPopover,
-  LinkContent,
-  LinkButton,
-} from "../../ui/link-popover"
 import { MarkButton } from "../../ui/mark-button"
 import { TextAlignButton } from "../../ui/text-align-button"
 import { UndoRedoButton } from "../../ui/undo-redo-button"
@@ -67,7 +61,6 @@ import { UndoRedoButton } from "../../ui/undo-redo-button"
 // --- Icons ---
 import { ArrowLeftIcon } from "../../icons/arrow-left-icon"
 import { HighlighterIcon } from "../../icons/highlighter-icon"
-import { LinkIcon } from "../../icons/link-icon"
 
 // --- Hooks ---
 import { useIsBreakpoint } from "../../hooks/use-is-breakpoint"
@@ -108,11 +101,9 @@ const defaultContent: JSONContent = {
 
 const MainToolbarContent = ({
   onHighlighterClick,
-  onLinkClick,
   isMobile,
 }: {
   onHighlighterClick: () => void
-  onLinkClick: () => void
   isMobile: boolean
 }) => {
   return (
@@ -134,7 +125,6 @@ const MainToolbarContent = ({
         />
         <BlockquoteButton />
         <CodeBlockButton />
-        <OpenApiDropdownMenu portal={isMobile} hideWhenUnavailable />
       </ToolbarGroup>
 
       <ToolbarSeparator />
@@ -150,7 +140,9 @@ const MainToolbarContent = ({
         ) : (
           <ColorHighlightPopoverButton onClick={onHighlighterClick} />
         )}
-        {!isMobile ? <LinkPopover /> : <LinkButton onClick={onLinkClick} />}
+        <LinkPreviewButton />
+        <ImageUploadButton />
+        <FileBlockButton />
       </ToolbarGroup>
 
       <ToolbarSeparator />
@@ -169,14 +161,6 @@ const MainToolbarContent = ({
         <TextAlignButton align="justify" />
       </ToolbarGroup>
 
-      <ToolbarSeparator />
-
-      <ToolbarGroup>
-        <ImageUploadButton text="Image" />
-        <FileBlockButton text="File" />
-        <LinkPreviewButton text="Link Preview" />
-      </ToolbarGroup>
-
       <Spacer />
 
       {isMobile && <ToolbarSeparator />}
@@ -186,31 +170,21 @@ const MainToolbarContent = ({
 }
 
 const MobileToolbarContent = ({
-  type,
   onBack,
 }: {
-  type: "highlighter" | "link"
   onBack: () => void
 }) => (
   <>
     <ToolbarGroup>
       <Button data-style="ghost" onClick={onBack}>
         <ArrowLeftIcon className="tiptap-button-icon" />
-        {type === "highlighter" ? (
-          <HighlighterIcon className="tiptap-button-icon" />
-        ) : (
-          <LinkIcon className="tiptap-button-icon" />
-        )}
+        <HighlighterIcon className="tiptap-button-icon" />
       </Button>
     </ToolbarGroup>
 
     <ToolbarSeparator />
 
-    {type === "highlighter" ? (
-      <ColorHighlightPopoverContent />
-    ) : (
-      <LinkContent />
-    )}
+    <ColorHighlightPopoverContent />
   </>
 )
 
@@ -227,7 +201,7 @@ export function DocEditor({
   const isEditable = mode === "edit"
   const isMobile = useIsBreakpoint()
   const { height } = useWindowSize()
-  const [mobileView, setMobileView] = useState<"main" | "highlighter" | "link">(
+  const [mobileView, setMobileView] = useState<"main" | "highlighter">(
     "main"
   )
   const toolbarRef = useRef<HTMLDivElement>(null)
@@ -385,14 +359,10 @@ export function DocEditor({
             {mobileView === "main" ? (
               <MainToolbarContent
                 onHighlighterClick={() => setMobileView("highlighter")}
-                onLinkClick={() => setMobileView("link")}
                 isMobile={isMobile}
               />
             ) : (
-              <MobileToolbarContent
-                type={mobileView === "highlighter" ? "highlighter" : "link"}
-                onBack={() => setMobileView("main")}
-              />
+              <MobileToolbarContent onBack={() => setMobileView("main")} />
             )}
           </Toolbar>
         ) : null}

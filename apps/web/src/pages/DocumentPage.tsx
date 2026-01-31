@@ -2175,7 +2175,8 @@ function DocumentPage() {
                   {uploading ? (
                     <>
                       <span className="kb-import-spinner" aria-hidden="true" />
-                      {(importMode === "file" || importMode === "folder") && uploadTotal > 0
+                      {/* Only show progress for folder (multiple files) or git imports */}
+                      {(importMode === "folder" || importMode === "git") && uploadTotal > 1
                         ? `${uploadProgress}%`
                         : null}
                     </>
@@ -2341,13 +2342,15 @@ function mapDocumentDetail(data: DocumentDetail | undefined | null, fallbackId: 
   const body = data?.body;
   const contentPayload = body?.content ?? data?.content;
   let content: JSONContent | null = null;
+  
   if (contentPayload && typeof contentPayload === "object") {
     if ("content" in contentPayload && Array.isArray(contentPayload.content)) {
       content = contentPayload as JSONContent;
-    } else if ("content" in contentPayload && typeof contentPayload.content === "object") {
+    } else if ("content" in contentPayload && typeof contentPayload.content === "object" && contentPayload.content !== null) {
       content = contentPayload.content as JSONContent;
     }
   }
+  
   const hierarchyData = data?.hierarchy ?? [];
   const hierarchy = hierarchyData
     .map((item) => ({

@@ -6,3 +6,4 @@
 .pnpm-store
 resources
 node_modules
+apps/app-backend/data

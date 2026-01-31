@@ -298,6 +298,90 @@ async function parseWithPaddleOCR(request: OCRRequest, endpoint: string): Promis
 // LLM Vision OCR
 // ============================================================================
 
+// Supported Tiptap marks - only these will be kept, others are stripped
+const SUPPORTED_MARKS = new Set([
+  "bold",
+  "italic",
+  "underline",
+  "strike",
+  "code",
+  "link",
+  "highlight",
+  "subscript",
+  "superscript",
+]);
+
+// Supported Tiptap node types
+const SUPPORTED_NODES = new Set([
+  "doc",
+  "text",
+  "paragraph",
+  "heading",
+  "blockquote",
+  "bulletList",
+  "orderedList",
+  "listItem",
+  "codeBlock",
+  "hardBreak",
+  "horizontalRule",
+  "image",
+  "table",
+  "tableRow",
+  "tableCell",
+  "tableHeader",
+  "taskList",
+  "taskItem",
+]);
+
+/**
+ * Sanitize Tiptap JSON content to remove unsupported marks and nodes
+ * This ensures the content is compatible with the editor schema
+ */
+function sanitizeTiptapContent(content: JSONContent): JSONContent {
+  // If no content, return as-is
+  if (!content || typeof content !== "object") {
+    return content;
+  }
+
+  // Handle text nodes with marks
+  if (content.type === "text" && content.marks) {
+    const filteredMarks = content.marks.filter(
+      (mark: { type: string }) => SUPPORTED_MARKS.has(mark.type)
+    );
+    if (filteredMarks.length !== content.marks.length) {
+      const removedMarks = content.marks
+        .filter((mark: { type: string }) => !SUPPORTED_MARKS.has(mark.type))
+        .map((m: { type: string }) => m.type);
+      console.log(`[OCR Sanitize] Removed unsupported marks: ${removedMarks.join(", ")}`);
+    }
+    return {
+      ...content,
+      marks: filteredMarks.length > 0 ? filteredMarks : undefined,
+    };
+  }
+
+  // Recursively process children
+  if (Array.isArray(content.content)) {
+    const sanitizedChildren = content.content
+      .map((child) => sanitizeTiptapContent(child as JSONContent))
+      .filter((child) => {
+        // Filter out unsupported node types
+        if (child && child.type && !SUPPORTED_NODES.has(child.type) && child.type !== "text") {
+          console.log(`[OCR Sanitize] Removed unsupported node type: ${child.type}`);
+          return false;
+        }
+        return true;
+      });
+
+    return {
+      ...content,
+      content: sanitizedChildren,
+    };
+  }
+
+  return content;
+}
+
 /**
  * Parse OCR response to extract JSON content
  */
@@ -326,17 +410,26 @@ function parseOCRResponse(response: string): JSONContent {
   try {
     const parsed = JSON.parse(jsonStr);
     console.log(`[OCR Parse] JSON parsed successfully, type: ${parsed.type}, content length: ${parsed.content?.length || 0}`);
+    
+    // Sanitize to remove unsupported marks and nodes
+    let result: JSONContent;
+    
     // Validate basic structure
     if (parsed.type === "doc" && Array.isArray(parsed.content)) {
-      return parsed as JSONContent;
-    }
-    // If it's just content array, wrap it
-    if (Array.isArray(parsed)) {
+      result = parsed as JSONContent;
+    } else if (Array.isArray(parsed)) {
+      // If it's just content array, wrap it
       console.log(`[OCR Parse] Wrapping array as doc content`);
-      return { type: "doc", content: parsed };
+      result = { type: "doc", content: parsed };
+    } else {
+      // Return as-is if it looks valid
+      result = parsed as JSONContent;
     }
-    // Return as-is if it looks valid
-    return parsed as JSONContent;
+    
+    // Sanitize to ensure compatibility with editor schema
+    const sanitized = sanitizeTiptapContent(result);
+    console.log(`[OCR Parse] Content sanitized`);
+    return sanitized;
   } catch (err) {
     console.error("[OCR Parse] Failed to parse JSON:", err);
     console.error("[OCR Parse] Attempted to parse:", jsonStr.substring(0, 500));
