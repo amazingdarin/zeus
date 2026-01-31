@@ -4,7 +4,7 @@ HELM_NAMESPACE ?= zeus
 NAMESPACE ?= $(HELM_NAMESPACE)
 CONFIG_PATH ?= /tmp/zeus-$(NAMESPACE)/config.yaml
 
-.PHONY: run-server run-app-backend run-app-web run-app-desktop install uninstall dev-install build-postgres-image build-backend-image build-frontend-image start-deps start-deps-dev stop-deps stop-deps-dev clean-deps start-all stop-all clean-all test-integration setup-python-venv install-paddleocr
+.PHONY: run-server run-app-backend run-app-web run-app-desktop install uninstall dev-install build-postgres-image build-backend-image build-frontend-image build-paddleocr-image start-deps start-deps-dev stop-deps stop-deps-dev clean-deps start-all stop-all clean-all test-integration setup-python-venv install-paddleocr run-paddleocr-docker stop-paddleocr-docker
 
 # Development run commands
 run-server:
@@ -42,6 +42,33 @@ build-backend-image:
 
 build-frontend-image:
 	docker build -t zeus-web:latest -f apps/web/Dockerfile apps/web
+
+# PaddleOCR Docker commands
+PADDLEOCR_IMAGE := zeus/paddleocr:latest
+PADDLEOCR_CONTAINER := zeus-paddleocr
+PADDLEOCR_PORT ?= 8001
+
+build-paddleocr-image:
+	@echo "Building PaddleOCR Docker image..."
+	docker build -t $(PADDLEOCR_IMAGE) -f deploy/paddleocr/Dockerfile .
+	@echo "PaddleOCR image built: $(PADDLEOCR_IMAGE)"
+
+run-paddleocr-docker:
+	@echo "Starting PaddleOCR container on port $(PADDLEOCR_PORT)..."
+	@docker rm -f $(PADDLEOCR_CONTAINER) 2>/dev/null || true
+	docker run -d \
+		--name $(PADDLEOCR_CONTAINER) \
+		-p $(PADDLEOCR_PORT):8001 \
+		--restart unless-stopped \
+		$(PADDLEOCR_IMAGE)
+	@echo "PaddleOCR running at http://localhost:$(PADDLEOCR_PORT)"
+	@echo "Configure this URL in Settings > OCR Document Recognition"
+
+stop-paddleocr-docker:
+	@echo "Stopping PaddleOCR container..."
+	docker stop $(PADDLEOCR_CONTAINER) 2>/dev/null || true
+	docker rm $(PADDLEOCR_CONTAINER) 2>/dev/null || true
+	@echo "PaddleOCR container stopped."
 
 start-deps:
 	bash ./scripts/gen-config.sh $(NAMESPACE) $(CONFIG_PATH)
