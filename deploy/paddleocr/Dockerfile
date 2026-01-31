@@ -1,10 +1,12 @@
 # PaddleOCR Docker Image
 # Based on official PaddlePaddle Docker image
 # Reference: https://www.paddlepaddle.org.cn/install/quick?docurl=/documentation/docs/zh/install/docker/macos-docker.html
+#
+# NOTE: PaddlePaddle only provides amd64 images, use --platform to emulate on ARM Macs
 
-# Use PaddlePaddle CPU image (for macOS compatibility)
-# For GPU support, use: registry.baidubce.com/paddlepaddle/paddle:3.0.0-gpu-cuda12.6-cudnn9.5-trt10.6
-FROM registry.baidubce.com/paddlepaddle/paddle:3.0.0
+# Use PaddlePaddle CPU image
+# For GPU support, use: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddle:3.3.0-gpu-cuda12.6-cudnn9.5-trt10.6
+FROM --platform=linux/amd64 ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddle:3.3.0
 
 # Set working directory
 WORKDIR /app
