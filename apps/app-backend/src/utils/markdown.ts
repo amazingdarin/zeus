@@ -3,14 +3,13 @@
  *
  * Simple markdown <-> JSON conversion without frontend dependencies.
  * Uses markdown-it for parsing and prosemirror-markdown for serialization.
+ * Schema is defined directly using prosemirror-model for maximum compatibility.
  */
 
 import MarkdownIt from "markdown-it";
-import type { Node as ProsemirrorNode, Schema } from "prosemirror-model";
-import { getSchema, Node as TiptapNode } from "@tiptap/core";
+import type { Node as ProsemirrorNode } from "prosemirror-model";
+import { Schema } from "prosemirror-model";
 import type { JSONContent } from "@tiptap/core";
-import { StarterKit } from "@tiptap/starter-kit";
-import { Image } from "@tiptap/extension-image";
 import {
   MarkdownParser,
   MarkdownSerializer,
@@ -19,47 +18,202 @@ import {
 } from "prosemirror-markdown";
 
 // ============================================================================
-// Custom Node: file_block (simplified for backend)
+// Schema (defined directly using prosemirror-model)
 // ============================================================================
-
-const FileBlockNode = TiptapNode.create({
-  name: "file_block",
-  group: "block",
-  atom: true,
-  addAttributes() {
-    return {
-      asset_id: { default: null },
-      file_name: { default: null },
-      mime: { default: null },
-      file_type: { default: null },
-      office_type: { default: null },
-      size: { default: null },
-    };
-  },
-  parseHTML() {
-    return [{ tag: "div[data-file-block]" }];
-  },
-  renderHTML() {
-    return ["div", { "data-file-block": "" }];
-  },
-});
-
-// ============================================================================
-// Schema (simplified - no SCSS-dependent extensions)
-// ============================================================================
-
-const SIMPLE_EXTENSIONS = [
-  StarterKit,
-  Image,
-  FileBlockNode,
-];
 
 let cachedSchema: Schema | null = null;
 
 function getSimpleSchema(): Schema {
-  if (!cachedSchema) {
-    cachedSchema = getSchema(SIMPLE_EXTENSIONS);
+  if (cachedSchema) {
+    return cachedSchema;
   }
+
+  cachedSchema = new Schema({
+    nodes: {
+      doc: { content: "block+" },
+      paragraph: {
+        content: "inline*",
+        group: "block",
+        parseDOM: [{ tag: "p" }],
+        toDOM() {
+          return ["p", 0];
+        },
+      },
+      blockquote: {
+        content: "block+",
+        group: "block",
+        parseDOM: [{ tag: "blockquote" }],
+        toDOM() {
+          return ["blockquote", 0];
+        },
+      },
+      horizontalRule: {
+        group: "block",
+        parseDOM: [{ tag: "hr" }],
+        toDOM() {
+          return ["hr"];
+        },
+      },
+      heading: {
+        attrs: { level: { default: 1 } },
+        content: "inline*",
+        group: "block",
+        defining: true,
+        parseDOM: [
+          { tag: "h1", attrs: { level: 1 } },
+          { tag: "h2", attrs: { level: 2 } },
+          { tag: "h3", attrs: { level: 3 } },
+          { tag: "h4", attrs: { level: 4 } },
+          { tag: "h5", attrs: { level: 5 } },
+          { tag: "h6", attrs: { level: 6 } },
+        ],
+        toDOM(node) {
+          return ["h" + node.attrs.level, 0];
+        },
+      },
+      codeBlock: {
+        attrs: { language: { default: "" } },
+        content: "text*",
+        marks: "",
+        group: "block",
+        code: true,
+        defining: true,
+        parseDOM: [{ tag: "pre", preserveWhitespace: "full" }],
+        toDOM() {
+          return ["pre", ["code", 0]];
+        },
+      },
+      text: { group: "inline" },
+      image: {
+        inline: true,
+        attrs: {
+          src: {},
+          alt: { default: null },
+          title: { default: null },
+        },
+        group: "inline",
+        draggable: true,
+        parseDOM: [
+          {
+            tag: "img[src]",
+            getAttrs(dom: HTMLElement) {
+              return {
+                src: dom.getAttribute("src"),
+                title: dom.getAttribute("title"),
+                alt: dom.getAttribute("alt"),
+              };
+            },
+          },
+        ],
+        toDOM(node) {
+          return ["img", node.attrs];
+        },
+      },
+      hardBreak: {
+        inline: true,
+        group: "inline",
+        selectable: false,
+        parseDOM: [{ tag: "br" }],
+        toDOM() {
+          return ["br"];
+        },
+      },
+      bulletList: {
+        content: "listItem+",
+        group: "block",
+        parseDOM: [{ tag: "ul" }],
+        toDOM() {
+          return ["ul", 0];
+        },
+      },
+      orderedList: {
+        attrs: { order: { default: 1 } },
+        content: "listItem+",
+        group: "block",
+        parseDOM: [
+          {
+            tag: "ol",
+            getAttrs(dom: HTMLElement) {
+              return { order: dom.hasAttribute("start") ? +dom.getAttribute("start")! : 1 };
+            },
+          },
+        ],
+        toDOM(node) {
+          return node.attrs.order === 1 ? ["ol", 0] : ["ol", { start: node.attrs.order }, 0];
+        },
+      },
+      listItem: {
+        content: "paragraph block*",
+        defining: true,
+        parseDOM: [{ tag: "li" }],
+        toDOM() {
+          return ["li", 0];
+        },
+      },
+      // Custom file_block node for embedded files
+      file_block: {
+        attrs: {
+          asset_id: { default: null },
+          file_name: { default: null },
+          mime: { default: null },
+          file_type: { default: null },
+          office_type: { default: null },
+          size: { default: null },
+        },
+        group: "block",
+        atom: true,
+        parseDOM: [{ tag: "div[data-file-block]" }],
+        toDOM() {
+          return ["div", { "data-file-block": "" }];
+        },
+      },
+    },
+    marks: {
+      link: {
+        attrs: {
+          href: {},
+          title: { default: null },
+        },
+        inclusive: false,
+        parseDOM: [
+          {
+            tag: "a[href]",
+            getAttrs(dom: HTMLElement) {
+              return { href: dom.getAttribute("href"), title: dom.getAttribute("title") };
+            },
+          },
+        ],
+        toDOM(node) {
+          return ["a", node.attrs, 0];
+        },
+      },
+      bold: {
+        parseDOM: [{ tag: "strong" }, { tag: "b" }],
+        toDOM() {
+          return ["strong", 0];
+        },
+      },
+      italic: {
+        parseDOM: [{ tag: "em" }, { tag: "i" }],
+        toDOM() {
+          return ["em", 0];
+        },
+      },
+      strike: {
+        parseDOM: [{ tag: "s" }, { tag: "del" }],
+        toDOM() {
+          return ["s", 0];
+        },
+      },
+      code: {
+        parseDOM: [{ tag: "code" }],
+        toDOM() {
+          return ["code", 0];
+        },
+      },
+    },
+  });
+
   return cachedSchema;
 }
 
