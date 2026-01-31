@@ -124,20 +124,20 @@ type DocumentCreateMeta = {
 };
 
 const UPLOAD_FILTER_PRESETS: UploadFilterPreset[] = [
-  { id: "all", label: "All", extensions: [] },
+  { id: "all", label: "全部", extensions: [] },
   {
     id: "images",
-    label: "Images",
+    label: "图片",
     extensions: ["png", "jpg", "jpeg", "gif", "webp", "svg"],
   },
   {
     id: "office",
-    label: "Office",
+    label: "办公文档",
     extensions: ["docx", "pptx", "xlsx", "pdf"],
   },
   {
     id: "text",
-    label: "Text",
+    label: "文本",
     extensions: ["txt", "csv", "json", "yaml", "yml", "log"],
   },
   {
@@ -150,10 +150,10 @@ const UPLOAD_FILTER_PRESETS: UploadFilterPreset[] = [
 const SMART_IMPORT_OPTIONS: SmartImportOption[] = [
   { id: "all", label: "全部", enabled: true },
   { id: "markdown", label: "Markdown", enabled: true },
-  { id: "word", label: "Word", enabled: true },
+  { id: "word", label: "Word 文档", enabled: true },
   { id: "pdf", label: "PDF (OCR)", enabled: true },
-  { id: "image", label: "Image", enabled: true },
-  { id: "ocr", label: "OCR (图片转文档)", enabled: true },
+  { id: "image", label: "图片", enabled: true },
+  { id: "ocr", label: "OCR 识别", enabled: true },
 ];
 
 // All individual smart import types (excluding "all")
@@ -1284,11 +1284,11 @@ function DocumentPage() {
     if (importMode === "url") {
       const urlValue = importUrl.trim();
       if (!urlValue) {
-        setImportStatus({ type: "error", message: "URL is required." });
+        setImportStatus({ type: "error", message: "请输入网址" });
         return;
       }
       if (!isValidHttpUrl(urlValue)) {
-        setImportStatus({ type: "error", message: "Enter a valid http(s) URL." });
+        setImportStatus({ type: "error", message: "请输入有效的 http(s) 网址" });
         return;
       }
       setUploading(true);
@@ -1339,7 +1339,7 @@ function DocumentPage() {
           converted: 1,
           fallback: 0,
         });
-        setImportStatus({ type: "success", message: "Import completed." });
+        setImportStatus({ type: "success", message: "导入完成" });
         setImportModalOpen(false);
         setImportUrl("");
         setImportUrlTitle("");
@@ -1347,7 +1347,7 @@ function DocumentPage() {
         await handleDocumentsChanged(activeDocument?.id ?? "");
       } catch (err) {
         console.log("import_url_error", err);
-        const message = err instanceof Error && err.message ? err.message : "Import failed.";
+        const message = err instanceof Error && err.message ? err.message : "导入失败";
         setImportStatus({ type: "error", message });
       } finally {
         setUploading(false);
@@ -1360,15 +1360,15 @@ function DocumentPage() {
       const repoUrl = gitRepoUrl.trim();
       const branchValue = gitBranch.trim();
       if (!repoUrl) {
-        setImportStatus({ type: "error", message: "Repository URL is required." });
+        setImportStatus({ type: "error", message: "请输入仓库地址" });
         return;
       }
       if (!isValidHttpUrl(repoUrl)) {
-        setImportStatus({ type: "error", message: "Enter a valid http(s) repository URL." });
+        setImportStatus({ type: "error", message: "请输入有效的仓库地址" });
         return;
       }
       if (branchValue && !isValidGitBranch(branchValue)) {
-        setImportStatus({ type: "error", message: "Branch name contains invalid characters." });
+        setImportStatus({ type: "error", message: "分支名包含无效字符" });
         return;
       }
       setUploading(true);
@@ -1389,11 +1389,11 @@ function DocumentPage() {
         },
         {
           id: crypto.randomUUID(),
-          text: gitSubdir.trim() ? `Importing subdir ${gitSubdir.trim()}` : "Importing full repo",
+          text: gitSubdir.trim() ? `正在导入子目录 ${gitSubdir.trim()}` : "正在导入整个仓库",
         },
         {
           id: crypto.randomUUID(),
-          text: smartImportEnabled ? `Smart Import: ${Array.from(smartImportTypes).join(", ")}` : "Smart Import: Off",
+          text: smartImportEnabled ? `智能导入: ${Array.from(smartImportTypes).join(", ")}` : "智能导入: 关闭",
         },
       ]);
       try {
@@ -1431,7 +1431,7 @@ function DocumentPage() {
           converted: result.converted,
           fallback: result.fallback,
         });
-        setImportStatus({ type: "success", message: "Import completed." });
+        setImportStatus({ type: "success", message: "导入完成" });
         setImportModalOpen(false);
         setGitRepoUrl("");
         setGitBranch("main");
@@ -1440,7 +1440,7 @@ function DocumentPage() {
         await handleDocumentsChanged(activeDocument?.id ?? "");
       } catch (err) {
         console.log("import_git_error", err);
-        const message = err instanceof Error && err.message ? err.message : "Import failed.";
+        const message = err instanceof Error && err.message ? err.message : "导入失败";
         setGitLogEntries((prev) => [
           ...prev,
           { id: crypto.randomUUID(), text: `Failed: ${message}` },
@@ -1463,7 +1463,7 @@ function DocumentPage() {
       activeUploadPreset,
     );
     if (filteredFiles.length === 0) {
-      setImportStatus({ type: "error", message: "No files match the selected filter." });
+      setImportStatus({ type: "error", message: "没有符合筛选条件的文件" });
       return;
     }
 
@@ -1677,13 +1677,13 @@ function DocumentPage() {
         converted,
         fallback,
       });
-      setImportStatus({ type: "success", message: "Upload completed." });
+      setImportStatus({ type: "success", message: "上传完成" });
       setImportModalOpen(false);
       setSelectedFiles([]);
       await handleDocumentsChanged(baseParentId);
     } catch (err) {
       console.log("import_upload_error", err);
-      setImportStatus({ type: "error", message: "Upload failed." });
+      setImportStatus({ type: "error", message: "上传失败" });
     } finally {
       setUploading(false);
       setUploadTotal(0);
@@ -1854,9 +1854,9 @@ function DocumentPage() {
               onKeyDown={(event) => event.stopPropagation()}
             >
               <div className="modal-header">
-                <h2>Upload Assets</h2>
+                <h2>导入文档</h2>
                 <button className="modal-close" type="button" onClick={handleCloseImport}>
-                  Close
+                  关闭
                 </button>
               </div>
               <div className="modal-body">
@@ -1866,42 +1866,42 @@ function DocumentPage() {
                     type="button"
                     onClick={() => handleModeChange("file")}
                   >
-                    File
+                    文件
                   </button>
                   <button
                     className={`kb-import-tab${importMode === "folder" ? " active" : ""}`}
                     type="button"
                     onClick={() => handleModeChange("folder")}
                   >
-                    Folder
+                    文件夹
                   </button>
                   <button
                     className={`kb-import-tab${importMode === "url" ? " active" : ""}`}
                     type="button"
                     onClick={() => handleModeChange("url")}
                   >
-                    URL
+                    网址
                   </button>
                   <button
                     className={`kb-import-tab${importMode === "git" ? " active" : ""}`}
                     type="button"
                     onClick={() => handleModeChange("git")}
                   >
-                    Git
+                    Git 仓库
                   </button>
                 </div>
                 {importMode !== "url" ? (
                   <>
                     <fieldset className="kb-import-smart">
                       <div className="kb-import-smart-header">
-                        <div className="kb-import-smart-title">Smart Import</div>
+                        <div className="kb-import-smart-title">智能导入</div>
                         <button
                           className={`kb-import-toggle${smartImportEnabled ? " active" : ""}`}
                           type="button"
                           aria-pressed={smartImportEnabled}
                           onClick={() => setSmartImportEnabled((prev) => !prev)}
                         >
-                          {smartImportEnabled ? "On" : "Off"}
+                          {smartImportEnabled ? "开启" : "关闭"}
                         </button>
                       </div>
                       <fieldset className="kb-import-smart-options" aria-label="Smart import types">
@@ -1974,13 +1974,13 @@ function DocumentPage() {
                         />
                       </svg>
                     </div>
-                    <div className="kb-import-title">Select a file to import</div>
-                    <div className="kb-import-note">Uploads create documents.</div>
+                    <div className="kb-import-title">选择要导入的文件</div>
+                    <div className="kb-import-note">上传后将创建对应文档</div>
                     <button className="btn ghost" type="button" onClick={handleFilePick}>
-                      Choose file
+                      选择文件
                     </button>
                     <div className="kb-import-selection">
-                      {selectedFiles[0]?.name ?? "No file selected"}
+                      {selectedFiles[0]?.name ?? "未选择文件"}
                     </div>
                   </div>
                 ) : importMode === "folder" ? (
@@ -2005,15 +2005,15 @@ function DocumentPage() {
                         />
                       </svg>
                     </div>
-                    <div className="kb-import-title">Select a folder to import</div>
-                    <div className="kb-import-note">Uploads create documents.</div>
+                    <div className="kb-import-title">选择要导入的文件夹</div>
+                    <div className="kb-import-note">上传后将创建对应文档</div>
                     <button className="btn ghost" type="button" onClick={handleFolderPick}>
-                      Choose folder
+                      选择文件夹
                     </button>
                     <div className="kb-import-selection">
                       {selectedFiles.length > 0
-                        ? `${selectedFiles.length} files selected`
-                        : "No folder selected"}
+                        ? `已选择 ${selectedFiles.length} 个文件`
+                        : "未选择文件夹"}
                     </div>
                   </div>
                 ) : importMode === "url" ? (
@@ -2039,9 +2039,9 @@ function DocumentPage() {
                         <circle cx="24" cy="24" r="4" fill="currentColor" />
                       </svg>
                     </div>
-                    <div className="kb-import-title">Import from URL</div>
+                    <div className="kb-import-title">从网址导入</div>
                     <div className="kb-import-note">
-                      Paste a URL to fetch and convert the page content.
+                      粘贴网址，自动抓取并转换页面内容
                     </div>
                     <div className="kb-import-url-fields">
                       <input
@@ -2055,7 +2055,7 @@ function DocumentPage() {
                       <input
                         className="kb-import-url-input"
                         type="text"
-                        placeholder="Title (optional)"
+                        placeholder="标题（可选）"
                         value={importUrlTitle}
                         onChange={(event) => setImportUrlTitle(event.target.value)}
                         disabled={uploading}
@@ -2096,9 +2096,9 @@ function DocumentPage() {
                         />
                       </svg>
                     </div>
-                    <div className="kb-import-title">Import from Git</div>
+                    <div className="kb-import-title">从 Git 仓库导入</div>
                     <div className="kb-import-note">
-                      Clone a public repository and create documents by directory.
+                      克隆公开仓库，按目录结构创建文档
                     </div>
                     <div className="kb-import-url-fields">
                       <input
@@ -2112,7 +2112,7 @@ function DocumentPage() {
                       <input
                         className="kb-import-url-input"
                         type="text"
-                        placeholder="Branch (default: main)"
+                        placeholder="分支（默认: main）"
                         value={gitBranch}
                         onChange={(event) => setGitBranch(event.target.value)}
                         disabled={uploading}
@@ -2120,7 +2120,7 @@ function DocumentPage() {
                       <input
                         className="kb-import-url-input"
                         type="text"
-                        placeholder="Subdir (optional)"
+                        placeholder="子目录（可选）"
                         value={gitSubdir}
                         onChange={(event) => setGitSubdir(event.target.value)}
                         disabled={uploading}
@@ -2173,7 +2173,7 @@ function DocumentPage() {
               </div>
               <div className="modal-actions">
                 <button className="btn ghost" type="button" onClick={handleCloseImport}>
-                  Cancel
+                  取消
                 </button>
                 <button
                   className="btn primary"
@@ -2187,12 +2187,12 @@ function DocumentPage() {
                 >
                   {uploading ? <span className="kb-import-spinner" aria-hidden="true" /> : null}
                   {importMode === "url"
-                    ? "Import URL"
+                    ? "导入网址"
                     : importMode === "git"
-                      ? "Import Git"
+                      ? "导入仓库"
                       : importMode === "folder" && uploading
-                        ? `Upload ${uploadProgress}%`
-                        : "Upload"}
+                        ? `上传中 ${uploadProgress}%`
+                        : "上传"}
                 </button>
               </div>
             </div>
