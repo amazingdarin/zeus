@@ -96,14 +96,31 @@ echo "data:image/png;base64,..." | python paddleocr_cli.py - --output-format mar
 
 ### 环境变量
 
+在 `apps/app-backend/.env` 中配置:
+
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `PADDLE_OCR_URL` | PaddleOCR 服务地址 | http://localhost:8001 |
+| `ENABLE_PADDLE_OCR` | 是否启用 PaddleOCR 服务 | false |
+| `PADDLE_OCR_PORT` | PaddleOCR 服务端口 | 8001 |
+| `PADDLE_OCR_URL` | PaddleOCR 服务地址（外部服务时使用） | http://localhost:8001 |
 
-在 `apps/app-backend/.env` 中配置:
+**示例配置**:
 ```env
-PADDLE_OCR_URL=http://localhost:8001
+# 启用 PaddleOCR（app-backend 会自动启动 Python 服务）
+ENABLE_PADDLE_OCR=true
+PADDLE_OCR_PORT=8001
+
+# 或者连接外部 PaddleOCR 服务
+# PADDLE_OCR_URL=http://ocr-server:8001
 ```
+
+### 自动启动模式
+
+当设置 `ENABLE_PADDLE_OCR=true` 时，app-backend 会自动启动 PaddleOCR Python 服务作为子进程。
+
+**前提条件**:
+- Python3 已安装并在 PATH 中
+- PaddleOCR 依赖已安装 (`pip install -r scripts/ocr/requirements.txt`)
 
 ## 与 Zeus 集成
 

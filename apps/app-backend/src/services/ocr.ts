@@ -48,7 +48,8 @@ export type OCRProviderStatus = {
 // ============================================================================
 
 // PaddleOCR service endpoint (configurable via env)
-const PADDLE_OCR_ENDPOINT = process.env.PADDLE_OCR_URL || "http://localhost:8001";
+const PADDLE_OCR_PORT = process.env.PADDLE_OCR_PORT || "8001";
+const PADDLE_OCR_ENDPOINT = process.env.PADDLE_OCR_URL || `http://localhost:${PADDLE_OCR_PORT}`;
 
 // ============================================================================
 // Prompt Templates (for LLM Vision)
