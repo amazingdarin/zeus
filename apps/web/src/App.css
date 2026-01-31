@@ -3652,20 +3652,17 @@ body {
 }
 
 /* ===== Dark Theme Overrides for Ant Design ===== */
-[data-theme="dark"] .ant-modal .ant-modal-content {
-  background: #161b22 !important;
-  border-color: rgba(255, 255, 255, 0.1);
-  color: #e6edf3;
-}
-
+[data-theme="dark"] .ant-modal .ant-modal-content,
 [data-theme="dark"] .ant-modal-content {
   background: #161b22 !important;
-  color: #e6edf3;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: #e6edf3 !important;
+  box-shadow: 0 6px 16px 0 rgba(0, 0, 0, 0.5), 0 3px 6px -4px rgba(0, 0, 0, 0.6) !important;
 }
 
 [data-theme="dark"] .ant-modal-header {
   background: #161b22 !important;
-  border-bottom-color: rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
 }
 
 [data-theme="dark"] .ant-modal-title {
@@ -3674,7 +3671,12 @@ body {
 
 [data-theme="dark"] .ant-modal-body {
   background: #161b22 !important;
-  color: #e6edf3;
+  color: #e6edf3 !important;
+}
+
+[data-theme="dark"] .ant-modal-footer {
+  background: #161b22 !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
 }
 
 [data-theme="dark"] .ant-modal-body p,
