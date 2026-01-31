@@ -109,7 +109,7 @@ type UploadSummary = {
   fallback: number;
 };
 
-type SmartImportType = "all" | "markdown" | "word" | "pdf" | "image" | "ocr";
+type SmartImportType = "all" | "markdown" | "word" | "pdf" | "image";
 
 type SmartImportOption = {
   id: SmartImportType;
@@ -151,20 +151,24 @@ const SMART_IMPORT_OPTIONS: SmartImportOption[] = [
   { id: "all", label: "全部", enabled: true },
   { id: "markdown", label: "Markdown", enabled: true },
   { id: "word", label: "Word 文档", enabled: true },
-  { id: "pdf", label: "PDF (OCR)", enabled: true },
+  { id: "pdf", label: "PDF", enabled: true },
   { id: "image", label: "图片", enabled: true },
-  { id: "ocr", label: "OCR 识别", enabled: true },
 ];
 
 // All individual smart import types (excluding "all")
-const ALL_SMART_IMPORT_TYPES: SmartImportType[] = ["markdown", "word", "pdf", "image", "ocr"];
+const ALL_SMART_IMPORT_TYPES: SmartImportType[] = ["markdown", "word", "pdf", "image"];
 
-const createDefaultUploadFilterSet = () => new Set<UploadFilterPresetId>(["all"]);
+// All individual upload filter presets (excluding "all")
+const ALL_UPLOAD_FILTER_PRESETS: UploadFilterPresetId[] = ["images", "office", "text", "markdown"];
+
+const createDefaultUploadFilterSet = () => new Set<UploadFilterPresetId>(ALL_UPLOAD_FILTER_PRESETS);
 
 const buildUploadFilterPreset = (
   selectedPresets: Set<UploadFilterPresetId>,
 ): UploadFilterPreset => {
-  if (selectedPresets.has("all") || selectedPresets.size === 0) {
+  // If all presets are selected or none are selected, return "all" (no filtering)
+  const hasAll = ALL_UPLOAD_FILTER_PRESETS.every((p) => selectedPresets.has(p));
+  if (hasAll || selectedPresets.size === 0) {
     return UPLOAD_FILTER_PRESETS[0];
   }
   const extensions: string[] = [];
@@ -263,7 +267,7 @@ function DocumentPage() {
   const [uploadSummary, setUploadSummary] = useState<UploadSummary | null>(null);
   const [smartImportEnabled, setSmartImportEnabled] = useState(true);
   const [smartImportTypes, setSmartImportTypes] = useState<Set<SmartImportType>>(
-    () => new Set(["markdown"]),
+    () => new Set(ALL_SMART_IMPORT_TYPES),
   );
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -318,24 +322,32 @@ function DocumentPage() {
   }, [activeUploadPreset]);
 
   const isUploadFilterSelected = useCallback(
-    (id: UploadFilterPresetId) => uploadFilterPresets.has(id),
+    (id: UploadFilterPresetId) => {
+      if (id === "all") {
+        return ALL_UPLOAD_FILTER_PRESETS.every((p) => uploadFilterPresets.has(p));
+      }
+      return uploadFilterPresets.has(id);
+    },
     [uploadFilterPresets],
   );
 
   const toggleUploadFilterPreset = useCallback((id: UploadFilterPresetId) => {
     setUploadFilterPresets((prev) => {
       const next = new Set(prev);
+      const hasAll = ALL_UPLOAD_FILTER_PRESETS.every((p) => next.has(p));
+
       if (id === "all") {
-        return createDefaultUploadFilterSet();
+        if (hasAll) {
+          return new Set<UploadFilterPresetId>(); // Deselect all
+        }
+        return new Set<UploadFilterPresetId>(ALL_UPLOAD_FILTER_PRESETS); // Select all
       }
-      next.delete("all");
+
+      // Toggle individual preset
       if (next.has(id)) {
         next.delete(id);
       } else {
         next.add(id);
-      }
-      if (next.size === 0) {
-        next.add("all");
       }
       return next;
     });
@@ -1521,59 +1533,14 @@ function DocumentPage() {
           smartImportEnabled &&
           smartImportTypes.has("image") &&
           isImageAsset(entry.file.type, entry.file.name);
-        const canPdfOcr =
+        const canPdfImport =
           smartImportEnabled &&
           smartImportTypes.has("pdf") &&
           entry.file.type === "application/pdf";
-        const canOcrImport =
-          smartImportEnabled &&
-          smartImportTypes.has("ocr") &&
-          isImageAsset(entry.file.type, entry.file.name);
         
-        // OCR import for images (convert to document text)
-        if (canOcrImport) {
+        // PDF import: upload as file block
+        if (canPdfImport) {
           try {
-            const ocrResult = await ocrApi.ocrFile(entry.file, { outputFormat: "tiptap" });
-            const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
-            const fileBlock = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, false);
-            const contentItems = Array.isArray(ocrResult.content.content) ? ocrResult.content.content : [];
-            await createDocumentRecord(
-              resolvedProjectKey,
-              {
-                title: docTitle,
-                parentId,
-              },
-              { type: "doc", content: [fileBlock, ...contentItems] },
-            );
-            converted += 1;
-          } catch (err) {
-            console.error("OCR import failed:", err);
-            // Fallback to regular image import
-            try {
-              const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
-              const imageBlock = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, false);
-              await createDocumentRecord(
-                resolvedProjectKey,
-                {
-                  title: docTitle,
-                  parentId,
-                },
-                { type: "doc", content: [imageBlock] },
-              );
-            } catch (e) {
-              console.error("Fallback image import also failed:", e);
-            }
-            fallback += 1;
-          }
-          markCompleted();
-          continue;
-        }
-        
-        // PDF OCR import
-        if (canPdfOcr) {
-          try {
-            // For PDF, we'll use the first page as image (future: multi-page support)
-            // For now, just upload as file block with a note
             const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
             const fileBlock = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, true);
             await createDocumentRecord(
@@ -1586,25 +1553,35 @@ function DocumentPage() {
             );
             converted += 1;
           } catch (err) {
-            console.error("PDF OCR import failed:", err);
+            console.error("PDF import failed:", err);
             fallback += 1;
           }
           markCompleted();
           continue;
         }
         
+        // Image smart import: upload as image block + OCR for text content
         if (canImageImport) {
-          // Image smart import: upload and create image block directly
           try {
             const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
             const imageBlock = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, false);
+            
+            // Try OCR to extract text content
+            let contentItems: JSONContent[] = [];
+            try {
+              const ocrResult = await ocrApi.ocrFile(entry.file, { outputFormat: "tiptap" });
+              contentItems = Array.isArray(ocrResult.content.content) ? ocrResult.content.content : [];
+            } catch (ocrErr) {
+              console.warn("OCR failed, using image only:", ocrErr);
+            }
+            
             await createDocumentRecord(
               resolvedProjectKey,
               {
                 title: docTitle,
                 parentId,
               },
-              { type: "doc", content: [imageBlock] },
+              { type: "doc", content: [imageBlock, ...contentItems] },
             );
             converted += 1;
           } catch (err) {
