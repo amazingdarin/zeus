@@ -3268,19 +3268,31 @@ body {
 
 /* Dark mode enhancements */
 [data-theme="dark"] .provider-type-card {
-  background: rgba(255, 255, 255, 0.03);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: #1c2128;
+  border-color: rgba(255, 255, 255, 0.15);
 }
 
 [data-theme="dark"] .provider-type-card:hover {
-  background: rgba(88, 166, 255, 0.1);
-  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.15);
+  border-color: #58a6ff;
 }
 
 [data-theme="dark"] .provider-type-card.selected {
-  background: rgba(88, 166, 255, 0.15);
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.25);
+  background: rgba(88, 166, 255, 0.2);
+  border-color: #58a6ff;
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.3);
+}
+
+[data-theme="dark"] .provider-type-card-name {
+  color: #e6edf3;
+}
+
+[data-theme="dark"] .provider-type-card-desc {
+  color: #8b949e;
+}
+
+[data-theme="dark"] .provider-type-hint {
+  color: #c9d1d9;
 }
 
 .provider-type-card-icon {
@@ -3639,28 +3651,50 @@ body {
   color: var(--muted);
 }
 
-/* ===== Dark Theme Overrides ===== */
-[data-theme="dark"] .ant-modal-content,
-[data-theme="dark"] .ant-card {
-  background: var(--surface);
-  border-color: var(--border);
+/* ===== Dark Theme Overrides for Ant Design ===== */
+[data-theme="dark"] .ant-modal .ant-modal-content {
+  background: #161b22 !important;
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #e6edf3;
+}
+
+[data-theme="dark"] .ant-modal-content {
+  background: #161b22 !important;
+  color: #e6edf3;
 }
 
 [data-theme="dark"] .ant-modal-header {
-  background: var(--surface);
-  border-bottom-color: var(--border);
+  background: #161b22 !important;
+  border-bottom-color: rgba(255, 255, 255, 0.1);
 }
 
 [data-theme="dark"] .ant-modal-title {
-  color: var(--ink);
+  color: #e6edf3 !important;
+}
+
+[data-theme="dark"] .ant-modal-body {
+  background: #161b22 !important;
+  color: #e6edf3;
+}
+
+[data-theme="dark"] .ant-modal-body p,
+[data-theme="dark"] .ant-modal-body span,
+[data-theme="dark"] .ant-modal-body div {
+  color: inherit;
 }
 
 [data-theme="dark"] .ant-modal-close {
-  color: var(--muted);
+  color: #8b949e;
 }
 
 [data-theme="dark"] .ant-modal-close:hover {
-  color: var(--ink);
+  color: #e6edf3;
+}
+
+[data-theme="dark"] .ant-card {
+  background: #161b22 !important;
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #e6edf3;
 }
 
 [data-theme="dark"] .ant-card-head {
