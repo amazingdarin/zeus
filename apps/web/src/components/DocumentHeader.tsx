@@ -13,6 +13,7 @@ type DocumentHeaderProps = {
   allowEdit?: boolean;
   allowDelete?: boolean;
   allowRebuild?: boolean;
+  allowOptimize?: boolean;
   rebuilding?: boolean;
   deleting?: boolean;
   onEdit: () => void;
@@ -23,6 +24,7 @@ type DocumentHeaderProps = {
   onDelete?: () => void;
   onRebuild?: () => void;
   onExport?: () => void;
+  onOptimize?: () => void;
 };
 
 function DocumentHeader({
@@ -32,6 +34,7 @@ function DocumentHeader({
   allowEdit = true,
   allowDelete = false,
   allowRebuild = false,
+  allowOptimize = false,
   rebuilding = false,
   deleting = false,
   onEdit,
@@ -42,6 +45,7 @@ function DocumentHeader({
   onDelete,
   onRebuild,
   onExport,
+  onOptimize,
 }: DocumentHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -99,6 +103,14 @@ function DocumentHeader({
     }
     handleCloseMenu();
     onExport();
+  };
+
+  const handleOptimize = () => {
+    if (!onOptimize) {
+      return;
+    }
+    handleCloseMenu();
+    onOptimize();
   };
 
   return (
@@ -208,6 +220,11 @@ function DocumentHeader({
                 {onExport ? (
                   <button className="kb-menu-item" type="button" onClick={handleExport}>
                     Export
+                  </button>
+                ) : null}
+                {allowOptimize && onOptimize ? (
+                  <button className="kb-menu-item" type="button" onClick={handleOptimize}>
+                    Optimize
                   </button>
                 ) : null}
                 {allowDelete && onDelete ? (

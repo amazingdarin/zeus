@@ -26,6 +26,12 @@ import {
   type ConfigType,
 } from "./llm/index.js";
 import { createRun, getRun, streamRun, clearSession } from "./services/chat.js";
+import {
+  createTask as createOptimizeTask,
+  getTask as getOptimizeTask,
+  streamTask as streamOptimizeTask,
+  type OptimizeMode,
+} from "./services/optimize.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -330,6 +336,119 @@ export const buildRouter = () => {
         const message = err instanceof Error ? err.message : "Move failed";
         error(res, "MOVE_FAILED", message, 500);
       }
+    },
+  );
+
+  // ============================================
+  // Document Optimization APIs
+  // ============================================
+
+  /**
+   * Start document optimization task
+   * POST /projects/:projectKey/documents/:docId/optimize
+   */
+  router.post(
+    "/projects/:projectKey/documents/:docId/optimize",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const body = req.body as { mode?: OptimizeMode; preserveStructure?: boolean; language?: string };
+
+        const mode: OptimizeMode = body.mode || "full";
+        if (!["format", "content", "full"].includes(mode)) {
+          error(res, "INVALID_MODE", "mode must be 'format', 'content', or 'full'");
+          return;
+        }
+
+        const taskId = await createOptimizeTask(projectKey, docId, {
+          mode,
+          preserveStructure: body.preserveStructure,
+          language: body.language,
+        });
+
+        success(res, { taskId }, 201);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          error(res, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Failed to create optimization task";
+        error(res, "OPTIMIZE_TASK_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Stream optimization results
+   * GET /projects/:projectKey/documents/:docId/optimize/:taskId/stream
+   */
+  router.get(
+    "/projects/:projectKey/documents/:docId/optimize/:taskId/stream",
+    async (req: Request, res: Response) => {
+      const { taskId } = req.params;
+
+      const task = getOptimizeTask(taskId);
+      if (!task) {
+        error(res, "NOT_FOUND", "Task not found", 404);
+        return;
+      }
+
+      // Set up SSE
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+
+      try {
+        for await (const chunk of streamOptimizeTask(taskId)) {
+          if (chunk.type === "delta") {
+            res.write(`event: optimize.delta\ndata: ${JSON.stringify({ content: chunk.content })}\n\n`);
+          } else if (chunk.type === "done") {
+            res.write(
+              `event: optimize.done\ndata: ${JSON.stringify({
+                originalMarkdown: chunk.originalMarkdown,
+                optimizedMarkdown: chunk.optimizedMarkdown,
+                optimizedContent: chunk.optimizedContent,
+              })}\n\n`,
+            );
+          } else if (chunk.type === "error") {
+            res.write(`event: optimize.error\ndata: ${JSON.stringify({ error: chunk.error })}\n\n`);
+          }
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Streaming failed";
+        res.write(`event: optimize.error\ndata: ${JSON.stringify({ error: message })}\n\n`);
+      } finally {
+        res.end();
+      }
+    },
+  );
+
+  /**
+   * Get optimization task status
+   * GET /projects/:projectKey/documents/:docId/optimize/:taskId
+   */
+  router.get(
+    "/projects/:projectKey/documents/:docId/optimize/:taskId",
+    async (req: Request, res: Response) => {
+      const { taskId } = req.params;
+
+      const task = getOptimizeTask(taskId);
+      if (!task) {
+        error(res, "NOT_FOUND", "Task not found", 404);
+        return;
+      }
+
+      success(res, {
+        id: task.id,
+        status: task.status,
+        originalMarkdown: task.originalMarkdown,
+        optimizedMarkdown: task.optimizedMarkdown,
+        error: task.error,
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt,
+      });
     },
   );
 

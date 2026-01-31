@@ -15,6 +15,7 @@ import KnowledgeBaseSideNav, {
   type KnowledgeBaseMoveRequest,
 } from "../components/KnowledgeBaseSideNav";
 import RichTextViewer from "../components/RichTextViewer";
+import DocumentOptimizeModal from "../components/DocumentOptimizeModal";
 import {
   fetchDocument,
   fetchDocumentHierarchy,
@@ -231,6 +232,7 @@ function DocumentPage() {
     Array<{ label: string; to?: string }>
   >([]);
   const [rebuildModalOpen, setRebuildModalOpen] = useState(false);
+  const [optimizeModalOpen, setOptimizeModalOpen] = useState(false);
 
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importMode, setImportMode] = useState<"file" | "folder" | "url" | "git">("file");
@@ -992,6 +994,57 @@ function DocumentPage() {
     downloadTextFile(markdown, filename, "text/markdown;charset=utf-8");
   }, [activeDocument]);
 
+  const handleOpenOptimize = useCallback(() => {
+    if (!activeDocument) {
+      return;
+    }
+    setOptimizeModalOpen(true);
+  }, [activeDocument]);
+
+  const handleOptimizeApply = useCallback(
+    async (optimizedContent: JSONContent) => {
+      if (!resolvedProjectKey || !activeDocument) {
+        return;
+      }
+      try {
+        // Update the document with the optimized content
+        const response = await apiFetch(
+          `/api/projects/${encodeURIComponent(resolvedProjectKey)}/documents/${encodeURIComponent(activeDocument.id)}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              meta: { title: activeDocument.title },
+              body: { type: "tiptap", content: optimizedContent },
+            }),
+          },
+        );
+        if (!response.ok) {
+          throw new Error("Failed to save optimized document");
+        }
+        // Refresh the document
+        const payload = await response.json();
+        const data = payload?.data ?? payload;
+        const updatedContent = data?.body?.content ?? optimizedContent;
+        setDocument((prev) =>
+          prev
+            ? { ...prev, content: updatedContent }
+            : null,
+        );
+        // Trigger index rebuild for the updated document
+        try {
+          await rebuildDocumentRag(resolvedProjectKey, activeDocument.id);
+        } catch {
+          // Index rebuild failure is not critical
+        }
+      } catch (err) {
+        console.error("Failed to apply optimization:", err);
+        alert("保存优化后的文档失败");
+      }
+    },
+    [resolvedProjectKey, activeDocument],
+  );
+
   const clearProposalParam = () => {
     if (!proposalId) {
       return;
@@ -1650,6 +1703,7 @@ function DocumentPage() {
           allowEdit={Boolean(activeDocument)}
           allowDelete={Boolean(activeDocument)}
           allowRebuild={Boolean(activeDocument)}
+          allowOptimize={Boolean(activeDocument)}
           rebuilding={rebuilding}
           deleting={deleting}
           onEdit={handleEdit}
@@ -1660,6 +1714,7 @@ function DocumentPage() {
           onDelete={handleDelete}
           onRebuild={handleRebuild}
           onExport={activeDocument ? handleExport : undefined}
+          onOptimize={activeDocument ? handleOpenOptimize : undefined}
         />
         <div className="doc-viewer-page">{bodyContent()}</div>
         {importModalOpen ? (
@@ -2078,6 +2133,14 @@ function DocumentPage() {
             </div>
           </div>
         ) : null}
+        <DocumentOptimizeModal
+          isOpen={optimizeModalOpen}
+          projectKey={resolvedProjectKey}
+          docId={activeDocument?.id || ""}
+          docTitle={activeDocument?.title || ""}
+          onClose={() => setOptimizeModalOpen(false)}
+          onApply={handleOptimizeApply}
+        />
         <input
           ref={fileInputRef}
           className="kb-file-input"

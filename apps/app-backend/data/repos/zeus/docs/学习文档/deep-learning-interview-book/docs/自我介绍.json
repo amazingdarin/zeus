@@ -1,0 +1,106 @@
+{
+  "meta": {
+    "id": "e232839e-8bcc-417c-a763-8fba749218d8",
+    "schema_version": "v1",
+    "title": "自我介绍",
+    "slug": "自我介绍",
+    "path": "docs/学习文档/deep-learning-interview-book/docs/自我介绍.json",
+    "parent_id": "f8016af0-e745-4c00-abd8-8ab0fe55291b",
+    "created_at": "2026-01-31T02:03:13.921Z",
+    "updated_at": "2026-01-31T02:03:13.921Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "64d59318-1074-4be0-a3c4-fa96ab046fe1",
+            "file_name": "自我介绍.md",
+            "mime": "text/markdown",
+            "size": 616,
+            "file_type": "text"
+          }
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 1
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "自我介绍"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "重点"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- 研究方向\n- 科研经历\n- 实习经历\n- 竞赛经历\n- 获奖经历"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "模板"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**时长：3mins**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "你好，我是来自 xxx 大学的学生，我叫 xxx，目前研究生 x 年级 。研究生期间主要研究 xxx 方向。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- 研 x 的时候，在 xxx 公司实习了 xxx 个月，工作岗位是 xxx 实习生，主要负责 xxx，该项目是利用...\n- 研 x 的时候，参加了 xxx 竞赛，获得 xxx 名次。介绍使用了什么算法，最终的实验数据...\n- 研 x 的时候，发了一篇 xxx 论文（尽量是顶会或SCI），其中 xxx，实验结果是 xxx"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

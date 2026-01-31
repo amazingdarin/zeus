@@ -1,0 +1,4294 @@
+{
+  "meta": {
+    "id": "aae55147-5d2d-4bca-9b69-931071de1bdd",
+    "schema_version": "v1",
+    "title": "数据结构与算法",
+    "slug": "数据结构与算法",
+    "path": "docs/学习文档/deep-learning-interview-book/docs/数据结构与算法.json",
+    "parent_id": "f8016af0-e745-4c00-abd8-8ab0fe55291b",
+    "created_at": "2026-01-31T02:03:13.894Z",
+    "updated_at": "2026-01-31T02:03:13.894Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "b04d9766-3c06-4b40-811a-f29cee806b01",
+            "file_name": "数据结构与算法.md",
+            "mime": "text/markdown",
+            "size": 51746,
+            "file_type": "text"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[TOC]"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 1
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "数据结构与算法"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "排序"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**排序的定义**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "假设含有n个记录的序列为{r1,r2,...,rn}，其相应的关键字分别是{k1,k2,...,kn}，需要确定1,2,...,n的一种排列p1,p2,...,pn，使其相应的关键字满足kp1<=kp2<=...<=kpn 非递减（或非递增）的关系，即使得序列成为一个按关键字有序的序列{rp1,rp2,...,rpn}，这样的操作就称为排序[1]。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "简单来说，排序就是使输入的序列变成符合一定规则（关键字）的有序序列（非递减或非递增）。大多数遇到的排序问题都是按数据元素值的大小规则进行排序的问题。所以本文为了方便起见，只讨论数据元素值大小比较的排序问题。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**排序的稳定性**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "假设ki=kj（1<=i《=n，1<=j<=n，i!=j），且在排序前的序列中ri领先于rj（即i<j）。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- 如果排序后ri仍领先于rj，则称所用的排序方法是稳定的；\n- 反之，若可能使得排序后的序列中rj领先于ri，则称所用的排序方法是不稳定的。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "简单来概括稳定和不稳定[2]："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- **稳定**：如果a原本在b前面，而a=b，排序之后a仍然在b前面；\n- **不稳定**：如果a原本在b前面，而a=b，排序之后a可能在b的后面。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**时间和空间复杂度**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- **时间复杂度**：对排序数据的总的操作次数。反应当n变化时，操作次数呈现什么规律\n- **空间复杂度**：算法在计算机内执行时所需要的存储空间的容量，它也是数据规模n的函数。"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "排序算法"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "排序算法可以分成两大类："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**非线性时间比较类排序**：通过比较来决定元素间的相对次序，由于其时间复杂度不能突破O(nlogn)，因此称为非线性时间比较类排序。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**线性时间非比较类排序**：不通过比较来决定元素间的相对次序，它可以突破基于比较排序的时间下界，以线性时间运行，因此称为线性时间非比较类排序。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [`冒泡排序（Bubble Sort`](https://github.com/amusi/coding-note/tree/master/Data%20Structures%20and%20Algorithms/sort#bubblesort)\n- [`选择排序（Selection Sort`](https://github.com/amusi/coding-note/tree/master/Data%20Structures%20and%20Algorithms/sort#selectionsort)\n- [`插入排序（Insertion Sort`](https://github.com/amusi/coding-note/tree/master/Data%20Structures%20and%20Algorithms/sort#insertionsort)\n- [`希尔排序（Shell Sort`](https://github.com/amusi/coding-note/tree/master/Data%20Structures%20and%20Algorithms/sort#shellsort)\n- [`堆排序（heap Sort`](https://github.com/amusi/coding-note/tree/master/Data%20Structures%20and%20Algorithms/sort#heapsort)\n- [`归并排序（merge Sort`](https://github.com/amusi/coding-note/tree/master/Data%20Structures%20and%20Algorithms/sort#mergesort)\n- [`快速排序（Fast Sort`](https://github.com/amusi/coding-note/tree/master/Data%20Structures%20and%20Algorithms/sort#fastsort)"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "常见排序算法复杂度"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[![常用排序算法1](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/sort_algorithms_1.png)](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/images/sort_algorithms_1.png)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[![常用排序算法2](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/sort_algorithms_2.png)](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/images/sort_algorithms_2.png)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [8大排序算法稳定性分析](https://www.cnblogs.com/codingmylife/archive/2012/10/21/2732980.html)"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "冒泡排序（Bubble Sort）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**基本思想**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "比较相邻的两个元素，将值大的元素交换到右边（降序则相反）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**步骤：**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "1. 比较相邻的元素。如果第一个比第二个大，就交换它们两个；\n2. 对每一对相邻元素作同样的工作，从开始第一对到结尾的最后一对，这样在最后的元素应该会是最大的数；\n3. 针对所有的元素重复以上的步骤，除了最后一个；\n4. 重复步骤1~3，直到排序完成。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "比如有n个元素，那么第一次比较迭代，需要比较n-1次（因为是相邻成对比较，最后一个元素没有与下一个相邻比较的对象，所以是n-1次），此次迭代完成后确定了最后一个元素为最大值；第二次比较迭代，需要比较n-2次，因为第一次迭代已经确定好了最后一个元素，所以不再需要比较；...；第 i次比较迭代，需要比较n-i次，此时确定后面i个元素是有序的较大元素；...；第n-1次比较迭代，需要比较n-(n-1)次，此时完成冒泡排序操作。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "时间复杂度：o(n^2) = (n-1)*(n-1)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**动图演示：**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "![bubble_sort](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/bubble_sort_1.jpg)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "![bubble_sort](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/bubble_sort.gif)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**过程演示：**待排序数组：{5, 4, 7, 1, 6, 2}，升序排序"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "\\---------------------------------------"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第一次循环："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第一次比较5和4，5>4，交换位置：{4，5，7，1，6，2}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第二次比较5和7，5"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第三次比较7和1，7>1，交换位置：{4，5，1，7，6，2}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第四次比较7和6，7>6，交换位置：{4，5，1，6，7，2}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第五次比较7和2，7>2，交换位置：{4，5，1，6，2，7}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第一次循环完成结果：{4，5，1，6，2，7}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "\\----------------------------------------"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第二次循环："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第一次比较4和5，4"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第二次比较5和1，5>1，交换位置：{4，1，5，6，2，7}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第三次比较5和6，5"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第四次比较6和2，6>2，交换位置：{4，1，5，2，6，7}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第五次比较6和7，6"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第二次循环完成结果：{4，1，5，2，6，7}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "\\----------------------------------------"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第三次循环："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第一次比较4和1，4>1，交换位置：{1，4，5，2，6，7}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第二次比较4和5，4"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第三次比较5和2，5>2，交换位置：{1，4，2，5，6，7}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第四次比较5和6，5"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第五次比较6和7，6"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第三次循环完成结果：{1，4，2，5，6，7}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "\\----------------------------------------"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第四次循环："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第一次比较1和4，1"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第二次比较4和2，4>2，交换位置：{1，2，4，5，6，7}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第三次比较4和5，4"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第四次比较5和6，5"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第五次比较6和7，6"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第三次循环完成结果：{1，2，4，5，6，7}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "\\----------------------------------------"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第五次循环："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第一次比较1和2，1"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第二次比较2和4，2"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第三次比较4和5，4"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第四次比较5和6，5"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第五次比较6和7，6"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "第三次循环完成结果：{1，2，4，5，6，7}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "相信看完上面的演示过程，你对冒泡排序过程及原理有了完全的理解，但是细心的朋友应该会发现其实在第四次循环就已经得到了最终的结果，这么来看第五次循环完全是多余的，于是就有冒泡排序的改进版本：当某一轮循环当中没有交换位置的操作，说明已经排好序了，就没必要再循环了，break退出循环即可。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**复杂度分析：**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- 时间复杂度：若给定的数组刚好是排好序的数组，采用改进后的冒泡排序算法，只需循环一次就行了，此时是最优时间复杂度：O(n)，若给定的是倒序，此时是最差时间复杂度：O(n^2) ，因此综合平均时间复杂度为：O(n^2)\n- 空间复杂度：因为每次只需开辟一个temp的空间，因此空间复杂度是：O(1)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**代码实现：**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "-"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [bubble_sort.cpp](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/code/bubble_sort.cpp)"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "/* Summary: 冒泡排序\n* Author: Amusi\n* Date:   208-05-27\n*\n* Reference: \n*\thttp://en.wikipedia.org/wiki/Bubble_sort\n*\thttps://github.com/xtaci/algorithms/blob/master/include/bubble_sort.h\n*   https://zhuanlan.zhihu.com/p/37077924\n*\n* 冒泡排序说明：比较相邻的两个元素，将值大的元素交换到右边（降序则相反）\n*"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "#include <iostream>"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "// 冒泡函数\nnamespace alg{\n\ttemplate<typename T>\n\tstatic void BubbleSort(T list[], int length)\n\t{"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "#if 1\n\t\t// 版本1：两层for循环 \n\t\tfor (int i = 0; i < length-1; ++i)\n\t\t{ \n\t\t\tfor (int j = 0; j < length - i -1; ++j)\n\t\t\t{\n\t\t\t\t// 两两相邻元素比较大小，从小到大排序\n\t\t\t\t// if (list[j] < list[j + 1]) : 从大到小排序\n\t\t\t\tif (list[j] > list[j + 1])\n\t\t\t\t{\n\t\t\t\t\tint temp = list[j + 1];\n\t\t\t\t\tlist[j + 1] = list[j];\n\t\t\t\t\tlist[j] = temp;\n\t\t\t\t}\n\t\t\t}\n\t\t}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "#else\n\t\t// 版本2：while+一层for循环\n\t\tbool swapped = false;\n\t\twhile (!swapped)\n\t\t{\n\t\t\tswapped = true;\n\t\n\t\t\tfor (int i = 0; i < length - 1; ++i)\n\t\t\t{\n\t\t\t\t// 两两相邻元素比较大小，从小到大排序\n\t\t\t\t// if (list[j] < list[j + 1]) : 从大到小排序\n\t\t\t\tif (list[i] > list[i + 1])\n\t\t\t\t{\n\t\t\t\t\tint temp = list[i + 1];\n\t\t\t\t\tlist[i + 1] = list[i];\n\t\t\t\t\tlist[i] = temp;\n\t\t\t\t}\n\t\t\t\tswapped = false;\n\t\t\t}\n\t\t\tlength--;\n\t\t}\n\t\t\t\n#endif"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "}\n}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "using namespace std;\nusing namespace alg;"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "int main()\n{\n\tint a[8] = { 5, 2, 5, 7, 1, -3, 99, 56 };\n\tBubbleSort<int>(a, 8);\n\tfor (auto e : a)\n\t\tstd::cout << e << \" \";"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "return 0;\n}\n```"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [bubble_sort.py](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/code/bubble_sort.py)"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "''' Summary: 冒泡排序\n* Author: Amusi\n* Date:   208-05-27\n*\n* Reference: \n*\thttp://en.wikipedia.org/wiki/Bubble_sort\n*\thttps://github.com/xtaci/algorithms/blob/master/include/bubble_sort.h\n*   https://zhuanlan.zhihu.com/p/37077924\n*\n* 冒泡排序说明：比较相邻的两个元素，将值大的元素交换到右边（降序则相反）\n*"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "def BubbleSort(array):\n    lengths = len(array)\n    for i in range(lengths-1):\n        for j in range(lengths-1-i):\n            if array[j] > array[j+1]:\n               array[j+1], array[j] = array[j], array[j+1]"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "return array"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "array = [1,3,8,5,2,10,7,16,7,4,5]\nprint(\"Original array: \", array)\narray = BubbleSort(array)\nprint(\"BubbleSort: \", array)\n```"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**参考：**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "1 [经典排序算法之冒泡排序](http://baijiahao.baidu.com/s?id=1585931471155461767&wfr=spider&for=pc)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "2 (图示版)：[来、通俗聊聊冒泡排序](https://zhuanlan.zhihu.com/p/37077924)"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "选择排序（Selection Sort）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**基本思想**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "首先在未排序序列中找到最小（大）元素，存放到排序序列的起始位置，然后，再从剩余未排序元素中继续寻找最小（大）元素，然后放到已排序序列的末尾。以此类推，直到所有元素均排序完毕。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**步骤**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "n个记录的直接选择排序可经过n-1趟直接选择排序得到有序结果。具体算法描述如下："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- 初始状态：无序区为R[1..n]，有序区为空；\n- 第i趟排序(i=1,2,3…n-1)开始时，当前有序区和无序区分别为R[1..i-1]和R(i..n）。该趟排序从当前无序区中-选出关键字最小的记录 R[k]，将它与无序区的第1个记录R交换，使R[1..i]和R[i+1..n)分别变为记录个数增加1个的新有序区和记录个数减少1个的新无序区；\n- n-1趟结束，数组有序化了。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**动图演示**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "![selection_sort](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/selection_sort.gif)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**复杂度分析**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- 时间复杂度：O(n2)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "注：无论什么数据进去，选择都是O(n2)的时间复杂度，所以若要使用它，建议数据规模越小越好。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- 空间复杂度：O(1)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**代码实现**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "-"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [selection_sort.cpp](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/code/selection_sort.cpp)"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "/* Summary: 选择排序\n* Author: Amusi\n* Date:   208-06-22\n*\n* Reference: \n*   https://en.wikipedia.org/wiki/Selection_sort\n*   https://github.com/xtaci/algorithms/blob/master/include/selection_sort.h\n* 选择排序说明：首先在未排序序列中找到最小（大）元素，存放到排序序列的起始位置，然后，再从剩余未排序元素中继续寻找最小（大）元素，然后放到已排序序列的末尾。以此类推，直到所有元素均排序完毕。 \n*"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "#include <iostream>"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "// 选择排序函数\nnamespace alg{\n\ttemplate<typename T>\n\tstatic void SelectionSort(T list[], int length)\n\t{\n\t\t// 外循环: length-1次，因为当length-1个元素排序好后，第length个元素位置不再变化\n\t\tfor (int i = 0; i < length-1; ++i)\n\t\t{ \n\t\t\tint minIndex = i;\n\t\t\t// 从i的位置，进行遍历，因为前i-1个元素已经排序好\n\t\t\tfor (int j = i; j < length; ++j)\n\t\t\t{\n\t\t\t\t// 每次从未排序的数组中选出最小的值放入已排序的数组中，即从小到大排序\n\t\t\t\tif (list[j] < list[minIndex])\n\t\t\t\t{\n\t\t\t\t\tminIndex = j;\n\t\t\t\t}\n\t\t\t}\n\t\t\tint temp = list[minIndex];\n\t\t\tlist[minIndex] = list[i];\n\t\t\tlist[i] = temp;\n\t\t}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "}\n}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "using namespace std;\nusing namespace alg;"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "int main()\n{\n\tint a[8] = { 5, 2, 5, 7, 1, -3, 99, 56 };\n\tSelectionSort<int>(a, 8);\n\tfor (auto e : a)\n\t\tstd::cout << e << \" \";"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "return 0;\n}\n```"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [selection_sort.py](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/code/selection_sort.py)"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "''' Summary: 选择排序\n* Author: Amusi\n* Date:   208-06-22\n*\n* Reference: \n*   https://en.wikipedia.org/wiki/Selection_sort\n*\n* 选择排序说明：首先在未排序序列中找到最小（大）元素，存放到排序序列的起始位置，然后，再从剩余未排序元素中继续寻找最小（大）元素，然后放到已排序序列的末尾。以此类推，直到所有元素均排序完毕。 \n*"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "def SelectionSort(array):\n    lengths = len(array)\n    for i in range(lengths-1):\n        min_index = i\n        for j in range(i, lengths):\n            if array[j] < array[min_index]:\n               min_index = j\n        array[i], array[min_index] = array[min_index], array[i]\n\t\t\n    return array"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "array = [1,3,8,5,2,10,7,16,7,4,5]\nprint(\"Original array: \", array)\narray = SelectionSort(array)\nprint(\"SelectionSort: \", array)\n```"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "插入排序（Insertion Sort）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**基本思想**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "插入排序（insertion sort）又称直接插入排序（staright insertion sort），其是将未排序元素一个个插入到已排序列表中。对于未排序元素，在已排序序列中从后向前扫描，找到相应位置把它插进去；在从后向前扫描过程中，需要反复把已排序元素逐步向后挪，为新元素提供插入空间。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**步骤**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "1. 从第一个元素开始，该元素可以认为已经被排序；\n2. 取出下一个元素（未排序），在已经排序的元素序列中从后向前扫描；\n3. 如果该元素（已排序）大于新元素，将该元素移到下一位置（往前移动）；\n4. 重复步骤3，直到找到已排序的元素小于或者等于新元素的位置；\n5. 将新元素插入到该位置后；\n6. 重复步骤2~5。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**动图演示**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "![插入排序图示](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/insertion_sort.gif)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**复杂度分析**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- 时间复杂度：最坏O(n2)、平均O(n2)、最好O(n)\n- 空间复杂度：O(n1)\n- 稳定性：稳定"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "举个例子（暴力手绘图）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "![Insertion Sort](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/insertion_sort.png)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**代码实现**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [insertion_sort.cpp](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/code/insertion_sort.cpp)"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "/* Summary: 插入排序（Insertion Sort）\n* Author: Amusi\n* Date:   2018-07-16\n*\n* Reference: \n*   https://en.wikipedia.org/wiki/Insertion_sort\n*\t\n* 插入排序（insertion sort）又称直接插入排序（staright insertion sort），其是将未排序元素一个个插入到已排序列表中。对于未排序元素，在已排序序列中从后向前扫描，找到相应位置把它插进去；在从后向前扫描过程中，需要反复把已排序元素逐步向后挪，为新元素提供插入空间。\n*"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "#include <iostream>"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "// 插入排序函数\nnamespace alg{\n\ttemplate<typename T>\n\tstatic void InsertionSort(T list[], int length)\n\t{\n\t\t// 从索引为1的位置开始遍历\n\t\tfor (int i = 1; i < length; ++i)\n\t\t{\n\t\t\tT currentValue = list[i];\t// 保存当前值\n\t\t\tint preIndex = i - 1;\t// 前一个索引值\n\t\t\t// 循环条件: 前一个索引值对应元素值大于当前值 && 前一个索引值大于等于0\n\t\t\twhile (list[preIndex] > currentValue && preIndex >= 0){\n\t\t\t\tlist[preIndex + 1] = list[preIndex];\n\t\t\t\tpreIndex--;\n\t\t\t}\n\t\t\tlist[preIndex + 1] = currentValue;\n\t\t}\n\t}\n}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "using namespace std;\nusing namespace alg;"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "int main()\n{\n\tint a[8] = { 5, 2, 5, 7, 1, -3, 99, 56 };\n\tInsertionSort<int>(a, 8);\n\tfor (auto e : a)\n\t\tstd::cout << e << \" \";"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "return 0;\n}\n```"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [insertion_sort.py](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/code/insertion_sort.py)"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "''' Summary: 插入排序（Insertion Sort）\n* Author: Amusi\n* Date:   208-07-16\n*\n* Reference: \n*   https://en.wikipedia.org/wiki/Insertion_sort\n*   https://www.cnblogs.com/wujingqiao/articles/8961890.html\n*\t\n* 插入排序（insertion sort）又称直接插入排序（staright insertion sort），其是将未排序元素一个个插入到已排序列表中。对于未排序元素，在已排序序列中从后向前扫描，找到相应位置把它插进去；在从后向前扫描过程中，需要反复把已排序元素逐步向后挪，为新元素提供插入空间。\n*"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "def InsertionnSort(array):\n    lengths = len(array)\n    # 从索引位置1开始\n    for i in range(1, lengths):\n        currentValue = array[i] # 当前索引对应的元素数值\n        preIndex = i-1\t\t     # 前一个索引位置\n        # 循环条件: 前一个索引对应元素值大于当前值，前一个索引值大于等于0\n        while array[preIndex] > currentValue and preIndex>=0:\n        \tarray[preIndex+1] = array[preIndex]\t# 前一个索引对应元素值赋值给当前值\n        \tpreIndex -= 1\t# 前一个索引位置-1\n        # preIndex+1，实现元素交换\n        array[preIndex+1] = currentValue\n\t\t\n    return array"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "array = [1,3,8,5,2,10,7,16,7,4,5]\nprint(\"Original array: \", array)\narray = InsertionnSort(array)\nprint(\"InsertionnSort: \", array)\n```"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "希尔排序（Shell Sort）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**基本思想**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "设待排序元素序列有n个元素，首先取一个整数increment（小于n）作为间隔将全部元素分为increment个子序列，所有距离为increment的元素放在同一个子序列中，在每一个子序列中分别实行直接插入。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "注：在[希尔排序算法](https://en.wikipedia.org/wiki/Shellsort)提出之前，排序算法的时间复杂度都为O(n^2)，如冒泡排序、选择排序和插入排序。而希尔排序算法是突破这个时间复杂度的第一批算法之一。该复杂度为O(nlogn)，其实直接插入排序算法的改进版，也称为缩小增量排序。**希尔排序是直接插入排序的一种改进，减少了其复制的次数，速度要快很多**。原因是，当n值很大时，数据项每一趟排序需要移动的个数很少，但数据项的距离很长；当n值减小时，每一趟需要移动的数据增多。正是因为这两种情况的结合才使得希尔排序效率比插入排序高很多。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**步骤**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "先将整个待排序的记录序列分割成为若干子序列分别进行直接插入排序，具体算法描述："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- 选择一个增量序列t1，t2，…，tk\n- 按增量序列个数k，对序列进行k 趟排序；\n- 每趟排序，根据对应的增量ti，将待排序列分割成若干长度为m 的子序列，分别对各子表进行直接插入排序。仅增量因子为1 时，整个序列作为一个表来处理，表长度即为整个序列的长度。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "注：增量的初始值一般为序列长度的一半，然后之后每次再自身减半。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**动图演示**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[![希尔排序](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/shell_sort01.gif)](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/images/shell_sort01.gif)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "上图是不是很难理解，那么来看看这个！"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[![img](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/shell_sort02.png)](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/images/shell_sort02.png)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "说实话，看了上面两个图，我还是有点不理解，不怕，我又找了下面这幅图像。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "简单介绍一下："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "对于[592, 401, 874, 141, 348, 72, 911, 887, 820, 283]序列，一共10个元素。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**第一次，设置增量为5=10/2**，所以有5个子序列：[592,72]、[401,911]、[874,887]、[141,820]和[348,283]。然后对每个子序列进行插入排序，结果是[72,592]、[401,911]、[874,887]、[141,820]和[283,348]。注意，这些元素在序列中的位置初始是不变的，只会随着部分子序列间元素的位置变化而变化，比如[592,72]在原来的序列中索引是[0,5]，之后变成了[5,0]；而[401,911]的序列索引是[1,6]，第一次处理后，索引值不变。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "总之，第一次处理的结果是将**[592, 401, 874, 141, 348, 72, 911, 887, 820, 283]—> [72, 401, 874, 141, 283, 592, 911, 887, 820, 348]**。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**第二次，设置增量为2=5/2**，所以有2个子序列：[72, 874, 283, 911, 820]和[401, 141, 592, 887, 348]。然后对每个子序列进行插入排序，[72, 874, 283, 911, 820]的结果是[72, 283, 820, 874, 911]，而[401, 141, 292, 887, 348]的结果是[141, 292, 348, 401, 887]。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "总之，第二次处理的结果是将 **[72, 401, 874, 141, 283, 592, 911, 887, 820, 348]—>[72, 141, 283, 292, 820, 348, 874, 401, 911, 997]**。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**第三次，设置增量为1=2/2**，所以有1个序列，就是上述生成的序列[72, 141, 283, 292, 820, 348, 874, 401, 911, 997]。然后进行插入排序，其结果为[72, 141, 283, 292, 348, 401, 820, 874, 911, 997]。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "总之，第三次处理的结果是将 **[72, 141, 283, 292, 820, 348, 874, 401, 911, 997]—>[72, 141, 283, 292, 348, 401, 820, 874, 911, 997]**。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "其实本质上还是利用了插入排序，但这里通过增量作用，相当于添加了预处理，减少插入排序中移动元素的次数，提高了效率。通过\"增量\"预处理，使得希尔排序算法时间复杂度降低。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[![img](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/shell_sort03.jpg)](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/images/shell_sort03.jpg)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**复杂度分析**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "希尔排序的时间复杂度与增量序列的选取有关。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "时间复杂度："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- 平均：O(n^1.3)\n- 最差：O(n2)\n- 最好：O(n)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "空间复杂度：O(1)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "稳定性：不稳定"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**代码实现**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[shell_sort.cpp](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/code/shell_sort.cpp)"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "/* Summary: 希尔排序（Shell Sort）\n* Author: Amusi\n* Date:   2018-09-23\n*\n* Reference:\n*   https://en.wikipedia.org/wiki/Shellsort\n*   https://www.geeksforgeeks.org/shellsort/\n*   希尔排序（shell sort）：设待排序元素序列有n个元素，首先取一个整数increment（小于n）作为间隔将全部元素分为increment个子序列，所有距离为increment的元素放在同一个子序列中，在每一个子序列中分别实行直接插入。\n*"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "#include <iostream>"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "// 希尔排序函数（基于快速插入排序）\nnamespace alg{\n\ttemplate<typename T>\n\tstatic void ShellSort(T list[], int n)\n\t{\n\t\t// 设置增量：以n/2为初始gap，然后逐渐减小gap（每次缩小为上次gap的一半）\n\t\tfor (int gap = n / 2; gap > 0; gap /= 2){\n\t\t\t// 遍历当前趟，对每个子序列进行插入排序\n\t\t\tfor (int i = gap; i < n; i++){\n\t\t\t\tint temp = list[i];\n\t\t\t\tint j = 0;\n\t\t\t\t// 遍历子序列\n\t\t\t\tfor (j = i; j >= gap && list[j - gap]>temp; j -= gap)\n\t\t\t\t\tlist[j] = list[j - gap];"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "list[j] = temp;\n\t\t\t}\n\t\t}\n\t}\n}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "using namespace std;\nusing namespace alg;"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "int main()\n{\n\tint a[8] = { 5, 2, 5, 7, 1, -3, 99, 56 };\n\tint n = sizeof(a) / sizeof(a[0]);\n\tShellSort<int>(a, n);\n\tfor (auto e : a)\n\t\tstd::cout << e << \" \";"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "return 0;\n}\n```"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[shell_sort.py](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/code/shell_sort.py)"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "'''\n* Summary: 希尔排序（Shell Sort）\n* Author: Amusi\n* Date:   2018-09-23\n*\n* Reference:\n*   https://en.wikipedia.org/wiki/Shellsort\n*   https://www.geeksforgeeks.org/shellsort/\n*   希尔排序（shell sort）：设待排序元素序列有n个元素，首先取一个整数increment（小于n）作为间隔将全部元素分为increment个子序列，所有距离为increment的元素放在同一个子序列中，在每一个子序列中分别实行直接插入。\n*\n*"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "def ShellSort(array):\n    lengths = len(array)\n    # 初始化gap\n    gap = lengths//2\n    # 减少增量，遍历子序列进行插入排序\n    while(gap > 0):\n        for i in range(gap, lengths):\n            # \n            temp = array[i]\n            j = i\n            # 子序列插入排序\n            while j>=gap and array[j-gap]>temp:\n                array[j] = array[j-gap]\n                j -= gap"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "array[j] = temp\n        \n        gap = gap//2\n\t\t\n    return array"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "array = [1,3,8,5,2,10,7,16,7,4,5]\nprint(\"Original array: \", array)\narray = ShellSort(array)\nprint(\"InsertionnSort: \", array)\n```"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "参考："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [Shell Sort](https://www.geeksforgeeks.org/shellsort/)\n- [理解希尔排序的排序过程](https://blog.csdn.net/weixin_37818081/article/details/79202115)\n- [图解排序算法(二)之希尔排序](https://www.cnblogs.com/chengxiao/p/6104371.html)"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "堆排序（Heap Sort）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**基本思想**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[堆排序（heap sort）](https://en.wikipedia.org/wiki/Heapsort)：将待排序序列构造成一个大顶堆，此时，整个序列的最大值就是堆顶的根节点。将其与末尾元素进行交换，此时末尾就为最大值。然后将剩余n-1个元素重新构造成一个堆，这样会得到n个元素的次小值。如此反复执行，便能得到一个有序序列了。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "注：堆排序是一种选择排序，指利用堆这种数据结构所设计的一种排序算法。堆积是一个近似完全二叉树的结构，并同时满足堆积的性质：即子结点的键值或索引总是小于（或者大于）它的父节点。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "在介绍堆排序之前，先了解一下什么是**堆（heap）**？"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**堆**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "堆是具有以下性质的完全二叉树：每个结点的值都大于或等于其左右孩子结点的值，称为大顶堆；或者每个结点的值都小于或等于其左右孩子结点的值，称为小顶堆。如下图："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[![堆结构](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/heap.png)](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/images/heap.png)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "同时，我们对堆的结点按层进行编号，将这种逻辑结构映射到数组中就是下面这个样子："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[![img](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/heap2.png)](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/images/heap2.png)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "该数组从逻辑上讲就是一个堆结构，我们用简单的公式来描述一下堆的定义就是："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**大顶堆：arr[i] >= arr[2i+1] && arr[i] >= arr[2i+2] **"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**小顶堆：arr[i] <= arr[2i+1] && arr[i] <= arr[2i+2] **"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "ok，了解了这些定义。接下来，我们来看看堆排序的基本思想及基本步骤："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**步骤**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- 将初始待排序关键字序列(R1,R2….Rn)构建成大顶堆，此堆为初始的无序区；\n- 将堆顶元素R[1]与最后一个元素R[n]交换，此时得到新的无序区(R1,R2,……Rn-1)和新的有序区(Rn),且满足R[1,2…n-1]<=R[n]；\n- 由于交换后新的堆顶R[1]可能违反堆的性质，因此需要对当前无序区(R1,R2,……Rn-1)调整为新堆，然后再次将R[1]与无序区最后一个元素交换，得到新的无序区(R1,R2….Rn-2)和新的有序区(Rn-1,Rn)。不断重复此过程直到有序区的元素个数为n-1，则整个排序过程完成。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**动图演示**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[![堆排序](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/heap_sort.gif)](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/images/heap_sort.gif)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "看到这里，你可能还是晕乎乎的，下面看个讲解示例："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**步骤一 构造初始堆。将给定无序序列构造成一个大顶堆（一般升序采用大顶堆，降序采用小顶堆)。**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "a.假设给定无序序列结构如下"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[![img](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/heap_p1.png)](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/images/heap_p1.png)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "b.此时我们从最后一个非叶子结点开始（叶结点自然不用调整，第一个非叶子结点 arr.length/2-1=5/2-1=1，也就是下面的6结点），从左至右，从下至上进行调整。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[![img](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/heap_p2.png)](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/images/heap_p2.png)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "c.找到第二个非叶节点4，由于[4,9,8]中9元素最大，4和9交换。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[![img](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/heap_p3.png)](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/images/heap_p3.png)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "d.这时交换导致了子根[4,5,6]结构混乱，继续调整，[4,5,6]中6最大，交换4和6。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[![img](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/heap_p4.png)](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/images/heap_p4.png)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "此时，我们就将一个无需序列构造成了一个大顶堆。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**步骤二 将堆顶元素与末尾元素进行交换，使末尾元素最大。然后继续调整堆，再将堆顶元素与末尾元素交换，得到第二大元素。如此反复进行交换、重建、交换。**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "a.将堆顶元素9和末尾元素4进行交换"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[![img](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/heap_p5.png)](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/images/heap_p5.png)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "b.重新调整结构，使其继续满足堆定义"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[![img](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/heap_p6.png)](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/images/heap_p6.png)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "c.再将堆顶元素8与末尾元素5进行交换，得到第二大元素8."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[![img](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/heap_p7.png)](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/images/heap_p7.png)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "后续过程，继续进行调整，交换，如此反复进行，最终使得整个序列有序"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[![img](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/heap_p8.png)](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/images/heap_p8.png)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "再简单总结下堆排序的基本思路："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**a.将无需序列构建成一个堆，根据升序降序需求选择大顶堆或小顶堆;**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**b.将堆顶元素与末尾元素交换，将最大元素\"沉\"到数组末端;**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**c.重新调整结构，使其满足堆定义，然后继续交换堆顶元素与当前末尾元素，反复执行调整+交换步骤，直到整个序列有序。**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**复杂度分析**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "堆排序整体主要由构建初始堆+交换堆顶元素和末尾元素并重建堆两部分组成。其中构建初始堆经推导复杂度为O(n)，在交换并重建堆的过程中，需交换n-1次，而重建堆的过程中，根据完全二叉树的性质，[log2(n-1),log2(n-2)...1]逐步递减，近似为nlogn。所以堆排序时间复杂度一般认为就是O(nlogn)级。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "时间复杂度："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- 最差：O(nlogn)\n- 平均：O(nlogn)\n- 最优：O(nlogn)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "空间复杂度：O(n)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "稳定性：不稳定"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**代码实现**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "-  TODO"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "参考："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [图解排序算法(三)之堆排序](https://www.cnblogs.com/chengxiao/p/6129630.html)\n- [heap-sort](https://www.geeksforgeeks.org/heap-sort/)"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "归并排序（Merge Sort）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**基本思想**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[归并排序（merge sort）](https://en.wikipedia.org/wiki/Merge_sort)："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**步骤**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "快速排序（Quick Sort）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**基本思想**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[快速排序（quick sort）](https://en.wikipedia.org/wiki/Quicksort)：通过一趟排序将待排列表分隔成独立的两部分，其中一部分的所有元素均比另一部分的所有元素小，则可分别对这两部分继续重复进行此操作，以达到整个序列有序。（这个过程，我们可以使用递归快速实现）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**步骤**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "快速排序使用分治法来把一个串（list）分为两个子串（sub-lists）。具体算法描述如下："
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- 从数列中挑出一个元素，称为 “基准”（pivot），这里我们通常都会选择第一个元素作为prvot；\n- 重新排序数列，将比基准值小的所有元素放在基准前面，比基准值大的所有元素放在基准的后面（相同的数可以到任一边）。这样操作完成后，该基准就处于新数列的中间位置，即将数列分成了两部分。这个操作称为分区（partition）操作；\n- 递归地（recursive）把小于基准值元素的子数列和大于基准值元素的子数按上述操作进行排序。这里的递归结束的条件是序列的大小为0或1。此时递归结束，排序就完成了。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**动图演示**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[![Quick Sort](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/quick_sort.gif)](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/images/quick_sort.gif)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**复杂度分析**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- 时间复杂度：\n  - 平均情况：O(nlogn)\n  - 最好情况：O(nlong)\n  - 最坏情况：O(n^2) 其实不难理解，快排的最坏情况就已经退化为冒泡排序了！所以大家深入理解就会发现各个排序算法是相通的，学习时间久了你就会发现它们的内在联系！是不是很神奇哈～\n- 空间复杂度：\n  - 平均情况：O(logn)\n  - 最好情况：O(logn)\n  - 最坏情况：O(n)\n- 稳定性：不稳定 （由于关键字的比较和交换是跳跃进行的，所以快速排序是一种不稳定的排序方法～）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "举个例子（暴力手绘图）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[![img](https://github.com/amusi/coding-note/raw/master/Data%20Structures%20and%20Algorithms/sort/images/quick_sort.png)](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/images/quick_sort.png)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**代码实现**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "注：下面都是利用递归法实现快速排序。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[quick_sort.cpp](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/code/quick_sort.cpp)"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "/* Summary: 快速排序（Quick Sort）\n* Author: Amusi\n* Date:   2018-07-28\n*\n* Reference: \n*   https://en.wikipedia.org/wiki/Quicksort\n*\t\n* 快速排序（quick sort）：通过一趟排序将待排列表分隔成独立的两部分，其中一部分的所有元素均比另一部分的所有元素小，则可分别对这两部分继续重复进行此操作，以达到整个序列有序。（这个过程，我们可以使用递归快速实现）\n*"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "#include <iostream>"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "// 快速排序函数（递归法）\nnamespace alg{\n\ttemplate<typename T>\n\tstatic void QuickSort(T list[], int start, int end)\n\t{\n\t\tint i = start;\n\t\tint j = end;\n\t\t// 结束排序（左右两索引值见面，即相等，或者左索引>右索引）\n\t\tif (i >= j)\n\t\t\treturn;\n\t\t// 保存首个数值（以首个数值作为基准）\n\t\t// 这个位置很重要，一定要在if i >= j判断语句之后，否则就索引溢出了\n\t\tT pivot = list[i];"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "// 一次排序，i和j的值不断的靠拢，然后最终停止，结束一次排序\n\t\twhile (i < j){\n\t\t\t// 一层循环实现从左边起大于基准的值替换基准的位置，右边起小于基准的值位置替换从左起大于基准值的索引\n\t\t\t//（从右往左）和最右边的比较，如果 >= pivot, 即满足要求，不需要交换，然后j - 1，慢慢左移，即拿基准值与前一个值比较; 如果值<pivot，那么就交换位置\n\t\t\twhile (i < j && pivot <= list[j])\n\t\t\t\t--j;\n\t\t\tlist[i] = list[j];\n\t\t\t// 交换位置后，（从左往右）然后在和最左边的值开始比较，如果 <= pivot, 然后i + 1，慢慢的和后一个值比较; 如果值>pivot，那么就交换位置\n\t\t\twhile (i < j && pivot >= list[i])\n\t\t\t\t++i;\n\t\t\tlist[j] = list[i];\n\t\t}\n\t\t// 列表中索引i的位置为基准值，i左边序列都是小于基准值的，i右边序列都是大于基准值的，当前基准值的索引为i，之后不变\n\t\tlist[i] = pivot;\n\t\t// 左边排序\n\t\tQuickSort(list, start, i-1);\n\t\t// 右边排序\n\t\tQuickSort(list, i+1, end);\n\t}\n}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "using namespace std;\nusing namespace alg;"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "int main()\n{\n\tint a[8] = { 5, 2, 5, 7, 1, -3, 99, 56 };\n\tQuickSort<int>(a, 0, sizeof(a)/sizeof(a[0]) - 1);\n\tfor (auto e : a)\n\t\tstd::cout << e << \" \";"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "return 0;\n}\n```"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "[quick_sort.py](https://github.com/amusi/coding-note/blob/master/Data%20Structures%20and%20Algorithms/sort/code/quick_sort.py)"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": "python"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "''' Summary: 快速排序（Quick Sort）\n* Author: Amusi\n* Date:   208-07-28\n*\n* Reference: \n*   https://en.wikipedia.org/wiki/Quicksort\n*   https://www.cnblogs.com/wujingqiao/articles/8961890.html\n*\thttps://github.com/apachecn/LeetCode/blob/master/src/py3.x/sort/QuickSort.py\n*   快速排序（quick sort）：通过一趟排序将待排列表分隔成独立的两部分，其中一部分的所有元素均比另一部分的所有元素小，则可分别对这两部分继续重复进行此操作，以达到整个序列有序。（这个过程，我们可以使用递归快速实现）\n*"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "def QuickSort(array, start, end):\n    lengths = len(array)\n    i = start\n    j = end\n    # 结束排序（左右两索引值见面，即相等，或者左索引>右索引）\n    if i >= j:\n        return\t# 返回空即可\n    # 保存首个数值（以首个数值作为基准）\n\t# 这个位置很重要，一定要在if i>=j判断语句之后，否则就索引溢出了\n    pivot = array[i]\n    # 一次排序，i和j的值不断的靠拢，然后最终停止，结束一次排序\n    while i < j:\n        # （从右往左）和最右边的比较，如果>=pivot,即满足要求，不需要交换，然后j-1，慢慢左移，即拿基准值与前一个值比较; 如果值<pivot，那么就交换位置\n        while i < j and pivot <= array[j]:\n            # print(pivot, array[j], '*' * 30)\n            j -= 1\n        array[i] = array[j]\n        # 交换位置后，然后在和最左边的值开始比较，如果<=pivot,然后i+1，慢慢的和后一个值比较;如果值>pivot，那么就交换位置\n        while i < j and pivot >= array[i]:\n            # print(pivot, array[i], '*' * 30)\n            i += 1\n        array[j] = array[i]\n    # 列表中索引i的位置为基准值，i左边序列都是小于基准值的，i右边序列都是大于基准值的，当前基准值的索引为i，之后不变\n    array[i] = pivot\n    # 左边排序\n    QuickSort(array, start, i-1)\n    # 右边排序\n    QuickSort(array, i+1, end)\n\t\t\n    #return array"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "if __name__ == \"__main__\":\n    array = [1,3,8,5,2,10,7,16,7,4,5]\n    print(\"Original array: \", array)\n    #array = QuickSort(array, 0, len(array)-1)\n\t# 因为python中的list对象是可变对象，所以在函数做\"形参\"时，是相当于按引用传递\n\t# 所以不写成返回值的形式，也是OK的\n    QuickSort(array, 0, len(array)-1)\n    print(\"QuickSort: \", array)\n```"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "查找"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "二分查找"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "lower_bound"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "upper_bound"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "分治与递归"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "逆序对数"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "大数相加"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "大数相乘"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "贪婪算法"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "动态规划"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "背包问题"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "找零钱问题"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "最长公共子序列（LCS）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "字符串匹配算法"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "KMP算法"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "BM算法"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Sunday算法"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "线性表"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "数组"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "栈"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "队列"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "链表"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "二叉树"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "二叉排序树/二叉查找树BST"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "平衡二叉树"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "求二叉树的最大高度"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "二叉树的前序遍历"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "二叉树打印出最右侧的节点"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "非递归中序遍历二叉树"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "求二叉树深度和宽度"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "链表"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "找到链表倒数第k个结点"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "如何判断单链表中是否有环？"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "翻转链表"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "手写双向链表"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "堆"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "构建堆的复杂度"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 3
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "堆找出第k大元素的复杂度"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "打印螺旋矩阵"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "找最小字串"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "2-sum、3-sum和4-sum问题"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "N-sum就是从序列中找出N个数，使得N个数之和等于指定数值的问题。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**2-sum**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "2-sum就是从序列中找出2个数，使得2个数之和等于0的问题，即a+b=sum。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "下面的例子是规定指定数值为0："
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": "cpp"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "int sum_2()\n{\n\tint res = 0;\n\tint n = data.size();\n\tfor(int i=0; i<n-1; i++)\n\t{\n\t\tfor(int j=i+1; j<n; j++)\n\t\t{\n\t\t\tif(data[i] + data[j] == 0)\n\t\t\t{\n\t\t\t\tres ++;\n\t\t\t}\n\t\t}\n\t}\n\treturn res;"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": ""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "上述算法的由于包含了两层循环，因此时间复杂度为O(N^2)。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "观察发现，上述算法时间主要花费在数据比对，为此可以考虑使用二分查找来减少数据比对时间，要想使用二分查找，首先应该对数据进行排序，在此使用归并排序或者快速排序对数组进行升序排列。排序所花时间为O(NlogN)，排序之后数据查找只需要O(logN)的时间，但是总共需要查找N次，为此改进后算法的时间复杂度为O(NlogN)。"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": "cpp"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "int cal_sum_2()\n{\n\tint res = 0;\n\tfor(int i=0; i<data.size(); i++)\n\t{\n\t\tint j = binary_search(-data[i]);\n\t\tif(j > i)\t\n\t\tres++;\n\t}\n\treturn res;"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": ""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**3-sum**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "上述2-sum的解题思路适用于3-sum及4-sum问题，如求解a+b+c=0，可将其转换为求解a+b=-c，此就为2-sum问题。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "为此将2-sum，3-sum，4-sum的求解方法以及相应的优化方法实现在如下所示的sum类中。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "sum.h"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": "cpp"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "#ifndef SUM_H\n#define SUM_H\n#include <vector>\nusing std::vector;\nclass sum\n{\nprivate:\n\tvector<int> data;\npublic:\n\tsum(){};\n\tsum(const vector<int>& a);\n\t~sum(){};\n\tint cal_sum_2() const;\n\tint cal_sum_3() const;\n\tint cal_sum_4() const;\n\tint cal_sum_2_update() const;\n\tint cal_sum_3_update() const;\n\tint cal_sum_3_update2() const;\n\tint cal_sum_4_update() const;\n\tvoid sort(int low, int high);\n\tvoid print() const;\n\tfriend int find(const sum& s, int target); \n};"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": ""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "sum.cpp"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": "cpp"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "#include \"Sum.h\"\n#include <iostream>\nusing namespace std;\nsum::sum(const vector<int>& a)\n{\n\tdata = a;\n}\nvoid sum::sort(int low, int high)\n{\n\tif(low >= high)\n\t\treturn;\n\tint mid = (low+high)/2;\n\tsort(low,mid);\n\tsort(mid+1,high);\n\tvector<int> temp;\n\tint l = low;\n\tint h = mid+1;\n\twhile(l<=mid && h <=high)\n\t{\n\t\tif(data[l] > data[h])\n\t\t\ttemp.push_back(data[h++]);\n\t\telse\n\t\t\ttemp.push_back(data[l++]);\n\t}\n\twhile(l<=mid)\n\t\ttemp.push_back(data[l++]);\n\twhile(h<=high)\n\t\ttemp.push_back(data[h++]);\n\tfor(int i=low; i<=high; i++)\n\t{\n\t\tdata[i] = temp[i-low];\n\t}\n}\nvoid sum::print() const\n{\n\tfor(int i=0; i<data.size(); i++)\n\t{\n\t\tcout<<data[i]<<\" \";\n\t}\n\tcout<<endl;\n}\nint find(const sum& s, int target)\n{\n\tint low = 0;\n\tint high = s.data.size()-1;\n\twhile(low <= high)\n\t{\n\t\tint mid = (low + high)/2;\n\t\tif(s.data[mid] < target)\n\t\t{\n\t\t\tlow = mid+1;\n\t\t}\n\t\telse if(s.data[mid] > target)\n\t\t{\n\t\t\thigh = mid - 1;\n\t\t}\n\t\telse\n\t\t{\n\t\t\treturn mid;\n\t\t}\n\t}\n\treturn -1;\n}\nint sum::cal_sum_2() const\n{\n\tint res = 0;\n\tfor(int i=0; i<data.size(); i++)\n\t{\n\t\tint j = find(*this, -data[i]);\n\t\tif(j > i)\t\n\t\t\tres++;\n\t}\n\treturn res;\n}\nint sum::cal_sum_3() const\n{\n\tint res = 0;\n\tfor(int i=0; i<data.size(); i++)\n\t{\n\t\tfor(int j=i+1; j<data.size(); j++)\n\t\t{\n\t\t\tfor(int p=j+1;p<data.size();p++)\n\t\t\t{\n\t\t\t\tif(data[i] + data[j] + data[p] == 0)\n\t\t\t\t\tres++;\n\t\t\t}\n\t\t}\n\t}\n\treturn res;\n}\nint sum::cal_sum_4() const\n{\n\tint res = 0;\n\tfor(int i=0; i<data.size(); i++)\n\t{\n\t\tfor(int j=i+1; j<data.size(); j++)\n\t\t{\n\t\t\tfor(int p=j+1; p<data.size(); p++)\n\t\t\t{\n\t\t\t\tfor(int q=p+1; q<data.size(); q++)\n\t\t\t\t{\n\t\t\t\t\tif(data[i]+data[j]+data[p]+data[q] == 0)\n\t\t\t\t\t\tres++;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n\treturn res;\n}\nint sum::cal_sum_2_update() const\n{\n\tint res = 0;\n\tfor(int i=0,j=data.size()-1; i<j; )\n\t{\n\t\tif(data[i] + data[j] > 0)\n\t\t\tj--;\n\t\telse if(data[i] + data[j] < 0)\n\t\t\ti++;\n\t\telse\n\t\t{\n\t\t\tres++;\n\t\t\tj--;\n\t\t\ti++;\n\t\t}\n\t}\n\treturn res;\n}\nint sum::cal_sum_3_update() const\n{\n\tint res = 0;\n\tfor(int i=0; i<data.size(); i++)\n\t{\n\t\tfor(int j=i+1; j<data.size(); j++)\n\t\t{\n\t\t\tif(find(*this, -data[i] - data[j]) > j)\n\t\t\t\tres ++;\n\t\t}\n\t}\n\treturn res;\n}\nint sum::cal_sum_3_update2() const\n{\n\tint res = 0;\n\tfor(int i=0; i<data.size(); i++)\n\t{\n\t\tint j=i+1;\n\t\tint p=data.size()-1;\n\t\twhile(j<p)\n\t\t{\n\t\t\tif (data[j] + data[p] < -data[i])\n\t\t\t\tj++;\n\t\t\telse if(data[j] + data[p] > -data[i])\n\t\t\t\tp--;\n\t\t\telse\n\t\t\t{\n\t\t\t\tres++;\n\t\t\t\tj++;\n\t\t\t\tp--;\n\t\t\t}\n\t\t}\n\t}\n\treturn res;\n}\nint sum::cal_sum_4_update() const\n{\n\tint res = 0;\n\tfor(int i=0; i<data.size(); i++)\n\t{\n\t\tfor(int j=i+1; j<data.size(); j++)\n\t\t{\n\t\t\tfor(int p=j+1; p<data.size(); p++)\n\t\t\t{\n\t\t\t\tif(find(*this, -data[i]-data[j]-data[p])>p)\n\t\t\t\t\tres++;\n\t\t\t}\n\t\t}\n\t}\n\treturn res;"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": ""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "test.cpp"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": "cpp"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "#include \"Sum.h\"\n#include <iostream>\n#include <fstream>\n#include <vector>\nusing namespace std;\nvoid main()\n{\n\tifstream in(\"1Kints.txt\");\n\tvector<int> a;\n\twhile(!in.eof())\n\t{\n\t\tint temp;\n\t\tin>>temp;\n\t\ta.push_back(temp);\n\t}\n\tsum s(a);\n\ts.sort(0,a.size()-1);\n\ts.print();\n\tcout<<\"s.cal_sum_2() = \"<<s.cal_sum_2()<<endl;\n\tcout<<\"s.cal_sum_2_update() = \"<<s.cal_sum_2_update()<<endl;\n\tcout<<\"s.cal_sum_3() = \"<<s.cal_sum_3()<<endl;\n\tcout<<\"s.cal_sum_3_update() = \"<<s.cal_sum_3_update()<<endl;\n\tcout<<\"s.cal_sum_3_update()2 = \"<<s.cal_sum_3_update2()<<endl;\n\tcout<<\"s.cal_sum_4() = \"<<s.cal_sum_4()<<endl;\n\tcout<<\"s.cal_sum_4_update() = \"<<s.cal_sum_4_update()<<endl;"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": ""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**参考资料**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [剖析3-sum问题(Three sum)](https://blog.csdn.net/shaya118/article/details/40755551)\n- [2-sum, 3-sum, 4-sum问题分析](http://shmilyaw-hotmail-com.iteye.com/blog/2085129)"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "无序数组a，b 归并排序成有序数组c"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "TODO"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] ## 将256*256二维数组逆时针旋转90°"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "二分查找"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "分治与递归：逆序对数、大数相加、大数相乘"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "动态规划：背包问题、找零钱问题和最长公共子序列（LCS）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "青蛙跳台阶"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "BFS和DFS解决最短路径"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "DFS和BFS的区别（优缺点）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "深度优先搜索算法（Depth-First-Search，DFS）是一种利用递归实现的搜索算法。简单来说，其搜索过程和\"不撞南墙不回头\"类似。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "广度优先搜索算法（Breadth-First-Search，BFS）是一种利用队列实现的搜索算法。简单来说，其搜索过程和\"湖面丢进一块石头激起层层涟漪\"类似。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "BFS 的重点在于队列，而 DFS 的重点在于递归。这是它们的本质区别。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**应用方向**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "BFS 常用于找单一的最短路线，它的特点是 \"搜到就是最优解\"，而 DFS 用于找所有解的问题，它的空间效率高，而且找到的不一定是最优解，必须记录并完成整个搜索，故一般情况下，深搜需要非常高效的剪枝（剪枝的概念请百度）。"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**参考资料**"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [一文读懂 BFS 和 DFS 区别](https://www.sohu.com/a/201679198_479559)"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "数组的最大区间和"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "迪杰斯特拉 (Dijkstra) 算法"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "两个栈实现一个队列"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [ ] TODO"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "​\t- Coding：单例模式实现（2次）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：stoi函数"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：二叉树对称判断（不用额外空间）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：返回数组中和最大的子串"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：链表局部反转，每两个结点调换下位置（2次）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：输入一个数组，取一些数出来，使和最大，约束是不能取相邻的元素，有负数，有小数"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：链表反转"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：swap函数"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：输入数组，将正数排到前面，负数在后面"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：设计实现Hashmap"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：求二叉树中节点的最远距离（3次）"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：找数组中位数"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：给一个点的集合和一个值K，把在以k为半径的区域内存在其他点的点列表输出"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：给一个数组，随机等概率删除数组中的一个数，要求高效"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：写个String类，把能想到的构造函数都写出来"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：atoi函数"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：给一个图，给两个结点，求两个结点之间的最短路径"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：单链表，删除值为k的节点"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：二叉树前序遍历"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：给一个上线时间段记录数组，和开始，结束时间，输出所有这段时间内的上下线记录"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：大小端，写个程序判断"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：两个有序链表merge"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：二分查找，有重复，findlast"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：x的y次方"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：链表倒数第k个节点"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：分数转化成小数，循环部分用括号包起来"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：输入一些时间段，输出最大重合数"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：hash数据结构设计"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：n个点的数组，按x轴排序"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：n个点的数组，两个同行或列的点可以移除一个，使最后图中节点最少，返回移除点的索引序列"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：链表尾结点插入头部，操作k次返回"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- Coding：给一个数组，能不能分成两个数组，它们平均值相等，能的话返回两个数组"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "TODO"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "参考资料"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "level": 1
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "参考"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**[1]（推荐）**[《大话数据结构》](https://book.douban.com/subject/6424904/)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**[2]（推荐）**[十大经典排序算法（动图演示）](https://www.cnblogs.com/onepixel/p/7674659.html)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**[3]（推荐）**[轻松搞定十大排序算法(C++版)](https://blog.csdn.net/opooc/article/details/80994353)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**[4]（推荐）**[从头说12种排序算法：原理、图解、动画视频演示、代码以及笔试面试题目中的应用](https://blog.csdn.net/han_xiaoyang/article/details/12163251)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**[5]（推荐）**[排序算法时间复杂度、空间复杂度、稳定性比较](https://blog.csdn.net/yushiyi6453/article/details/76407640)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**[6]（推荐）**[十大排序算法和七大查找算法总结（原理讲解和Python代码实现）---（一）排序算法篇](https://www.cnblogs.com/wujingqiao/p/8961890.html)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**[7]** [常见排序算法C++总结](https://www.cnblogs.com/zyb428/p/5673738.html)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**[8]** [十大经典排序算法（JavaScript版）](http://web.jobbole.com/87968/)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**[9]** [八大排序算法总结（JAVA版）](http://www.runoob.com/w3cnote/sort-algorithm-summary.html)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "**[10]** [C++代码](https://github.com/xtaci/algorithms/blob/master/include/selection_sort.h)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "- [八大排序算法时间空间复杂度分析](https://www.nowcoder.com/discuss/200097)"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

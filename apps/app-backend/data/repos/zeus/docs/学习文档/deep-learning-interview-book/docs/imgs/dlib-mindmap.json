@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "9539cf32-8676-45fa-950c-1df4cac90273",
+    "schema_version": "v1",
+    "title": "DLIB-Mindmap",
+    "slug": "dlib-mindmap",
+    "path": "docs/学习文档/deep-learning-interview-book/docs/imgs/dlib-mindmap.json",
+    "parent_id": "9655dc10-1085-427b-a570-eca3249e8d45",
+    "created_at": "2026-01-31T02:03:13.876Z",
+    "updated_at": "2026-01-31T02:03:13.876Z",
+    "extra": {
+      "status": "draft",
+      "tags": []
+    }
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "file_block",
+          "attrs": {
+            "asset_id": "44120711-aaf9-4448-a873-c8708c4011c3",
+            "file_name": "DLIB-Mindmap.png",
+            "mime": "image/png",
+            "size": 35193,
+            "file_type": "unknown"
+          }
+        }
+      ]
+    }
+  }
+}
