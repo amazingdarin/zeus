@@ -1646,10 +1646,6 @@ body {
   cursor: pointer;
 }
 
-.kb-sidebar-empty-area:hover {
-  background: var(--hover-bg);
-}
-
 @keyframes kb-spin {
   from {
     transform: rotate(0deg);
