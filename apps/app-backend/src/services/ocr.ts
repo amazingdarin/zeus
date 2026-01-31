@@ -268,7 +268,28 @@ async function parseWithPaddleOCR(request: OCRRequest, endpoint: string): Promis
       throw new Error(result.error || "PaddleOCR processing failed");
     }
 
-    console.log(`[OCR] PaddleOCR response received, markdown length: ${result.markdown?.length || 0}`);
+    // Log OCR result details
+    console.log(`[OCR] ========== PaddleOCR Result ==========`);
+    console.log(`[OCR] Provider: PaddleOCR (${endpoint})`);
+    console.log(`[OCR] Output format: ${outputFormat}`);
+    console.log(`[OCR] Markdown length: ${result.markdown?.length || 0} chars`);
+    if (result.markdown) {
+      // Print first 500 chars of markdown for debugging
+      const preview = result.markdown.length > 500 
+        ? result.markdown.substring(0, 500) + "...(truncated)" 
+        : result.markdown;
+      console.log(`[OCR] Markdown preview:\n${preview}`);
+    }
+    if (result.content) {
+      const contentStr = JSON.stringify(result.content);
+      console.log(`[OCR] Tiptap JSON length: ${contentStr.length} chars`);
+      // Print node types summary
+      if (result.content.content && Array.isArray(result.content.content)) {
+        const nodeTypes = result.content.content.map((n: { type?: string }) => n.type).filter(Boolean);
+        console.log(`[OCR] Node types: ${nodeTypes.join(", ")}`);
+      }
+    }
+    console.log(`[OCR] ========================================`);
 
     return {
       content: result.content,
