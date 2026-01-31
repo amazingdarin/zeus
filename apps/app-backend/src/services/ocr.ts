@@ -387,12 +387,17 @@ export async function parseImage(request: OCRRequest): Promise<OCRResponse> {
   // Check PaddleOCR first (better for document parsing)
   const paddleAvailable = await checkPaddleOCR();
   if (paddleAvailable) {
-    console.log("[OCR] Using PaddleOCR-VL (auto-selected)");
-    return parseWithPaddleOCR(request);
+    console.log("[OCR] Trying PaddleOCR-VL (auto-selected)");
+    try {
+      return await parseWithPaddleOCR(request);
+    } catch (err) {
+      console.warn("[OCR] PaddleOCR failed, falling back to LLM Vision:", err instanceof Error ? err.message : err);
+      // Fall through to LLM vision
+    }
   }
 
   // Fall back to LLM vision
-  console.log("[OCR] Using LLM Vision (auto-selected, PaddleOCR not available)");
+  console.log("[OCR] Using LLM Vision (auto-selected)");
   return parseWithLLMVision(request);
 }
 
