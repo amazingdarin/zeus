@@ -186,9 +186,11 @@ def markdown_to_tiptap(markdown: str) -> Dict[str, Any]:
 class PaddleOCRCLI:
     """PaddleOCR-VL CLI wrapper"""
     
-    def __init__(self):
+    def __init__(self, preload: bool = False):
         self.pipeline = None
         self._initialized = False
+        if preload:
+            self._ensure_initialized()
     
     def _ensure_initialized(self):
         """Lazy initialization of PaddleOCR pipeline"""
@@ -198,12 +200,17 @@ class PaddleOCRCLI:
         if not PADDLEOCR_AVAILABLE:
             raise RuntimeError("PaddleOCR is not installed. Run: pip install paddleocr[doc-parser]")
         
+        import logging
+        logger = logging.getLogger("paddleocr-cli")
+        logger.info("Loading PaddleOCR-VL model... (this may take a moment)")
+        
         self.pipeline = PaddleOCRVL(
             use_doc_orientation_classify=False,
             use_doc_unwarping=False,
             use_layout_detection=True
         )
         self._initialized = True
+        logger.info("PaddleOCR-VL model loaded successfully")
     
     def process_image(self, image_path: str, output_format: str = "tiptap") -> Dict[str, Any]:
         """

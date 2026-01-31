@@ -59,9 +59,14 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing PaddleOCR-VL service...")
     
     if PADDLEOCR_AVAILABLE:
-        ocr_cli = PaddleOCRCLI()
-        # Lazy init - don't load model until first request
-        logger.info("PaddleOCR-VL service ready (lazy initialization)")
+        # Preload model on startup for faster first request
+        preload = os.environ.get("PADDLEOCR_PRELOAD", "true").lower() == "true"
+        logger.info(f"Creating PaddleOCR CLI (preload={preload})...")
+        ocr_cli = PaddleOCRCLI(preload=preload)
+        if preload:
+            logger.info("PaddleOCR-VL service ready (model preloaded)")
+        else:
+            logger.info("PaddleOCR-VL service ready (lazy initialization)")
     else:
         logger.warning("PaddleOCR not installed. OCR functionality will be unavailable.")
         ocr_cli = None
@@ -129,7 +134,7 @@ class InfoResponse(BaseModel):
 async def health_check():
     """Health check endpoint"""
     return HealthResponse(
-        status="ok" if PADDLEOCR_AVAILABLE else "degraded",
+        status="healthy" if PADDLEOCR_AVAILABLE else "degraded",
         paddleocr_available=PADDLEOCR_AVAILABLE,
         model_loaded=ocr_cli is not None and ocr_cli._initialized
     )
