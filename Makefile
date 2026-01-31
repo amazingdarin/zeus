@@ -4,7 +4,7 @@ HELM_NAMESPACE ?= zeus
 NAMESPACE ?= $(HELM_NAMESPACE)
 CONFIG_PATH ?= /tmp/zeus-$(NAMESPACE)/config.yaml
 
-.PHONY: run-server run-app-backend run-app-web run-app-desktop install uninstall dev-install build-postgres-image build-backend-image build-frontend-image start-deps start-deps-dev stop-deps stop-deps-dev clean-deps start-all stop-all clean-all test-integration
+.PHONY: run-server run-app-backend run-app-web run-app-desktop install uninstall dev-install build-postgres-image build-backend-image build-frontend-image start-deps start-deps-dev stop-deps stop-deps-dev clean-deps start-all stop-all clean-all test-integration setup-python-venv install-paddleocr
 
 # Development run commands
 run-server:
@@ -88,3 +88,20 @@ test-integration:
 	$(MAKE) start-deps NAMESPACE=zeus-test
 	cd server && ZEUS_CONFIG_PATH=/tmp/zeus-zeus-test/config.yaml go test ./internal/... -run Integration -v || ( $(MAKE) clean-all NAMESPACE=zeus-test; exit 1 )
 	$(MAKE) clean-all NAMESPACE=zeus-test
+
+# Python environment setup
+PYTHON_VENV := .venv
+
+setup-python-venv:
+	@echo "Creating Python virtual environment in $(PYTHON_VENV)..."
+	python3 -m venv $(PYTHON_VENV)
+	@echo "Virtual environment created. Activate with:"
+	@echo "  source $(PYTHON_VENV)/bin/activate"
+
+install-paddleocr: setup-python-venv
+	@echo "Installing PaddleOCR dependencies..."
+	$(PYTHON_VENV)/bin/pip install --upgrade pip
+	$(PYTHON_VENV)/bin/pip install -r scripts/ocr/requirements.txt
+	@echo "PaddleOCR dependencies installed."
+	@echo "To use PaddleOCR, activate the venv first:"
+	@echo "  source $(PYTHON_VENV)/bin/activate"
