@@ -1405,6 +1405,17 @@ export const buildRouter = () => {
         requiresBaseUrl: true,
         defaultModels: [],
       },
+      {
+        id: "paddleocr",
+        name: "PaddleOCR",
+        description: "PaddleOCR 文档识别服务 (本地或远程)",
+        requiresApiKey: false,
+        supportsBaseUrl: true,
+        requiresBaseUrl: true,
+        defaultBaseUrl: "http://localhost:8001",
+        defaultModels: [],
+        ocrOnly: true,
+      },
     ];
     success(res, types);
   });

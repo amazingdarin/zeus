@@ -7,7 +7,7 @@ import { apiFetch } from "../config/api";
 /**
  * LLM Provider IDs
  */
-export type LLMProviderId = "openai" | "anthropic" | "google" | "ollama" | "openai-compatible";
+export type LLMProviderId = "openai" | "anthropic" | "google" | "ollama" | "openai-compatible" | "paddleocr";
 
 /**
  * Configuration type: LLM for chat/completion, embedding for embeddings

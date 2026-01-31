@@ -50,6 +50,8 @@ function getProviderIcon(providerId: LLMProviderId) {
       return <ApiOutlined />;
     case "ollama":
       return <DesktopOutlined />;
+    case "paddleocr":
+      return <ThunderboltOutlined />;
     default:
       return <CloudServerOutlined />;
   }
@@ -375,9 +377,13 @@ function AIProviderPanel() {
         {typeInfo?.supportsBaseUrl && (
           <Form.Item
             name="baseUrl"
-            label="API 地址"
-            extra={typeInfo.requiresBaseUrl ? "该提供商必须填写此项" : "可选，用于自定义接口地址"}
-            rules={typeInfo.requiresBaseUrl ? [{ required: true, message: "API 地址为必填项" }] : undefined}
+            label={selectedProvider === "paddleocr" ? "服务地址" : "API 地址"}
+            extra={
+              selectedProvider === "paddleocr" 
+                ? "PaddleOCR 服务的 HTTP 地址"
+                : typeInfo.requiresBaseUrl ? "该提供商必须填写此项" : "可选，用于自定义接口地址"
+            }
+            rules={typeInfo.requiresBaseUrl ? [{ required: true, message: selectedProvider === "paddleocr" ? "服务地址为必填项" : "API 地址为必填项" }] : undefined}
           >
             <Input 
               placeholder={typeInfo.defaultBaseUrl || "https://api.example.com/v1"}
@@ -391,6 +397,8 @@ function AIProviderPanel() {
           </Form.Item>
         )}
 
+        {/* Don't show model field for PaddleOCR */}
+        {selectedProvider !== "paddleocr" && (
         <Form.Item
           name="defaultModel"
           label={
@@ -437,6 +445,7 @@ function AIProviderPanel() {
             <Input placeholder="model-name" />
           )}
         </Form.Item>
+        )}
 
         <Form.Item name="enabled" label="启用" valuePropName="checked" initialValue={true}>
           <Switch />
@@ -484,8 +493,8 @@ function AIProviderPanel() {
         {renderConfigCard(
           "vision",
           visionConfig,
-          "视觉模型",
-          "用于 OCR 识别的备用模型"
+          "OCR 文档识别",
+          "用于图片/PDF 文字识别，支持 LLM 视觉模型或 PaddleOCR 服务"
         )}
       </div>
 
@@ -503,7 +512,16 @@ function AIProviderPanel() {
               选择一个提供商类型：
             </p>
             <div className="provider-type-grid">
-              {providerTypes.map((type) => (
+              {providerTypes
+                .filter((type) => {
+                  // PaddleOCR only shows for vision/OCR config
+                  if (type.id === "paddleocr") {
+                    return editingType === "vision";
+                  }
+                  // For vision config, show all providers (LLM vision models too)
+                  return true;
+                })
+                .map((type) => (
                 <div
                   key={type.id}
                   className={`provider-type-card${selectedProvider === type.id ? " selected" : ""}`}

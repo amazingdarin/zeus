@@ -10,7 +10,8 @@ export type LLMProviderId =
   | "anthropic"
   | "google"
   | "ollama"
-  | "openai-compatible";
+  | "openai-compatible"
+  | "paddleocr";
 
 /**
  * Provider configuration

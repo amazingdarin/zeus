@@ -47,9 +47,29 @@ export type OCRProviderStatus = {
 // Configuration
 // ============================================================================
 
-// PaddleOCR service endpoint (configurable via env)
-const PADDLE_OCR_PORT = process.env.PADDLE_OCR_PORT || "8001";
-const PADDLE_OCR_ENDPOINT = process.env.PADDLE_OCR_URL || `http://localhost:${PADDLE_OCR_PORT}`;
+// Default PaddleOCR service endpoint (can be overridden by vision config)
+const DEFAULT_PADDLE_OCR_PORT = process.env.PADDLE_OCR_PORT || "8001";
+const DEFAULT_PADDLE_OCR_ENDPOINT = process.env.PADDLE_OCR_URL || `http://localhost:${DEFAULT_PADDLE_OCR_PORT}`;
+
+/**
+ * Get PaddleOCR endpoint from vision config or fallback to env/default
+ */
+async function getPaddleOCREndpoint(): Promise<string | null> {
+  const visionConfig = await getVisionConfig();
+  
+  // If vision config is paddleocr provider, use its baseUrl
+  if (visionConfig && visionConfig.enabled && visionConfig.providerId === "paddleocr") {
+    return visionConfig.baseUrl || DEFAULT_PADDLE_OCR_ENDPOINT;
+  }
+  
+  // Fall back to env/default only if no vision config or it's not paddleocr
+  // Return null if ENABLE_PADDLE_OCR is false
+  if (process.env.ENABLE_PADDLE_OCR === "false") {
+    return null;
+  }
+  
+  return DEFAULT_PADDLE_OCR_ENDPOINT;
+}
 
 // ============================================================================
 // Prompt Templates (for LLM Vision)
@@ -176,49 +196,55 @@ async function getVisionCapableConfig(): Promise<ProviderConfigInternal | null> 
 // PaddleOCR Service Client
 // ============================================================================
 
-let paddleOCRAvailable: boolean | null = null;
-let paddleOCRCheckTime: number = 0;
+let paddleOCRCache: { available: boolean; endpoint: string; timestamp: number } | null = null;
 const PADDLE_CHECK_TTL = 30 * 1000; // 30 seconds
 
 /**
- * Check if PaddleOCR service is available
+ * Check if PaddleOCR service is available and return its endpoint
  */
-async function checkPaddleOCR(): Promise<boolean> {
+async function checkPaddleOCR(): Promise<{ available: boolean; endpoint: string | null }> {
+  const endpoint = await getPaddleOCREndpoint();
+  
+  if (!endpoint) {
+    return { available: false, endpoint: null };
+  }
+  
   const now = Date.now();
-  if (paddleOCRAvailable !== null && now - paddleOCRCheckTime < PADDLE_CHECK_TTL) {
-    return paddleOCRAvailable;
+  if (paddleOCRCache && paddleOCRCache.endpoint === endpoint && now - paddleOCRCache.timestamp < PADDLE_CHECK_TTL) {
+    return { available: paddleOCRCache.available, endpoint };
   }
 
   try {
-    const response = await fetch(`${PADDLE_OCR_ENDPOINT}/api/ocr/health`, {
+    const response = await fetch(`${endpoint}/api/ocr/health`, {
       method: "GET",
       signal: AbortSignal.timeout(5000),
     });
 
     if (response.ok) {
       const data = await response.json();
-      paddleOCRAvailable = data.paddleocr_available === true;
+      const available = data.paddleocr_available === true || data.status === "ok";
+      paddleOCRCache = { available, endpoint, timestamp: now };
+      return { available, endpoint };
     } else {
-      paddleOCRAvailable = false;
+      paddleOCRCache = { available: false, endpoint, timestamp: now };
+      return { available: false, endpoint };
     }
   } catch {
-    paddleOCRAvailable = false;
+    paddleOCRCache = { available: false, endpoint, timestamp: now };
+    return { available: false, endpoint };
   }
-
-  paddleOCRCheckTime = now;
-  return paddleOCRAvailable;
 }
 
 /**
  * Parse image using PaddleOCR service
  */
-async function parseWithPaddleOCR(request: OCRRequest): Promise<OCRResponse> {
+async function parseWithPaddleOCR(request: OCRRequest, endpoint: string): Promise<OCRResponse> {
   const outputFormat = request.outputFormat || "tiptap";
 
-  console.log(`[OCR] Processing image with PaddleOCR-VL`);
+  console.log(`[OCR] Processing image with PaddleOCR at ${endpoint}`);
 
   try {
-    const response = await fetch(`${PADDLE_OCR_ENDPOINT}/api/ocr/parse-base64`, {
+    const response = await fetch(`${endpoint}/api/ocr/parse-base64`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -248,7 +274,7 @@ async function parseWithPaddleOCR(request: OCRRequest): Promise<OCRResponse> {
       content: result.content,
       markdown: result.markdown,
       rawResponse: JSON.stringify(result),
-      provider: "PaddleOCR-VL",
+      provider: `PaddleOCR (${endpoint})`,
     };
   } catch (err) {
     console.error("[OCR] PaddleOCR error:", err);
@@ -403,11 +429,11 @@ export async function parseImage(request: OCRRequest): Promise<OCRResponse> {
 
   // If specific provider is requested
   if (preferredProvider === "paddle") {
-    const paddleAvailable = await checkPaddleOCR();
-    if (!paddleAvailable) {
-      throw new Error("PaddleOCR service is not available. Please start the service or use LLM vision.");
+    const paddle = await checkPaddleOCR();
+    if (!paddle.available || !paddle.endpoint) {
+      throw new Error("PaddleOCR service is not available. Please configure it in settings or use LLM vision.");
     }
-    return parseWithPaddleOCR(request);
+    return parseWithPaddleOCR(request, paddle.endpoint);
   }
 
   if (preferredProvider === "llm") {
@@ -415,21 +441,35 @@ export async function parseImage(request: OCRRequest): Promise<OCRResponse> {
   }
 
   // Auto-select provider
-  // Check PaddleOCR first (better for document parsing)
-  const paddleAvailable = await checkPaddleOCR();
-  if (paddleAvailable) {
-    console.log("[OCR] Trying PaddleOCR-VL (auto-selected)");
-    try {
-      return await parseWithPaddleOCR(request);
-    } catch (err) {
-      console.warn("[OCR] PaddleOCR failed, falling back to LLM Vision:", err instanceof Error ? err.message : err);
-      // Fall through to LLM vision
+  // First check if vision config is PaddleOCR
+  const visionConfig = await getVisionConfig();
+  if (visionConfig && visionConfig.enabled && visionConfig.providerId === "paddleocr") {
+    const paddle = await checkPaddleOCR();
+    if (paddle.available && paddle.endpoint) {
+      console.log(`[OCR] Using PaddleOCR from config: ${paddle.endpoint}`);
+      try {
+        return await parseWithPaddleOCR(request, paddle.endpoint);
+      } catch (err) {
+        console.warn("[OCR] PaddleOCR failed, falling back to LLM Vision:", err instanceof Error ? err.message : err);
+      }
     }
   }
 
-  // Fall back to LLM vision
-  console.log("[OCR] Using LLM Vision (auto-selected)");
-  return parseWithLLMVision(request);
+  // Try LLM vision (from vision config or LLM config)
+  const llmConfig = await getVisionCapableConfig();
+  if (llmConfig && llmConfig.enabled && llmConfig.providerId !== "paddleocr") {
+    console.log("[OCR] Using LLM Vision");
+    return parseWithLLMVision(request);
+  }
+
+  // Last resort: try default PaddleOCR endpoint
+  const defaultPaddle = await checkPaddleOCR();
+  if (defaultPaddle.available && defaultPaddle.endpoint) {
+    console.log("[OCR] Trying default PaddleOCR");
+    return parseWithPaddleOCR(request, defaultPaddle.endpoint);
+  }
+
+  throw new Error("没有可用的 OCR 服务。请在设置中配置 OCR 文档识别模型或 PaddleOCR 服务。");
 }
 
 /**
@@ -482,30 +522,38 @@ export async function isVisionAvailable(): Promise<boolean> {
  * Check if PaddleOCR service is available
  */
 export async function isPaddleOCRAvailable(): Promise<boolean> {
-  return checkPaddleOCR();
+  const paddle = await checkPaddleOCR();
+  return paddle.available;
 }
 
 /**
  * Get status of all OCR providers
  */
 export async function getProviderStatus(): Promise<OCRProviderStatus> {
-  const [llmConfig, paddleAvailable] = await Promise.all([
+  const [visionConfig, llmConfig, paddle] = await Promise.all([
+    getVisionConfig(),
     getLLMConfig(),
     checkPaddleOCR(),
   ]);
 
-  const llmAvailable = llmConfig?.enabled && llmConfig?.defaultModel
-    ? await isVisionAvailable()
-    : false;
+  // Check if vision config is LLM-based (not paddleocr)
+  const llmVisionAvailable = visionConfig?.enabled && 
+    visionConfig?.defaultModel && 
+    visionConfig.providerId !== "paddleocr";
+  
+  // Or fall back to LLM config
+  const llmFallbackAvailable = !llmVisionAvailable && 
+    llmConfig?.enabled && 
+    llmConfig?.defaultModel;
 
   return {
     llm: {
-      available: llmAvailable,
-      model: llmConfig?.defaultModel,
+      available: llmVisionAvailable || llmFallbackAvailable,
+      model: llmVisionAvailable ? visionConfig?.defaultModel : llmConfig?.defaultModel,
     },
     paddle: {
-      available: paddleAvailable,
-      endpoint: PADDLE_OCR_ENDPOINT,
+      available: paddle.available,
+      endpoint: paddle.endpoint || undefined,
     },
   };
 }
