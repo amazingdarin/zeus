@@ -108,7 +108,7 @@ type UploadSummary = {
   fallback: number;
 };
 
-type SmartImportType = "markdown" | "word" | "pdf";
+type SmartImportType = "markdown" | "word" | "pdf" | "image";
 
 type SmartImportOption = {
   id: SmartImportType;
@@ -150,6 +150,7 @@ const SMART_IMPORT_OPTIONS: SmartImportOption[] = [
   { id: "markdown", label: "Markdown", enabled: true },
   { id: "word", label: "Word", enabled: true },
   { id: "pdf", label: "PDF", enabled: false },
+  { id: "image", label: "Image", enabled: true },
 ];
 
 const createDefaultUploadFilterSet = () => new Set<UploadFilterPresetId>(["all"]);
@@ -1494,6 +1495,31 @@ function DocumentPage() {
           smartImportEnabled &&
           smartImportTypes.has("word") &&
           isDocxFile(entry.file);
+        const canImageImport =
+          smartImportEnabled &&
+          smartImportTypes.has("image") &&
+          isImageAsset(entry.file.type, entry.file.name);
+        if (canImageImport) {
+          // Image smart import: upload and create image block directly
+          try {
+            const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
+            const imageBlock = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, false);
+            await createDocumentRecord(
+              resolvedProjectKey,
+              {
+                title: docTitle,
+                parentId,
+              },
+              { type: "doc", content: [imageBlock] },
+            );
+            converted += 1;
+          } catch (err) {
+            console.error("Image import failed:", err);
+            fallback += 1;
+          }
+          markCompleted();
+          continue;
+        }
         if (canSmartImport || canDocxImport) {
           try {
             const markdown = canDocxImport

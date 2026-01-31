@@ -263,7 +263,7 @@ export const importDocument = async (
     }
 };
 
-export type SmartImportType = "markdown" | "word" | "pdf";
+export type SmartImportType = "markdown" | "word" | "pdf" | "image";
 export type FileTypeFilter = "all" | "images" | "office" | "text" | "markdown";
 
 export type ImportGitRequest = {
