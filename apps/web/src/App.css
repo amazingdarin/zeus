@@ -3662,17 +3662,18 @@ body {
   padding: 0 !important;
 }
 
+/* Fix Ant Design 5.x modal container white background */
+[data-theme="dark"] .ant-modal .ant-modal-container,
+[data-theme="dark"] .ant-modal-container {
+  background-color: #161b22 !important;
+  box-shadow: 0 6px 16px 0 rgba(0, 0, 0, 0.5) !important;
+}
+
 /* Remove white background from modal root and all wrappers */
 [data-theme="dark"] .ant-modal,
 [data-theme="dark"] .ant-modal-wrap,
 [data-theme="dark"] .ant-modal-root {
   background: transparent !important;
-}
-
-/* Force dark background on the content wrapper */
-[data-theme="dark"] .ant-modal-content::before,
-[data-theme="dark"] .ant-modal-content::after {
-  display: none !important;
 }
 
 [data-theme="dark"] .ant-modal-header {
