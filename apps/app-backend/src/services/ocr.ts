@@ -304,11 +304,13 @@ async function parseWithPaddleOCR(request: OCRRequest, endpoint: string): Promis
 function parseOCRResponse(response: string): JSONContent {
   // Try to extract JSON from the response
   let jsonStr = response.trim();
+  console.log(`[OCR Parse] Original response length: ${jsonStr.length}`);
 
   // Remove markdown code block if present
   const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (jsonMatch) {
     jsonStr = jsonMatch[1].trim();
+    console.log(`[OCR Parse] Extracted from code block, length: ${jsonStr.length}`);
   }
 
   // Try to find JSON object boundaries
@@ -316,24 +318,30 @@ function parseOCRResponse(response: string): JSONContent {
   const endIdx = jsonStr.lastIndexOf("}");
   if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
     jsonStr = jsonStr.slice(startIdx, endIdx + 1);
+    console.log(`[OCR Parse] Extracted JSON object, length: ${jsonStr.length}`);
+  } else {
+    console.log(`[OCR Parse] No JSON object found (startIdx: ${startIdx}, endIdx: ${endIdx})`);
   }
 
   try {
     const parsed = JSON.parse(jsonStr);
+    console.log(`[OCR Parse] JSON parsed successfully, type: ${parsed.type}, content length: ${parsed.content?.length || 0}`);
     // Validate basic structure
     if (parsed.type === "doc" && Array.isArray(parsed.content)) {
       return parsed as JSONContent;
     }
     // If it's just content array, wrap it
     if (Array.isArray(parsed)) {
+      console.log(`[OCR Parse] Wrapping array as doc content`);
       return { type: "doc", content: parsed };
     }
     // Return as-is if it looks valid
     return parsed as JSONContent;
   } catch (err) {
-    console.error("[OCR] Failed to parse JSON response:", err);
-    console.error("[OCR] Raw response:", response);
+    console.error("[OCR Parse] Failed to parse JSON:", err);
+    console.error("[OCR Parse] Attempted to parse:", jsonStr.substring(0, 500));
     // Return a fallback with the raw text
+    console.log("[OCR Parse] Falling back to raw text as paragraph");
     return {
       type: "doc",
       content: [
@@ -397,12 +405,24 @@ async function parseWithLLMVision(request: OCRRequest): Promise<OCRResponse> {
     });
 
     const rawResponse = result.text;
-    console.log(`[OCR] LLM Vision response received, length: ${rawResponse.length}`);
+    
+    // Detailed logging for debugging
+    console.log(`[OCR] ========== LLM Vision Result ==========`);
+    console.log(`[OCR] Provider: ${config.providerId}/${config.defaultModel}`);
+    console.log(`[OCR] Output format: ${outputFormat}`);
+    console.log(`[OCR] Response length: ${rawResponse.length} chars`);
+    // Print first 1000 chars for debugging
+    const preview = rawResponse.length > 1000 
+      ? rawResponse.substring(0, 1000) + "...(truncated)" 
+      : rawResponse;
+    console.log(`[OCR] Response preview:\n${preview}`);
+    console.log(`[OCR] ========================================`);
 
     if (outputFormat === "markdown") {
       // For markdown output, we need to convert to Tiptap JSON
       const { markdownToTiptapJson } = await import("../utils/markdown.js");
       const content = markdownToTiptapJson(rawResponse);
+      console.log(`[OCR] Converted markdown to Tiptap, nodes: ${content.content?.length || 0}`);
       return {
         content,
         markdown: rawResponse,
@@ -413,6 +433,11 @@ async function parseWithLLMVision(request: OCRRequest): Promise<OCRResponse> {
 
     // Parse Tiptap JSON directly
     const content = parseOCRResponse(rawResponse);
+    console.log(`[OCR] Parsed Tiptap JSON, nodes: ${content.content?.length || 0}`);
+    if (content.content && Array.isArray(content.content)) {
+      const nodeTypes = content.content.map((n: { type?: string }) => n.type).filter(Boolean);
+      console.log(`[OCR] Node types: ${nodeTypes.join(", ") || "(empty)"}`);
+    }
     return {
       content,
       rawResponse,
