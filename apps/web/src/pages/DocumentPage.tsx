@@ -109,7 +109,7 @@ type UploadSummary = {
   fallback: number;
 };
 
-type SmartImportType = "markdown" | "word" | "pdf" | "image" | "ocr";
+type SmartImportType = "all" | "markdown" | "word" | "pdf" | "image" | "ocr";
 
 type SmartImportOption = {
   id: SmartImportType;
@@ -148,12 +148,16 @@ const UPLOAD_FILTER_PRESETS: UploadFilterPreset[] = [
 ];
 
 const SMART_IMPORT_OPTIONS: SmartImportOption[] = [
+  { id: "all", label: "全部", enabled: true },
   { id: "markdown", label: "Markdown", enabled: true },
   { id: "word", label: "Word", enabled: true },
   { id: "pdf", label: "PDF (OCR)", enabled: true },
   { id: "image", label: "Image", enabled: true },
   { id: "ocr", label: "OCR (图片转文档)", enabled: true },
 ];
+
+// All individual smart import types (excluding "all")
+const ALL_SMART_IMPORT_TYPES: SmartImportType[] = ["markdown", "word", "pdf", "image", "ocr"];
 
 const createDefaultUploadFilterSet = () => new Set<UploadFilterPresetId>(["all"]);
 
@@ -344,6 +348,17 @@ function DocumentPage() {
 
   const toggleSmartImportType = useCallback((type: SmartImportType) => {
     setSmartImportTypes((prev) => {
+      if (type === "all") {
+        // If "all" is clicked, toggle between all selected and none selected
+        const hasAll = ALL_SMART_IMPORT_TYPES.every((t) => prev.has(t));
+        if (hasAll) {
+          // Deselect all
+          return new Set<SmartImportType>();
+        }
+        // Select all
+        return new Set<SmartImportType>(ALL_SMART_IMPORT_TYPES);
+      }
+      
       const next = new Set(prev);
       if (next.has(type)) {
         next.delete(type);
@@ -354,8 +369,13 @@ function DocumentPage() {
     });
   }, []);
 
-
-  const isSmartImportTypeSelected = (type: SmartImportType) => smartImportTypes.has(type);
+  const isSmartImportTypeSelected = (type: SmartImportType) => {
+    if (type === "all") {
+      // "All" is selected if all individual types are selected
+      return ALL_SMART_IMPORT_TYPES.every((t) => smartImportTypes.has(t));
+    }
+    return smartImportTypes.has(type);
+  };
 
   /**
    * Convert a tree item to KnowledgeBaseDocument format
@@ -1909,6 +1929,9 @@ function DocumentPage() {
                       </fieldset>
                     </fieldset>
                     <fieldset className="kb-import-smart" aria-label="Filter presets">
+                      <div className="kb-import-smart-header">
+                        <div className="kb-import-smart-title">文件类型筛选</div>
+                      </div>
                       <div className="kb-import-smart-options">
                         {UPLOAD_FILTER_PRESETS.map((preset) => {
                           const active = isUploadFilterSelected(preset.id);
