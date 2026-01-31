@@ -61,6 +61,7 @@ function getProviderIcon(providerId: LLMProviderId) {
 function AIProviderPanel() {
   const [llmConfig, setLlmConfig] = useState<ProviderConfig | null>(null);
   const [embeddingConfig, setEmbeddingConfig] = useState<ProviderConfig | null>(null);
+  const [visionConfig, setVisionConfig] = useState<ProviderConfig | null>(null);
   const [providerTypes, setProviderTypes] = useState<ProviderType[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
@@ -78,13 +79,15 @@ function AIProviderPanel() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [llm, embedding, types] = await Promise.all([
+      const [llm, embedding, vision, types] = await Promise.all([
         getConfigByType("llm"),
         getConfigByType("embedding"),
+        getConfigByType("vision"),
         getProviderTypes(),
       ]);
       setLlmConfig(llm);
       setEmbeddingConfig(embedding);
+      setVisionConfig(vision);
       setProviderTypes(types);
     } catch (err) {
       message.error("加载配置失败");
@@ -327,11 +330,24 @@ function AIProviderPanel() {
   /**
    * Render the selected provider type's configuration form
    */
+  /**
+   * Get existing config by type
+   */
+  const getExistingConfig = (configType: ConfigType | null): ProviderConfig | null => {
+    if (configType === "llm") return llmConfig;
+    if (configType === "embedding") return embeddingConfig;
+    if (configType === "vision") return visionConfig;
+    return null;
+  };
+
+  /**
+   * Render the selected provider type's configuration form
+   */
   const renderForm = () => {
     if (!selectedProvider) return null;
 
     const typeInfo = getTypeInfo(selectedProvider);
-    const existingConfig = editingType === "llm" ? llmConfig : embeddingConfig;
+    const existingConfig = getExistingConfig(editingType);
     const isEditing = !!existingConfig;
     const requiresApiKey = typeInfo?.requiresApiKey ?? true;
 
@@ -444,7 +460,7 @@ function AIProviderPanel() {
     );
   }
 
-  const existingConfig = editingType === "llm" ? llmConfig : embeddingConfig;
+  const existingConfig = getExistingConfig(editingType);
 
   return (
     <>
@@ -464,6 +480,12 @@ function AIProviderPanel() {
           embeddingConfig,
           "Embedding 模型",
           "用于知识库向量检索"
+        )}
+        {renderConfigCard(
+          "vision",
+          visionConfig,
+          "视觉模型",
+          "用于 OCR 识别的备用模型"
         )}
       </div>
 

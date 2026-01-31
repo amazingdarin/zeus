@@ -127,11 +127,21 @@ const buildMarkdownPrompt = (language?: string): string => {
 };
 
 // ============================================================================
-// LLM Config Cache
+// Config Cache
 // ============================================================================
 
+let visionConfigCache: { config: ProviderConfigInternal | null; timestamp: number } | null = null;
 let llmConfigCache: { config: ProviderConfigInternal | null; timestamp: number } | null = null;
 const CONFIG_CACHE_TTL = 60 * 1000; // 1 minute
+
+async function getVisionConfig(): Promise<ProviderConfigInternal | null> {
+  if (visionConfigCache && Date.now() - visionConfigCache.timestamp < CONFIG_CACHE_TTL) {
+    return visionConfigCache.config;
+  }
+  const config = await configStore.getInternalByType("vision");
+  visionConfigCache = { config, timestamp: Date.now() };
+  return config;
+}
 
 async function getLLMConfig(): Promise<ProviderConfigInternal | null> {
   if (llmConfigCache && Date.now() - llmConfigCache.timestamp < CONFIG_CACHE_TTL) {
@@ -140,6 +150,26 @@ async function getLLMConfig(): Promise<ProviderConfigInternal | null> {
   const config = await configStore.getInternalByType("llm");
   llmConfigCache = { config, timestamp: Date.now() };
   return config;
+}
+
+/**
+ * Get the best available vision-capable config
+ * Priority: vision config > llm config (if vision-capable)
+ */
+async function getVisionCapableConfig(): Promise<ProviderConfigInternal | null> {
+  // First try dedicated vision config
+  const visionConfig = await getVisionConfig();
+  if (visionConfig && visionConfig.enabled && visionConfig.defaultModel) {
+    return visionConfig;
+  }
+  
+  // Fall back to LLM config if no vision config
+  const llmConfig = await getLLMConfig();
+  if (llmConfig && llmConfig.enabled && llmConfig.defaultModel) {
+    return llmConfig;
+  }
+  
+  return null;
 }
 
 // ============================================================================
@@ -280,15 +310,16 @@ function parseOCRResponse(response: string): JSONContent {
 
 /**
  * Parse image using LLM vision
+ * Uses dedicated vision config if available, otherwise falls back to LLM config
  */
 async function parseWithLLMVision(request: OCRRequest): Promise<OCRResponse> {
-  const config = await getLLMConfig();
+  const config = await getVisionCapableConfig();
   if (!config || !config.enabled) {
-    throw new Error("No LLM provider configured. Please configure an LLM provider in settings.");
+    throw new Error("未配置视觉模型。请在设置中配置视觉模型或 LLM 提供商。");
   }
 
   if (!config.defaultModel) {
-    throw new Error("No default model configured for LLM provider.");
+    throw new Error("未配置默认模型。");
   }
 
   const outputFormat = request.outputFormat || "tiptap";
@@ -402,11 +433,21 @@ export async function parseImage(request: OCRRequest): Promise<OCRResponse> {
 }
 
 /**
- * Check if the configured LLM supports vision
+ * Check if vision-capable model is available
+ * Returns true if:
+ * 1. A dedicated vision config is configured, OR
+ * 2. LLM config has a vision-capable model
  */
 export async function isVisionAvailable(): Promise<boolean> {
-  const config = await getLLMConfig();
-  if (!config || !config.enabled || !config.defaultModel) {
+  // First check if dedicated vision config is available
+  const visionConfig = await getVisionConfig();
+  if (visionConfig && visionConfig.enabled && visionConfig.defaultModel) {
+    return true; // Assume vision config is always vision-capable
+  }
+  
+  // Fall back to checking LLM config
+  const llmConfig = await getLLMConfig();
+  if (!llmConfig || !llmConfig.enabled || !llmConfig.defaultModel) {
     return false;
   }
 
@@ -433,7 +474,7 @@ export async function isVisionAvailable(): Promise<boolean> {
     "moondream",
   ];
 
-  const modelLower = config.defaultModel.toLowerCase();
+  const modelLower = llmConfig.defaultModel.toLowerCase();
   return visionModels.some((vm) => modelLower.includes(vm.toLowerCase()));
 }
 

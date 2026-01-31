@@ -13,7 +13,7 @@ import type { LLMProviderId } from "./types.js";
 /**
  * Configuration type: LLM for chat/completion, embedding for embeddings
  */
-export type ConfigType = "llm" | "embedding";
+export type ConfigType = "llm" | "embedding" | "vision";
 
 /**
  * Provider configuration as stored in database

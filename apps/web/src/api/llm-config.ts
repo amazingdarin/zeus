@@ -12,7 +12,7 @@ export type LLMProviderId = "openai" | "anthropic" | "google" | "ollama" | "open
 /**
  * Configuration type: LLM for chat/completion, embedding for embeddings
  */
-export type ConfigType = "llm" | "embedding";
+export type ConfigType = "llm" | "embedding" | "vision";
 
 /**
  * Provider configuration status
