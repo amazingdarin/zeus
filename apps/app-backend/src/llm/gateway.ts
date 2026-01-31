@@ -22,33 +22,63 @@ import type {
  * Chat with an LLM model
  */
 export async function chat(options: ChatOptions): Promise<ChatResponse> {
+  console.log(`[LLM Gateway] chat() called with:`, {
+    provider: options.provider,
+    model: options.model,
+    baseUrl: options.baseUrl,
+    hasApiKey: !!options.apiKey,
+    messageCount: options.messages.length,
+  });
+
   const model = providerRegistry.getLanguageModel(options.provider, options.model, {
     baseUrl: options.baseUrl,
     apiKey: options.apiKey,
   });
 
-  const result = await generateText({
-    model,
-    messages: options.messages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    })),
-    temperature: options.temperature,
-    maxTokens: options.maxTokens,
-    topP: options.topP,
-  });
+  console.log(`[LLM Gateway] Got model instance, calling generateText...`);
 
-  return {
-    id: result.response?.id || crypto.randomUUID(),
-    model: options.model,
-    content: result.text,
-    finishReason: result.finishReason || "stop",
-    usage: {
-      promptTokens: result.usage?.promptTokens || 0,
-      completionTokens: result.usage?.completionTokens || 0,
-      totalTokens: result.usage?.totalTokens || 0,
-    },
-  };
+  try {
+    const result = await generateText({
+      model,
+      messages: options.messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+      temperature: options.temperature,
+      maxTokens: options.maxTokens,
+      topP: options.topP,
+    });
+
+    console.log(`[LLM Gateway] generateText succeeded`);
+
+    return {
+      id: result.response?.id || crypto.randomUUID(),
+      model: options.model,
+      content: result.text,
+      finishReason: result.finishReason || "stop",
+      usage: {
+        promptTokens: result.usage?.promptTokens || 0,
+        completionTokens: result.usage?.completionTokens || 0,
+        totalTokens: result.usage?.totalTokens || 0,
+      },
+    };
+  } catch (err) {
+    console.error(`[LLM Gateway] generateText failed:`, err);
+    // Try to extract more details from the error
+    if (err && typeof err === "object") {
+      const anyErr = err as Record<string, unknown>;
+      if (anyErr.cause) {
+        console.error(`[LLM Gateway] Error cause:`, anyErr.cause);
+      }
+      if (anyErr.response) {
+        console.error(`[LLM Gateway] Error response:`, anyErr.response);
+      }
+      if (anyErr.data) {
+        console.error(`[LLM Gateway] Error data:`, anyErr.data);
+      }
+    }
+    throw err;
+  }
 }
 
 /**

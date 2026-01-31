@@ -420,9 +420,15 @@ class ProviderRegistry {
       }
       case "openai-compatible": {
         // For OpenAI-compatible providers, use OpenAI SDK with custom baseUrl
+        const effectiveBaseUrl = baseUrl || config?.baseUrl || "";
+        console.log(`[ProviderRegistry] Creating openai-compatible model:`, {
+          modelId,
+          baseUrl: effectiveBaseUrl,
+          hasApiKey: !!(apiKey || config?.apiKey),
+        });
         const openai = createOpenAI({
           apiKey: apiKey || config?.apiKey || "",
-          baseURL: baseUrl || config?.baseUrl || "",
+          baseURL: effectiveBaseUrl,
           compatibility: "compatible",
         });
         return openai(modelId);

@@ -975,10 +975,21 @@ export const buildRouter = () => {
         return;
       }
       
+      // Log test request details
+      console.log(`[LLM Test] Testing ${configType} provider:`, {
+        id: config.id,
+        providerId: config.providerId,
+        displayName: config.displayName,
+        baseUrl: config.baseUrl,
+        model: config.defaultModel,
+        hasApiKey: !!config.apiKey,
+      });
+      
       // Test based on config type
       try {
         if (configType === "embedding") {
           // Test embedding
+          console.log(`[LLM Test] Calling embedding API...`);
           await llmGateway.generateEmbeddings({
             inputs: ["test"],
             model: config.defaultModel || "nomic-embed-text",
@@ -988,6 +999,7 @@ export const buildRouter = () => {
           });
         } else {
           // Test LLM chat
+          console.log(`[LLM Test] Calling chat API...`);
           await llmGateway.chat({
             messages: [{ role: "user", content: "Hi" }],
             model: config.defaultModel || "gpt-4o",
@@ -997,17 +1009,31 @@ export const buildRouter = () => {
           });
         }
         
+        console.log(`[LLM Test] Test succeeded for ${config.displayName}`);
         await configStore.updateStatus(config.id, "active");
         const updated = await configStore.getByType(configType as ConfigType);
         success(res, { success: true, config: updated });
       } catch (testErr) {
+        // Log detailed error information
         const testMessage = testErr instanceof Error ? testErr.message : "Test failed";
+        console.error(`[LLM Test] Test failed for ${config.displayName}:`, testMessage);
+        if (testErr instanceof Error) {
+          console.error(`[LLM Test] Error stack:`, testErr.stack);
+          // Log cause if available
+          if (testErr.cause) {
+            console.error(`[LLM Test] Error cause:`, testErr.cause);
+          }
+        }
+        // Log the full error object for debugging
+        console.error(`[LLM Test] Full error object:`, JSON.stringify(testErr, Object.getOwnPropertyNames(testErr), 2));
+        
         await configStore.updateStatus(config.id, "error", testMessage);
         const updated = await configStore.getByType(configType as ConfigType);
         success(res, { success: false, error: testMessage, config: updated });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Test config failed";
+      console.error(`[LLM Test] Unexpected error:`, err);
       error(res, "TEST_CONFIG_FAILED", message, 500);
     }
   });
