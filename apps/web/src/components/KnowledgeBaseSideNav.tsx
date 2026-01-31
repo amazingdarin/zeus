@@ -42,6 +42,7 @@ type KnowledgeBaseSideNavProps = {
   onMove: (request: KnowledgeBaseMoveRequest) => void;
   onRefresh?: () => void;
   onRebuildIndex?: () => void;
+  onEmptyAreaClick?: () => void;
 };
 
 const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
@@ -58,6 +59,7 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
   onMove,
   onRefresh,
   onRebuildIndex,
+  onEmptyAreaClick,
 }: KnowledgeBaseSideNavProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{
@@ -343,13 +345,33 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
           </Tooltip>
         )}
       </div>
-      <div className="kb-sidebar-content">
+      <div
+        className="kb-sidebar-content"
+        onClick={(e) => {
+          // Only trigger if clicking directly on the content area, not on documents
+          if (e.target === e.currentTarget && onEmptyAreaClick) {
+            onEmptyAreaClick();
+          }
+        }}
+      >
         {rootLoading ? (
           <div className="kb-doc-loading">Loading...</div>
         ) : documents.length === 0 ? (
-          <div className="kb-doc-empty">No items</div>
+          <div 
+            className="kb-doc-empty kb-doc-empty-clickable"
+            onClick={() => onEmptyAreaClick?.()}
+          >
+            点击添加文档
+          </div>
         ) : (
-          renderTree(documents, 0)
+          <>
+            {renderTree(documents, 0)}
+            {/* Clickable empty area at the bottom */}
+            <div 
+              className="kb-sidebar-empty-area"
+              onClick={() => onEmptyAreaClick?.()}
+            />
+          </>
         )}
       </div>
     </aside>

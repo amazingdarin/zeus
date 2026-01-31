@@ -1638,6 +1638,7 @@ function DocumentPage() {
           onMove={handleMove}
           onRefresh={handleRefresh}
           onRebuildIndex={handleRebuildIndex}
+          onEmptyAreaClick={() => navigate("/documents")}
         />
       }
     >
