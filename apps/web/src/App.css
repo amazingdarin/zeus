@@ -1228,11 +1228,53 @@ body {
 .kb-sidebar {
   background: var(--kb-sidebar-bg);
   border-radius: 18px;
-  padding: 16px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.kb-sidebar-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+
+.kb-sidebar-toolbar-spacer {
+  flex: 1;
+}
+
+.kb-sidebar-toolbar-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.kb-sidebar-toolbar-btn:hover {
+  background: var(--hover-bg);
+  color: var(--ink);
+}
+
+.kb-sidebar-toolbar-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.kb-sidebar-content {
+  flex: 1;
   min-height: 0;
   overflow: auto;
 }

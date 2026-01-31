@@ -628,6 +628,15 @@ function DocumentPage() {
     [],
   );
 
+  const handleRefresh = useCallback(() => {
+    if (!resolvedProjectKey || rootLoading) {
+      return;
+    }
+    // Force reload by resetting the attempt ref
+    rootLoadAttemptRef.current = "";
+    void loadFullTreeRef.current(resolvedProjectKey);
+  }, [resolvedProjectKey, rootLoading]);
+
   const handleDocumentsChanged = useCallback(
     async (parentId: string) => {
       if (!resolvedProjectKey) {
@@ -1527,6 +1536,7 @@ function DocumentPage() {
           onSelect={handleSelectDocument}
           onToggle={handleToggle}
           onMove={handleMove}
+          onRefresh={handleRefresh}
         />
       }
     >

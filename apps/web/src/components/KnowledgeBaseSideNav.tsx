@@ -1,5 +1,5 @@
 import { useMemo, useState, memo, type DragEvent } from "react";
-import { DownOutlined, RightOutlined } from "@ant-design/icons";
+import { DownOutlined, RightOutlined, ReloadOutlined } from "@ant-design/icons";
 
 export type KnowledgeBaseDocument = {
   id: string;
@@ -31,6 +31,7 @@ type KnowledgeBaseSideNavProps = {
   onSelect: (doc: KnowledgeBaseDocument) => void;
   onToggle: (doc: KnowledgeBaseDocument) => void;
   onMove: (request: KnowledgeBaseMoveRequest) => void;
+  onRefresh?: () => void;
 };
 
 const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
@@ -43,6 +44,7 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
   onSelect,
   onToggle,
   onMove,
+  onRefresh,
 }: KnowledgeBaseSideNavProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{
@@ -295,13 +297,29 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
       }}
       onDrop={handleRootDrop}
     >
-      {rootLoading ? (
-        <div className="kb-doc-loading">Loading...</div>
-      ) : documents.length === 0 ? (
-        <div className="kb-doc-empty">No items</div>
-      ) : (
-        renderTree(documents, 0)
-      )}
+      <div className="kb-sidebar-toolbar">
+        <div className="kb-sidebar-toolbar-spacer" />
+        {onRefresh && (
+          <button
+            className="kb-sidebar-toolbar-btn"
+            type="button"
+            onClick={onRefresh}
+            disabled={rootLoading}
+            title="刷新文档树"
+          >
+            <ReloadOutlined spin={rootLoading} />
+          </button>
+        )}
+      </div>
+      <div className="kb-sidebar-content">
+        {rootLoading ? (
+          <div className="kb-doc-loading">Loading...</div>
+        ) : documents.length === 0 ? (
+          <div className="kb-doc-empty">No items</div>
+        ) : (
+          renderTree(documents, 0)
+        )}
+      </div>
     </aside>
   );
 });
