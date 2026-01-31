@@ -2,20 +2,19 @@ import type { KeyboardEvent } from "react";
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
-  useReducer,
   useRef,
   useState,
 } from "react";
 import {
-  CloseOutlined,
   DeleteOutlined,
   SendOutlined,
   RobotOutlined,
   UserOutlined,
   LoadingOutlined,
   SettingOutlined,
+  UpOutlined,
+  DownOutlined,
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 
@@ -40,8 +39,6 @@ type ChatMessage = {
 };
 
 type ChatPanelProps = {
-  isOpen: boolean;
-  onClose: () => void;
   onOpenSettings?: () => void;
 };
 
@@ -180,7 +177,7 @@ function renderMarkdown(content: string): React.ReactNode {
   return <>{elements}</>;
 }
 
-function ChatPanel({ isOpen, onClose, onOpenSettings }: ChatPanelProps) {
+function ChatPanel({ onOpenSettings }: ChatPanelProps) {
   const { currentProject } = useProjectContext();
   const projectKey = currentProject?.key ?? "";
   const navigate = useNavigate();
@@ -192,12 +189,16 @@ function ChatPanel({ isOpen, onClose, onOpenSettings }: ChatPanelProps) {
   const [assistantBuffer, setAssistantBuffer] = useState("");
   const [llmConfig, setLlmConfig] = useState<ProviderConfig | null>(null);
   const [sessionId, setSessionId] = useState<string>(() => `session-${createId()}`);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [panelHeight, setPanelHeight] = useState(320);
+  const [isResizing, setIsResizing] = useState(false);
 
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const hasCustomEventsRef = useRef(false);
   const assistantBufferRef = useRef("");
+  const resizeStartRef = useRef<{ y: number; height: number } | null>(null);
 
   const canSend = useMemo(() => {
     return !isGenerating && input.trim().length > 0 && projectKey !== "";
@@ -218,20 +219,43 @@ function ChatPanel({ isOpen, onClose, onOpenSettings }: ChatPanelProps) {
 
   // Auto scroll to bottom
   useEffect(() => {
+    if (!isExpanded) return;
     const container = messagesRef.current;
     if (!container) return;
     const handle = requestAnimationFrame(() => {
       container.scrollTop = container.scrollHeight;
     });
     return () => cancelAnimationFrame(handle);
-  }, [messages, assistantBuffer]);
+  }, [messages, assistantBuffer, isExpanded]);
 
   // Focus input when panel opens
   useEffect(() => {
-    if (isOpen && inputRef.current) {
+    if (isExpanded && inputRef.current) {
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [isOpen]);
+  }, [isExpanded]);
+
+  // Handle resize
+  useEffect(() => {
+    if (!isResizing) return;
+    const handleMove = (event: MouseEvent) => {
+      const start = resizeStartRef.current;
+      if (!start) return;
+      const delta = start.y - event.clientY;
+      const nextHeight = Math.min(600, Math.max(200, start.height + delta));
+      setPanelHeight(nextHeight);
+    };
+    const handleUp = () => {
+      setIsResizing(false);
+      resizeStartRef.current = null;
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, [isResizing]);
 
   const closeStream = useCallback(() => {
     if (eventSourceRef.current) {
@@ -454,23 +478,23 @@ function ChatPanel({ isOpen, onClose, onOpenSettings }: ChatPanelProps) {
     if (!artifacts || artifacts.length === 0) return null;
 
     return (
-      <div className="chat-artifacts">
+      <div className="chat-dock-artifacts">
         {artifacts.map((artifact, index) => {
           if (artifact.type === "document.list") {
             const items = Array.isArray(artifact.data?.items)
               ? (artifact.data?.items as Array<{ id?: string; title?: string }>)
               : [];
             return (
-              <div key={`${artifact.type}-${index}`} className="chat-artifact">
-                <div className="chat-artifact-title">
+              <div key={`${artifact.type}-${index}`} className="chat-dock-artifact">
+                <div className="chat-dock-artifact-title">
                   📄 {artifact.title || "相关文档"}
                 </div>
-                <div className="chat-artifact-list">
+                <div className="chat-dock-artifact-list">
                   {items.map((item, i) => (
                     <button
                       key={`${item.id || i}`}
                       type="button"
-                      className="chat-artifact-link"
+                      className="chat-dock-artifact-link"
                       onClick={() => handleDocumentNavigate(String(item.id ?? ""))}
                     >
                       {String(item.title ?? item.id ?? "文档")}
@@ -485,13 +509,13 @@ function ChatPanel({ isOpen, onClose, onOpenSettings }: ChatPanelProps) {
             const docId = String(artifact.data?.doc_id ?? "");
             const proposalId = String(artifact.data?.proposal_id ?? "");
             return (
-              <div key={`${artifact.type}-${index}`} className="chat-artifact">
-                <div className="chat-artifact-title">
+              <div key={`${artifact.type}-${index}`} className="chat-dock-artifact">
+                <div className="chat-dock-artifact-title">
                   📝 {artifact.title || "修改建议"}
                 </div>
                 <button
                   type="button"
-                  className="chat-artifact-link"
+                  className="chat-dock-artifact-link"
                   onClick={() => handleDocumentNavigate(docId, proposalId)}
                 >
                   查看修改
@@ -512,16 +536,16 @@ function ChatPanel({ isOpen, onClose, onOpenSettings }: ChatPanelProps) {
               ? (artifact.data?.actions as Array<{ type?: string; label?: string }>)
               : [];
             return (
-              <div key={`${artifact.type}-${index}`} className="chat-artifact">
-                <div className="chat-artifact-title">
+              <div key={`${artifact.type}-${index}`} className="chat-dock-artifact">
+                <div className="chat-dock-artifact-title">
                   📝 {artifact.title || "修改建议"}
                 </div>
-                <div className="chat-artifact-list">
+                <div className="chat-dock-artifact-list">
                   {items.map((item, i) => (
-                    <div key={`${item.doc_id || i}`} className="chat-artifact-row">
+                    <div key={`${item.doc_id || i}`} className="chat-dock-artifact-row">
                       <button
                         type="button"
-                        className="chat-artifact-link"
+                        className="chat-dock-artifact-link"
                         onClick={() =>
                           handleProposalAction(
                             "open",
@@ -532,12 +556,12 @@ function ChatPanel({ isOpen, onClose, onOpenSettings }: ChatPanelProps) {
                       >
                         {String(item.title ?? item.doc_id ?? "文档")}
                       </button>
-                      <div className="chat-artifact-actions">
+                      <div className="chat-dock-artifact-actions">
                         {actions.map((action, j) => (
                           <button
                             key={`${action.type || j}`}
                             type="button"
-                            className="chat-artifact-action-btn"
+                            className="chat-dock-artifact-action"
                             onClick={() =>
                               handleProposalAction(
                                 String(action.type ?? "open"),
@@ -558,11 +582,11 @@ function ChatPanel({ isOpen, onClose, onOpenSettings }: ChatPanelProps) {
           }
 
           return (
-            <div key={`${artifact.type}-${index}`} className="chat-artifact">
-              <div className="chat-artifact-title">
+            <div key={`${artifact.type}-${index}`} className="chat-dock-artifact">
+              <div className="chat-dock-artifact-title">
                 📎 {artifact.title || artifact.type}
               </div>
-              <pre className="chat-artifact-json">
+              <pre className="chat-dock-artifact-json">
                 {JSON.stringify(artifact.data ?? {}, null, 2)}
               </pre>
             </div>
@@ -572,174 +596,183 @@ function ChatPanel({ isOpen, onClose, onOpenSettings }: ChatPanelProps) {
     );
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="chat-panel-overlay" onClick={onClose}>
-      <aside className="chat-panel" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <header className="chat-panel-header">
-          <div className="chat-panel-header-left">
-            <div className="chat-panel-avatar-ai">
-              <RobotOutlined />
-            </div>
-            <div className="chat-panel-title-group">
-              <h2 className="chat-panel-title">AI 助手</h2>
-              {llmConfig ? (
-                <span className="chat-panel-model">
-                  {llmConfig.displayName} · {llmConfig.defaultModel}
-                </span>
-              ) : (
-                <span className="chat-panel-model chat-panel-model-warning">
-                  未配置模型
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="chat-panel-header-actions">
-            {onOpenSettings && (
-              <button
-                type="button"
-                className="chat-panel-header-btn"
-                onClick={onOpenSettings}
-                title="设置"
-              >
-                <SettingOutlined />
-              </button>
-            )}
-            <button
-              type="button"
-              className="chat-panel-header-btn"
-              onClick={handleClearHistory}
-              title="清空对话"
-            >
-              <DeleteOutlined />
-            </button>
-            <button
-              type="button"
-              className="chat-panel-header-btn"
-              onClick={onClose}
-              title="关闭"
-            >
-              <CloseOutlined />
-            </button>
-          </div>
-        </header>
+    <section className="chat-dock-bottom">
+      {/* Expanded Panel */}
+      {isExpanded && (
+        <div
+          className="chat-dock-panel"
+          style={{ height: `${panelHeight}px` }}
+        >
+          {/* Resize Handle */}
+          <div
+            className="chat-dock-resize-handle"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              resizeStartRef.current = { y: e.clientY, height: panelHeight };
+              setIsResizing(true);
+            }}
+          />
 
-        {/* Messages */}
-        <div className="chat-panel-messages" ref={messagesRef}>
-          {messages.length === 0 && !assistantBuffer ? (
-            <div className="chat-panel-empty">
-              <div className="chat-panel-empty-icon">
+          {/* Header */}
+          <header className="chat-dock-header">
+            <div className="chat-dock-header-left">
+              <div className="chat-dock-avatar">
                 <RobotOutlined />
               </div>
-              <div className="chat-panel-empty-title">有什么可以帮助你的？</div>
-              <div className="chat-panel-empty-hint">
-                {projectKey
-                  ? `当前项目: ${projectKey}`
-                  : "请先选择一个项目"}
+              <div className="chat-dock-title-group">
+                <span className="chat-dock-title">AI 助手</span>
+                {llmConfig ? (
+                  <span className="chat-dock-model">
+                    {llmConfig.displayName} · {llmConfig.defaultModel}
+                  </span>
+                ) : (
+                  <span className="chat-dock-model chat-dock-model-warning">
+                    未配置模型
+                  </span>
+                )}
               </div>
             </div>
-          ) : (
-            <>
-              {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`chat-message chat-message-${msg.role}`}
+            <div className="chat-dock-header-actions">
+              {onOpenSettings && (
+                <button
+                  type="button"
+                  className="chat-dock-header-btn"
+                  onClick={onOpenSettings}
+                  title="设置"
                 >
-                  <div className="chat-message-avatar">
-                    {msg.role === "user" ? (
-                      <UserOutlined />
-                    ) : msg.role === "assistant" ? (
+                  <SettingOutlined />
+                </button>
+              )}
+              <button
+                type="button"
+                className="chat-dock-header-btn"
+                onClick={handleClearHistory}
+                title="清空对话"
+              >
+                <DeleteOutlined />
+              </button>
+            </div>
+            {isGenerating && (
+              <span className="chat-dock-status">
+                <LoadingOutlined spin /> 生成中...
+              </span>
+            )}
+          </header>
+
+          {/* Messages */}
+          <div className="chat-dock-messages" ref={messagesRef}>
+            {messages.length === 0 && !assistantBuffer ? (
+              <div className="chat-dock-empty">
+                <div className="chat-dock-empty-icon">
+                  <RobotOutlined />
+                </div>
+                <div className="chat-dock-empty-text">有什么可以帮助你的？</div>
+                <div className="chat-dock-empty-hint">
+                  {projectKey ? `当前项目: ${projectKey}` : "请先选择一个项目"}
+                </div>
+              </div>
+            ) : (
+              <>
+                {messages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={`chat-msg chat-msg-${msg.role}`}
+                  >
+                    <div className="chat-msg-avatar">
+                      {msg.role === "user" ? (
+                        <UserOutlined />
+                      ) : msg.role === "assistant" ? (
+                        <RobotOutlined />
+                      ) : (
+                        "⚠️"
+                      )}
+                    </div>
+                    <div className="chat-msg-content">
+                      <div className="chat-msg-header">
+                        <span className="chat-msg-role">
+                          {msg.role === "user"
+                            ? "你"
+                            : msg.role === "assistant"
+                              ? "AI"
+                              : "系统"}
+                        </span>
+                        <span className="chat-msg-time">
+                          {formatTime(msg.timestamp)}
+                        </span>
+                      </div>
+                      <div className="chat-msg-text">
+                        {msg.role === "assistant"
+                          ? renderMarkdown(msg.content)
+                          : msg.content}
+                      </div>
+                      {renderArtifacts(msg.artifacts)}
+                    </div>
+                  </div>
+                ))}
+
+                {/* Streaming message */}
+                {assistantBuffer && (
+                  <div className="chat-msg chat-msg-assistant">
+                    <div className="chat-msg-avatar">
                       <RobotOutlined />
-                    ) : (
-                      "⚠️"
-                    )}
-                  </div>
-                  <div className="chat-message-content">
-                    <div className="chat-message-header">
-                      <span className="chat-message-role">
-                        {msg.role === "user"
-                          ? "你"
-                          : msg.role === "assistant"
-                            ? "AI"
-                            : "系统"}
-                      </span>
-                      <span className="chat-message-time">
-                        {formatTime(msg.timestamp)}
-                      </span>
                     </div>
-                    <div className="chat-message-text">
-                      {msg.role === "assistant"
-                        ? renderMarkdown(msg.content)
-                        : msg.content}
+                    <div className="chat-msg-content">
+                      <div className="chat-msg-header">
+                        <span className="chat-msg-role">AI</span>
+                        <span className="chat-msg-time">
+                          <LoadingOutlined spin /> 思考中...
+                        </span>
+                      </div>
+                      <div className="chat-msg-text">
+                        {renderMarkdown(assistantBuffer)}
+                      </div>
                     </div>
-                    {renderArtifacts(msg.artifacts)}
                   </div>
-                </div>
-              ))}
+                )}
 
-              {/* Streaming message */}
-              {assistantBuffer && (
-                <div className="chat-message chat-message-assistant">
-                  <div className="chat-message-avatar">
-                    <RobotOutlined />
-                  </div>
-                  <div className="chat-message-content">
-                    <div className="chat-message-header">
-                      <span className="chat-message-role">AI</span>
-                      <span className="chat-message-time">
-                        <LoadingOutlined spin /> 思考中...
-                      </span>
+                {/* Generating indicator */}
+                {isGenerating && !assistantBuffer && (
+                  <div className="chat-msg chat-msg-assistant">
+                    <div className="chat-msg-avatar">
+                      <RobotOutlined />
                     </div>
-                    <div className="chat-message-text">
-                      {renderMarkdown(assistantBuffer)}
+                    <div className="chat-msg-content">
+                      <div className="chat-msg-header">
+                        <span className="chat-msg-role">AI</span>
+                      </div>
+                      <div className="chat-msg-text chat-msg-typing">
+                        <span className="typing-dot" />
+                        <span className="typing-dot" />
+                        <span className="typing-dot" />
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
+              </>
+            )}
+          </div>
 
-              {/* Generating indicator without content */}
-              {isGenerating && !assistantBuffer && (
-                <div className="chat-message chat-message-assistant">
-                  <div className="chat-message-avatar">
-                    <RobotOutlined />
-                  </div>
-                  <div className="chat-message-content">
-                    <div className="chat-message-header">
-                      <span className="chat-message-role">AI</span>
-                    </div>
-                    <div className="chat-message-text chat-message-typing">
-                      <span className="typing-dot" />
-                      <span className="typing-dot" />
-                      <span className="typing-dot" />
-                    </div>
-                  </div>
-                </div>
-              )}
-            </>
+          {/* Error */}
+          {error && (
+            <div className="chat-dock-error">
+              {error}
+              <button type="button" onClick={() => setError(null)}>
+                ×
+              </button>
+            </div>
           )}
         </div>
+      )}
 
-        {/* Error */}
-        {error && (
-          <div className="chat-panel-error">
-            {error}
-            <button type="button" onClick={() => setError(null)}>
-              ×
-            </button>
-          </div>
-        )}
-
-        {/* Input */}
-        <div className="chat-panel-input">
+      {/* Input Bar (Always visible) */}
+      <div className="chat-dock-bar">
+        <div className="chat-dock-input-wrapper">
           <textarea
             ref={inputRef}
-            className="chat-panel-textarea"
+            className="chat-dock-textarea"
             placeholder={
-              projectKey
-                ? "输入消息，按 Enter 发送..."
-                : "请先选择项目"
+              projectKey ? "输入消息，按 Enter 发送..." : "请先选择项目"
             }
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -747,17 +780,27 @@ function ChatPanel({ isOpen, onClose, onOpenSettings }: ChatPanelProps) {
             disabled={!projectKey || isGenerating}
             rows={1}
           />
-          <button
-            type="button"
-            className="chat-panel-send-btn"
-            onClick={handleSend}
-            disabled={!canSend}
-          >
-            {isGenerating ? <LoadingOutlined spin /> : <SendOutlined />}
-          </button>
+          <div className="chat-dock-bar-actions">
+            <button
+              type="button"
+              className="chat-dock-send-btn"
+              onClick={handleSend}
+              disabled={!canSend}
+            >
+              {isGenerating ? <LoadingOutlined spin /> : <SendOutlined />}
+            </button>
+            <button
+              type="button"
+              className="chat-dock-toggle-btn"
+              onClick={() => setIsExpanded(!isExpanded)}
+              title={isExpanded ? "收起" : "展开"}
+            >
+              {isExpanded ? <DownOutlined /> : <UpOutlined />}
+            </button>
+          </div>
         </div>
-      </aside>
-    </div>
+      </div>
+    </section>
   );
 }
 
