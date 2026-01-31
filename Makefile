@@ -90,11 +90,14 @@ test-integration:
 	$(MAKE) clean-all NAMESPACE=zeus-test
 
 # Python environment setup
+# PaddlePaddle requires Python 3.8-3.12
 PYTHON_VENV := .venv
+PYTHON_BIN := python3.12
 
 setup-python-venv:
-	@echo "Creating Python virtual environment in $(PYTHON_VENV)..."
-	python3 -m venv $(PYTHON_VENV)
+	@echo "Creating Python 3.12 virtual environment in $(PYTHON_VENV)..."
+	@which $(PYTHON_BIN) > /dev/null || (echo "Error: $(PYTHON_BIN) not found. Install with: brew install python@3.12" && exit 1)
+	$(PYTHON_BIN) -m venv $(PYTHON_VENV)
 	@echo "Virtual environment created. Activate with:"
 	@echo "  source $(PYTHON_VENV)/bin/activate"
 
@@ -102,7 +105,7 @@ install-paddleocr: setup-python-venv
 	@echo "Installing PaddleOCR dependencies (CPU)..."
 	$(PYTHON_VENV)/bin/python -m pip install --upgrade pip
 	@echo "Installing PaddlePaddle (CPU version)..."
-	$(PYTHON_VENV)/bin/python -m pip install paddlepaddle==3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+	$(PYTHON_VENV)/bin/python -m pip install paddlepaddle==3.3.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
 	@echo "Installing PaddleOCR with doc-parser..."
 	$(PYTHON_VENV)/bin/python -m pip install -U "paddleocr[doc-parser]"
 	$(PYTHON_VENV)/bin/pip install -r scripts/ocr/requirements.txt
@@ -112,7 +115,7 @@ install-paddleocr-gpu: setup-python-venv
 	@echo "Installing PaddleOCR dependencies (GPU CUDA 12.6)..."
 	$(PYTHON_VENV)/bin/python -m pip install --upgrade pip
 	@echo "Installing PaddlePaddle GPU..."
-	$(PYTHON_VENV)/bin/python -m pip install paddlepaddle-gpu==3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
+	$(PYTHON_VENV)/bin/python -m pip install paddlepaddle-gpu==3.3.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
 	@echo "Installing PaddleOCR with doc-parser..."
 	$(PYTHON_VENV)/bin/python -m pip install -U "paddleocr[doc-parser]"
 	$(PYTHON_VENV)/bin/pip install -r scripts/ocr/requirements.txt
