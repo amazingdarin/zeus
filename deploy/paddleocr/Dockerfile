@@ -42,8 +42,9 @@ RUN pip install --no-cache-dir \
     PyMuPDF>=1.24.0 \
     orjson>=3.10.0
 
-# Copy the OCR server script
+# Copy the OCR scripts
 COPY scripts/ocr/paddleocr_server.py /app/paddleocr_server.py
+COPY scripts/ocr/paddleocr_cli.py /app/paddleocr_cli.py
 
 # Pre-download models (optional, makes first request faster)
 # This downloads the default OCR models during build
