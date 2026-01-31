@@ -992,8 +992,8 @@ export const buildRouter = () => {
     try {
       const { configType } = req.params;
       
-      if (configType !== "llm" && configType !== "embedding") {
-        error(res, "INVALID_TYPE", "configType must be 'llm' or 'embedding'");
+      if (configType !== "llm" && configType !== "embedding" && configType !== "vision") {
+        error(res, "INVALID_TYPE", "configType must be 'llm', 'embedding', or 'vision'");
         return;
       }
       
@@ -1014,8 +1014,8 @@ export const buildRouter = () => {
       const { configType } = req.params;
       const input = req.body as Omit<ProviderConfigInput, "configType">;
       
-      if (configType !== "llm" && configType !== "embedding") {
-        error(res, "INVALID_TYPE", "configType must be 'llm' or 'embedding'");
+      if (configType !== "llm" && configType !== "embedding" && configType !== "vision") {
+        error(res, "INVALID_TYPE", "configType must be 'llm', 'embedding', or 'vision'");
         return;
       }
       
@@ -1051,8 +1051,8 @@ export const buildRouter = () => {
     try {
       const { configType } = req.params;
       
-      if (configType !== "llm" && configType !== "embedding") {
-        error(res, "INVALID_TYPE", "configType must be 'llm' or 'embedding'");
+      if (configType !== "llm" && configType !== "embedding" && configType !== "vision") {
+        error(res, "INVALID_TYPE", "configType must be 'llm', 'embedding', or 'vision'");
         return;
       }
       
@@ -1081,8 +1081,8 @@ export const buildRouter = () => {
     try {
       const { configType } = req.params;
       
-      if (configType !== "llm" && configType !== "embedding") {
-        error(res, "INVALID_TYPE", "configType must be 'llm' or 'embedding'");
+      if (configType !== "llm" && configType !== "embedding" && configType !== "vision") {
+        error(res, "INVALID_TYPE", "configType must be 'llm', 'embedding', or 'vision'");
         return;
       }
       
