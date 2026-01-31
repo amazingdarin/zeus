@@ -182,8 +182,17 @@ export async function createTask(
   // Get document
   const doc = await documentStore.get(projectKey, docId);
 
-  // Convert to markdown
-  const originalMarkdown = tiptapJsonToMarkdown(doc.body.content as JSONContent);
+  // Convert to markdown based on document type
+  let originalMarkdown: string;
+  if (doc.body.type === "markdown") {
+    // Document content is already markdown
+    originalMarkdown = doc.body.content as string;
+  } else if (doc.body.type === "tiptap" && doc.body.content) {
+    // Convert tiptap JSON to markdown
+    originalMarkdown = tiptapJsonToMarkdown(doc.body.content as JSONContent);
+  } else {
+    throw new Error("Document has no valid content to optimize");
+  }
 
   const taskId = uuidv4();
   const task: OptimizeTask = {
