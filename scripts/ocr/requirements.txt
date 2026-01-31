@@ -1,14 +1,10 @@
 # PaddleOCR-VL Dependencies
 # 
-# Installation:
-#   1. Install PaddlePaddle GPU (CUDA 12.6):
-#      pip install paddlepaddle-gpu==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
-#   
-#   2. For CPU-only:
-#      pip install paddlepaddle==3.2.0
-#
-#   3. Install this requirements file:
-#      pip install -r requirements.txt
+# Note: For GPU support, replace paddlepaddle with:
+#   pip install paddlepaddle-gpu==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
+
+# PaddlePaddle core (CPU version by default)
+paddlepaddle>=3.0.0
 
 # PaddleOCR with document parser support
 paddleocr[doc-parser]>=3.0.0
