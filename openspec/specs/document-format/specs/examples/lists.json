@@ -1,0 +1,191 @@
+{
+  "description": "列表节点示例",
+  "examples": [
+    {
+      "name": "无序列表",
+      "node": {
+        "type": "bulletList",
+        "content": [
+          {
+            "type": "listItem",
+            "attrs": { "id": "li-bullet-1" },
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  { "type": "text", "text": "第一项" }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "listItem",
+            "attrs": { "id": "li-bullet-2" },
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  { "type": "text", "text": "第二项" }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "listItem",
+            "attrs": { "id": "li-bullet-3" },
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  { "type": "text", "text": "第三项" }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "有序列表",
+      "node": {
+        "type": "orderedList",
+        "attrs": { "start": 1 },
+        "content": [
+          {
+            "type": "listItem",
+            "attrs": { "id": "li-ordered-1" },
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  { "type": "text", "text": "步骤一：准备环境" }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "listItem",
+            "attrs": { "id": "li-ordered-2" },
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  { "type": "text", "text": "步骤二：安装依赖" }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "listItem",
+            "attrs": { "id": "li-ordered-3" },
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  { "type": "text", "text": "步骤三：运行测试" }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "嵌套列表",
+      "node": {
+        "type": "bulletList",
+        "content": [
+          {
+            "type": "listItem",
+            "attrs": { "id": "li-nested-1" },
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  { "type": "text", "text": "父级项目" }
+                ]
+              },
+              {
+                "type": "bulletList",
+                "content": [
+                  {
+                    "type": "listItem",
+                    "attrs": { "id": "li-nested-1-1" },
+                    "content": [
+                      {
+                        "type": "paragraph",
+                        "content": [
+                          { "type": "text", "text": "子项目 A" }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "listItem",
+                    "attrs": { "id": "li-nested-1-2" },
+                    "content": [
+                      {
+                        "type": "paragraph",
+                        "content": [
+                          { "type": "text", "text": "子项目 B" }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "任务列表",
+      "node": {
+        "type": "taskList",
+        "content": [
+          {
+            "type": "taskItem",
+            "attrs": { "id": "ti-task-1", "checked": true },
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  { "type": "text", "text": "已完成的任务" }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "taskItem",
+            "attrs": { "id": "ti-task-2", "checked": false },
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  { "type": "text", "text": "待完成的任务" }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "taskItem",
+            "attrs": { "id": "ti-task-3", "checked": false },
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "重要任务",
+                    "marks": [{ "type": "bold" }]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

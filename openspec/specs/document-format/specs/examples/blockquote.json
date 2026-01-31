@@ -1,0 +1,83 @@
+{
+  "description": "引用块节点示例",
+  "examples": [
+    {
+      "name": "简单引用",
+      "node": {
+        "type": "blockquote",
+        "attrs": { "id": "bq-simple" },
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              { "type": "text", "text": "这是一段引用文字。" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "多段落引用",
+      "node": {
+        "type": "blockquote",
+        "attrs": { "id": "bq-multi" },
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              { "type": "text", "text": "第一段引用内容。" }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "content": [
+              { "type": "text", "text": "第二段引用内容。" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "带格式的引用",
+      "node": {
+        "type": "blockquote",
+        "attrs": { "id": "bq-formatted" },
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "text": "注意：",
+                "marks": [{ "type": "bold" }]
+              },
+              { "type": "text", "text": "这是一条重要提示，请务必仔细阅读。" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "嵌套代码的引用",
+      "node": {
+        "type": "blockquote",
+        "attrs": { "id": "bq-with-code" },
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              { "type": "text", "text": "使用以下命令启动服务：" }
+            ]
+          },
+          {
+            "type": "codeBlock",
+            "attrs": { "language": "bash" },
+            "content": [
+              { "type": "text", "text": "npm run start" }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

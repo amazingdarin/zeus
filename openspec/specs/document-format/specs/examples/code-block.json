@@ -1,0 +1,85 @@
+{
+  "description": "代码块节点示例",
+  "examples": [
+    {
+      "name": "TypeScript 代码",
+      "node": {
+        "type": "codeBlock",
+        "attrs": {
+          "language": "typescript",
+          "renderer": "auto",
+          "preview": false,
+          "view_mode": "text",
+          "collapsed": false
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "interface User {\n  id: string;\n  name: string;\n  email: string;\n}\n\nconst getUser = async (id: string): Promise<User> => {\n  const response = await fetch(`/api/users/${id}`);\n  return response.json();\n};"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Python 代码",
+      "node": {
+        "type": "codeBlock",
+        "attrs": {
+          "language": "python"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "def hello(name: str) -> str:\n    \"\"\"返回问候语\"\"\"\n    return f\"Hello, {name}!\"\n\nif __name__ == \"__main__\":\n    print(hello(\"World\"))"
+          }
+        ]
+      }
+    },
+    {
+      "name": "JSON 配置",
+      "node": {
+        "type": "codeBlock",
+        "attrs": {
+          "language": "json"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"name\": \"zeus\",\n  \"version\": \"1.0.0\",\n  \"dependencies\": {\n    \"@tiptap/react\": \"^2.0.0\"\n  }\n}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Shell 命令",
+      "node": {
+        "type": "codeBlock",
+        "attrs": {
+          "language": "bash"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "# 安装依赖\nnpm install\n\n# 启动开发服务器\nnpm run dev"
+          }
+        ]
+      }
+    },
+    {
+      "name": "折叠的长代码块",
+      "node": {
+        "type": "codeBlock",
+        "attrs": {
+          "language": "javascript",
+          "collapsed": true
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "// 这是一段很长的代码...\nconst veryLongFunction = () => {\n  // 实现细节\n};"
+          }
+        ]
+      }
+    }
+  ]
+}

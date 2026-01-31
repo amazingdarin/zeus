@@ -226,8 +226,41 @@ EMBEDDING_MODEL=nomic-embed-text # Embedding 模型名
 REPO_ROOT=./data/repos         # 文档存储根目录
 ```
 
+## OPENSPEC 规范
+
+Zeus 使用 OpenSpec 管理技术规范，规范文档位于 `openspec/` 目录。
+
+### 文档格式规范
+
+文档内容基于 Tiptap JSON 格式，详细规范见：
+
+| 规范文件 | 路径 | 说明 |
+|----------|------|------|
+| 整体结构 | `openspec/specs/document-format/specs/document-structure.spec.md` | 文档 JSON 结构、元数据字段 |
+| Block 类型 | `openspec/specs/document-format/specs/block-types.spec.md` | 所有 Block 类型及属性 |
+| Marks | `openspec/specs/document-format/specs/marks.spec.md` | 内联格式标记 |
+| JSON 示例 | `openspec/specs/document-format/specs/examples/` | 各类型完整示例 |
+
+### 支持的 Block 类型
+
+**基础节点：** `paragraph`, `heading`, `bulletList`, `orderedList`, `listItem`, `taskList`, `taskItem`, `blockquote`, `hardBreak`
+
+**扩展节点：** `codeBlock`, `horizontalRule`, `image`, `imageUpload`, `link_preview`, `file_block`
+
+**Marks：** `bold`, `italic`, `strike`, `code`, `underline`, `link`, `highlight`, `superscript`, `subscript`
+
+### AI 生成文档内容
+
+当生成 Zeus 文档内容时，请参考 `openspec/specs/document-format/` 下的规范，确保：
+
+1. 使用正确的节点 `type` 名称
+2. 包含必需的 `attrs` 属性
+3. 遵循内容嵌套规则（如 `bulletList` 只能包含 `listItem`）
+4. 对于支持 Block ID 的节点，可省略 `id` 属性（会自动生成）
+
 ## NOTES
 
 - `resources/` 目录包含测试夹具和大型构建产物，代码导航时可忽略
 - `apps/desktop/target/` 是 Rust 构建输出，可忽略
 - 数据库使用 pgvector 扩展支持向量检索，zhparser 支持中文全文检索
+- `openspec/` 目录包含项目技术规范，AI 助手应参考其中的规范生成内容

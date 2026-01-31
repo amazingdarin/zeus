@@ -1,0 +1,60 @@
+{
+  "description": "段落节点示例",
+  "examples": [
+    {
+      "name": "简单段落",
+      "node": {
+        "type": "paragraph",
+        "attrs": {
+          "id": "p-uuid-001"
+        },
+        "content": [
+          { "type": "text", "text": "这是一个简单的段落。" }
+        ]
+      }
+    },
+    {
+      "name": "居中段落",
+      "node": {
+        "type": "paragraph",
+        "attrs": {
+          "id": "p-uuid-002",
+          "textAlign": "center"
+        },
+        "content": [
+          { "type": "text", "text": "居中对齐的段落文本。" }
+        ]
+      }
+    },
+    {
+      "name": "带格式的段落",
+      "node": {
+        "type": "paragraph",
+        "attrs": {
+          "id": "p-uuid-003"
+        },
+        "content": [
+          { "type": "text", "text": "这段文字包含 " },
+          {
+            "type": "text",
+            "text": "粗体",
+            "marks": [{ "type": "bold" }]
+          },
+          { "type": "text", "text": " 和 " },
+          {
+            "type": "text",
+            "text": "斜体",
+            "marks": [{ "type": "italic" }]
+          },
+          { "type": "text", "text": " 格式。" }
+        ]
+      }
+    },
+    {
+      "name": "空段落",
+      "node": {
+        "type": "paragraph"
+      }
+    }
+  ]
+}

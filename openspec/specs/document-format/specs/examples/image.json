@@ -1,0 +1,39 @@
+{
+  "description": "图片节点示例",
+  "examples": [
+    {
+      "name": "基础图片",
+      "node": {
+        "type": "image",
+        "attrs": {
+          "src": "https://example.com/image.png",
+          "alt": "示例图片",
+          "title": "图片标题"
+        }
+      }
+    },
+    {
+      "name": "指定尺寸的图片",
+      "node": {
+        "type": "image",
+        "attrs": {
+          "src": "https://example.com/photo.jpg",
+          "alt": "风景照片",
+          "title": "美丽的风景",
+          "width": 800,
+          "height": 600
+        }
+      }
+    },
+    {
+      "name": "本地资源图片",
+      "node": {
+        "type": "image",
+        "attrs": {
+          "src": "/api/projects/my-project/assets/asset-uuid-001",
+          "alt": "项目截图"
+        }
+      }
+    }
+  ]
+}

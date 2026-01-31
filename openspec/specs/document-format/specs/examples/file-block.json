@@ -1,0 +1,73 @@
+{
+  "description": "文件附件块节点示例",
+  "examples": [
+    {
+      "name": "PDF 文档",
+      "node": {
+        "type": "file_block",
+        "attrs": {
+          "asset_id": "asset-uuid-001",
+          "file_name": "用户手册.pdf",
+          "mime": "application/pdf",
+          "size": 2097152,
+          "file_type": "office",
+          "office_type": "pdf"
+        }
+      }
+    },
+    {
+      "name": "Word 文档",
+      "node": {
+        "type": "file_block",
+        "attrs": {
+          "asset_id": "asset-uuid-002",
+          "file_name": "需求规格说明书.docx",
+          "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "size": 524288,
+          "file_type": "office",
+          "office_type": "docx"
+        }
+      }
+    },
+    {
+      "name": "Excel 表格",
+      "node": {
+        "type": "file_block",
+        "attrs": {
+          "asset_id": "asset-uuid-003",
+          "file_name": "数据分析报告.xlsx",
+          "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "size": 1048576,
+          "file_type": "office",
+          "office_type": "xlsx"
+        }
+      }
+    },
+    {
+      "name": "文本文件",
+      "node": {
+        "type": "file_block",
+        "attrs": {
+          "asset_id": "asset-uuid-004",
+          "file_name": "README.txt",
+          "mime": "text/plain",
+          "size": 4096,
+          "file_type": "text"
+        }
+      }
+    },
+    {
+      "name": "未知类型文件",
+      "node": {
+        "type": "file_block",
+        "attrs": {
+          "asset_id": "asset-uuid-005",
+          "file_name": "archive.tar.gz",
+          "mime": "application/gzip",
+          "size": 10485760,
+          "file_type": "unknown"
+        }
+      }
+    }
+  ]
+}

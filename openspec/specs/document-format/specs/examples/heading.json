@@ -1,0 +1,68 @@
+{
+  "description": "标题节点示例",
+  "examples": [
+    {
+      "name": "一级标题",
+      "node": {
+        "type": "heading",
+        "attrs": {
+          "level": 1,
+          "id": "h-uuid-001"
+        },
+        "content": [
+          { "type": "text", "text": "一级标题" }
+        ]
+      }
+    },
+    {
+      "name": "二级标题",
+      "node": {
+        "type": "heading",
+        "attrs": {
+          "level": 2,
+          "id": "h-uuid-002"
+        },
+        "content": [
+          { "type": "text", "text": "二级标题" }
+        ]
+      }
+    },
+    {
+      "name": "三级标题（居中）",
+      "node": {
+        "type": "heading",
+        "attrs": {
+          "level": 3,
+          "id": "h-uuid-003",
+          "textAlign": "center"
+        },
+        "content": [
+          { "type": "text", "text": "居中的三级标题" }
+        ]
+      }
+    },
+    {
+      "name": "带链接的标题",
+      "node": {
+        "type": "heading",
+        "attrs": {
+          "level": 2,
+          "id": "h-uuid-004"
+        },
+        "content": [
+          { "type": "text", "text": "访问 " },
+          {
+            "type": "text",
+            "text": "官方文档",
+            "marks": [
+              {
+                "type": "link",
+                "attrs": { "href": "https://example.com/docs" }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

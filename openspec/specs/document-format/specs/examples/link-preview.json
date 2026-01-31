@@ -1,0 +1,54 @@
+{
+  "description": "链接预览卡片节点示例",
+  "examples": [
+    {
+      "name": "成功获取的预览",
+      "node": {
+        "type": "link_preview",
+        "attrs": {
+          "url": "https://github.com/tiptap/tiptap",
+          "title": "tiptap/tiptap: The headless editor framework for web artisans",
+          "description": "A headless, framework-agnostic and extendable rich text editor, based on ProseMirror.",
+          "image": "https://repository-images.githubusercontent.com/123456/og-image.png",
+          "site_name": "GitHub",
+          "fetched_at": "2024-01-15T10:30:00.000Z",
+          "status": "success"
+        }
+      }
+    },
+    {
+      "name": "加载中状态",
+      "node": {
+        "type": "link_preview",
+        "attrs": {
+          "url": "https://example.com/article",
+          "status": "loading"
+        }
+      }
+    },
+    {
+      "name": "获取失败",
+      "node": {
+        "type": "link_preview",
+        "attrs": {
+          "url": "https://private-site.example.com/page",
+          "status": "error",
+          "error_message": "无法访问该链接"
+        }
+      }
+    },
+    {
+      "name": "无预览图的链接",
+      "node": {
+        "type": "link_preview",
+        "attrs": {
+          "url": "https://docs.example.com/api-reference",
+          "title": "API Reference",
+          "description": "Complete API documentation for developers.",
+          "site_name": "Example Docs",
+          "status": "success"
+        }
+      }
+    }
+  ]
+}

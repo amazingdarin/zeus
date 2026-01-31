@@ -1,0 +1,268 @@
+{
+  "description": "完整文档示例，包含多种节点类型",
+  "document": {
+    "id": "doc-example-001",
+    "title": "Zeus 快速入门指南",
+    "parent_id": null,
+    "body": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "heading",
+          "attrs": { "level": 1, "id": "h-intro" },
+          "content": [
+            { "type": "text", "text": "Zeus 快速入门" }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "attrs": { "id": "p-welcome" },
+          "content": [
+            { "type": "text", "text": "欢迎使用 " },
+            {
+              "type": "text",
+              "text": "Zeus",
+              "marks": [{ "type": "bold" }]
+            },
+            { "type": "text", "text": " 智能文档管理系统。本指南将帮助您快速上手。" }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": { "level": 2, "id": "h-features" },
+          "content": [
+            { "type": "text", "text": "主要功能" }
+          ]
+        },
+        {
+          "type": "bulletList",
+          "content": [
+            {
+              "type": "listItem",
+              "attrs": { "id": "li-1" },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "富文本编辑",
+                      "marks": [{ "type": "bold" }]
+                    },
+                    { "type": "text", "text": " - 支持多种格式和样式" }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "listItem",
+              "attrs": { "id": "li-2" },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "文档层级",
+                      "marks": [{ "type": "bold" }]
+                    },
+                    { "type": "text", "text": " - 树形结构组织文档" }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "listItem",
+              "attrs": { "id": "li-3" },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "知识库搜索",
+                      "marks": [{ "type": "bold" }]
+                    },
+                    { "type": "text", "text": " - 全文检索和向量搜索" }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": { "level": 2, "id": "h-install" },
+          "content": [
+            { "type": "text", "text": "安装步骤" }
+          ]
+        },
+        {
+          "type": "orderedList",
+          "attrs": { "start": 1 },
+          "content": [
+            {
+              "type": "listItem",
+              "attrs": { "id": "li-step1" },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    { "type": "text", "text": "克隆代码仓库" }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "listItem",
+              "attrs": { "id": "li-step2" },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    { "type": "text", "text": "安装依赖" }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "listItem",
+              "attrs": { "id": "li-step3" },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    { "type": "text", "text": "启动服务" }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": "bash"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "# 克隆仓库\ngit clone https://github.com/example/zeus.git\ncd zeus\n\n# 安装依赖\npnpm install\n\n# 启动开发服务器\nmake run-app-backend\nmake run-app-web"
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": { "level": 2, "id": "h-tasks" },
+          "content": [
+            { "type": "text", "text": "待办事项" }
+          ]
+        },
+        {
+          "type": "taskList",
+          "content": [
+            {
+              "type": "taskItem",
+              "attrs": { "id": "ti-1", "checked": true },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    { "type": "text", "text": "阅读文档" }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "taskItem",
+              "attrs": { "id": "ti-2", "checked": false },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    { "type": "text", "text": "创建第一个项目" }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "taskItem",
+              "attrs": { "id": "ti-3", "checked": false },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    { "type": "text", "text": "导入现有文档" }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "blockquote",
+          "attrs": { "id": "bq-tip" },
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "提示：",
+                  "marks": [{ "type": "bold" }]
+                },
+                { "type": "text", "text": "您可以使用 " },
+                {
+                  "type": "text",
+                  "text": "Ctrl+S",
+                  "marks": [{ "type": "code" }]
+                },
+                { "type": "text", "text": " 快捷键保存文档。" }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "horizontalRule"
+        },
+        {
+          "type": "heading",
+          "attrs": { "level": 2, "id": "h-links" },
+          "content": [
+            { "type": "text", "text": "相关链接" }
+          ]
+        },
+        {
+          "type": "link_preview",
+          "attrs": {
+            "url": "https://github.com/example/zeus",
+            "title": "Zeus - 智能文档管理系统",
+            "description": "一个现代化的文档管理和知识库系统",
+            "site_name": "GitHub",
+            "status": "success"
+          }
+        },
+        {
+          "type": "paragraph",
+          "attrs": { "id": "p-footer" },
+          "content": [
+            { "type": "text", "text": "如有问题，请联系 " },
+            {
+              "type": "text",
+              "text": "support@example.com",
+              "marks": [
+                {
+                  "type": "link",
+                  "attrs": { "href": "mailto:support@example.com" }
+                }
+              ]
+            },
+            { "type": "text", "text": "。" }
+          ]
+        }
+      ]
+    },
+    "created_at": "2024-01-15T10:30:00.000Z",
+    "updated_at": "2024-01-20T16:45:00.000Z"
+  }
+}
