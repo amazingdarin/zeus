@@ -1,22 +1,10 @@
-import { apiFetch, buildApiUrl, ensureSystemSession } from "../config/api";
+import { apiFetch, buildApiUrl } from "../config/api";
 
-const getSessionId = async (): Promise<string> => {
-  const findCookie = () =>
-    document.cookie
-      .split(";")
-      .map((item) => item.trim())
-      .find((item) => item.startsWith("zeus_session_id="));
-  const cookie = findCookie();
-  if (cookie) {
-    return decodeURIComponent(cookie.split("=")[1] ?? "");
-  }
-  await ensureSystemSession();
-  const refreshed = findCookie();
-  return refreshed ? decodeURIComponent(refreshed.split("=")[1] ?? "") : "";
-};
-
-export const createChatRun = async (projectKey: string, message: string) => {
-  const sessionId = await getSessionId();
+export const createChatRun = async (
+  projectKey: string,
+  message: string,
+  sessionId?: string,
+): Promise<string> => {
   const response = await apiFetch(`/api/projects/${projectKey}/chat/runs`, {
     method: "POST",
     headers: {
@@ -39,6 +27,19 @@ export const createChatRun = async (projectKey: string, message: string) => {
   return runId;
 };
 
-export const buildChatStreamUrl = (projectKey: string, runId: string) => {
+export const buildChatStreamUrl = (projectKey: string, runId: string): string => {
   return buildApiUrl(`/api/projects/${projectKey}/chat/runs/${runId}/stream`);
+};
+
+export const clearChatSession = async (
+  projectKey: string,
+  sessionId: string,
+): Promise<void> => {
+  const response = await apiFetch(
+    `/api/projects/${projectKey}/chat/sessions/${encodeURIComponent(sessionId)}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    throw new Error("Failed to clear chat session");
+  }
 };

@@ -1,10 +1,10 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
-import { FileTextOutlined } from "@ant-design/icons";
+import { FileTextOutlined, RobotOutlined } from "@ant-design/icons";
 
 import Sidebar from "../components/Sidebar";
 import SettingsModal from "../components/SettingsModal";
-import ChatDock from "../components/ChatDock";
+import ChatPanel from "../components/ChatPanel";
 
 type AppShellProps = {
   children: ReactNode;
@@ -17,6 +17,7 @@ const navItems = [
 function AppShell({ children }: AppShellProps) {
   const location = useLocation();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
 
   const activeIndex = useMemo(() => {
     const path = location.pathname;
@@ -38,7 +39,27 @@ function AppShell({ children }: AppShellProps) {
         />
         <main className="content">{children}</main>
       </div>
-      <ChatDock />
+
+      {/* Chat Toggle Button */}
+      <button
+        type="button"
+        className="chat-toggle-btn"
+        onClick={() => setChatOpen(true)}
+        title="打开 AI 助手"
+      >
+        <RobotOutlined />
+      </button>
+
+      {/* Chat Panel */}
+      <ChatPanel
+        isOpen={chatOpen}
+        onClose={() => setChatOpen(false)}
+        onOpenSettings={() => {
+          setChatOpen(false);
+          setSettingsOpen(true);
+        }}
+      />
+
       <SettingsModal
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
