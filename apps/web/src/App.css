@@ -3655,15 +3655,24 @@ body {
 [data-theme="dark"] .ant-modal .ant-modal-content,
 [data-theme="dark"] .ant-modal-content {
   background: #161b22 !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border: none !important;
+  outline: none !important;
   color: #e6edf3 !important;
   box-shadow: 0 6px 16px 0 rgba(0, 0, 0, 0.5), 0 3px 6px -4px rgba(0, 0, 0, 0.6) !important;
   padding: 0 !important;
 }
 
-/* Remove white background from modal root */
-[data-theme="dark"] .ant-modal {
+/* Remove white background from modal root and all wrappers */
+[data-theme="dark"] .ant-modal,
+[data-theme="dark"] .ant-modal-wrap,
+[data-theme="dark"] .ant-modal-root {
   background: transparent !important;
+}
+
+/* Force dark background on the content wrapper */
+[data-theme="dark"] .ant-modal-content::before,
+[data-theme="dark"] .ant-modal-content::after {
+  display: none !important;
 }
 
 [data-theme="dark"] .ant-modal-header {
