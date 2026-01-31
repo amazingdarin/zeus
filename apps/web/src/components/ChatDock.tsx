@@ -1145,20 +1145,25 @@ function ChatDock() {
             }}
           />
           <div className="chat-dock-header">
-            <span>Chat</span>
+            <div className="chat-dock-header-title">
+              <span className="chat-dock-header-icon">✨</span>
+              <span>AI 助手</span>
+            </div>
             {isGenerating ? (
-              <span className="chat-dock-status">Generating...</span>
+              <span className="chat-dock-status">生成中...</span>
             ) : null}
           </div>
           <div className="chat-dock-messages" ref={messagesRef}>
             {messages.length === 0 ? (
-              <div className="chat-dock-empty">Start a conversation</div>
+              <div className="chat-dock-empty">
+                <div className="chat-dock-empty-icon">💬</div>
+                <div>开始与 AI 对话</div>
+              </div>
             ) : (
               <>
                 {messages.map((message) => (
                   <div key={message.id} className={`chat-dock-message ${message.role}`}>
-                    <div className="chat-dock-message-header">
-                      <span className="chat-dock-role">{message.role}</span>
+                    <div className="chat-dock-message-bubble">
                       <span className="chat-dock-text">
                         {renderZeusText(parseZeusText(message.content))}
                       </span>
@@ -1168,8 +1173,7 @@ function ChatDock() {
                 ))}
                 {assistantActive ? (
                   <div className="chat-dock-message assistant">
-                    <div className="chat-dock-message-header">
-                      <span className="chat-dock-role">assistant</span>
+                    <div className="chat-dock-message-bubble">
                       <span className="chat-dock-text">
                         {renderZeusText(parseZeusText(assistantBuffer))}
                       </span>
@@ -1201,11 +1205,11 @@ function ChatDock() {
               </div>
             ) : null}
             <div className="chat-dock-input-row">
-              <ActiveSlashPanel
-                value={input}
-                options={visibleOptions}
-                open={pickerOpen}
-                placeholder={projectKey ? "Type a message" : "Select a project to chat"}
+                <ActiveSlashPanel
+                  value={input}
+                  options={visibleOptions}
+                  open={pickerOpen}
+                  placeholder={projectKey ? "输入消息，按 Enter 发送..." : "请先选择项目"}
                 inputRef={inputRef as any}
                 renderHtml={inputHtml}
                 onChange={(value, caret) => updateInput(value, caret)}
@@ -1316,7 +1320,7 @@ function ChatDock() {
               />
               <div className="chat-dock-actions">
                 <button type="button" onClick={handleSend} disabled={!canSend}>
-                  Send
+                  发送
                 </button>
                 <button
                   type="button"

@@ -25,6 +25,7 @@ import {
   type LLMProviderId,
   type ConfigType,
 } from "./llm/index.js";
+import { createRun, getRun, streamRun, clearSession } from "./services/chat.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -1261,6 +1262,92 @@ export const buildRouter = () => {
       },
     ];
     success(res, types);
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Chat API (project-scoped)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Create a chat run
+   * POST /projects/:projectKey/chat/runs
+   */
+  router.post("/projects/:projectKey/chat/runs", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const { session_id, message } = req.body as { session_id?: string; message?: string };
+
+      if (!message || typeof message !== "string" || !message.trim()) {
+        error(res, "INVALID_REQUEST", "message is required");
+        return;
+      }
+
+      // Use provided session_id or generate one
+      const sessionId = session_id || `session-${uuidv4()}`;
+
+      const runId = await createRun(projectKey, sessionId, message.trim());
+
+      success(res, { run_id: runId });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to create chat run";
+      error(res, "CREATE_RUN_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Stream a chat run response (SSE)
+   * GET /projects/:projectKey/chat/runs/:runId/stream
+   */
+  router.get("/projects/:projectKey/chat/runs/:runId/stream", async (req: Request, res: Response) => {
+    const { runId } = req.params;
+
+    // Set SSE headers
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    try {
+      const run = getRun(runId);
+      if (!run) {
+        res.write(`event: run.error\ndata: ${JSON.stringify({ error: "Run not found" })}\n\n`);
+        res.end();
+        return;
+      }
+
+      // Stream the response
+      for await (const chunk of streamRun(runId)) {
+        if (chunk.type === "delta") {
+          res.write(`event: assistant.delta\ndata: ${JSON.stringify(chunk.content)}\n\n`);
+        } else if (chunk.type === "done") {
+          res.write(`event: assistant.done\ndata: ${JSON.stringify({ message: chunk.message })}\n\n`);
+        } else if (chunk.type === "error") {
+          res.write(`event: run.error\ndata: ${JSON.stringify({ error: chunk.error })}\n\n`);
+        }
+      }
+
+      res.end();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Stream failed";
+      res.write(`event: run.error\ndata: ${JSON.stringify({ error: msg })}\n\n`);
+      res.end();
+    }
+  });
+
+  /**
+   * Clear chat session history
+   * DELETE /projects/:projectKey/chat/sessions/:sessionId
+   */
+  router.delete("/projects/:projectKey/chat/sessions/:sessionId", async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+      clearSession(sessionId);
+      success(res, { cleared: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to clear session";
+      error(res, "CLEAR_SESSION_FAILED", msg, 500);
+    }
   });
 
   return router;
