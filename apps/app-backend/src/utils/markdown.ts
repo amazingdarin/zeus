@@ -7,7 +7,7 @@
 
 import MarkdownIt from "markdown-it";
 import type { Node as ProsemirrorNode, Schema } from "prosemirror-model";
-import { getSchema } from "@tiptap/core";
+import { getSchema, Node as TiptapNode } from "@tiptap/core";
 import type { JSONContent } from "@tiptap/core";
 import { StarterKit } from "@tiptap/starter-kit";
 import { Image } from "@tiptap/extension-image";
@@ -19,12 +19,39 @@ import {
 } from "prosemirror-markdown";
 
 // ============================================================================
+// Custom Node: file_block (simplified for backend)
+// ============================================================================
+
+const FileBlockNode = TiptapNode.create({
+  name: "file_block",
+  group: "block",
+  atom: true,
+  addAttributes() {
+    return {
+      asset_id: { default: null },
+      file_name: { default: null },
+      mime: { default: null },
+      file_type: { default: null },
+      office_type: { default: null },
+      size: { default: null },
+    };
+  },
+  parseHTML() {
+    return [{ tag: "div[data-file-block]" }];
+  },
+  renderHTML() {
+    return ["div", { "data-file-block": "" }];
+  },
+});
+
+// ============================================================================
 // Schema (simplified - no SCSS-dependent extensions)
 // ============================================================================
 
 const SIMPLE_EXTENSIONS = [
   StarterKit,
   Image,
+  FileBlockNode,
 ];
 
 let cachedSchema: Schema | null = null;
@@ -154,6 +181,21 @@ function getSerializer(): MarkdownSerializer {
         state.write(`\`\`\`${language}\n`);
         state.text(node.textContent, false);
         state.ensureNewLine();
+        state.write("```");
+        state.closeBlock(node);
+      },
+      // file_block: serialize as a file fence block
+      file_block: (state: { write: (text: string) => void; closeBlock: (node: ProsemirrorNode) => void }, node: ProsemirrorNode) => {
+        const attrs = node.attrs as Record<string, unknown>;
+        const attrParts: string[] = [];
+        if (attrs.asset_id) attrParts.push(`asset_id="${attrs.asset_id}"`);
+        if (attrs.file_name) attrParts.push(`file_name="${attrs.file_name}"`);
+        if (attrs.mime) attrParts.push(`mime="${attrs.mime}"`);
+        if (attrs.file_type) attrParts.push(`file_type="${attrs.file_type}"`);
+        if (attrs.office_type) attrParts.push(`office_type="${attrs.office_type}"`);
+        if (typeof attrs.size === "number") attrParts.push(`size=${attrs.size}`);
+        const attrStr = attrParts.length > 0 ? ` {${attrParts.join(" ")}}` : "";
+        state.write(`\`\`\`file${attrStr}\n`);
         state.write("```");
         state.closeBlock(node);
       },
