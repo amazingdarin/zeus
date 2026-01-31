@@ -99,19 +99,21 @@ setup-python-venv:
 	@echo "  source $(PYTHON_VENV)/bin/activate"
 
 install-paddleocr: setup-python-venv
-	@echo "Installing PaddleOCR dependencies..."
-	$(PYTHON_VENV)/bin/pip install --upgrade pip
+	@echo "Installing PaddleOCR dependencies (CPU)..."
+	$(PYTHON_VENV)/bin/python -m pip install --upgrade pip
 	@echo "Installing PaddlePaddle (CPU version)..."
-	$(PYTHON_VENV)/bin/pip install paddlepaddle -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+	$(PYTHON_VENV)/bin/python -m pip install paddlepaddle==3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+	@echo "Installing PaddleOCR with doc-parser..."
+	$(PYTHON_VENV)/bin/python -m pip install -U "paddleocr[doc-parser]"
 	$(PYTHON_VENV)/bin/pip install -r scripts/ocr/requirements.txt
 	@echo "PaddleOCR dependencies installed."
-	@echo "To use PaddleOCR, activate the venv first:"
-	@echo "  source $(PYTHON_VENV)/bin/activate"
 
 install-paddleocr-gpu: setup-python-venv
-	@echo "Installing PaddleOCR dependencies (GPU)..."
-	$(PYTHON_VENV)/bin/pip install --upgrade pip
-	@echo "Installing PaddlePaddle GPU (CUDA 12.6)..."
-	$(PYTHON_VENV)/bin/pip install paddlepaddle-gpu -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
+	@echo "Installing PaddleOCR dependencies (GPU CUDA 12.6)..."
+	$(PYTHON_VENV)/bin/python -m pip install --upgrade pip
+	@echo "Installing PaddlePaddle GPU..."
+	$(PYTHON_VENV)/bin/python -m pip install paddlepaddle-gpu==3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
+	@echo "Installing PaddleOCR with doc-parser..."
+	$(PYTHON_VENV)/bin/python -m pip install -U "paddleocr[doc-parser]"
 	$(PYTHON_VENV)/bin/pip install -r scripts/ocr/requirements.txt
 	@echo "PaddleOCR GPU dependencies installed."

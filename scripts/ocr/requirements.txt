@@ -1,18 +1,24 @@
 # PaddleOCR-VL Dependencies
 # 
-# IMPORTANT: PaddlePaddle must be installed separately from official source:
+# IMPORTANT: PaddlePaddle must be installed first from official source.
+# See: https://www.paddlepaddle.org.cn/install/quick
 #
-#   CPU version:
-#     pip install paddlepaddle -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+# Installation steps:
+#   1. Install PaddlePaddle:
 #
-#   GPU version (CUDA 12.6):
-#     pip install paddlepaddle-gpu -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
+#      GPU (CUDA 12.6):
+#        python -m pip install paddlepaddle-gpu==3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
 #
-# Then install this file:
-#     pip install -r requirements.txt
-
-# PaddleOCR with document parser support
-paddleocr[doc-parser]>=3.0.0
+#      CPU:
+#        python -m pip install paddlepaddle==3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+#
+#   2. Install PaddleOCR with doc-parser:
+#        python -m pip install -U "paddleocr[doc-parser]"
+#
+#   3. Install other dependencies:
+#        pip install -r requirements.txt
+#
+# Note: paddleocr[doc-parser] is NOT listed below as it requires special installation.
 
 # HTTP server dependencies
 fastapi>=0.115.0
