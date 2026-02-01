@@ -38,10 +38,12 @@ export function detectSkillIntent(
   // Check for explicit slash commands
   if (trimmed.startsWith("/doc-create")) {
     const rest = trimmed.slice("/doc-create".length).trim();
+    // If user specified documents with @, use the first one as parent
+    const parentId = docIds && docIds.length > 0 ? docIds[0] : null;
     return {
       skill: "doc-create",
       command: "/doc-create",
-      args: { title: rest || "新文档", description: rest },
+      args: { title: rest || "新文档", description: rest, parent_id: parentId },
       rawMessage: message,
       docIds,
     };
@@ -87,7 +89,7 @@ export function detectSkillIntent(
     }
   }
 
-  // Check for creation patterns (no @ reference needed)
+  // Check for creation patterns (@ reference optional, used as parent if provided)
   const createPatterns = [
     /^(创建|新建|写|生成|帮我写|写一个|创建一个).*(文档|文章|说明|指南|教程)/,
     /^(请|帮我)?(创建|新建|写|生成).*/,
@@ -95,10 +97,12 @@ export function detectSkillIntent(
 
   for (const pattern of createPatterns) {
     if (pattern.test(trimmed)) {
+      // If user specified documents with @, use the first one as parent
+      const parentId = docIds && docIds.length > 0 ? docIds[0] : null;
       return {
         skill: "doc-create",
         command: "",
-        args: { title: extractTitle(trimmed), description: trimmed },
+        args: { title: extractTitle(trimmed), description: trimmed, parent_id: parentId },
         rawMessage: message,
         docIds,
       };
