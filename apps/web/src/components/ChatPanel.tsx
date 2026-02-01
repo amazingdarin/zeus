@@ -721,15 +721,15 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
           }
         }
 
-        // Check for / trigger at the start of input
-        if (value === "/" || (cursorPos === 1 && value.startsWith("/"))) {
+        // Check for / trigger at the start of input (only if no command is already selected)
+        if (!selectedCommand && (value === "/" || (cursorPos === 1 && value.startsWith("/")))) {
           setSlashActive(true);
           setSlashQuery("");
           setSlashSelectedIndex(0);
         }
       }
     },
-    [mentionState.active, mentionState.startPos, slashActive],
+    [mentionState.active, mentionState.startPos, slashActive, selectedCommand],
   );
 
   const handleKeyDown = useCallback(
