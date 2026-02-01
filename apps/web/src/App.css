@@ -4808,3 +4808,36 @@ body {
     min-height: 200px;
   }
 }
+
+/* ============================================================================
+   Block Highlight Animation - for URL block navigation
+   ============================================================================ */
+
+@keyframes block-highlight-pulse {
+  0%, 100% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: rgba(255, 213, 79, 0.4);
+  }
+}
+
+[data-block-id].block-highlight {
+  animation: block-highlight-pulse 0.6s ease-in-out 3;
+  border-radius: 4px;
+  position: relative;
+}
+
+/* Dark mode variant */
+[data-theme="dark"] [data-block-id].block-highlight {
+  animation-name: block-highlight-pulse-dark;
+}
+
+@keyframes block-highlight-pulse-dark {
+  0%, 100% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: rgba(255, 193, 7, 0.3);
+  }
+}

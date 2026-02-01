@@ -9,6 +9,7 @@ import type { JSONContent } from "@tiptap/core";
 import { configStore, llmGateway, type ProviderConfigInternal } from "../llm/index.js";
 import { documentStore } from "../storage/document-store.js";
 import { tiptapJsonToMarkdown, markdownToTiptapJson } from "../utils/markdown.js";
+import { ensureBlockIds } from "../utils/block-id.js";
 
 // ============================================================================
 // Types
@@ -282,8 +283,8 @@ export async function* streamTask(taskId: string): AsyncGenerator<OptimizeStream
     optimizedMarkdown = cleanMarkdownOutput(optimizedMarkdown);
     task.optimizedMarkdown = optimizedMarkdown;
 
-    // Convert back to Tiptap JSON
-    const optimizedContent = markdownToTiptapJson(optimizedMarkdown);
+    // Convert back to Tiptap JSON and ensure block IDs
+    const optimizedContent = ensureBlockIds(markdownToTiptapJson(optimizedMarkdown)) as JSONContent;
 
     task.status = "completed";
     task.updatedAt = Date.now();

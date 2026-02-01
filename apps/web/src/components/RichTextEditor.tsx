@@ -20,6 +20,7 @@ interface RichTextEditorProps {
   projectKey?: string;
   docId?: string;
   onLoadDocument?: (id: string) => Promise<JSONContent>;
+  onEditorReady?: (editor: Editor | null) => void;
 }
 
 const openApiExtensions = (projectKey?: string): Extensions => [
@@ -43,6 +44,7 @@ function RichTextEditor({
   projectKey,
   docId,
   onLoadDocument,
+  onEditorReady: onEditorReadyProp,
 }: RichTextEditorProps) {
   const editorRef = useRef<Editor | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -133,6 +135,7 @@ function RichTextEditor({
         }}
         onEditorReady={(editor) => {
           editorRef.current = editor;
+          onEditorReadyProp?.(editor);
         }}
       />
       <BlockRefPicker

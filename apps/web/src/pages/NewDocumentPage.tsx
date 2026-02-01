@@ -5,6 +5,7 @@ import { Modal } from "antd";
 
 import RichTextEditor from "../components/RichTextEditor";
 import RichTextViewer from "../components/RichTextViewer";
+import { useScrollToBlock } from "@zeus/doc-editor";
 import {
   exportContentJson,
   type ContentMetaInput,
@@ -55,6 +56,13 @@ function NewDocumentPage() {
   const documentIdParam = useMemo(() => {
     return (searchParams.get("document_id") || "").trim();
   }, [searchParams]);
+  const blockIdParam = useMemo(() => {
+    return (searchParams.get("block") || "").trim() || null;
+  }, [searchParams]);
+  const [editorReady, setEditorReady] = useState(false);
+  
+  // Scroll to block if specified in URL
+  useScrollToBlock(blockIdParam, editorReady && !loadingDocument);
 
   const contentPayload = useMemo(() => {
     return exportContentJson(
@@ -658,6 +666,7 @@ function NewDocumentPage() {
               projectKey={currentProject?.key ?? ""}
               docId={documentIdParam || undefined}
               onLoadDocument={handleLoadDocument}
+              onEditorReady={(editor) => setEditorReady(!!editor)}
             />
           </div>
         )}

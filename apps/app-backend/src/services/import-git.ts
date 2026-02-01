@@ -8,6 +8,7 @@ import { optimizeFormatSync } from "./optimize.js";
 import { documentStore } from "../storage/document-store.js";
 import { assetStore } from "../storage/asset-store.js";
 import { knowledgeSearch } from "../knowledge/search.js";
+import { ensureBlockIds } from "../utils/block-id.js";
 import type { Document } from "../storage/types.js";
 
 export type SmartImportType = "markdown" | "word" | "pdf" | "image";
@@ -486,6 +487,16 @@ const createSmartDocument = async (
   const fileBlock = buildFileBlockNode(assetMeta);
   const tiptapContent = markdownToTiptap(finalMarkdown);
 
+  // Build content and ensure all blocks have IDs
+  const rawContent = {
+    type: "doc",
+    content: [
+      fileBlock,
+      ...(Array.isArray(tiptapContent.content) ? tiptapContent.content : []),
+    ],
+  };
+  const contentWithIds = ensureBlockIds(rawContent);
+
   const doc: Document = {
     meta: {
       id: uuidv4(),
@@ -503,13 +514,7 @@ const createSmartDocument = async (
     },
     body: {
       type: "tiptap",
-      content: {
-        type: "doc",
-        content: [
-          fileBlock,
-          ...(Array.isArray(tiptapContent.content) ? tiptapContent.content : []),
-        ],
-      },
+      content: contentWithIds,
     },
   };
 
@@ -568,7 +573,7 @@ function markdownToTiptap(markdown: string): { type: string; content: unknown[] 
 }
 
 /**
- * Build a Tiptap document with a file block
+ * Build a Tiptap document with a file block (with block IDs)
  */
 function buildFileBlockDoc(assetMeta: {
   id: string;
@@ -576,10 +581,11 @@ function buildFileBlockDoc(assetMeta: {
   mime: string;
   size: number;
 }): unknown {
-  return {
+  const doc = {
     type: "doc",
     content: [buildFileBlockNode(assetMeta)],
   };
+  return ensureBlockIds(doc);
 }
 
 /**

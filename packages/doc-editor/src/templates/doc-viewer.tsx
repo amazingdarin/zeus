@@ -1,5 +1,5 @@
 import { useMemo } from "react"
-import type { JSONContent } from "@tiptap/react"
+import type { JSONContent, Editor } from "@tiptap/react"
 import type { Extensions } from "@tiptap/core"
 import { LinkPreviewNode } from "../nodes/link-preview-node/link-preview-node-extension"
 
@@ -9,12 +9,14 @@ export interface DocViewerProps {
   content?: JSONContent | null
   extensions?: Extensions
   linkPreviewFetchHtml?: (url: string) => Promise<string>
+  onEditorReady?: (editor: Editor | null) => void
 }
 
 export function DocViewer({
   content,
   extensions = [],
   linkPreviewFetchHtml,
+  onEditorReady,
 }: DocViewerProps) {
   const contentKey = useMemo(() => JSON.stringify(content ?? {}), [content])
   return (
@@ -24,6 +26,7 @@ export function DocViewer({
       extensions={extensions}
       linkPreviewFetchHtml={linkPreviewFetchHtml}
       mode="view"
+      onEditorReady={onEditorReady}
     />
   )
 }

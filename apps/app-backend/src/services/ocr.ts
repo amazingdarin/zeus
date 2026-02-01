@@ -10,6 +10,7 @@ import type { JSONContent } from "@tiptap/core";
 import { generateText } from "ai";
 import { configStore, type ProviderConfigInternal } from "../llm/index.js";
 import { providerRegistry } from "../llm/providers.js";
+import { ensureBlockIds } from "../utils/block-id.js";
 
 // ============================================================================
 // Types
@@ -283,7 +284,7 @@ async function parseWithPaddleOCR(request: OCRRequest, endpoint: string): Promis
     console.log(`[OCR] ========================================`);
 
     return {
-      content: result.content,
+      content: ensureBlockIds(result.content) as JSONContent,
       markdown: result.markdown,
       rawResponse: JSON.stringify(result),
       provider: `PaddleOCR (${endpoint})`,
@@ -517,7 +518,7 @@ async function parseWithLLMVision(request: OCRRequest): Promise<OCRResponse> {
       const content = markdownToTiptapJson(rawResponse);
       console.log(`[OCR] Converted markdown to Tiptap, nodes: ${content.content?.length || 0}`);
       return {
-        content,
+        content: ensureBlockIds(content) as JSONContent,
         markdown: rawResponse,
         rawResponse,
         provider: `LLM Vision (${config.providerId}/${config.defaultModel})`,
@@ -532,7 +533,7 @@ async function parseWithLLMVision(request: OCRRequest): Promise<OCRResponse> {
       console.log(`[OCR] Node types: ${nodeTypes.join(", ") || "(empty)"}`);
     }
     return {
-      content,
+      content: ensureBlockIds(content) as JSONContent,
       rawResponse,
       provider: `LLM Vision (${config.providerId}/${config.defaultModel})`,
     };

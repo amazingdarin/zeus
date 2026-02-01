@@ -1,4 +1,4 @@
-import type { JSONContent } from "@tiptap/react";
+import type { JSONContent, Editor } from "@tiptap/react";
 import type { Extensions } from "@tiptap/core";
 
 import {
@@ -15,6 +15,7 @@ import { fetchUrlHtml } from "../api/documents";
 interface RichTextViewerProps {
   content: JSONContent;
   projectKey?: string;
+  onEditorReady?: (editor: Editor | null) => void;
 }
 
 const openApiExtensions = (projectKey?: string): Extensions => [
@@ -32,7 +33,7 @@ const openApiExtensions = (projectKey?: string): Extensions => [
   }),
 ];
 
-function RichTextViewer({ content, projectKey }: RichTextViewerProps) {
+function RichTextViewer({ content, projectKey, onEditorReady }: RichTextViewerProps) {
   const openapi = openApiExtensions(projectKey);
   const extensions: Extensions = [
     ...openapi,
@@ -55,6 +56,7 @@ function RichTextViewer({ content, projectKey }: RichTextViewerProps) {
           const data = await fetchUrlHtml(projectKey, url)
           return data.html
         }}
+        onEditorReady={onEditorReady}
       />
     </div>
   );

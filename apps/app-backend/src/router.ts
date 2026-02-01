@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import { convertDocument } from "./services/convert.js";
 import { fetchUrl } from "./services/fetch-url.js";
 import { importGit } from "./services/import-git.js";
+import { ensureBlockIds } from "./utils/block-id.js";
 import {
   documentStore,
   DocumentNotFoundError,
@@ -223,7 +224,10 @@ export const buildRouter = () => {
           updated_at: "",
           extra: body.meta.extra,
         },
-        body: body.body,
+        body: {
+          ...body.body,
+          content: body.body?.content ? ensureBlockIds(body.body.content) : body.body?.content,
+        },
       };
 
       const saved = await documentStore.save(projectKey, doc);
@@ -253,13 +257,17 @@ export const buildRouter = () => {
       const existing = await documentStore.get(projectKey, docId);
 
       // Merge updates
+      const updatedBody = body.body || existing.body;
       const doc: Document = {
         meta: {
           ...existing.meta,
           ...body.meta,
           id: docId, // Ensure ID doesn't change
         },
-        body: body.body || existing.body,
+        body: {
+          ...updatedBody,
+          content: updatedBody?.content ? ensureBlockIds(updatedBody.content) : updatedBody?.content,
+        },
       };
 
       const saved = await documentStore.save(projectKey, doc);

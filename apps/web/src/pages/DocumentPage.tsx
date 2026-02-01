@@ -42,6 +42,7 @@ import {
   HorizontalRule,
   OpenApiNode,
   OpenApiRefNode,
+  useScrollToBlock,
 } from "@zeus/doc-editor";
 import {
   buildUploadEntries,
@@ -223,6 +224,7 @@ function DocumentPage() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const proposalId = (searchParams.get("proposal_id") || "").trim();
+  const blockIdParam = (searchParams.get("block") || "").trim() || null;
   const refreshKey = (() => {
     const state = location.state as { refreshToken?: number | string } | null;
     if (!state?.refreshToken) {
@@ -233,6 +235,11 @@ function DocumentPage() {
 
   const [document, setDocument] = useState<DocumentData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [viewerReady, setViewerReady] = useState(false);
+  
+  // Scroll to block if specified in URL
+  useScrollToBlock(blockIdParam, viewerReady && !loading);
+  
   const [error, setError] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -296,7 +303,6 @@ function DocumentPage() {
   const projectKeyRef = useRef<string | null>(null);
   const loadingIdsRef = useRef<Record<string, boolean>>({});
   const rootLoadAttemptRef = useRef<string | null>(null);
-  const initialRedirectRef = useRef(false);
 
   const docParentMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -569,7 +575,6 @@ function DocumentPage() {
       loadingIdsRef.current = {};
       rootLoadAttemptRef.current = null;  // Reset so tree will reload
       setRootLoading(false);
-      initialRedirectRef.current = false;
       
       // Clear current document state
       setDocument(null);
@@ -582,20 +587,7 @@ function DocumentPage() {
     // Tree loading is handled by the separate effect below
   }, [navigate, resolvedProjectKey]);
 
-  useEffect(() => {
-    if (!resolvedProjectKey || !rootDocuments.length || resolvedDocumentId) {
-      return;
-    }
-    if (rootLoading || initialRedirectRef.current) {
-      return;
-    }
-    const firstDoc = rootDocuments[0];
-    if (!firstDoc?.id) {
-      return;
-    }
-    initialRedirectRef.current = true;
-    navigate(`/documents/${encodeURIComponent(firstDoc.id)}`, { replace: true });
-  }, [navigate, resolvedDocumentId, resolvedProjectKey, rootDocuments, rootLoading]);
+  // Auto-redirect to first document removed - main page will be displayed at /documents
 
   // Load tree once when entering the page or switching projects
   useEffect(() => {
@@ -1789,6 +1781,7 @@ function DocumentPage() {
           <RichTextViewer
             content={activeDocument.content}
             projectKey={resolvedProjectKey}
+            onEditorReady={(editor) => setViewerReady(!!editor)}
           />
         ) : (
           <div className="doc-viewer-state">No document content</div>
