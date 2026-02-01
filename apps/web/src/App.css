@@ -4637,6 +4637,55 @@ body {
   color: #ff4d4f;
 }
 
+/* Command Tag (Slash Command) */
+.chat-command-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(16, 185, 129, 0.15));
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #059669;
+}
+
+[data-theme="dark"] .chat-command-tag {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(16, 185, 129, 0.2));
+  border-color: rgba(34, 197, 94, 0.5);
+  color: #34d399;
+}
+
+.chat-command-tag-icon {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.chat-command-tag-text {
+  font-family: "SF Mono", "Monaco", "Menlo", monospace;
+  font-size: 11px;
+}
+
+.chat-command-tag-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  margin-left: 2px;
+  border: none;
+  background: transparent;
+  color: rgba(34, 197, 94, 0.6);
+  cursor: pointer;
+  font-size: 12px;
+  transition: color 0.15s;
+}
+
+.chat-command-tag-remove:hover {
+  color: #ff4d4f;
+}
+
 /* Dark mode adjustments for mention */
 [data-theme="dark"] .mention-dropdown {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);

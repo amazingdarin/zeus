@@ -233,6 +233,9 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
   const [slashActive, setSlashActive] = useState(false);
   const [slashQuery, setSlashQuery] = useState("");
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
+  
+  // Selected command (displayed as a tag, acts as a unit for undo)
+  const [selectedCommand, setSelectedCommand] = useState<SlashCommand | null>(null);
 
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -414,10 +417,18 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
   const handleSend = useCallback(async () => {
     if (!canSend) return;
 
-    const message = input.trim();
+    // Auto expand panel when sending message
+    if (!isExpanded) {
+      setIsExpanded(true);
+    }
+
+    // Build full message with command prefix if selected
+    const commandPrefix = selectedCommand ? selectedCommand.command + " " : "";
+    const message = (commandPrefix + input).trim();
     const currentMentions = [...mentions];
     setInput("");
     setMentions([]);
+    setSelectedCommand(null);
     setMentionState({ active: false, query: "", startPos: 0 });
     setError(null);
 
@@ -556,6 +567,8 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     resetAssistantBuffer,
     sessionId,
     mentions,
+    isExpanded,
+    selectedCommand,
   ]);
 
   const handleClearHistory = useCallback(async () => {
@@ -636,16 +649,26 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
 
   // Handle slash command selection
   const handleSlashSelect = useCallback((command: SlashCommand) => {
-    // Insert the command into input
+    // Set the command as a selected tag
+    setSelectedCommand(command);
+    // Remove the /query from input
     setInput((prev) => {
-      // Replace /query with the full command
-      const beforeSlash = prev.slice(0, prev.lastIndexOf("/"));
-      return beforeSlash + command.command + " ";
+      const slashIndex = prev.lastIndexOf("/");
+      if (slashIndex >= 0) {
+        return prev.slice(0, slashIndex);
+      }
+      return prev;
     });
     setSlashActive(false);
     setSlashQuery("");
     setSlashSelectedIndex(0);
     // Focus input
+    inputRef.current?.focus();
+  }, []);
+
+  // Remove selected command
+  const handleRemoveCommand = useCallback(() => {
+    setSelectedCommand(null);
     inputRef.current?.focus();
   }, []);
 
@@ -748,12 +771,19 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
         }
       }
 
+      // Handle Backspace to remove command tag when input is empty
+      if (event.key === "Backspace" && input === "" && selectedCommand) {
+        event.preventDefault();
+        setSelectedCommand(null);
+        return;
+      }
+
       if (event.key !== "Enter") return;
       if (event.shiftKey || event.ctrlKey || event.metaKey) return;
       event.preventDefault();
       handleSend();
     },
-    [handleSend, mentionState.active, slashActive, filteredSlashCommands, slashSelectedIndex, handleSlashSelect],
+    [handleSend, mentionState.active, slashActive, filteredSlashCommands, slashSelectedIndex, handleSlashSelect, input, selectedCommand],
   );
 
   const renderArtifacts = (artifacts?: ChatArtifact[]) => {
@@ -1105,9 +1135,24 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
 
       {/* Input Bar (Always visible) */}
       <div className="chat-dock-bar">
-        {/* Mention Tags */}
-        {mentions.length > 0 && (
+        {/* Command and Mention Tags */}
+        {(selectedCommand || mentions.length > 0) && (
           <div className="chat-mention-tags">
+            {/* Selected Command Tag */}
+            {selectedCommand && (
+              <span className="chat-command-tag">
+                <span className="chat-command-tag-icon">{selectedCommand.icon}</span>
+                <span className="chat-command-tag-text">{selectedCommand.command}</span>
+                <button
+                  type="button"
+                  className="chat-command-tag-remove"
+                  onClick={handleRemoveCommand}
+                >
+                  <CloseCircleOutlined />
+                </button>
+              </span>
+            )}
+            {/* Mention Tags */}
             {mentions.map((m) => (
               <span key={m.docId} className="chat-mention-tag">
                 <span className="chat-mention-tag-icon">
