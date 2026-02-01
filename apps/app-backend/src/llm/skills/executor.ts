@@ -21,7 +21,7 @@ import type {
   DocumentDraft,
 } from "./types.js";
 import { validateTiptapContent, fixCommonIssues } from "./validator.js";
-import { tiptapToMarkdown, markdownToTiptap } from "@zeus/shared";
+import { tiptapJsonToMarkdown, markdownToTiptapJson } from "../../utils/markdown.js";
 
 // Maximum retries for LLM content generation
 const MAX_RETRIES = 2;
@@ -167,7 +167,7 @@ async function* executeDocRead(
     const doc = await documentStore.get(projectKey, docId);
     
     // Convert to markdown for display
-    const markdown = tiptapToMarkdown(doc.body as JSONContent);
+    const markdown = tiptapJsonToMarkdown(doc.body as JSONContent);
     
     yield {
       type: "delta",
@@ -284,7 +284,7 @@ async function* executeDocEdit(
     // Get original document
     const doc = await documentStore.get(projectKey, docId);
     const originalContent = doc.body as JSONContent;
-    const originalMarkdown = tiptapToMarkdown(originalContent);
+    const originalMarkdown = tiptapJsonToMarkdown(originalContent);
 
     yield { type: "thinking", content: "正在生成修改内容..." };
 
@@ -405,7 +405,7 @@ async function parseAndValidateContent(
     // If we can't parse JSON, try to convert as markdown
     try {
       console.log("[SkillExecutor] Falling back to markdown conversion");
-      jsonContent = markdownToTiptap(rawContent);
+      jsonContent = markdownToTiptapJson(rawContent);
     } catch {
       // If markdown conversion also fails, retry with LLM
       if (retryCount < MAX_RETRIES) {
