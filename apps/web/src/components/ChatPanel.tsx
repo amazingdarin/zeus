@@ -18,6 +18,8 @@ import {
   CloseCircleOutlined,
   FolderOutlined,
   FileTextOutlined,
+  RightOutlined,
+  MessageOutlined,
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 
@@ -222,6 +224,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
   const [llmConfig, setLlmConfig] = useState<ProviderConfig | null>(null);
   const [sessionId, setSessionId] = useState<string>(() => `session-${createId()}`);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isHidden, setIsHidden] = useState(false);
   const [panelHeight, setPanelHeight] = useState(320);
   const [isResizing, setIsResizing] = useState(false);
 
@@ -1071,8 +1074,46 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     );
   };
 
+  // When hidden, show floating button
+  if (isHidden) {
+    return (
+      <>
+        {/* Draft Preview Modal (still accessible when hidden) */}
+        {pendingDraft && (
+          <DraftPreviewModal
+            draft={pendingDraft}
+            projectKey={projectKey}
+            onClose={handleDraftClose}
+            onApplied={handleDraftApplied}
+          />
+        )}
+        <button
+          type="button"
+          className="chat-floating-btn"
+          onClick={() => setIsHidden(false)}
+          title="打开 AI 助手"
+        >
+          <MessageOutlined />
+          {messages.length > 0 && (
+            <span className="chat-floating-badge">{messages.length}</span>
+          )}
+        </button>
+      </>
+    );
+  }
+
   return (
     <section className="chat-dock-bottom">
+      {/* Hide Button */}
+      <button
+        type="button"
+        className="chat-dock-hide-btn"
+        onClick={() => setIsHidden(true)}
+        title="隐藏对话框"
+      >
+        <RightOutlined />
+      </button>
+
       {/* Draft Preview Modal */}
       {pendingDraft && (
         <DraftPreviewModal
