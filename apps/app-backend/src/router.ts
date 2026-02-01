@@ -127,6 +127,24 @@ export const buildRouter = () => {
   });
 
   /**
+   * Suggest documents matching a query (for @ mention autocomplete)
+   * GET /projects/:projectKey/documents/suggest?q=xxx&limit=10
+   */
+  router.get("/projects/:projectKey/documents/suggest", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const query = String(req.query.q || "");
+      const limit = Math.min(Math.max(1, Number(req.query.limit) || 10), 50);
+
+      const suggestions = await documentStore.suggest(projectKey, query, limit);
+      success(res, suggestions);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Suggest failed";
+      error(res, "SUGGEST_FAILED", message, 500);
+    }
+  });
+
+  /**
    * Get a document by ID
    * GET /projects/:projectKey/documents/:docId
    */
@@ -1568,7 +1586,11 @@ export const buildRouter = () => {
   router.post("/projects/:projectKey/chat/runs", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
-      const { session_id, message } = req.body as { session_id?: string; message?: string };
+      const { session_id, message, document_scope } = req.body as { 
+        session_id?: string; 
+        message?: string;
+        document_scope?: Array<{ doc_id: string; include_children: boolean }>;
+      };
 
       if (!message || typeof message !== "string" || !message.trim()) {
         error(res, "INVALID_REQUEST", "message is required");
@@ -1578,7 +1600,17 @@ export const buildRouter = () => {
       // Use provided session_id or generate one
       const sessionId = session_id || `session-${uuidv4()}`;
 
-      const runId = await createRun(projectKey, sessionId, message.trim());
+      // Parse document scope
+      const docScope = Array.isArray(document_scope)
+        ? document_scope
+            .filter((s) => s && typeof s.doc_id === "string" && s.doc_id.trim())
+            .map((s) => ({
+              docId: s.doc_id.trim(),
+              includeChildren: Boolean(s.include_children),
+            }))
+        : undefined;
+
+      const runId = await createRun(projectKey, sessionId, message.trim(), docScope);
 
       success(res, { run_id: runId });
     } catch (err) {

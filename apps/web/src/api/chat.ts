@@ -1,10 +1,22 @@
 import { apiFetch, buildApiUrl } from "../config/api";
 
+export type DocumentScope = {
+  docId: string;
+  includeChildren: boolean;
+};
+
 export const createChatRun = async (
   projectKey: string,
   message: string,
   sessionId?: string,
+  documentScope?: DocumentScope[],
 ): Promise<string> => {
+  // Convert to API format
+  const apiDocScope = documentScope?.map((s) => ({
+    doc_id: s.docId,
+    include_children: s.includeChildren,
+  }));
+
   const response = await apiFetch(`/api/projects/${projectKey}/chat/runs`, {
     method: "POST",
     headers: {
@@ -13,6 +25,7 @@ export const createChatRun = async (
     body: JSON.stringify({
       ...(sessionId ? { session_id: sessionId } : {}),
       message,
+      ...(apiDocScope && apiDocScope.length > 0 ? { document_scope: apiDocScope } : {}),
     }),
   });
   const payload = await response.json().catch(() => null);

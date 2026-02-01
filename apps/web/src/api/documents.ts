@@ -440,3 +440,43 @@ export const optimizeFormat = async (
         optimized: Boolean(payload?.data?.optimized ?? false),
     };
 };
+
+/**
+ * Document suggestion for @ mention autocomplete
+ */
+export type DocumentSuggestion = {
+    id: string;
+    title: string;
+    titlePath: string;
+    hasChildren: boolean;
+};
+
+/**
+ * Get document suggestions matching a query
+ */
+export const suggestDocuments = async (
+    projectKey: string,
+    query: string,
+    limit = 10,
+): Promise<DocumentSuggestion[]> => {
+    const params = new URLSearchParams({
+        q: query,
+        limit: String(limit),
+    });
+    const response = await apiFetch(
+        `/api/projects/${encodeURIComponent(projectKey)}/documents/suggest?${params.toString()}`,
+    );
+    if (!response.ok) {
+        console.warn("Document suggest failed");
+        return [];
+    }
+    const payload = await response.json();
+    const data = payload?.data;
+    if (!Array.isArray(data)) return [];
+    return data.map((item: Record<string, unknown>) => ({
+        id: String(item.id ?? ""),
+        title: String(item.title ?? ""),
+        titlePath: String(item.titlePath ?? ""),
+        hasChildren: Boolean(item.hasChildren),
+    }));
+};

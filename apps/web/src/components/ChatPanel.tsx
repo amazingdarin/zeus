@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, ChangeEvent } from "react";
 import {
   useCallback,
   useEffect,
@@ -15,14 +15,24 @@ import {
   SettingOutlined,
   UpOutlined,
   DownOutlined,
+  CloseCircleOutlined,
+  FolderOutlined,
+  FileTextOutlined,
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 
-import { createChatRun, buildChatStreamUrl, clearChatSession } from "../api/chat";
+import { createChatRun, buildChatStreamUrl, clearChatSession, type DocumentScope } from "../api/chat";
 import { applyProposal, rejectProposal } from "../api/documents";
 import { executeCommand } from "../api/commands";
 import { useProjectContext } from "../context/ProjectContext";
 import { getConfigByType, type ProviderConfig } from "../api/llm-config";
+import MentionDropdown, { type MentionItem } from "./MentionDropdown";
+
+type MentionState = {
+  active: boolean;
+  query: string;
+  startPos: number;
+};
 
 type ChatArtifact = {
   type: string;
@@ -205,6 +215,14 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
   const [panelHeight, setPanelHeight] = useState(320);
   const [isResizing, setIsResizing] = useState(false);
 
+  // @ Mention state
+  const [mentions, setMentions] = useState<MentionItem[]>([]);
+  const [mentionState, setMentionState] = useState<MentionState>({
+    active: false,
+    query: "",
+    startPos: 0,
+  });
+
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -386,9 +404,17 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     if (!canSend) return;
 
     const message = input.trim();
+    const currentMentions = [...mentions];
     setInput("");
+    setMentions([]);
+    setMentionState({ active: false, query: "", startPos: 0 });
     setError(null);
-    appendMessage("user", message);
+
+    // Build display message with mention info
+    const mentionInfo = currentMentions.length > 0
+      ? `[检索范围: ${currentMentions.map((m) => m.titlePath + (m.includeChildren ? "/" : "")).join(", ")}]\n`
+      : "";
+    appendMessage("user", mentionInfo + message);
     setIsGenerating(true);
     resetAssistantBuffer();
     closeStream();
@@ -403,7 +429,15 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
         return;
       }
 
-      const runId = await createChatRun(projectKey, message, sessionId);
+      // Convert mentions to document scope
+      const documentScope: DocumentScope[] | undefined = currentMentions.length > 0
+        ? currentMentions.map((m) => ({
+            docId: m.docId,
+            includeChildren: m.includeChildren,
+          }))
+        : undefined;
+
+      const runId = await createChatRun(projectKey, message, sessionId, documentScope);
       const url = buildChatStreamUrl(projectKey, runId);
       const source = new EventSource(url, { withCredentials: true });
       eventSourceRef.current = source;
@@ -490,6 +524,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     projectKey,
     resetAssistantBuffer,
     sessionId,
+    mentions,
   ]);
 
   const handleClearHistory = useCallback(async () => {
@@ -505,14 +540,105 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     }
   }, [projectKey, sessionId]);
 
+  // Keep a ref to track the latest mentionState for callbacks
+  const mentionStateRef = useRef(mentionState);
+  useEffect(() => {
+    mentionStateRef.current = mentionState;
+  }, [mentionState]);
+
+  // Handle @ mention selection
+  const handleMentionSelect = useCallback(
+    (item: MentionItem) => {
+      const currentMentionState = mentionStateRef.current;
+
+      // Add to mentions list
+      setMentions((prev) => {
+        // Avoid duplicates
+        if (prev.some((m) => m.docId === item.docId)) {
+          return prev;
+        }
+        return [...prev, item];
+      });
+
+      // Remove the @query from input
+      setInput((prev) => {
+        const before = prev.slice(0, currentMentionState.startPos);
+        const after = prev.slice(currentMentionState.startPos + currentMentionState.query.length + 1); // +1 for @
+        return before + after;
+      });
+
+      // Close mention mode
+      setMentionState({ active: false, query: "", startPos: 0 });
+    },
+    [],
+  );
+
+  // Handle @ mention close
+  const handleMentionClose = useCallback(() => {
+    setMentionState({ active: false, query: "", startPos: 0 });
+  }, []);
+
+  // Remove a mention tag
+  const handleRemoveMention = useCallback((docId: string) => {
+    setMentions((prev) => prev.filter((m) => m.docId !== docId));
+  }, []);
+
+  // Handle input change with @ detection
+  const handleInputChange = useCallback(
+    (e: ChangeEvent<HTMLTextAreaElement>) => {
+      const value = e.target.value;
+      const cursorPos = e.target.selectionStart ?? value.length;
+
+      setInput(value);
+
+      // Check if we're in mention mode
+      if (mentionState.active) {
+        // Extract query after @
+        const queryPart = value.slice(mentionState.startPos + 1, cursorPos);
+
+        // Check for space (ends mention mode)
+        if (queryPart.includes(" ") || cursorPos <= mentionState.startPos) {
+          setMentionState({ active: false, query: "", startPos: 0 });
+        } else {
+          setMentionState((prev) => ({ ...prev, query: queryPart }));
+        }
+      } else {
+        // Check for @ trigger - look for @ anywhere in the new input
+        const atIndex = value.lastIndexOf("@");
+        if (atIndex >= 0 && atIndex === cursorPos - 1) {
+          // Check if @ is at start or after whitespace
+          const charBefore = atIndex > 0 ? value[atIndex - 1] : " ";
+          if (/\s/.test(charBefore) || atIndex === 0) {
+            setMentionState({
+              active: true,
+              query: "",
+              startPos: atIndex,
+            });
+          }
+        }
+      }
+    },
+    [mentionState.active, mentionState.startPos],
+  );
+
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      // If mention dropdown is active, let it handle keyboard events
+      if (mentionState.active) {
+        if (["ArrowDown", "ArrowUp", "Tab", "Escape", "Enter"].includes(event.key)) {
+          // Prevent default to avoid textarea behavior (like newline on Enter)
+          event.preventDefault();
+          // MentionDropdown handles these via window event listener
+          return;
+        }
+      }
+
       if (event.key !== "Enter") return;
       if (event.shiftKey || event.ctrlKey || event.metaKey) return;
       event.preventDefault();
       handleSend();
     },
-    [handleSend],
+    [handleSend, mentionState.active],
   );
 
   const renderArtifacts = (artifacts?: ChatArtifact[]) => {
@@ -854,15 +980,48 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
 
       {/* Input Bar (Always visible) */}
       <div className="chat-dock-bar">
+        {/* Mention Tags */}
+        {mentions.length > 0 && (
+          <div className="chat-mention-tags">
+            {mentions.map((m) => (
+              <span key={m.docId} className="chat-mention-tag">
+                <span className="chat-mention-tag-icon">
+                  {m.includeChildren ? <FolderOutlined /> : <FileTextOutlined />}
+                </span>
+                <span className="chat-mention-tag-text" title={m.titlePath}>
+                  {m.title}
+                  {m.includeChildren && "/"}
+                </span>
+                <button
+                  type="button"
+                  className="chat-mention-tag-remove"
+                  onClick={() => handleRemoveMention(m.docId)}
+                >
+                  <CloseCircleOutlined />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Mention Dropdown - positioned relative to chat-dock-bar */}
+        <MentionDropdown
+          projectKey={projectKey}
+          query={mentionState.query}
+          visible={mentionState.active && projectKey !== ""}
+          onSelect={handleMentionSelect}
+          onClose={handleMentionClose}
+        />
+
         <div className="chat-dock-input-wrapper">
           <textarea
             ref={inputRef}
             className="chat-dock-textarea"
             placeholder={
-              projectKey ? "输入消息，按 Enter 发送..." : "请先选择项目"
+              projectKey ? "输入消息，@ 指定文档范围..." : "请先选择项目"
             }
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             disabled={!projectKey || isGenerating}
             rows={1}

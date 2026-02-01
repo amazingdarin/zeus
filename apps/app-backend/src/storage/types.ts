@@ -77,6 +77,7 @@ export interface SearchQuery {
   highlight?: boolean;
   fuzzy?: boolean;
   min_similarity?: number;
+  doc_ids?: string[];  // Optional: filter by specific document IDs
 }
 
 export interface SearchResult {

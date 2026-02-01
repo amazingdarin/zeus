@@ -17,11 +17,17 @@ export type SourceReference = {
   score: number;
 };
 
+export type DocumentScope = {
+  docId: string;
+  includeChildren: boolean;
+};
+
 export type ChatRun = {
   id: string;
   projectKey: string;
   sessionId: string;
   messages: ChatMessage[];
+  docIds?: string[];  // Resolved document IDs for knowledge search scope
   status: "pending" | "running" | "completed" | "failed";
   createdAt: number;
   updatedAt: number;
@@ -71,12 +77,42 @@ export function clearLLMConfigCache(): void {
 }
 
 /**
+ * Resolve document scopes to a list of document IDs
+ */
+async function resolveDocumentScopes(
+  projectKey: string,
+  scopes: DocumentScope[],
+): Promise<string[]> {
+  const docIds = new Set<string>();
+
+  for (const scope of scopes) {
+    if (!scope.docId) continue;
+
+    docIds.add(scope.docId);
+
+    if (scope.includeChildren) {
+      try {
+        const descendantIds = await documentStore.collectAllDescendantIds(projectKey, scope.docId);
+        for (const id of descendantIds) {
+          docIds.add(id);
+        }
+      } catch {
+        // Ignore errors, just use the parent doc
+      }
+    }
+  }
+
+  return Array.from(docIds);
+}
+
+/**
  * Create a new chat run
  */
 export async function createRun(
   projectKey: string,
   sessionId: string,
   message: string,
+  documentScope?: DocumentScope[],
 ): Promise<string> {
   const runId = uuidv4();
   
@@ -91,11 +127,21 @@ export async function createRun(
   const userMessage: ChatMessage = { role: "user", content: message };
   history.push(userMessage);
 
+  // Resolve document scopes to IDs
+  let docIds: string[] | undefined;
+  if (documentScope && documentScope.length > 0) {
+    docIds = await resolveDocumentScopes(projectKey, documentScope);
+    if (docIds.length === 0) {
+      docIds = undefined; // No valid docs, search all
+    }
+  }
+
   const run: ChatRun = {
     id: runId,
     projectKey,
     sessionId,
     messages: [...history],
+    docIds,
     status: "pending",
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -158,6 +204,7 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
           text: userQuery,
           mode: "hybrid",
           limit: 5,
+          doc_ids: run.docIds,  // Apply document scope filter
         },
       );
 
@@ -165,7 +212,6 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
         const contextData = await buildContextFromResults(run.projectKey, searchResults);
         ragContext = contextData.text;
         sources = contextData.sources;
-        console.log(`[chat] RAG: Found ${sources.length} relevant documents for query`);
       }
     } catch (searchErr) {
       // Log but don't fail - continue without RAG context

@@ -175,9 +175,10 @@ export const embeddingIndex = {
       limit?: number;
       offset?: number;
       vector?: number[];
+      docIds?: string[];  // Optional: filter by specific document IDs
     } = {},
   ): Promise<SearchResult[]> {
-    const { limit = 20, offset = 0 } = options;
+    const { limit = 20, offset = 0, docIds } = options;
     let { vector } = options;
 
     if (!vector || vector.length === 0) {
@@ -191,15 +192,25 @@ export const embeddingIndex = {
       vector = vectors[0];
     }
 
-    const result = await query<{
-      doc_id: string;
-      block_id: string;
-      chunk_index: number;
-      score: number;
-      content: string;
-      metadata_json: Record<string, unknown>;
-    }>(
-      `SELECT 
+    // Build query with optional doc_id filter
+    let sql: string;
+    let params: unknown[];
+
+    if (docIds && docIds.length > 0) {
+      sql = `SELECT 
+         doc_id,
+         block_id,
+         chunk_index,
+         1 - (embedding <=> $3::vector) as score,
+         content,
+         metadata_json
+       FROM knowledge_embedding_index
+       WHERE project_key = $1 AND index_name = $2 AND doc_id = ANY($6)
+       ORDER BY embedding <=> $3::vector
+       LIMIT $4 OFFSET $5`;
+      params = [projectKey, indexName, formatVector(vector), limit, offset, docIds];
+    } else {
+      sql = `SELECT 
          doc_id,
          block_id,
          chunk_index,
@@ -209,9 +220,18 @@ export const embeddingIndex = {
        FROM knowledge_embedding_index
        WHERE project_key = $1 AND index_name = $2
        ORDER BY embedding <=> $3::vector
-       LIMIT $4 OFFSET $5`,
-      [projectKey, indexName, formatVector(vector), limit, offset],
-    );
+       LIMIT $4 OFFSET $5`;
+      params = [projectKey, indexName, formatVector(vector), limit, offset];
+    }
+
+    const result = await query<{
+      doc_id: string;
+      block_id: string;
+      chunk_index: number;
+      score: number;
+      content: string;
+      metadata_json: Record<string, unknown>;
+    }>(sql, params);
 
     return result.rows.map((row) => ({
       doc_id: row.doc_id,

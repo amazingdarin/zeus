@@ -600,6 +600,120 @@ export const documentStore = {
     
     return documents;
   },
+
+  /**
+   * Suggest documents matching a query string
+   * Matches against document titles and title paths
+   */
+  async suggest(
+    projectKey: string,
+    query: string,
+    limit = 10,
+  ): Promise<Array<{
+    id: string;
+    title: string;
+    titlePath: string;
+    hasChildren: boolean;
+  }>> {
+    const root = projectRoot(projectKey);
+    await indexManager.ensure(projectKey, root);
+
+    const allDocs = indexManager.getAll(projectKey);
+    const results: Array<{
+      id: string;
+      title: string;
+      titlePath: string;
+      hasChildren: boolean;
+      score: number;
+    }> = [];
+
+    const queryLower = query.toLowerCase().trim();
+    const queryParts = queryLower.split("/").filter(Boolean);
+
+    for (const [docId, cached] of allDocs) {
+      const titlePath = indexManager.buildTitlePath(projectKey, docId);
+      const titlePathLower = titlePath.toLowerCase();
+      const titleLower = cached.title.toLowerCase();
+
+      let score = 0;
+
+      // Match by title path (for hierarchical queries like "设计/用户")
+      if (queryParts.length > 0) {
+        const pathParts = titlePathLower.split("/");
+        let matchCount = 0;
+        let lastMatchIdx = -1;
+
+        for (const qPart of queryParts) {
+          for (let i = lastMatchIdx + 1; i < pathParts.length; i++) {
+            if (pathParts[i].includes(qPart)) {
+              matchCount++;
+              lastMatchIdx = i;
+              break;
+            }
+          }
+        }
+
+        if (matchCount === queryParts.length) {
+          // All query parts matched in order
+          score = 100 + matchCount * 10;
+          // Bonus for exact match at end
+          if (pathParts[pathParts.length - 1].startsWith(queryParts[queryParts.length - 1])) {
+            score += 20;
+          }
+        } else if (matchCount > 0) {
+          score = 50 + matchCount * 5;
+        }
+      }
+
+      // Simple title matching
+      if (score === 0 && queryLower) {
+        if (titleLower.startsWith(queryLower)) {
+          score = 80;
+        } else if (titleLower.includes(queryLower)) {
+          score = 60;
+        } else if (titlePathLower.includes(queryLower)) {
+          score = 40;
+        }
+      }
+
+      // If no query, include all documents with lower score
+      if (!queryLower) {
+        score = 10;
+      }
+
+      if (score > 0) {
+        // Check if has children
+        let hasChildren = false;
+        try {
+          const children = await this.getChildren(projectKey, docId);
+          hasChildren = children.length > 0;
+        } catch {
+          // Ignore errors
+        }
+
+        results.push({
+          id: docId,
+          title: cached.title,
+          titlePath,
+          hasChildren,
+          score,
+        });
+      }
+    }
+
+    // Sort by score descending, then by title path length (shorter = more relevant)
+    results.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.titlePath.length - b.titlePath.length;
+    });
+
+    return results.slice(0, limit).map(({ id, title, titlePath, hasChildren }) => ({
+      id,
+      title,
+      titlePath,
+      hasChildren,
+    }));
+  },
 };
 
 /**

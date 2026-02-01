@@ -28,6 +28,7 @@ export const knowledgeSearch = {
     const text = query.text?.trim() || "";
     const limit = query.limit || 20;
     const offset = query.offset || 0;
+    const docIds = query.doc_ids;
 
     if (!text && (!query.vector || query.vector.length === 0)) {
       return [];
@@ -48,6 +49,7 @@ export const knowledgeSearch = {
           highlight: query.highlight,
           sortBy: query.sort_by,
           filters: query.filters,
+          docIds,
         });
 
       case "embedding":
@@ -55,11 +57,12 @@ export const knowledgeSearch = {
           limit,
           offset,
           vector: query.vector,
+          docIds,
         });
 
       case "hybrid":
       default:
-        return hybridSearch(projectKey, indexName, text, { limit, offset });
+        return hybridSearch(projectKey, indexName, text, { limit, offset, docIds });
     }
   },
 
@@ -167,9 +170,9 @@ async function hybridSearch(
   projectKey: string,
   indexName: string,
   text: string,
-  options: { limit: number; offset: number },
+  options: { limit: number; offset: number; docIds?: string[] },
 ): Promise<SearchResult[]> {
-  const { limit, offset } = options;
+  const { limit, offset, docIds } = options;
 
   // Get more results than needed for merging
   const fetchLimit = Math.max(limit * 3, 60);
@@ -180,10 +183,12 @@ async function hybridSearch(
       limit: fetchLimit,
       offset: 0,
       highlight: true,
+      docIds,
     }),
     embeddingIndex.search(projectKey, indexName, text, {
       limit: fetchLimit,
       offset: 0,
+      docIds,
     }).catch(() => [] as SearchResult[]), // Fallback if embedding fails
   ]);
 

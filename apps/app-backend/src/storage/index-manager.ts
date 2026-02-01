@@ -59,6 +59,39 @@ export class IndexManager {
   }
 
   /**
+   * Get all cached documents for a project
+   */
+  getAll(projectKey: string): Map<string, CachedDoc> {
+    return this.indexes.get(projectKey) || new Map();
+  }
+
+  /**
+   * Build title path for a document (e.g., "父文档/子文档/当前文档")
+   */
+  buildTitlePath(projectKey: string, docId: string): string {
+    const projectIndex = this.indexes.get(projectKey);
+    if (!projectIndex) return "";
+
+    const parts: string[] = [];
+    const visited = new Set<string>();
+    let currentId = docId;
+
+    while (currentId && !visited.has(currentId)) {
+      visited.add(currentId);
+      const cached = projectIndex.get(currentId);
+      if (!cached) break;
+
+      parts.unshift(cached.title);
+
+      const parentId = cached.parentId?.trim();
+      if (!parentId || parentId === "root") break;
+      currentId = parentId;
+    }
+
+    return parts.join("/");
+  }
+
+  /**
    * Find document ID by its path
    */
   findIdByPath(projectKey: string, docPath: string): string | undefined {

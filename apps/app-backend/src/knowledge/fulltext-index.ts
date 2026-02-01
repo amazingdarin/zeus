@@ -83,9 +83,10 @@ export const fulltextIndex = {
       highlight?: boolean;
       sortBy?: string;
       filters?: Record<string, string>;
+      docIds?: string[];  // Optional: filter by specific document IDs
     } = {},
   ): Promise<SearchResult[]> {
-    const { limit = 20, offset = 0, highlight = false } = options;
+    const { limit = 20, offset = 0, highlight = false, docIds } = options;
 
     if (!queryText.trim()) {
       return [];
@@ -102,13 +103,26 @@ export const fulltextIndex = {
       snippetExpr = `LEFT(content_plain, 200)`;
     }
 
-    const result = await query<{
-      doc_id: string;
-      score: number;
-      snippet: string;
-      metadata_json: Record<string, unknown>;
-    }>(
-      `SELECT 
+    // Build query with optional doc_id filter
+    let sql: string;
+    let params: unknown[];
+
+    if (docIds && docIds.length > 0) {
+      sql = `SELECT 
+         doc_id,
+         ts_rank(${tsvColumn}, plainto_tsquery('${config}', $3)) as score,
+         ${snippetExpr} as snippet,
+         metadata_json
+       FROM knowledge_fulltext_index
+       WHERE project_key = $1 
+         AND index_name = $2 
+         AND ${tsvColumn} @@ plainto_tsquery('${config}', $3)
+         AND doc_id = ANY($6)
+       ORDER BY score DESC
+       LIMIT $4 OFFSET $5`;
+      params = [projectKey, indexName, queryText, limit, offset, docIds];
+    } else {
+      sql = `SELECT 
          doc_id,
          ts_rank(${tsvColumn}, plainto_tsquery('${config}', $3)) as score,
          ${snippetExpr} as snippet,
@@ -118,9 +132,16 @@ export const fulltextIndex = {
          AND index_name = $2 
          AND ${tsvColumn} @@ plainto_tsquery('${config}', $3)
        ORDER BY score DESC
-       LIMIT $4 OFFSET $5`,
-      [projectKey, indexName, queryText, limit, offset],
-    );
+       LIMIT $4 OFFSET $5`;
+      params = [projectKey, indexName, queryText, limit, offset];
+    }
+
+    const result = await query<{
+      doc_id: string;
+      score: number;
+      snippet: string;
+      metadata_json: Record<string, unknown>;
+    }>(sql, params);
 
     return result.rows.map((row) => ({
       doc_id: row.doc_id,
