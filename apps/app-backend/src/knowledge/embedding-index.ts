@@ -193,12 +193,16 @@ export const embeddingIndex = {
 
     const result = await query<{
       doc_id: string;
+      block_id: string;
+      chunk_index: number;
       score: number;
       content: string;
       metadata_json: Record<string, unknown>;
     }>(
       `SELECT 
          doc_id,
+         block_id,
+         chunk_index,
          1 - (embedding <=> $3::vector) as score,
          content,
          metadata_json
@@ -211,6 +215,8 @@ export const embeddingIndex = {
 
     return result.rows.map((row) => ({
       doc_id: row.doc_id,
+      block_id: row.block_id || undefined,
+      chunk_index: row.chunk_index,
       score: row.score,
       snippet: row.content,
       metadata: stringifyMetadata(row.metadata_json),

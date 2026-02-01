@@ -81,6 +81,8 @@ export interface SearchQuery {
 
 export interface SearchResult {
   doc_id: string;
+  block_id?: string;
+  chunk_index?: number;
   score: number;
   snippet: string;
   metadata?: Record<string, string>;

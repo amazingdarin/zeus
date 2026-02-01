@@ -11,6 +11,7 @@ export type ChatMessage = {
 
 export type SourceReference = {
   docId: string;
+  blockId?: string;
   title: string;
   snippet: string;
   score: number;
@@ -246,13 +247,15 @@ async function buildContextFromResults(
 
     sources.push({
       docId: result.doc_id,
+      blockId: result.block_id,
       title,
       snippet: result.snippet,
       score: result.score,
     });
 
-    // Build context text
-    contextParts.push(`【${title}】\n${result.snippet}`);
+    // Build context text with block location hint
+    const locationHint = result.block_id ? ` (block: ${result.block_id.slice(0, 8)}...)` : "";
+    contextParts.push(`【${title}${locationHint}】\n${result.snippet}`);
   }
 
   return {

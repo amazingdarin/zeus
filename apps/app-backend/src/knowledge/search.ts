@@ -150,6 +150,16 @@ export const knowledgeSearch = {
   },
 };
 
+// Maximum blocks per document in search results
+const MAX_BLOCKS_PER_DOC = 3;
+
+/**
+ * Create a unique key for doc+block combination
+ */
+function makeBlockKey(docId: string, blockId?: string): string {
+  return blockId ? `${docId}::${blockId}` : docId;
+}
+
 /**
  * Hybrid search combining fulltext and embedding results
  */
@@ -162,7 +172,7 @@ async function hybridSearch(
   const { limit, offset } = options;
 
   // Get more results than needed for merging
-  const fetchLimit = Math.max(limit * 2, 50);
+  const fetchLimit = Math.max(limit * 3, 60);
 
   // Run both searches in parallel
   const [fulltextResults, embeddingResults] = await Promise.all([
@@ -178,42 +188,55 @@ async function hybridSearch(
   ]);
 
   // Merge and deduplicate results using RRF (Reciprocal Rank Fusion)
+  // Use doc_id + block_id as key to preserve block-level granularity
   const scores = new Map<string, { score: number; result: SearchResult }>();
   const k = 60; // RRF constant
 
-  // Process fulltext results
+  // Process fulltext results (fulltext doesn't have block_id, so use doc_id only)
   for (let i = 0; i < fulltextResults.length; i++) {
     const r = fulltextResults[i];
+    const key = makeBlockKey(r.doc_id, r.block_id);
     const rrfScore = 1 / (k + i + 1);
-    const existing = scores.get(r.doc_id);
+    const existing = scores.get(key);
     if (existing) {
       existing.score += rrfScore;
     } else {
-      scores.set(r.doc_id, { score: rrfScore, result: r });
+      scores.set(key, { score: rrfScore, result: r });
     }
   }
 
-  // Process embedding results
+  // Process embedding results (has block_id)
   for (let i = 0; i < embeddingResults.length; i++) {
     const r = embeddingResults[i];
+    const key = makeBlockKey(r.doc_id, r.block_id);
     const rrfScore = 1 / (k + i + 1);
-    const existing = scores.get(r.doc_id);
+    const existing = scores.get(key);
     if (existing) {
       existing.score += rrfScore;
-      // Prefer fulltext snippet if available
     } else {
-      scores.set(r.doc_id, { score: rrfScore, result: r });
+      scores.set(key, { score: rrfScore, result: r });
     }
   }
 
-  // Sort by combined score and apply pagination
-  const sorted = [...scores.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(offset, offset + limit)
-    .map(({ score, result }) => ({
-      ...result,
-      score,
-    }));
+  // Sort by combined score
+  const sorted = [...scores.values()].sort((a, b) => b.score - a.score);
 
-  return sorted;
+  // Limit blocks per document to avoid one document dominating results
+  const docBlockCounts = new Map<string, number>();
+  const filtered: Array<{ score: number; result: SearchResult }> = [];
+
+  for (const entry of sorted) {
+    const docId = entry.result.doc_id;
+    const currentCount = docBlockCounts.get(docId) || 0;
+    if (currentCount < MAX_BLOCKS_PER_DOC) {
+      filtered.push(entry);
+      docBlockCounts.set(docId, currentCount + 1);
+    }
+  }
+
+  // Apply pagination and return
+  return filtered.slice(offset, offset + limit).map(({ score, result }) => ({
+    ...result,
+    score,
+  }));
 }

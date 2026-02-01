@@ -32,6 +32,7 @@ type ChatArtifact = {
 
 type SourceReference = {
   docId: string;
+  blockId?: string;
   title: string;
   snippet: string;
   score: number;
@@ -341,12 +342,17 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
   );
 
   const handleDocumentNavigate = useCallback(
-    (docId: string, proposalId?: string) => {
+    (docId: string, options?: { proposalId?: string; blockId?: string }) => {
       const trimmed = docId.trim();
       if (!trimmed) return;
-      const query = proposalId
-        ? `?proposal_id=${encodeURIComponent(proposalId)}`
-        : "";
+      const params = new URLSearchParams();
+      if (options?.proposalId) {
+        params.set("proposal_id", options.proposalId);
+      }
+      if (options?.blockId) {
+        params.set("block", options.blockId);
+      }
+      const query = params.toString() ? `?${params.toString()}` : "";
       navigate(`/documents/${encodeURIComponent(trimmed)}${query}`);
     },
     [navigate],
@@ -356,7 +362,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     async (action: string, docId: string, proposalId: string) => {
       if (!projectKey || !docId) return;
       if (action === "open") {
-        handleDocumentNavigate(docId, proposalId);
+        handleDocumentNavigate(docId, { proposalId });
         return;
       }
       if (!proposalId) return;
@@ -530,7 +536,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
                       key={`${item.id || i}`}
                       type="button"
                       className="chat-dock-artifact-link"
-                      onClick={() => handleDocumentNavigate(String(item.id ?? ""))}
+                      onClick={() => handleDocumentNavigate(String(item.id ?? ""), {})}
                     >
                       {String(item.title ?? item.id ?? "文档")}
                     </button>
@@ -551,7 +557,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
                 <button
                   type="button"
                   className="chat-dock-artifact-link"
-                  onClick={() => handleDocumentNavigate(docId, proposalId)}
+                  onClick={() => handleDocumentNavigate(docId, { proposalId })}
                 >
                   查看修改
                 </button>
@@ -655,11 +661,18 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
           <div className="chat-sources-list">
             {sources.map((source, index) => (
               <div
-                key={`${source.docId}-${index}`}
+                key={`${source.docId}-${source.blockId || ""}-${index}`}
                 className="chat-source-item"
-                onClick={() => handleDocumentNavigate(source.docId)}
+                onClick={() => handleDocumentNavigate(source.docId, { blockId: source.blockId })}
               >
-                <div className="chat-source-title">{source.title}</div>
+                <div className="chat-source-title">
+                  {source.title}
+                  {source.blockId && (
+                    <span className="chat-source-block-hint">
+                      #{source.blockId.slice(0, 8)}
+                    </span>
+                  )}
+                </div>
                 <div className="chat-source-snippet">{source.snippet}</div>
               </div>
             ))}
