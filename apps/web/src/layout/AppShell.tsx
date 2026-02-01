@@ -11,8 +11,8 @@ type AppShellProps = {
 };
 
 const navItems = [
-  { label: "文档", to: "/documents", icon: <FileTextOutlined /> },
   { label: "AI 助手", to: "/chat", icon: <RobotOutlined /> },
+  { label: "文档", to: "/documents", icon: <FileTextOutlined /> },
 ];
 
 function AppShell({ children }: AppShellProps) {
