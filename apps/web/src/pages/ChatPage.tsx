@@ -25,7 +25,7 @@ import {
   formatTime,
   type ChatArtifact,
   type SourceReference,
-} from "../hooks/useChatLogic.js";
+} from "../hooks/useChatLogic";
 import MentionDropdown from "../components/MentionDropdown";
 import DraftPreviewModal from "../components/DraftPreviewModal";
 import SettingsModal from "../components/SettingsModal";
