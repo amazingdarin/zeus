@@ -5270,16 +5270,34 @@ body {
   max-width: 400px;
 }
 
+/* Override Ant Design CSS-in-JS styles */
+.draft-parent-selector .ant-tree-select.ant-select {
+  background: transparent !important;
+}
+
 .draft-parent-selector .ant-tree-select .ant-select-selector {
   background: var(--input-bg) !important;
   border-color: var(--border) !important;
   color: var(--ink) !important;
 }
 
+[data-theme="dark"] .draft-parent-selector .ant-tree-select.ant-select {
+  background: transparent !important;
+}
+
 [data-theme="dark"] .draft-parent-selector .ant-tree-select .ant-select-selector {
   background: var(--surface) !important;
-  border-color: var(--border) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
   color: var(--ink) !important;
+}
+
+[data-theme="dark"] .draft-parent-selector .ant-tree-select .ant-select-selector:hover {
+  border-color: rgba(255, 255, 255, 0.25) !important;
+}
+
+[data-theme="dark"] .draft-parent-selector .ant-tree-select.ant-select-focused .ant-select-selector {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.15) !important;
 }
 
 [data-theme="dark"] .draft-parent-selector .ant-tree-select.ant-select-open .ant-select-selector {

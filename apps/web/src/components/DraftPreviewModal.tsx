@@ -278,7 +278,6 @@ function DraftPreviewModal({
             treeData={treeData}
             placeholder="选择父文档"
             allowClear
-            showSearch
             treeDefaultExpandAll
             style={{ width: 300 }}
             dropdownStyle={{ maxHeight: 400, overflow: "auto" }}
