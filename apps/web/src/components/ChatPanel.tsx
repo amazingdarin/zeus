@@ -37,7 +37,7 @@ type ChatPanelProps = {
 
 function ChatPanel({ onOpenSettings }: ChatPanelProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [isHidden, setIsHidden] = useState(false);
+  const [isHidden, setIsHidden] = useState(true);
   const [panelHeight, setPanelHeight] = useState(320);
   const [isResizing, setIsResizing] = useState(false);
   const resizeStartRef = useRef<{ y: number; height: number } | null>(null);
