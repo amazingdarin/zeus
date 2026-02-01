@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { SettingOutlined, FileTextOutlined } from "@ant-design/icons";
+import { Tooltip } from "antd";
 import type { ReactNode } from "react";
 
 import ProjectSelector from "./ProjectSelector";
@@ -34,28 +35,33 @@ function Sidebar({
 
           if (item.to) {
             return (
-              <Link key={item.label} className={className} to={item.to} title={item.label}>
-                {item.icon}
-              </Link>
+              <Tooltip key={item.label} title={item.label} placement="right" mouseEnterDelay={0.3}>
+                <Link className={className} to={item.to}>
+                  {item.icon}
+                </Link>
+              </Tooltip>
             );
           }
 
           return (
-            <button key={item.label} className={className} type="button" title={item.label}>
-              {item.icon}
-            </button>
+            <Tooltip key={item.label} title={item.label} placement="right" mouseEnterDelay={0.3}>
+              <button className={className} type="button">
+                {item.icon}
+              </button>
+            </Tooltip>
           );
         })}
       </nav>
       <div className="sidebar-spacer" />
-      <button
-        type="button"
-        className={`sidebar-menu-item${settingsActive ? " active" : ""}`}
-        onClick={onSettingsClick}
-        title="设置"
-      >
-        <SettingOutlined />
-      </button>
+      <Tooltip title="设置" placement="right" mouseEnterDelay={0.3}>
+        <button
+          type="button"
+          className={`sidebar-menu-item${settingsActive ? " active" : ""}`}
+          onClick={onSettingsClick}
+        >
+          <SettingOutlined />
+        </button>
+      </Tooltip>
     </aside>
   );
 }

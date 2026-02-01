@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { Tooltip } from "antd";
 
 import { type Project, useProjectContext } from "../context/ProjectContext";
 import CreateProjectModal from "./CreateProjectModal";
@@ -146,17 +147,22 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
 
   return (
     <div className="project-selector compact" ref={containerRef}>
-      <button
-        className="sidebar-menu-item"
-        type="button"
-        aria-expanded={open}
-        onClick={toggleOpen}
-        title={activeProject ? activeProject.name : "选择项目"}
+      <Tooltip 
+        title={activeProject ? activeProject.name : "选择项目"} 
+        placement="right" 
+        mouseEnterDelay={0.3}
       >
-        <span className="project-selector-initial" aria-label="Project">
-          {projectInitial}
-        </span>
-      </button>
+        <button
+          className="sidebar-menu-item"
+          type="button"
+          aria-expanded={open}
+          onClick={toggleOpen}
+        >
+          <span className="project-selector-initial" aria-label="项目">
+            {projectInitial}
+          </span>
+        </button>
+      </Tooltip>
       {open ? (
         <div className={`project-selector-menu${collapsed ? " compact" : ""}`}>
           <button
