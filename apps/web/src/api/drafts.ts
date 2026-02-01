@@ -49,8 +49,19 @@ export async function getDraft(
 export async function applyDraft(
   projectKey: string,
   draftId: string,
-  modifiedContent?: JSONContent,
+  options?: {
+    modifiedContent?: JSONContent;
+    parentId?: string | null;
+  },
 ): Promise<{ docId: string; isNew: boolean }> {
+  const body: { modifiedContent?: JSONContent; parentId?: string | null } = {};
+  if (options?.modifiedContent) {
+    body.modifiedContent = options.modifiedContent;
+  }
+  if (options?.parentId !== undefined) {
+    body.parentId = options.parentId;
+  }
+
   const response = await apiFetch(
     `/api/projects/${encodeURIComponent(projectKey)}/drafts/${encodeURIComponent(draftId)}/apply`,
     {
@@ -58,7 +69,7 @@ export async function applyDraft(
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(modifiedContent ? { modifiedContent } : {}),
+      body: JSON.stringify(body),
     },
   );
 

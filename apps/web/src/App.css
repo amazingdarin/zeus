@@ -5154,6 +5154,36 @@ body {
   font-weight: normal;
 }
 
+.draft-parent-selector {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--hover-bg);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  margin-top: 12px;
+}
+
+.draft-parent-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.draft-parent-path {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+  display: none; /* Hide when TreeSelect is shown */
+}
+
 .draft-preview-body {
   border: 1px solid var(--border);
   border-radius: 8px;

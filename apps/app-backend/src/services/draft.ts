@@ -94,7 +94,10 @@ export const draftService = {
   async apply(
     projectKey: string,
     draftId: string,
-    modifiedContent?: JSONContent,
+    options?: {
+      modifiedContent?: JSONContent;
+      parentId?: string | null;
+    },
   ): Promise<{ docId: string; isNew: boolean }> {
     const draft = this.get(draftId);
     if (!draft) {
@@ -109,7 +112,9 @@ export const draftService = {
       throw new Error(`Draft is already ${draft.status}`);
     }
 
-    const contentToSave = modifiedContent ?? draft.proposedContent;
+    const contentToSave = options?.modifiedContent ?? draft.proposedContent;
+    // Use provided parentId if specified, otherwise fall back to draft's parentId
+    const parentId = options?.parentId !== undefined ? options.parentId : draft.parentId;
 
     try {
       let docId: string;
@@ -135,7 +140,7 @@ export const draftService = {
             title: draft.title,
             slug: generateSlug(draft.title),
             path: "",
-            parent_id: draft.parentId || null,
+            parent_id: parentId || null,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           },

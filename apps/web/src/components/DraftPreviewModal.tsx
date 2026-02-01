@@ -4,18 +4,20 @@
  * Modal for previewing AI-generated document drafts with DIFF view for edits.
  */
 
-import { useCallback, useMemo, useState } from "react";
-import { Modal, Button, message } from "antd";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Modal, Button, message, TreeSelect, Spin } from "antd";
 import {
   CheckOutlined,
   CloseOutlined,
   FileTextOutlined,
   EditOutlined,
+  FolderOutlined,
 } from "@ant-design/icons";
 import type { JSONContent } from "@tiptap/react";
 
 import type { DocumentDraft } from "../api/drafts";
 import { applyDraft, rejectDraft } from "../api/drafts";
+import { fetchDocumentTree, type DocumentTreeItem } from "../api/documents";
 import RichTextViewer from "./RichTextViewer";
 import {
   blockDiff,
@@ -34,6 +36,27 @@ type DraftPreviewModalProps = {
 
 type DiffResolution = "accept" | "reject";
 
+// Convert document tree to TreeSelect format
+type TreeSelectNode = {
+  value: string;
+  title: string;
+  children?: TreeSelectNode[];
+};
+
+function convertToTreeSelectData(
+  items: DocumentTreeItem[],
+  parentPath = "",
+): TreeSelectNode[] {
+  return items.map((item) => {
+    const path = parentPath ? `${parentPath}/${item.title}` : item.title;
+    return {
+      value: item.id,
+      title: path,
+      children: item.children ? convertToTreeSelectData(item.children, path) : undefined,
+    };
+  });
+}
+
 function DraftPreviewModal({
   draft,
   projectKey,
@@ -44,6 +67,34 @@ function DraftPreviewModal({
   const [resolvedDiffs, setResolvedDiffs] = useState<Map<number, DiffResolution>>(
     new Map(),
   );
+
+  // Parent document state (only for new documents)
+  const [parentId, setParentId] = useState<string | null>(draft.parentId);
+  const [treeData, setTreeData] = useState<TreeSelectNode[]>([]);
+  const [loadingTree, setLoadingTree] = useState(false);
+
+  // Load document tree for parent selection
+  useEffect(() => {
+    if (!draft.docId && projectKey) {
+      // Only load tree for new documents
+      setLoadingTree(true);
+      fetchDocumentTree(projectKey)
+        .then((tree) => {
+          const data = convertToTreeSelectData(tree);
+          // Add root option
+          setTreeData([
+            { value: "", title: "根目录" },
+            ...data,
+          ]);
+        })
+        .catch((err) => {
+          console.error("Failed to load document tree:", err);
+        })
+        .finally(() => {
+          setLoadingTree(false);
+        });
+    }
+  }, [draft.docId, projectKey]);
 
   // Compute diff for edit mode
   const diffResult: BlockDiffResult | null = useMemo(() => {
@@ -163,7 +214,10 @@ function DraftPreviewModal({
     setApplying(true);
     try {
       const finalContent = buildFinalContent();
-      const result = await applyDraft(projectKey, draft.id, finalContent);
+      const result = await applyDraft(projectKey, draft.id, {
+        modifiedContent: finalContent,
+        parentId: !draft.docId ? parentId : undefined, // Only pass parentId for new documents
+      });
       message.success(result.isNew ? "文档已创建" : "文档已更新");
       onApplied(result.docId, result.isNew);
       onClose();
@@ -172,7 +226,7 @@ function DraftPreviewModal({
     } finally {
       setApplying(false);
     }
-  }, [buildFinalContent, draft.id, onApplied, onClose, projectKey]);
+  }, [buildFinalContent, draft.id, draft.docId, onApplied, onClose, projectKey, parentId]);
 
   // Handle reject
   const handleReject = useCallback(async () => {
@@ -185,6 +239,22 @@ function DraftPreviewModal({
     }
   }, [draft.id, onClose, projectKey]);
 
+  // Get parent document title for display
+  const getParentTitle = useCallback((id: string | null): string => {
+    if (!id) return "根目录";
+    const findNode = (nodes: TreeSelectNode[]): string | null => {
+      for (const node of nodes) {
+        if (node.value === id) return node.title;
+        if (node.children) {
+          const found = findNode(node.children);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+    return findNode(treeData) || id;
+  }, [treeData]);
+
   // Render new document preview
   const renderNewDocumentPreview = () => (
     <div className="draft-preview-content">
@@ -192,6 +262,35 @@ function DraftPreviewModal({
         <FileTextOutlined />
         <span>新建文档预览</span>
       </div>
+
+      {/* Parent document selector */}
+      <div className="draft-parent-selector">
+        <label className="draft-parent-label">
+          <FolderOutlined />
+          <span>父文档：</span>
+        </label>
+        {loadingTree ? (
+          <Spin size="small" />
+        ) : (
+          <TreeSelect
+            value={parentId || ""}
+            onChange={(value) => setParentId(value || null)}
+            treeData={treeData}
+            placeholder="选择父文档"
+            allowClear
+            showSearch
+            treeDefaultExpandAll
+            style={{ width: 300 }}
+            dropdownStyle={{ maxHeight: 400, overflow: "auto" }}
+          />
+        )}
+        {parentId && (
+          <span className="draft-parent-path" title={getParentTitle(parentId)}>
+            {getParentTitle(parentId)}
+          </span>
+        )}
+      </div>
+
       <div className="draft-preview-body">
         <RichTextViewer content={draft.proposedContent} projectKey={projectKey} />
       </div>

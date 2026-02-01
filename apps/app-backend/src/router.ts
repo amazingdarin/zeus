@@ -1720,7 +1720,10 @@ export const buildRouter = () => {
   router.post("/projects/:projectKey/drafts/:draftId/apply", async (req: Request, res: Response) => {
     try {
       const { projectKey, draftId } = req.params;
-      const { modifiedContent } = req.body as { modifiedContent?: unknown };
+      const { modifiedContent, parentId } = req.body as {
+        modifiedContent?: unknown;
+        parentId?: string | null;
+      };
 
       // Validate modified content if provided
       let validatedContent = undefined;
@@ -1728,7 +1731,10 @@ export const buildRouter = () => {
         validatedContent = modifiedContent as { type: string; content?: unknown[] };
       }
 
-      const result = await draftService.apply(projectKey, draftId, validatedContent);
+      const result = await draftService.apply(projectKey, draftId, {
+        modifiedContent: validatedContent,
+        parentId,
+      });
 
       success(res, {
         docId: result.docId,
