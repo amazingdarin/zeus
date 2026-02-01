@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
-import { FileTextOutlined } from "@ant-design/icons";
+import { FileTextOutlined, RobotOutlined } from "@ant-design/icons";
 
 import Sidebar from "../components/Sidebar";
 import SettingsModal from "../components/SettingsModal";
@@ -12,6 +12,7 @@ type AppShellProps = {
 
 const navItems = [
   { label: "文档", to: "/documents", icon: <FileTextOutlined /> },
+  { label: "AI 助手", to: "/chat", icon: <RobotOutlined /> },
 ];
 
 function AppShell({ children }: AppShellProps) {
@@ -23,6 +24,9 @@ function AppShell({ children }: AppShellProps) {
     const index = navItems.findIndex((item) => item.to && path.startsWith(item.to));
     return index === -1 ? -1 : index;
   }, [location.pathname]);
+
+  // Don't show ChatPanel on the dedicated chat page
+  const isChatPage = location.pathname === "/chat";
 
   return (
     <div className="app-shell">
@@ -39,8 +43,8 @@ function AppShell({ children }: AppShellProps) {
         <main className="content">{children}</main>
       </div>
 
-      {/* Bottom Chat Panel */}
-      <ChatPanel onOpenSettings={() => setSettingsOpen(true)} />
+      {/* Bottom Chat Panel - hidden on dedicated chat page */}
+      {!isChatPage && <ChatPanel onOpenSettings={() => setSettingsOpen(true)} />}
 
       <SettingsModal
         isOpen={settingsOpen}
