@@ -8,7 +8,7 @@ function TopBarModelButton({ onOpen }: TopBarModelButtonProps) {
       className="topbar-icon-button"
       type="button"
       onClick={onOpen}
-      aria-label="Model Settings"
+      aria-label="模型设置"
     >
       <svg
         viewBox="0 0 24 24"

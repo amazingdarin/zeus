@@ -310,7 +310,7 @@ function ChatDock() {
     }
     if (docSearchState.active) {
       return [
-        { value: "__cancel__", label: "Cancel" },
+        { value: "__cancel__", label: "取消" },
         ...docOptions.map((doc) => ({
           value: doc.id,
           label: doc.title,

@@ -354,7 +354,7 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
         }}
       >
         {rootLoading ? (
-          <div className="kb-doc-loading">Loading...</div>
+          <div className="kb-doc-loading">加载中...</div>
         ) : documents.length === 0 ? (
           <div 
             className="kb-doc-empty kb-doc-empty-clickable"

@@ -58,7 +58,7 @@ function BlockRefPicker({ open, projectKey, onCancel, onSelect }: BlockRefPicker
       .filter((item) => item.id)
       .map((item) => ({
         key: String(item.id),
-        title: item.title || item.slug || "Untitled",
+        title: item.title || item.slug || "无标题",
         isLeaf: item.kind === "file",
       }));
   }, []);
@@ -141,7 +141,7 @@ function BlockRefPicker({ open, projectKey, onCancel, onSelect }: BlockRefPicker
         if (!isActive) {
           return;
         }
-        setBlockError("Failed to load blocks");
+        setBlockError("加载块失败");
         setBlocks([]);
       })
       .finally(() => {
@@ -159,7 +159,7 @@ function BlockRefPicker({ open, projectKey, onCancel, onSelect }: BlockRefPicker
       return (
         <div className="block-ref-picker-state">
           <Spin size="small" />
-          <span>Loading blocks...</span>
+          <span>正在加载块...</span>
         </div>
       );
     }
@@ -169,7 +169,7 @@ function BlockRefPicker({ open, projectKey, onCancel, onSelect }: BlockRefPicker
     if (!selectedDocId) {
       return (
         <div className="block-ref-picker-state">
-          <Text type="secondary">Select a document to list blocks.</Text>
+          <Text type="secondary">选择文档以列出块。</Text>
         </div>
       );
     }
@@ -177,7 +177,7 @@ function BlockRefPicker({ open, projectKey, onCancel, onSelect }: BlockRefPicker
       return (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="No blocks with IDs found."
+          description="未找到带有 ID 的块。"
         />
       );
     }
@@ -191,7 +191,7 @@ function BlockRefPicker({ open, projectKey, onCancel, onSelect }: BlockRefPicker
             onClick={() => onSelect(selectedDocId, item.id)}
           >
             <div className="block-ref-picker-item-title">
-              {item.text || "Untitled block"}
+              {item.text || "无标题块"}
             </div>
           </List.Item>
         )}
@@ -201,7 +201,7 @@ function BlockRefPicker({ open, projectKey, onCancel, onSelect }: BlockRefPicker
 
   return (
     <Modal
-      title="Insert Block Reference"
+      title="插入块引用"
       open={open}
       onCancel={onCancel}
       footer={null}
@@ -212,12 +212,12 @@ function BlockRefPicker({ open, projectKey, onCancel, onSelect }: BlockRefPicker
           {loadingTree ? (
             <div className="block-ref-picker-state">
               <Spin size="small" />
-              <span>Loading documents...</span>
+              <span>正在加载文档...</span>
             </div>
           ) : treeData.length === 0 ? (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="No documents available."
+              description="暂无文档。"
             />
           ) : (
             <Tree

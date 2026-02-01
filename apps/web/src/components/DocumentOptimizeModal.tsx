@@ -144,7 +144,7 @@ function DocumentOptimizeModal({
 
       source.onerror = () => {
         if (status === "streaming") {
-          setError("Connection lost");
+          setError("连接断开");
           setStatus("error");
         }
         source.close();
@@ -182,7 +182,7 @@ function DocumentOptimizeModal({
       <button
         className="modal-overlay-button"
         type="button"
-        aria-label="Close optimize dialog"
+        aria-label="关闭优化对话框"
         onClick={handleClose}
       />
       <div

@@ -284,7 +284,7 @@ function NewDocumentPage() {
         setContentMeta(parsed.meta ? (parsed.meta as ContentMetaInput) : null);
       }
       let documentPayload;
-      const normalizedTitle = title.trim() || "Untitled Document";
+      const normalizedTitle = title.trim() || "无标题文档";
       const safeSlug = sanitizeFileName(normalizedTitle);
       const meta = {
         id: documentId || undefined,
@@ -458,7 +458,7 @@ function NewDocumentPage() {
     <div className="new-doc-page">
       <div className="new-doc-header">
         <button className="btn primary" type="button" onClick={handleSave} disabled={saving}>
-          {saving ? "Saving..." : "Save"}
+          {saving ? "保存中..." : "保存"}
         </button>
         <button
           className="btn ghost"
@@ -475,7 +475,7 @@ function NewDocumentPage() {
       </div>
       {saveError ? <div className="doc-viewer-error">{saveError}</div> : null}
       {loadingDocument ? (
-        <div className="doc-viewer-state">Loading document...</div>
+        <div className="doc-viewer-state">加载文档中...</div>
       ) : null}
       {diffContentError ? <div className="doc-viewer-error">{diffContentError}</div> : null}
       <div className="new-doc-metadata">
@@ -483,7 +483,7 @@ function NewDocumentPage() {
           className="kb-title-input new-doc-title-input"
           type="text"
           value={title}
-          placeholder="Untitled Document"
+          placeholder="无标题文档"
           onChange={(event) => setTitle(event.target.value)}
         />
       </div>

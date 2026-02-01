@@ -134,7 +134,7 @@ function DocumentHeader({
           <button
             className="kb-rebuild-button"
             type="button"
-            aria-label="Rebuild knowledge"
+            aria-label="重建知识库"
             onClick={handleRebuild}
             disabled={!allowRebuild || rebuilding}
           >
@@ -184,7 +184,7 @@ function DocumentHeader({
         <button
           className="kb-menu-button"
           type="button"
-          aria-label="Open menu"
+          aria-label="打开菜单"
           onClick={handleToggle}
         >
           ...
@@ -194,37 +194,37 @@ function DocumentHeader({
             {mode === "edit" ? (
               <>
                 <button className="kb-menu-item" type="button" onClick={handleSave}>
-                  Save
+                  保存
                 </button>
                 <button className="kb-menu-item" type="button" onClick={handleCancel}>
-                  Cancel
+                  取消
                 </button>
               </>
             ) : (
               <>
                 {allowChildActions ? (
                   <button className="kb-menu-item" type="button" onClick={handleNew}>
-                    New
+                    新建
                   </button>
                 ) : null}
                 {allowEdit ? (
                   <button className="kb-menu-item" type="button" onClick={handleEdit}>
-                    Edit
+                    编辑
                   </button>
                 ) : null}
                 {allowChildActions ? (
                   <button className="kb-menu-item" type="button" onClick={handleImport}>
-                    Import
+                    导入
                   </button>
                 ) : null}
                 {onExport ? (
                   <button className="kb-menu-item" type="button" onClick={handleExport}>
-                    Export
+                    导出
                   </button>
                 ) : null}
                 {allowOptimize && onOptimize ? (
                   <button className="kb-menu-item" type="button" onClick={handleOptimize}>
-                    Optimize
+                    优化
                   </button>
                 ) : null}
                 {allowDelete && onDelete ? (
@@ -234,7 +234,7 @@ function DocumentHeader({
                     onClick={handleDelete}
                     disabled={deleting}
                   >
-                    {deleting ? "Deleting..." : "Delete"}
+                    {deleting ? "删除中..." : "删除"}
                   </button>
                 ) : null}
               </>

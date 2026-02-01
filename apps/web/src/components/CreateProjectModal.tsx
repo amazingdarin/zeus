@@ -30,7 +30,7 @@ function CreateProjectModal({ onClose, onCreated }: CreateProjectModalProps) {
       onCreated?.(project);
       onClose();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Create project failed";
+      const message = err instanceof Error ? err.message : "创建项目失败";
       setError(message);
     } finally {
       setLoading(false);
@@ -41,15 +41,15 @@ function CreateProjectModal({ onClose, onCreated }: CreateProjectModalProps) {
     <div className="modal-overlay" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="modal-card" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
-          <h2>Create Project</h2>
+          <h2>创建项目</h2>
           <button className="modal-close" type="button" onClick={onClose}>
-            Close
+            关闭
           </button>
         </div>
         {error ? <div className="modal-error">{error}</div> : null}
         <div className="modal-body">
           <label className="modal-field">
-            <span>Key</span>
+            <span>标识</span>
             <input
               type="text"
               value={keyValue}
@@ -59,32 +59,32 @@ function CreateProjectModal({ onClose, onCreated }: CreateProjectModalProps) {
             />
           </label>
           <label className="modal-field">
-            <span>Name</span>
+            <span>名称</span>
             <input
               type="text"
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="Project name"
+              placeholder="项目名称"
               disabled={loading}
             />
           </label>
           <label className="modal-field">
-            <span>Description</span>
+            <span>描述</span>
             <textarea
               rows={4}
               value={description}
               onChange={(event) => setDescription(event.target.value)}
-              placeholder="Optional description"
+              placeholder="可选描述"
               disabled={loading}
             />
           </label>
         </div>
         <div className="modal-actions">
           <button className="btn ghost" type="button" onClick={onClose} disabled={loading}>
-            Cancel
+            取消
           </button>
           <button className="btn primary" type="button" onClick={handleCreate} disabled={loading}>
-            {loading ? "Creating..." : "Create"}
+            {loading ? "创建中..." : "创建"}
           </button>
         </div>
       </div>

@@ -151,7 +151,7 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
         type="button"
         aria-expanded={open}
         onClick={toggleOpen}
-        title={activeProject ? activeProject.name : "Select a project"}
+        title={activeProject ? activeProject.name : "选择项目"}
       >
         <span className="project-selector-initial" aria-label="Project">
           {projectInitial}
@@ -164,7 +164,7 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
             type="button"
             onClick={handleAddProject}
           >
-            Add a new project
+            新建项目
           </button>
           <div className="project-selector-divider" />
           {availableProjects.map((project) => (
@@ -189,17 +189,17 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
         >
           <div className="modal-card" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
-              <h2>Rebuild project knowledge</h2>
+              <h2>重建项目知识库</h2>
               <button
                 className="modal-close"
                 type="button"
                 onClick={() => setRebuildModalOpen(false)}
               >
-                Close
+                关闭
               </button>
             </div>
             <div className="modal-body">
-              Generate document summaries as well?
+              是否同时生成文档摘要？
             </div>
             <div className="modal-actions">
               <button
@@ -208,7 +208,7 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
                 onClick={() => setRebuildModalOpen(false)}
                 disabled={rebuilding}
               >
-                Cancel
+                取消
               </button>
               <button
                 className="btn ghost"
@@ -216,7 +216,7 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
                 onClick={() => handleRebuildChoice(false)}
                 disabled={rebuilding}
               >
-                Rebuild only
+                仅重建
               </button>
               <button
                 className="btn primary"
@@ -224,7 +224,7 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
                 onClick={() => handleRebuildChoice(true)}
                 disabled={rebuilding}
               >
-                Rebuild + Summary
+                重建 + 摘要
               </button>
             </div>
           </div>

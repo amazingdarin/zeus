@@ -49,7 +49,7 @@ function ModelScenarioConfigPanel({
       const items = await onRefreshModels(draft.baseUrl, draft.apiKey);
       setModels(items);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to refresh models";
+      const message = err instanceof Error ? err.message : "刷新模型列表失败";
       setError(message);
       setModels([]);
     } finally {
@@ -61,20 +61,20 @@ function ModelScenarioConfigPanel({
     <div className="model-panel">
       <div className="model-panel-header">
         <h3>{title}</h3>
-        {disabled ? <span className="model-pill">Coming soon</span> : null}
+        {disabled ? <span className="model-pill">即将推出</span> : null}
       </div>
       <label className="model-field">
-        <span>Display Name</span>
+        <span>显示名称</span>
         <input
           type="text"
           value={draft.name}
           onChange={(event) => onChange({ name: event.target.value })}
-          placeholder="Runtime name"
+          placeholder="运行时名称"
           disabled={disabled}
         />
       </label>
       <label className="model-field">
-        <span>Base URL</span>
+        <span>接口地址</span>
         <input
           type="text"
           value={draft.baseUrl}
@@ -84,22 +84,22 @@ function ModelScenarioConfigPanel({
         />
       </label>
       <label className="model-field">
-        <span>API Key</span>
+        <span>API 密钥</span>
         <input
           type="password"
           value={draft.apiKey}
           onChange={(event) => onChange({ apiKey: event.target.value })}
-          placeholder="Optional"
+          placeholder="可选"
           disabled={disabled}
         />
       </label>
       <label className="model-field">
-        <span>Model Name</span>
+        <span>模型名称</span>
         <div className="model-input-row">
           <Select
             className="model-select"
             value={draft.modelName || undefined}
-            placeholder="Select model"
+            placeholder="选择模型"
             disabled={disabled}
             onChange={(value) => onChange({ modelName: value })}
             options={modelOptions.map((model) => ({ label: model, value: model }))}
@@ -109,8 +109,8 @@ function ModelScenarioConfigPanel({
             type="button"
             onClick={handleRefresh}
             disabled={disabled || refreshing}
-            aria-label="Refresh models"
-            title="Refresh models"
+            aria-label="刷新模型列表"
+            title="刷新模型列表"
           >
             {refreshing ? (
               <span className="model-refresh-spinner" />
@@ -135,9 +135,9 @@ function ModelScenarioConfigPanel({
           </button>
         </div>
       </label>
-      {refreshing ? <div className="model-hint">Refreshing model list...</div> : null}
+      {refreshing ? <div className="model-hint">正在刷新模型列表...</div> : null}
       <details className="model-params" open>
-        <summary>Parameters</summary>
+        <summary>参数</summary>
         <textarea
           value={draft.parametersText}
           onChange={(event) => onChange({ parametersText: event.target.value })}
@@ -145,7 +145,7 @@ function ModelScenarioConfigPanel({
           disabled={disabled}
         />
         {scenario === "embedding" ? (
-          <div className="model-hint">Embedding models ignore temperature.</div>
+          <div className="model-hint">Embedding 模型会忽略 temperature 参数。</div>
         ) : null}
       </details>
       {error ? <div className="model-error">{error}</div> : null}

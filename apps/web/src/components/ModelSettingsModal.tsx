@@ -9,9 +9,9 @@ import ModelScenarioConfigPanel, {
 const scenarioOrder: ScenarioKey[] = ["chat", "embedding", "multimodal"];
 
 const scenarioTitles: Record<ScenarioKey, string> = {
-  chat: "LLM Models",
-  embedding: "Embedding Models",
-  multimodal: "Multimodal Models",
+  chat: "对话模型",
+  embedding: "Embedding 模型",
+  multimodal: "多模态模型",
 };
 
 type ModelSettingsModalProps = {
@@ -34,13 +34,13 @@ type ModelSettingsModalProps = {
 const defaultScenarioName = (scenario: ScenarioKey) => {
   switch (scenario) {
     case "chat":
-      return "Chat";
+      return "对话";
     case "embedding":
       return "Embedding";
     case "multimodal":
-      return "Multimodal";
+      return "多模态";
     default:
-      return "Runtime";
+      return "运行时";
   }
 };
 
@@ -156,7 +156,7 @@ function ModelSettingsModal({
       await onReload();
       onClose();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Save failed";
+      const message = err instanceof Error ? err.message : "保存失败";
       setError(message);
     } finally {
       setSaving(false);
@@ -170,9 +170,9 @@ function ModelSettingsModal({
     setTestError(null);
     try {
       await onTestRuntime(activeTab, draft.baseUrl, draft.apiKey, draft.modelName);
-      setTestStatus("Connection successful");
+      setTestStatus("连接成功");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Test failed";
+      const message = err instanceof Error ? err.message : "测试失败";
       setTestError(message);
     } finally {
       setTesting(false);
@@ -195,13 +195,13 @@ function ModelSettingsModal({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="modal-header">
-          <h2>Model Settings</h2>
+          <h2>模型设置</h2>
           <button className="modal-close" type="button" onClick={onClose}>
             Close
           </button>
         </div>
         {displayError ? <div className="modal-error">{displayError}</div> : null}
-        {loading ? <div className="model-loading">Loading configurations...</div> : null}
+        {loading ? <div className="model-loading">加载配置中...</div> : null}
         <div className="model-tabs">
           {scenarioOrder.map((scenario) => {
             const disabled = scenario === "multimodal";
@@ -223,7 +223,7 @@ function ModelSettingsModal({
           {activeTab === "chat" ? (
             <ModelScenarioConfigPanel
               scenario="chat"
-              title="LLM Models"
+              title="对话模型"
               draft={drafts.chat}
               onChange={(patch) => handleChange("chat", patch)}
               onRefreshModels={onRefreshModels}
@@ -232,7 +232,7 @@ function ModelSettingsModal({
           {activeTab === "embedding" ? (
             <ModelScenarioConfigPanel
               scenario="embedding"
-              title="Embedding Models"
+              title="Embedding 模型"
               draft={drafts.embedding}
               onChange={(patch) => handleChange("embedding", patch)}
               onRefreshModels={onRefreshModels}
@@ -241,7 +241,7 @@ function ModelSettingsModal({
           {activeTab === "multimodal" ? (
             <ModelScenarioConfigPanel
               scenario="multimodal"
-              title="Multimodal Models"
+              title="多模态模型"
               draft={drafts.multimodal}
               onChange={(patch) => handleChange("multimodal", patch)}
               onRefreshModels={onRefreshModels}
@@ -260,10 +260,10 @@ function ModelSettingsModal({
             onClick={handleTest}
             disabled={testDisabled}
           >
-            {testing ? "Testing..." : "Test"}
+            {testing ? "测试中..." : "测试"}
           </button>
           <button className="btn primary" type="button" onClick={handleSave} disabled={saving}>
-            {saving ? "Saving..." : "Save"}
+            {saving ? "保存中..." : "保存"}
           </button>
         </div>
       </div>

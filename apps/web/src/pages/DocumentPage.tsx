@@ -144,14 +144,14 @@ const UPLOAD_FILTER_PRESETS: UploadFilterPreset[] = [
   },
   {
     id: "markdown",
-    label: "Markdown",
+    label: "Markdown 文档",
     extensions: ["md", "markdown"],
   },
 ];
 
 const SMART_IMPORT_OPTIONS: SmartImportOption[] = [
   { id: "all", label: "全部", enabled: true },
-  { id: "markdown", label: "Markdown", enabled: true },
+  { id: "markdown", label: "Markdown 文档", enabled: true },
   { id: "word", label: "Word 文档", enabled: true },
   { id: "pdf", label: "PDF", enabled: true },
   { id: "image", label: "图片", enabled: true },
@@ -188,7 +188,7 @@ const buildUploadFilterPreset = (
   });
   return {
     id: "all",
-    label: "Custom",
+    label: "自定义",
     extensions,
   };
 };
@@ -905,7 +905,7 @@ function DocumentPage() {
         if (!isActive || currentRequestRef.current !== requestKey) {
           return;
         }
-        setError((err as Error).message || "failed to load document");
+        setError((err as Error).message || "加载文档失败");
         setDocument(null);
       })
       .finally(() => {
@@ -978,7 +978,7 @@ function DocumentPage() {
         if (!isActive) {
           return;
         }
-        setDiffError((err as Error).message || "failed to load diff");
+        setDiffError((err as Error).message || "加载差异失败");
         setDiffData(null);
       })
       .finally(() => {
@@ -1049,7 +1049,7 @@ function DocumentPage() {
           },
         );
         if (!response.ok) {
-          throw new Error("Failed to save optimized document");
+          throw new Error("保存优化文档失败");
         }
         // Refresh the document
         const payload = await response.json();
@@ -1106,7 +1106,7 @@ function DocumentPage() {
       clearProposalParam();
       setDiffData(null);
     } catch (err) {
-      setDiffError((err as Error).message || "failed to apply proposal");
+      setDiffError((err as Error).message || "应用提案失败");
     } finally {
       setApplyLoading(false);
     }
@@ -1199,7 +1199,7 @@ function DocumentPage() {
       }
     } catch (err) {
       console.error("Delete failed:", err);
-      alert(err instanceof Error ? err.message : "Failed to delete document");
+      alert(err instanceof Error ? err.message : "删除文档失败");
     } finally {
       setDeleting(false);
     }
@@ -1319,14 +1319,14 @@ function DocumentPage() {
           (projectKey, targetUrl) => fetchUrlHtml(projectKey, targetUrl),
         );
         if (!html) {
-          throw new Error("Empty HTML response");
+          throw new Error("返回的 HTML 为空");
         }
         const parsedDoc = new DOMParser().parseFromString(html, "text/html");
         const article = new Readability(parsedDoc).parse();
         const extractedTitle = article?.title?.trim() ?? "";
         const content = article?.content ?? "";
         if (!content.trim()) {
-          throw new Error("No readable content found");
+          throw new Error("未找到可读取的内容");
         }
         const turndownService = new TurndownService({
           headingStyle: "atx",
@@ -1721,7 +1721,7 @@ function DocumentPage() {
     }
     // Show loading only if we don't have any document to show yet
     if (loading && !activeDocument) {
-      return <div className="doc-viewer-state">Loading document...</div>;
+      return <div className="doc-viewer-state">加载文档中...</div>;
     }
     if (!activeDocument) {
       return <div className="doc-viewer-state">No document available</div>;
@@ -1740,7 +1740,7 @@ function DocumentPage() {
                   onClick={handleApplyProposal}
                   disabled={applyLoading || diffLoading}
                 >
-                  {applyLoading ? "Applying..." : "Apply"}
+                  {applyLoading ? "应用中..." : "应用"}
                 </button>
                 <button
                   className="doc-diff-action secondary"
@@ -1753,7 +1753,7 @@ function DocumentPage() {
               </div>
             </div>
             {diffLoading ? (
-              <div className="doc-diff-state">Loading diff...</div>
+              <div className="doc-diff-state">加载差异中...</div>
             ) : diffError ? (
               <div className="doc-diff-error">{diffError}</div>
             ) : diffData ? (
@@ -1838,7 +1838,7 @@ function DocumentPage() {
             <button
               className="modal-overlay-button"
               type="button"
-              aria-label="Close import dialog"
+              aria-label="关闭导入对话框"
               onClick={handleCloseImport}
             />
             <div
@@ -2218,7 +2218,7 @@ function DocumentPage() {
             <button
               className="modal-overlay-button"
               type="button"
-              aria-label="Close rebuild dialog"
+              aria-label="关闭重建对话框"
               onClick={() => setRebuildModalOpen(false)}
             />
             <div
@@ -2309,13 +2309,13 @@ const mapHierarchyToBreadcrumb = (
   if (!hierarchy || hierarchy.length === 0) {
     return [
       {
-        label: fallbackTitle || "Document",
+        label: fallbackTitle || "文档",
         to: `/documents/${encodeURIComponent(fallbackId)}`,
       },
     ];
   }
   return hierarchy.map((item) => ({
-    label: item.name || "Document",
+    label: item.name || "文档",
     to: `/documents/${encodeURIComponent(item.id)}`,
   }));
 };

@@ -64,7 +64,7 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
       try {
         const response = await fetch(downloadUrl, { signal: controller.signal });
         if (!response.ok) {
-          throw new Error("failed to load document content");
+          throw new Error("加载文档内容失败");
         }
         const buffer = await response.arrayBuffer();
         if (controller.signal.aborted) {
@@ -85,7 +85,7 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
         if ((err as Error).name === "AbortError") {
           return;
         }
-        setContentError((err as Error).message || "failed to load document");
+        setContentError((err as Error).message || "加载文档失败");
       } finally {
         if (!controller.signal.aborted) {
           setContentLoading(false);
@@ -100,7 +100,7 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
   }, [downloadUrl, officeType]);
 
   if (loading || contentLoading) {
-    return <div className="doc-viewer-state">Loading document...</div>;
+    return <div className="doc-viewer-state">加载文档中...</div>;
   }
 
   if (error) {
@@ -112,7 +112,7 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
   }
 
   if (!downloadUrl) {
-    return <div className="doc-viewer-state">No document available</div>;
+    return <div className="doc-viewer-state">暂无文档</div>;
   }
 
   if (officeType) {
