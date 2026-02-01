@@ -3854,6 +3854,50 @@ body {
   background: var(--hover-bg);
 }
 
+/* TreeSelect dark theme */
+[data-theme="dark"] .ant-tree-select-dropdown {
+  background: var(--surface-elevated) !important;
+  border: 1px solid var(--border) !important;
+}
+
+[data-theme="dark"] .ant-tree-select-dropdown .ant-select-tree {
+  background: transparent !important;
+  color: var(--ink) !important;
+}
+
+[data-theme="dark"] .ant-select-tree-treenode {
+  color: var(--ink) !important;
+}
+
+[data-theme="dark"] .ant-select-tree-node-content-wrapper {
+  color: var(--ink) !important;
+}
+
+[data-theme="dark"] .ant-select-tree-node-content-wrapper:hover {
+  background: var(--hover-bg) !important;
+}
+
+[data-theme="dark"] .ant-select-tree-node-selected .ant-select-tree-node-content-wrapper {
+  background: var(--accent) !important;
+  color: #fff !important;
+}
+
+[data-theme="dark"] .ant-select-tree-switcher {
+  color: var(--muted) !important;
+}
+
+[data-theme="dark"] .ant-select-tree-switcher:hover {
+  color: var(--ink) !important;
+}
+
+[data-theme="dark"] .ant-select-selection-item {
+  color: var(--ink) !important;
+}
+
+[data-theme="dark"] .ant-select-arrow {
+  color: var(--muted) !important;
+}
+
 [data-theme="dark"] .ant-btn {
   color: var(--ink);
   border-color: var(--border);
@@ -5172,6 +5216,25 @@ body {
   font-weight: 500;
   color: var(--fg);
   white-space: nowrap;
+}
+
+.draft-parent-selector .ant-select {
+  flex: 1;
+  max-width: 400px;
+}
+
+.draft-parent-selector .ant-select-selector {
+  background: var(--input-bg) !important;
+  border-color: var(--border) !important;
+  color: var(--ink) !important;
+}
+
+.draft-parent-selector .ant-select-selection-item {
+  color: var(--ink) !important;
+}
+
+.draft-parent-selector .ant-select-arrow {
+  color: var(--muted) !important;
 }
 
 .draft-parent-path {
