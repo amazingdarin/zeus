@@ -117,17 +117,28 @@ export const draftService = {
 
       if (draft.docId) {
         // Update existing document
-        await documentStore.update(projectKey, draft.docId, {
-          title: draft.title,
+        const existingDoc = await documentStore.get(projectKey, draft.docId);
+        await documentStore.save(projectKey, {
+          meta: {
+            ...existingDoc.meta,
+            title: draft.title,
+          },
           body: contentToSave,
         });
         docId = draft.docId;
       } else {
         // Create new document
-        const newDoc = await documentStore.create(projectKey, {
-          title: draft.title,
-          slug: generateSlug(draft.title),
-          parent_id: draft.parentId || undefined,
+        const newDoc = await documentStore.save(projectKey, {
+          meta: {
+            id: uuidv4(),
+            schema_version: "v1",
+            title: draft.title,
+            slug: generateSlug(draft.title),
+            path: "",
+            parent_id: draft.parentId || null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
           body: contentToSave,
         });
         docId = newDoc.meta.id;
