@@ -372,12 +372,75 @@ function getSerializer(): MarkdownSerializer {
 
 /**
  * Convert Tiptap JSON content to Markdown
+ * Falls back to plain text extraction if schema conversion fails
  */
 export function tiptapJsonToMarkdown(json: JSONContent): string {
-  const schema = getSimpleSchema();
-  const serializer = getSerializer();
-  const node = schema.nodeFromJSON(json);
-  return serializer.serialize(node);
+  try {
+    const schema = getSimpleSchema();
+    const serializer = getSerializer();
+    const node = schema.nodeFromJSON(json);
+    return serializer.serialize(node);
+  } catch (err) {
+    // Fallback: extract plain text from JSON
+    console.warn("[markdown] Schema conversion failed, falling back to text extraction:", err);
+    return extractTextFromJson(json);
+  }
+}
+
+/**
+ * Extract plain text from Tiptap JSON (fallback for unsupported nodes)
+ */
+function extractTextFromJson(node: JSONContent, depth = 0): string {
+  if (!node) return "";
+
+  const parts: string[] = [];
+
+  // Handle text nodes
+  if (node.type === "text" && node.text) {
+    return node.text;
+  }
+
+  // Handle specific block types
+  if (node.type === "heading") {
+    const level = (node.attrs?.level as number) || 1;
+    const prefix = "#".repeat(level) + " ";
+    const text = node.content?.map((c) => extractTextFromJson(c, depth)).join("") || "";
+    parts.push(prefix + text);
+  } else if (node.type === "paragraph") {
+    const text = node.content?.map((c) => extractTextFromJson(c, depth)).join("") || "";
+    parts.push(text);
+  } else if (node.type === "bulletList" || node.type === "orderedList" || node.type === "taskList") {
+    const items = node.content || [];
+    items.forEach((item, idx) => {
+      const prefix = node.type === "orderedList" ? `${idx + 1}. ` : "- ";
+      const text = extractTextFromJson(item, depth + 1);
+      parts.push(prefix + text.trim());
+    });
+  } else if (node.type === "listItem" || node.type === "taskItem") {
+    const text = node.content?.map((c) => extractTextFromJson(c, depth)).join("\n") || "";
+    parts.push(text);
+  } else if (node.type === "codeBlock") {
+    const lang = (node.attrs?.language as string) || "";
+    const text = node.content?.map((c) => extractTextFromJson(c, depth)).join("") || "";
+    parts.push("```" + lang + "\n" + text + "\n```");
+  } else if (node.type === "blockquote") {
+    const text = node.content?.map((c) => extractTextFromJson(c, depth)).join("\n") || "";
+    parts.push(text.split("\n").map((line) => "> " + line).join("\n"));
+  } else if (node.type === "horizontalRule") {
+    parts.push("---");
+  } else if (node.type === "image") {
+    const src = node.attrs?.src || "";
+    const alt = node.attrs?.alt || "";
+    parts.push(`![${alt}](${src})`);
+  } else if (node.type === "hardBreak") {
+    parts.push("\n");
+  } else if (node.content) {
+    // Generic handler for other nodes with content
+    const text = node.content.map((c) => extractTextFromJson(c, depth)).join("\n");
+    parts.push(text);
+  }
+
+  return parts.join("\n\n").replace(/\n{3,}/g, "\n\n");
 }
 
 /**
