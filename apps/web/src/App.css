@@ -4042,30 +4042,26 @@ body {
   z-index: 100;
 }
 
-/* Hide button on the right side */
+/* Hide button in the input bar */
 .chat-dock-hide-btn {
-  position: absolute;
-  right: -40px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--muted);
+  font-size: 14px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
-  z-index: 101;
+  transition: all 0.15s ease;
 }
 
 .chat-dock-hide-btn:hover {
   background: var(--hover-bg);
-  color: var(--fg);
-  border-color: var(--accent);
+  color: var(--ink);
+  border-color: var(--border-strong);
 }
 
 /* Floating button when hidden */

@@ -1104,16 +1104,6 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
 
   return (
     <section className="chat-dock-bottom">
-      {/* Hide Button */}
-      <button
-        type="button"
-        className="chat-dock-hide-btn"
-        onClick={() => setIsHidden(true)}
-        title="隐藏对话框"
-      >
-        <RightOutlined />
-      </button>
-
       {/* Draft Preview Modal */}
       {pendingDraft && (
         <DraftPreviewModal
@@ -1392,6 +1382,14 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
               title={isExpanded ? "收起" : "展开"}
             >
               {isExpanded ? <DownOutlined /> : <UpOutlined />}
+            </button>
+            <button
+              type="button"
+              className="chat-dock-hide-btn"
+              onClick={() => setIsHidden(true)}
+              title="隐藏对话框"
+            >
+              <RightOutlined />
             </button>
           </div>
         </div>
