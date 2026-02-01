@@ -1135,24 +1135,9 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
 
       {/* Input Bar (Always visible) */}
       <div className="chat-dock-bar">
-        {/* Command and Mention Tags */}
-        {(selectedCommand || mentions.length > 0) && (
+        {/* Mention Tags (above input) */}
+        {mentions.length > 0 && (
           <div className="chat-mention-tags">
-            {/* Selected Command Tag */}
-            {selectedCommand && (
-              <span className="chat-command-tag">
-                <span className="chat-command-tag-icon">{selectedCommand.icon}</span>
-                <span className="chat-command-tag-text">{selectedCommand.command}</span>
-                <button
-                  type="button"
-                  className="chat-command-tag-remove"
-                  onClick={handleRemoveCommand}
-                >
-                  <CloseCircleOutlined />
-                </button>
-              </span>
-            )}
-            {/* Mention Tags */}
             {mentions.map((m) => (
               <span key={m.docId} className="chat-mention-tag">
                 <span className="chat-mention-tag-icon">
@@ -1209,11 +1194,22 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
         )}
 
         <div className="chat-dock-input-wrapper">
+          {/* Command Tag (inline, left of input) */}
+          {selectedCommand && (
+            <span className="chat-command-tag-inline">
+              <span className="chat-command-tag-icon">{selectedCommand.icon}</span>
+              <span className="chat-command-tag-text">{selectedCommand.command}</span>
+            </span>
+          )}
           <textarea
             ref={inputRef}
-            className="chat-dock-textarea"
+            className={`chat-dock-textarea ${selectedCommand ? "with-command" : ""}`}
             placeholder={
-              projectKey ? "输入消息，@ 指定文档范围..." : "请先选择项目"
+              selectedCommand 
+                ? selectedCommand.placeholder || "输入参数..."
+                : projectKey 
+                  ? "输入消息，@ 指定文档范围..." 
+                  : "请先选择项目"
             }
             value={input}
             onChange={handleInputChange}
