@@ -5265,23 +5265,41 @@ body {
   white-space: nowrap;
 }
 
-.draft-parent-selector .ant-select {
+.draft-parent-selector .ant-tree-select {
   flex: 1;
   max-width: 400px;
 }
 
-.draft-parent-selector .ant-select-selector {
+.draft-parent-selector .ant-tree-select .ant-select-selector {
   background: var(--input-bg) !important;
   border-color: var(--border) !important;
   color: var(--ink) !important;
 }
 
-.draft-parent-selector .ant-select-selection-item {
+[data-theme="dark"] .draft-parent-selector .ant-tree-select .ant-select-selector {
+  background: var(--surface) !important;
+  border-color: var(--border) !important;
   color: var(--ink) !important;
 }
 
-.draft-parent-selector .ant-select-arrow {
+[data-theme="dark"] .draft-parent-selector .ant-tree-select.ant-select-open .ant-select-selector {
+  background: var(--surface) !important;
+}
+
+.draft-parent-selector .ant-tree-select .ant-select-selection-item {
+  color: var(--ink) !important;
+}
+
+.draft-parent-selector .ant-tree-select .ant-select-arrow {
   color: var(--muted) !important;
+}
+
+.draft-parent-selector .ant-tree-select .ant-select-selection-search-input {
+  color: var(--ink) !important;
+}
+
+.draft-parent-selector .ant-tree-select .ant-select-clear {
+  background: var(--surface) !important;
 }
 
 .draft-parent-path {
