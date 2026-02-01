@@ -27,6 +27,9 @@ import { executeCommand } from "../api/commands";
 import { useProjectContext } from "../context/ProjectContext";
 import { getConfigByType, type ProviderConfig } from "../api/llm-config";
 import MentionDropdown, { type MentionItem } from "./MentionDropdown";
+import DraftPreviewModal from "./DraftPreviewModal";
+import type { DocumentDraft } from "../api/drafts";
+import { allCommands, filterCommands, type SlashCommand } from "../constants/slash-commands";
 
 type MentionState = {
   active: boolean;
@@ -222,6 +225,14 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     query: "",
     startPos: 0,
   });
+
+  // Draft state for AI-generated document changes
+  const [pendingDraft, setPendingDraft] = useState<DocumentDraft | null>(null);
+
+  // Slash command state
+  const [slashActive, setSlashActive] = useState(false);
+  const [slashQuery, setSlashQuery] = useState("");
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
 
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -449,6 +460,26 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
         if (delta) handleDelta(delta);
       });
 
+      source.addEventListener("assistant.thinking", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        const content = typeof payload === "object" && payload !== null
+          ? String((payload as { content?: string }).content ?? "")
+          : String(payload ?? "");
+        if (content) {
+          // Show thinking status in UI
+          setAssistantBuffer(`*${content}*\n`);
+        }
+      });
+
+      source.addEventListener("assistant.draft", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        if (payload && typeof payload === "object") {
+          setPendingDraft(payload as DocumentDraft);
+        }
+      });
+
       source.addEventListener("assistant.done", (event) => {
         hasCustomEventsRef.current = true;
         const payload = parsePayload((event as MessageEvent).data);
@@ -540,6 +571,20 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     }
   }, [projectKey, sessionId]);
 
+  // Handle draft applied
+  const handleDraftApplied = useCallback((docId: string, isNew: boolean) => {
+    setPendingDraft(null);
+    const action = isNew ? "创建" : "更新";
+    appendMessage("system", `文档已${action}。`);
+    // Navigate to the document
+    handleDocumentNavigate(docId, {});
+  }, [appendMessage, handleDocumentNavigate]);
+
+  // Handle draft closed/rejected
+  const handleDraftClose = useCallback(() => {
+    setPendingDraft(null);
+  }, []);
+
   // Keep a ref to track the latest mentionState for callbacks
   const mentionStateRef = useRef(mentionState);
   useEffect(() => {
@@ -583,7 +628,28 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     setMentions((prev) => prev.filter((m) => m.docId !== docId));
   }, []);
 
-  // Handle input change with @ detection
+  // Get filtered slash commands
+  const filteredSlashCommands = useMemo(() => {
+    if (!slashActive) return [];
+    return filterCommands(slashQuery);
+  }, [slashActive, slashQuery]);
+
+  // Handle slash command selection
+  const handleSlashSelect = useCallback((command: SlashCommand) => {
+    // Insert the command into input
+    setInput((prev) => {
+      // Replace /query with the full command
+      const beforeSlash = prev.slice(0, prev.lastIndexOf("/"));
+      return beforeSlash + command.command + " ";
+    });
+    setSlashActive(false);
+    setSlashQuery("");
+    setSlashSelectedIndex(0);
+    // Focus input
+    inputRef.current?.focus();
+  }, []);
+
+  // Handle input change with @ and / detection
   const handleInputChange = useCallback(
     (e: ChangeEvent<HTMLTextAreaElement>) => {
       const value = e.target.value;
@@ -602,11 +668,26 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
         } else {
           setMentionState((prev) => ({ ...prev, query: queryPart }));
         }
+      } else if (slashActive) {
+        // Check if we're in slash command mode
+        const slashIndex = value.lastIndexOf("/");
+        if (slashIndex < 0 || cursorPos <= slashIndex) {
+          setSlashActive(false);
+          setSlashQuery("");
+        } else {
+          const queryPart = value.slice(slashIndex + 1, cursorPos);
+          // Check for space after command
+          if (queryPart.includes(" ")) {
+            setSlashActive(false);
+            setSlashQuery("");
+          } else {
+            setSlashQuery(queryPart);
+          }
+        }
       } else {
-        // Check for @ trigger - look for @ anywhere in the new input
+        // Check for @ trigger
         const atIndex = value.lastIndexOf("@");
         if (atIndex >= 0 && atIndex === cursorPos - 1) {
-          // Check if @ is at start or after whitespace
           const charBefore = atIndex > 0 ? value[atIndex - 1] : " ";
           if (/\s/.test(charBefore) || atIndex === 0) {
             setMentionState({
@@ -616,9 +697,16 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
             });
           }
         }
+
+        // Check for / trigger at the start of input
+        if (value === "/" || (cursorPos === 1 && value.startsWith("/"))) {
+          setSlashActive(true);
+          setSlashQuery("");
+          setSlashSelectedIndex(0);
+        }
       }
     },
-    [mentionState.active, mentionState.startPos],
+    [mentionState.active, mentionState.startPos, slashActive],
   );
 
   const handleKeyDown = useCallback(
@@ -626,9 +714,36 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
       // If mention dropdown is active, let it handle keyboard events
       if (mentionState.active) {
         if (["ArrowDown", "ArrowUp", "Tab", "Escape", "Enter"].includes(event.key)) {
-          // Prevent default to avoid textarea behavior (like newline on Enter)
           event.preventDefault();
-          // MentionDropdown handles these via window event listener
+          return;
+        }
+      }
+
+      // Handle slash command navigation
+      if (slashActive && filteredSlashCommands.length > 0) {
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          setSlashSelectedIndex((prev) =>
+            prev < filteredSlashCommands.length - 1 ? prev + 1 : 0,
+          );
+          return;
+        }
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          setSlashSelectedIndex((prev) =>
+            prev > 0 ? prev - 1 : filteredSlashCommands.length - 1,
+          );
+          return;
+        }
+        if (event.key === "Enter" || event.key === "Tab") {
+          event.preventDefault();
+          handleSlashSelect(filteredSlashCommands[slashSelectedIndex]);
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setSlashActive(false);
+          setSlashQuery("");
           return;
         }
       }
@@ -638,7 +753,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
       event.preventDefault();
       handleSend();
     },
-    [handleSend, mentionState.active],
+    [handleSend, mentionState.active, slashActive, filteredSlashCommands, slashSelectedIndex, handleSlashSelect],
   );
 
   const renderArtifacts = (artifacts?: ChatArtifact[]) => {
@@ -810,6 +925,16 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
 
   return (
     <section className="chat-dock-bottom">
+      {/* Draft Preview Modal */}
+      {pendingDraft && (
+        <DraftPreviewModal
+          draft={pendingDraft}
+          projectKey={projectKey}
+          onClose={handleDraftClose}
+          onApplied={handleDraftApplied}
+        />
+      )}
+
       {/* Expanded Panel */}
       {isExpanded && (
         <div
@@ -1012,6 +1137,31 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
           onSelect={handleMentionSelect}
           onClose={handleMentionClose}
         />
+
+        {/* Slash Command Dropdown */}
+        {slashActive && filteredSlashCommands.length > 0 && (
+          <div className="slash-command-dropdown">
+            <ul className="slash-command-list">
+              {filteredSlashCommands.map((cmd, index) => (
+                <li
+                  key={cmd.command}
+                  className={`slash-command-item ${index === slashSelectedIndex ? "selected" : ""}`}
+                  onClick={() => handleSlashSelect(cmd)}
+                  onMouseEnter={() => setSlashSelectedIndex(index)}
+                >
+                  <span className="slash-command-icon">{cmd.icon}</span>
+                  <span className="slash-command-name">{cmd.command}</span>
+                  <span className="slash-command-desc">{cmd.description}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="slash-command-hint">
+              <span>↑↓ 选择</span>
+              <span>Tab/Enter 确认</span>
+              <span>Esc 取消</span>
+            </div>
+          </div>
+        )}
 
         <div className="chat-dock-input-wrapper">
           <textarea

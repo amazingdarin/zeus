@@ -3,6 +3,12 @@ import { configStore, llmGateway, type ProviderConfigInternal } from "../llm/ind
 import { knowledgeSearch } from "../knowledge/search.js";
 import { documentStore } from "../storage/document-store.js";
 import type { SearchResult } from "../storage/types.js";
+import {
+  detectSkillIntent,
+  executeSkillWithStream,
+  type SkillStreamChunk,
+  type DocumentDraft,
+} from "../llm/skills/index.js";
 
 export type ChatMessage = {
   role: "user" | "assistant" | "system";
@@ -34,11 +40,12 @@ export type ChatRun = {
 };
 
 export type ChatStreamChunk = {
-  type: "delta" | "done" | "error";
+  type: "delta" | "done" | "error" | "thinking" | "draft";
   content?: string;
   message?: string;
   error?: string;
   sources?: SourceReference[];
+  draft?: DocumentDraft;
 };
 
 // In-memory storage for active chat runs
@@ -168,7 +175,53 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
     return;
   }
 
-  // Get LLM config
+  run.status = "running";
+  run.updatedAt = Date.now();
+
+  // Extract user's latest message
+  const userQuery = run.messages[run.messages.length - 1]?.content || "";
+
+  // Check for skill intent first
+  const skillIntent = detectSkillIntent(userQuery, run.docIds);
+  if (skillIntent) {
+    console.log("[chat] Detected skill intent:", skillIntent.skill);
+    
+    try {
+      // Execute skill with streaming
+      for await (const chunk of executeSkillWithStream(run.projectKey, skillIntent)) {
+        // Map skill chunks to chat chunks
+        const mappedChunk = mapSkillChunkToChatChunk(chunk);
+        yield mappedChunk;
+
+        // If it's a draft, add a summary to session history
+        if (chunk.type === "draft") {
+          const history = sessionMessages.get(run.sessionId);
+          if (history) {
+            const draftType = chunk.draft.docId ? "编辑" : "创建";
+            history.push({
+              role: "assistant",
+              content: `已生成${draftType}文档「${chunk.draft.title}」的草稿，请查看并确认。`,
+            });
+          }
+        }
+      }
+
+      run.status = "completed";
+      run.updatedAt = Date.now();
+      return;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Skill execution failed";
+      console.error("[chat] Skill execution error:", errorMessage);
+      
+      run.status = "failed";
+      run.updatedAt = Date.now();
+      
+      yield { type: "error", error: errorMessage };
+      return;
+    }
+  }
+
+  // Get LLM config for regular chat
   const config = await getLLMConfig();
   if (!config || !config.enabled) {
     yield { type: "error", error: "No LLM provider configured. Please configure an LLM provider in settings." };
@@ -184,16 +237,10 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
     return;
   }
 
-  run.status = "running";
-  run.updatedAt = Date.now();
-
   // Track sources for RAG
   let sources: SourceReference[] = [];
 
   try {
-    // Extract user's latest message for knowledge search
-    const userQuery = run.messages[run.messages.length - 1]?.content || "";
-
     // Search knowledge base for relevant context
     let ragContext = "";
     try {
@@ -266,6 +313,26 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
     run.updatedAt = Date.now();
     
     yield { type: "error", error: errorMessage };
+  }
+}
+
+/**
+ * Map skill stream chunk to chat stream chunk
+ */
+function mapSkillChunkToChatChunk(chunk: SkillStreamChunk): ChatStreamChunk {
+  switch (chunk.type) {
+    case "delta":
+      return { type: "delta", content: chunk.content };
+    case "thinking":
+      return { type: "thinking", content: chunk.content };
+    case "draft":
+      return { type: "draft", draft: chunk.draft };
+    case "done":
+      return { type: "done", message: chunk.message };
+    case "error":
+      return { type: "error", error: chunk.error };
+    default:
+      return { type: "error", error: "Unknown chunk type" };
   }
 }
 

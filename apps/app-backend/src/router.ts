@@ -27,6 +27,7 @@ import {
   type ConfigType,
 } from "./llm/index.js";
 import { createRun, getRun, streamRun, clearSession } from "./services/chat.js";
+import { draftService } from "./services/draft.js";
 import {
   createTask as createOptimizeTask,
   getTask as getOptimizeTask,
@@ -1645,6 +1646,10 @@ export const buildRouter = () => {
       for await (const chunk of streamRun(runId)) {
         if (chunk.type === "delta") {
           res.write(`event: assistant.delta\ndata: ${JSON.stringify(chunk.content)}\n\n`);
+        } else if (chunk.type === "thinking") {
+          res.write(`event: assistant.thinking\ndata: ${JSON.stringify({ content: chunk.content })}\n\n`);
+        } else if (chunk.type === "draft") {
+          res.write(`event: assistant.draft\ndata: ${JSON.stringify(chunk.draft)}\n\n`);
         } else if (chunk.type === "done") {
           res.write(`event: assistant.done\ndata: ${JSON.stringify({
             message: chunk.message,
@@ -1675,6 +1680,108 @@ export const buildRouter = () => {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to clear session";
       error(res, "CLEAR_SESSION_FAILED", msg, 500);
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Draft API (for AI-generated document changes)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get a draft by ID
+   * GET /projects/:projectKey/drafts/:draftId
+   */
+  router.get("/projects/:projectKey/drafts/:draftId", async (req: Request, res: Response) => {
+    try {
+      const { projectKey, draftId } = req.params;
+      const draft = draftService.get(draftId);
+
+      if (!draft) {
+        error(res, "NOT_FOUND", "Draft not found or expired", 404);
+        return;
+      }
+
+      if (draft.projectKey !== projectKey) {
+        error(res, "FORBIDDEN", "Draft does not belong to this project", 403);
+        return;
+      }
+
+      success(res, draft);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to get draft";
+      error(res, "GET_DRAFT_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Apply a draft (save the document)
+   * POST /projects/:projectKey/drafts/:draftId/apply
+   */
+  router.post("/projects/:projectKey/drafts/:draftId/apply", async (req: Request, res: Response) => {
+    try {
+      const { projectKey, draftId } = req.params;
+      const { modifiedContent } = req.body as { modifiedContent?: unknown };
+
+      // Validate modified content if provided
+      let validatedContent = undefined;
+      if (modifiedContent && typeof modifiedContent === "object") {
+        validatedContent = modifiedContent as { type: string; content?: unknown[] };
+      }
+
+      const result = await draftService.apply(projectKey, draftId, validatedContent);
+
+      success(res, {
+        docId: result.docId,
+        isNew: result.isNew,
+        applied: true,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to apply draft";
+      error(res, "APPLY_DRAFT_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Reject a draft
+   * DELETE /projects/:projectKey/drafts/:draftId
+   */
+  router.delete("/projects/:projectKey/drafts/:draftId", async (req: Request, res: Response) => {
+    try {
+      const { projectKey, draftId } = req.params;
+      const draft = draftService.get(draftId);
+
+      if (!draft) {
+        error(res, "NOT_FOUND", "Draft not found or expired", 404);
+        return;
+      }
+
+      if (draft.projectKey !== projectKey) {
+        error(res, "FORBIDDEN", "Draft does not belong to this project", 403);
+        return;
+      }
+
+      draftService.reject(draftId);
+      draftService.delete(draftId);
+
+      success(res, { rejected: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to reject draft";
+      error(res, "REJECT_DRAFT_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * List pending drafts for a project
+   * GET /projects/:projectKey/drafts
+   */
+  router.get("/projects/:projectKey/drafts", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const drafts = draftService.listPending(projectKey);
+      success(res, drafts);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list drafts";
+      error(res, "LIST_DRAFTS_FAILED", msg, 500);
     }
   });
 
