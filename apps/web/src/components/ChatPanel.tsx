@@ -37,6 +37,13 @@ type MentionState = {
   startPos: number;
 };
 
+type CommandHistoryEntry = {
+  input: string;
+  command: SlashCommand | null;
+  mentions: MentionItem[];
+  timestamp: number;
+};
+
 type ChatArtifact = {
   type: string;
   title?: string;
@@ -237,6 +244,11 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
   // Selected command (displayed as a tag, acts as a unit for undo)
   const [selectedCommand, setSelectedCommand] = useState<SlashCommand | null>(null);
 
+  // Command history (for arrow up/down navigation)
+  const [commandHistory, setCommandHistory] = useState<CommandHistoryEntry[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1); // -1 = current input, not in history
+  const currentInputRef = useRef<CommandHistoryEntry | null>(null); // Save current input before entering history
+
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -275,6 +287,34 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     };
     loadConfig();
   }, []);
+
+  // Load command history from localStorage
+  const MAX_HISTORY = 50;
+  useEffect(() => {
+    if (!projectKey) return;
+    const historyKey = `zeus-cmd-history-${projectKey}`;
+    try {
+      const saved = localStorage.getItem(historyKey);
+      if (saved) {
+        const parsed = JSON.parse(saved) as CommandHistoryEntry[];
+        setCommandHistory(parsed);
+      }
+    } catch {
+      // Ignore parse errors
+    }
+  }, [projectKey]);
+
+  // Save command history to localStorage
+  useEffect(() => {
+    if (!projectKey || commandHistory.length === 0) return;
+    const historyKey = `zeus-cmd-history-${projectKey}`;
+    try {
+      const toSave = commandHistory.slice(-MAX_HISTORY);
+      localStorage.setItem(historyKey, JSON.stringify(toSave));
+    } catch {
+      // Ignore storage errors
+    }
+  }, [projectKey, commandHistory]);
 
   // Auto scroll to bottom
   useEffect(() => {
@@ -426,6 +466,18 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     const commandPrefix = selectedCommand ? selectedCommand.command + " " : "";
     const message = (commandPrefix + input).trim();
     const currentMentions = [...mentions];
+
+    // Save to command history before clearing
+    const historyEntry: CommandHistoryEntry = {
+      input: input,
+      command: selectedCommand,
+      mentions: [...mentions],
+      timestamp: Date.now(),
+    };
+    setCommandHistory((prev) => [...prev, historyEntry]);
+    setHistoryIndex(-1); // Reset history index
+    currentInputRef.current = null; // Clear saved current input
+
     setInput("");
     setMentions([]);
     setSelectedCommand(null);
@@ -732,6 +784,13 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     [mentionState.active, mentionState.startPos, slashActive, selectedCommand],
   );
 
+  // Helper function to restore a history entry
+  const restoreHistoryEntry = useCallback((entry: CommandHistoryEntry) => {
+    setInput(entry.input);
+    setSelectedCommand(entry.command);
+    setMentions(entry.mentions);
+  }, []);
+
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       // If mention dropdown is active, let it handle keyboard events
@@ -778,12 +837,71 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
         return;
       }
 
+      // Handle ArrowUp for command history (when cursor at start of input)
+      if (event.key === "ArrowUp" && commandHistory.length > 0) {
+        const textarea = event.currentTarget;
+        const cursorAtStart = textarea.selectionStart === 0 && textarea.selectionEnd === 0;
+        
+        if (cursorAtStart || input === "") {
+          event.preventDefault();
+          
+          if (historyIndex === -1) {
+            // Save current input before entering history
+            currentInputRef.current = {
+              input,
+              command: selectedCommand,
+              mentions: [...mentions],
+              timestamp: Date.now(),
+            };
+            // Go to last history entry
+            const newIndex = commandHistory.length - 1;
+            setHistoryIndex(newIndex);
+            restoreHistoryEntry(commandHistory[newIndex]);
+          } else if (historyIndex > 0) {
+            // Go to previous history entry
+            const newIndex = historyIndex - 1;
+            setHistoryIndex(newIndex);
+            restoreHistoryEntry(commandHistory[newIndex]);
+          }
+          return;
+        }
+      }
+
+      // Handle ArrowDown for command history
+      if (event.key === "ArrowDown" && historyIndex >= 0) {
+        const textarea = event.currentTarget;
+        const cursorAtEnd = textarea.selectionStart === input.length;
+        
+        if (cursorAtEnd || input === "") {
+          event.preventDefault();
+          
+          if (historyIndex < commandHistory.length - 1) {
+            // Go to next history entry
+            const newIndex = historyIndex + 1;
+            setHistoryIndex(newIndex);
+            restoreHistoryEntry(commandHistory[newIndex]);
+          } else {
+            // Return to current input
+            setHistoryIndex(-1);
+            if (currentInputRef.current) {
+              restoreHistoryEntry(currentInputRef.current);
+              currentInputRef.current = null;
+            } else {
+              setInput("");
+              setSelectedCommand(null);
+              setMentions([]);
+            }
+          }
+          return;
+        }
+      }
+
       if (event.key !== "Enter") return;
       if (event.shiftKey || event.ctrlKey || event.metaKey) return;
       event.preventDefault();
       handleSend();
     },
-    [handleSend, mentionState.active, slashActive, filteredSlashCommands, slashSelectedIndex, handleSlashSelect, input, selectedCommand],
+    [handleSend, mentionState.active, slashActive, filteredSlashCommands, slashSelectedIndex, handleSlashSelect, input, selectedCommand, commandHistory, historyIndex, mentions, restoreHistoryEntry],
   );
 
   const renderArtifacts = (artifacts?: ChatArtifact[]) => {
@@ -1206,7 +1324,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
             className={`chat-dock-textarea ${selectedCommand ? "with-command" : ""}`}
             placeholder={
               selectedCommand 
-                ? selectedCommand.placeholder || "输入参数..."
+                ? "输入参数..."
                 : projectKey 
                   ? "输入消息，@ 指定文档范围..." 
                   : "请先选择项目"
