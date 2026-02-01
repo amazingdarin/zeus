@@ -1800,13 +1800,10 @@ function DocumentPage() {
           activeId={resolvedDocumentId || null}
           loadingIds={loadingIds}
           rootLoading={rootLoading}
-          rebuildingIndex={rebuildingIndex}
-          rebuildProgress={rebuildProgress}
           onSelect={handleSelectDocument}
           onToggle={handleToggle}
           onMove={handleMove}
           onRefresh={handleRefresh}
-          onRebuildIndex={handleRebuildIndex}
           onEmptyAreaClick={() => navigate("/documents")}
         />
       }

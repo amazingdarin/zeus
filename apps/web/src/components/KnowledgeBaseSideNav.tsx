@@ -1,5 +1,5 @@
 import { useMemo, useState, memo, type DragEvent } from "react";
-import { DownOutlined, RightOutlined, ReloadOutlined, DatabaseOutlined } from "@ant-design/icons";
+import { DownOutlined, RightOutlined, ReloadOutlined } from "@ant-design/icons";
 import { Tooltip } from "antd";
 
 export type KnowledgeBaseDocument = {
@@ -22,12 +22,6 @@ export type KnowledgeBaseMoveRequest = {
   targetParentId: string;
 };
 
-type RebuildProgress = {
-  total: number;
-  processed: number;
-  status: string;
-};
-
 type KnowledgeBaseSideNavProps = {
   documents: KnowledgeBaseDocument[];
   childrenByParent: Record<string, KnowledgeBaseDocument[]>;
@@ -35,13 +29,10 @@ type KnowledgeBaseSideNavProps = {
   activeId: string | null;
   loadingIds: Record<string, boolean>;
   rootLoading: boolean;
-  rebuildingIndex?: boolean;
-  rebuildProgress?: RebuildProgress | null;
   onSelect: (doc: KnowledgeBaseDocument) => void;
   onToggle: (doc: KnowledgeBaseDocument) => void;
   onMove: (request: KnowledgeBaseMoveRequest) => void;
   onRefresh?: () => void;
-  onRebuildIndex?: () => void;
   onEmptyAreaClick?: () => void;
 };
 
@@ -52,13 +43,10 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
   activeId,
   loadingIds,
   rootLoading,
-  rebuildingIndex,
-  rebuildProgress,
   onSelect,
   onToggle,
   onMove,
   onRefresh,
-  onRebuildIndex,
   onEmptyAreaClick,
 }: KnowledgeBaseSideNavProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -313,24 +301,6 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
     >
       <div className="kb-sidebar-toolbar">
         <div className="kb-sidebar-toolbar-spacer" />
-        {onRebuildIndex && (
-          <Tooltip 
-            title={
-              rebuildingIndex && rebuildProgress
-                ? `重建中：${rebuildProgress.processed}/${rebuildProgress.total}`
-                : "重建索引"
-            }
-          >
-            <button
-              className={`kb-sidebar-toolbar-btn${rebuildingIndex ? " rebuilding" : ""}`}
-              type="button"
-              onClick={onRebuildIndex}
-              disabled={rebuildingIndex || rootLoading}
-            >
-              <DatabaseOutlined spin={rebuildingIndex} />
-            </button>
-          </Tooltip>
-        )}
         {onRefresh && (
           <Tooltip title="刷新文档树">
             <button
