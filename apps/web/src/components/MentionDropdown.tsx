@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FolderOutlined, FileTextOutlined } from "@ant-design/icons";
 import type { DocumentSuggestion } from "../api/documents";
 import { suggestDocuments } from "../api/documents";
@@ -8,6 +8,14 @@ export type MentionItem = {
   title: string;
   titlePath: string;
   includeChildren: boolean;
+};
+
+type DisplayItem = {
+  id: string;
+  title: string;
+  titlePath: string;
+  hasChildren: boolean;
+  includeChildren: boolean;  // true = include children, false = doc only
 };
 
 type MentionDropdownProps = {
@@ -31,7 +39,7 @@ function MentionDropdown({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch suggestions on query change
   useEffect(() => {
@@ -66,6 +74,31 @@ function MentionDropdown({
     };
   }, [projectKey, query, visible]);
 
+  // Build display items: for documents with children, show two options
+  const displayItems = useMemo<DisplayItem[]>(() => {
+    const items: DisplayItem[] = [];
+    for (const item of suggestions) {
+      if (item.hasChildren) {
+        // Show two options for folders
+        items.push({
+          ...item,
+          includeChildren: false,  // Document only
+        });
+        items.push({
+          ...item,
+          includeChildren: true,   // Document + children
+        });
+      } else {
+        // Single option for files
+        items.push({
+          ...item,
+          includeChildren: false,
+        });
+      }
+    }
+    return items;
+  }, [suggestions]);
+
   // Reset selected index when suggestions change
   useEffect(() => {
     setSelectedIndex(0);
@@ -80,27 +113,25 @@ function MentionDropdown({
         case "ArrowDown":
           e.preventDefault();
           setSelectedIndex((prev) =>
-            prev < suggestions.length - 1 ? prev + 1 : 0
+            prev < displayItems.length - 1 ? prev + 1 : 0
           );
           break;
         case "ArrowUp":
           e.preventDefault();
           setSelectedIndex((prev) =>
-            prev > 0 ? prev - 1 : suggestions.length - 1
+            prev > 0 ? prev - 1 : displayItems.length - 1
           );
           break;
         case "Enter":
         case "Tab":
           e.preventDefault();
-          if (suggestions[selectedIndex]) {
-            const item = suggestions[selectedIndex];
-            // Check if query ends with /
-            const includeChildren = query.endsWith("/") || item.hasChildren;
+          if (displayItems[selectedIndex]) {
+            const item = displayItems[selectedIndex];
             onSelect({
               docId: item.id,
               title: item.title,
               titlePath: item.titlePath,
-              includeChildren,
+              includeChildren: item.includeChildren,
             });
           }
           break;
@@ -110,7 +141,7 @@ function MentionDropdown({
           break;
       }
     },
-    [visible, suggestions, selectedIndex, query, onSelect, onClose]
+    [visible, displayItems, selectedIndex, onSelect, onClose]
   );
 
   // Add keyboard event listener
@@ -145,14 +176,17 @@ function MentionDropdown({
 
   if (!visible) return null;
 
-  const handleItemClick = (item: DocumentSuggestion) => {
+  const handleItemClick = (item: DisplayItem) => {
     onSelect({
       docId: item.id,
       title: item.title,
       titlePath: item.titlePath,
-      includeChildren: query.endsWith("/") || item.hasChildren,
+      includeChildren: item.includeChildren,
     });
   };
+
+  // Adjust selected index for keyboard navigation
+  const safeSelectedIndex = Math.min(selectedIndex, displayItems.length - 1);
 
   return (
     <div
@@ -168,23 +202,34 @@ function MentionDropdown({
           {query ? "无匹配文档" : "输入文档名称搜索"}
         </div>
       )}
-      {!loading && suggestions.length > 0 && (
+      {!loading && displayItems.length > 0 && (
         <ul className="mention-dropdown-list">
-          {suggestions.map((item, index) => (
+          {displayItems.map((item, index) => (
             <li
-              key={item.id}
+              key={`${item.id}-${item.includeChildren ? "dir" : "doc"}`}
               className={`mention-dropdown-item ${
-                index === selectedIndex ? "selected" : ""
+                index === safeSelectedIndex ? "selected" : ""
               }`}
               onClick={() => handleItemClick(item)}
               onMouseEnter={() => setSelectedIndex(index)}
             >
               <span className="mention-dropdown-icon">
-                {item.hasChildren ? <FolderOutlined /> : <FileTextOutlined />}
+                {item.includeChildren ? <FolderOutlined /> : <FileTextOutlined />}
               </span>
-              <span className="mention-dropdown-title">{item.title}</span>
+              <span className="mention-dropdown-title">
+                {item.title}
+                {item.includeChildren && "/"}
+              </span>
               {item.titlePath !== item.title && (
-                <span className="mention-dropdown-path">{item.titlePath}</span>
+                <span className="mention-dropdown-path">
+                  {item.titlePath}
+                  {item.includeChildren && "/"}
+                </span>
+              )}
+              {item.hasChildren && (
+                <span className="mention-dropdown-type">
+                  {item.includeChildren ? "含子文档" : "仅文档"}
+                </span>
               )}
             </li>
           ))}
