@@ -23,7 +23,7 @@ import {
   wrapBlockInDoc,
   type BlockDiffResult,
   type RawBlock,
-} from "@zeus/shared/block-diff";
+} from "@zeus/shared";
 
 type DraftPreviewModalProps = {
   draft: DocumentDraft;
