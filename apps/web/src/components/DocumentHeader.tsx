@@ -12,9 +12,7 @@ type DocumentHeaderProps = {
   allowChildActions?: boolean;
   allowEdit?: boolean;
   allowDelete?: boolean;
-  allowRebuild?: boolean;
   allowOptimize?: boolean;
-  rebuilding?: boolean;
   deleting?: boolean;
   onEdit: () => void;
   onSave: () => void;
@@ -22,7 +20,6 @@ type DocumentHeaderProps = {
   onNew: () => void;
   onImport: () => void;
   onDelete?: () => void;
-  onRebuild?: () => void;
   onExport?: () => void;
   onOptimize?: () => void;
 };
@@ -33,9 +30,7 @@ function DocumentHeader({
   allowChildActions = true,
   allowEdit = true,
   allowDelete = false,
-  allowRebuild = false,
   allowOptimize = false,
-  rebuilding = false,
   deleting = false,
   onEdit,
   onSave,
@@ -43,7 +38,6 @@ function DocumentHeader({
   onNew,
   onImport,
   onDelete,
-  onRebuild,
   onExport,
   onOptimize,
 }: DocumentHeaderProps) {
@@ -90,13 +84,6 @@ function DocumentHeader({
     onDelete();
   };
 
-  const handleRebuild = () => {
-    if (!onRebuild) {
-      return;
-    }
-    onRebuild();
-  };
-
   const handleExport = () => {
     if (!onExport) {
       return;
@@ -130,57 +117,6 @@ function DocumentHeader({
         ))}
       </div>
       <div className="kb-header-menu">
-        {onRebuild ? (
-          <button
-            className="kb-rebuild-button"
-            type="button"
-            aria-label="重建知识库"
-            onClick={handleRebuild}
-            disabled={!allowRebuild || rebuilding}
-          >
-            {rebuilding ? (
-              <span className="kb-doc-spinner" aria-hidden="true" />
-            ) : (
-              <svg
-                className="kb-rebuild-icon"
-                viewBox="0 0 24 24"
-                role="presentation"
-                aria-hidden="true"
-              >
-                <path
-                  d="M4 12a8 8 0 0 1 13.66-5.66"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                />
-                <path
-                  d="M17.5 3.8v4.2h4.2"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M20 12a8 8 0 0 1-13.66 5.66"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                />
-                <path
-                  d="M6.5 20.2v-4.2H2.3"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            )}
-          </button>
-        ) : null}
         <button
           className="kb-menu-button"
           type="button"

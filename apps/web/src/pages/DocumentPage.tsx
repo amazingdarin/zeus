@@ -1818,9 +1818,7 @@ function DocumentPage() {
           allowChildActions={allowChildActions}
           allowEdit={Boolean(activeDocument)}
           allowDelete={Boolean(activeDocument)}
-          allowRebuild={Boolean(activeDocument)}
           allowOptimize={Boolean(activeDocument)}
-          rebuilding={rebuilding}
           deleting={deleting}
           onEdit={handleEdit}
           onSave={() => { }}
@@ -1828,7 +1826,6 @@ function DocumentPage() {
           onNew={handleOpenNew}
           onImport={() => handleOpenImportWithMode("file")}
           onDelete={handleDelete}
-          onRebuild={handleRebuild}
           onExport={activeDocument ? handleExport : undefined}
           onOptimize={activeDocument ? handleOpenOptimize : undefined}
         />
