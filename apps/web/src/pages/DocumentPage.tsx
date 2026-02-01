@@ -27,6 +27,7 @@ import {
   deleteDocument,
   fetchUrlHtml,
   importGit,
+  optimizeFormat,
   type DocumentDetail,
   type DocumentTreeItem,
 } from "../api/documents";
@@ -269,6 +270,7 @@ function DocumentPage() {
   const [smartImportTypes, setSmartImportTypes] = useState<Set<SmartImportType>>(
     () => new Set(ALL_SMART_IMPORT_TYPES),
   );
+  const [formatOptimizeEnabled, setFormatOptimizeEnabled] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -1427,6 +1429,7 @@ function DocumentPage() {
           smart_import: smartImportEnabled,
           smart_import_types: Array.from(smartImportTypes) as ("markdown" | "word" | "pdf")[],
           file_types: fileTypeFilters,
+          enable_format_optimize: smartImportEnabled && formatOptimizeEnabled,
         });
         setUploadCompleted(1);
         setGitLogEntries((prev) => [
@@ -1603,9 +1606,22 @@ function DocumentPage() {
         }
         if (canSmartImport || canDocxImport) {
           try {
-            const markdown = canDocxImport
+            let markdown = canDocxImport
               ? (await convertDocument(resolvedProjectKey, entry.file, "docx", "md")).content
               : await entry.file.text();
+            
+            // Optionally optimize format using LLM
+            if (formatOptimizeEnabled && markdown.trim()) {
+              try {
+                const optimized = await optimizeFormat(resolvedProjectKey, markdown);
+                if (optimized.optimized) {
+                  markdown = optimized.markdown;
+                }
+              } catch (optErr) {
+                console.warn("Format optimization failed, using original:", optErr);
+              }
+            }
+            
             const parsed = markdownToTiptapJson(markdown, { extensions: markdownExtensions });
             const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
             const fileBlock = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, true);
@@ -1882,14 +1898,26 @@ function DocumentPage() {
                     <fieldset className="kb-import-smart">
                       <div className="kb-import-smart-header">
                         <div className="kb-import-smart-title">智能导入</div>
-                        <button
-                          className={`kb-import-toggle${smartImportEnabled ? " active" : ""}`}
-                          type="button"
-                          aria-pressed={smartImportEnabled}
-                          onClick={() => setSmartImportEnabled((prev) => !prev)}
-                        >
-                          {smartImportEnabled ? "开启" : "关闭"}
-                        </button>
+                        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                          <button
+                            className={`kb-import-toggle${formatOptimizeEnabled && smartImportEnabled ? " active" : ""}`}
+                            type="button"
+                            aria-pressed={formatOptimizeEnabled && smartImportEnabled}
+                            onClick={() => setFormatOptimizeEnabled((prev) => !prev)}
+                            disabled={!smartImportEnabled}
+                            title="使用 AI 优化导入文档的格式（标题层级、列表规范等），不修改内容"
+                          >
+                            格式优化
+                          </button>
+                          <button
+                            className={`kb-import-toggle${smartImportEnabled ? " active" : ""}`}
+                            type="button"
+                            aria-pressed={smartImportEnabled}
+                            onClick={() => setSmartImportEnabled((prev) => !prev)}
+                          >
+                            {smartImportEnabled ? "开启" : "关闭"}
+                          </button>
+                        </div>
                       </div>
                       <fieldset className="kb-import-smart-options" aria-label="Smart import types">
                         {SMART_IMPORT_OPTIONS.map((option) => {

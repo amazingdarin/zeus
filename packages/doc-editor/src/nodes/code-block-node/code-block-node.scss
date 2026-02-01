@@ -212,6 +212,70 @@
   border: 0;
 }
 
+/* Mermaid Viewer Styles */
+.mermaid-viewer {
+  padding: 16px;
+  background: #ffffff;
+  border-radius: 8px;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100px;
+
+  svg {
+    max-width: 100%;
+    height: auto;
+  }
+
+  [data-theme="dark"] & {
+    background: #1c2128;
+  }
+}
+
+.mermaid-placeholder {
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.mermaid-error {
+  padding: 12px 16px;
+  background: #fff1f0;
+  border: 1px solid #ffccc7;
+  border-radius: 6px;
+  font-size: 13px;
+
+  [data-theme="dark"] & {
+    background: rgba(248, 81, 73, 0.1);
+    border-color: rgba(248, 81, 73, 0.3);
+  }
+}
+
+.mermaid-error-title {
+  font-weight: 600;
+  color: #cf1322;
+  margin-bottom: 4px;
+
+  [data-theme="dark"] & {
+    color: #f85149;
+  }
+}
+
+.mermaid-error-message {
+  color: #820014;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+
+  [data-theme="dark"] & {
+    color: #ffa8a8;
+  }
+}
+
 /* =====================
    CODE FORMATTING
    ===================== */

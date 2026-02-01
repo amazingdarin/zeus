@@ -17,3 +17,6 @@ export {
 } from "./upload-entries";
 export { isValidGitBranch, isValidHttpUrl } from "./validation";
 export { fetchUrlHtmlWithFallback, type FetchUrlFallback } from "./fetch-url";
+
+// Block Diff
+export * from "./block-diff";

@@ -36,4 +36,88 @@
     font-weight: 600;
     margin-top: 2em;
   }
+
+  // ============================================================================
+  // Heading Collapse Button
+  // ============================================================================
+
+  .heading-collapse-btn {
+    position: absolute;
+    left: -28px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 4px;
+    opacity: 0;
+    transition: opacity 0.15s ease, background-color 0.15s ease;
+    z-index: 10;
+
+    &:hover {
+      background-color: rgba(0, 0, 0, 0.08);
+    }
+
+    &:focus {
+      opacity: 1;
+      outline: none;
+    }
+
+    // Always visible when collapsed
+    &.collapsed {
+      opacity: 1;
+    }
+
+    [data-theme="dark"] & {
+      &:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+      }
+    }
+  }
+
+  .heading-collapse-icon {
+    width: 17px;
+    height: 17x;
+    color: #666;
+    flex-shrink: 0;
+
+    [data-theme="dark"] & {
+      color: #999;
+    }
+  }
+
+  // Show button on heading hover
+  h1:hover > .heading-collapse-btn,
+  h2:hover > .heading-collapse-btn,
+  h3:hover > .heading-collapse-btn,
+  h4:hover > .heading-collapse-btn {
+    opacity: 1;
+  }
+
+  // Collapsed heading indicator
+  .heading-collapsed::after {
+    content: " ...";
+    color: #999;
+    font-weight: 400;
+    font-size: 0.8em;
+
+    [data-theme="dark"] & {
+      color: #666;
+    }
+  }
+
+  // ============================================================================
+  // Collapsed Content
+  // ============================================================================
+
+  .prosemirror-collapsed {
+    display: none !important;
+  }
 }

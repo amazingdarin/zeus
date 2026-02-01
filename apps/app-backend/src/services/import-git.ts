@@ -4,6 +4,7 @@ import simpleGit from "simple-git";
 import { v4 as uuidv4 } from "uuid";
 
 import { convertDocument } from "./convert.js";
+import { optimizeFormatSync } from "./optimize.js";
 import { documentStore } from "../storage/document-store.js";
 import { assetStore } from "../storage/asset-store.js";
 import { knowledgeSearch } from "../knowledge/search.js";
@@ -21,6 +22,8 @@ export type ImportGitRequest = {
   smart_import?: boolean;
   smart_import_types?: SmartImportType[];
   file_types?: FileTypeFilter[];
+  // Enable format optimization using LLM (optional, fail-safe)
+  enable_format_optimize?: boolean;
 };
 
 export type ImportGitResult = {
@@ -177,6 +180,7 @@ export const importGit = async (
   const smartImport = req.smart_import ?? false;
   const smartImportTypes = new Set<SmartImportType>(req.smart_import_types ?? []);
   const allowedExtensions = buildAllowedExtensions(req.file_types ?? []);
+  const enableFormatOptimize = req.enable_format_optimize ?? false;
 
   const tempDir = path.join(process.cwd(), ".tmp", `git-import-${uuidv4()}`);
   await mkdir(tempDir, { recursive: true });
@@ -271,7 +275,7 @@ export const importGit = async (
             // Upload as asset first
             const assetMeta = await uploadAsset(projectKey, file, content);
             // Create document with file block + converted content
-            await createSmartDocument(projectKey, file.name, resolvedParent, markdown, assetMeta);
+            await createSmartDocument(projectKey, file.name, resolvedParent, markdown, assetMeta, enableFormatOptimize);
             result.converted += 1;
           } else {
             // Conversion failed, fallback to regular file import
@@ -468,10 +472,19 @@ const createSmartDocument = async (
   parentId: string,
   markdown: string,
   assetMeta: { id: string; filename: string; mime: string; size: number },
+  enableFormatOptimize: boolean = false,
 ): Promise<void> => {
+  // Optionally optimize the markdown format using LLM
+  // This is fail-safe: if optimization fails, original markdown is used
+  let finalMarkdown = markdown;
+  if (enableFormatOptimize) {
+    console.log(`[smart-import] Starting format optimization for: ${title}`);
+    finalMarkdown = await optimizeFormatSync(markdown);
+  }
+
   // Create document with file block at top, followed by converted content
   const fileBlock = buildFileBlockNode(assetMeta);
-  const tiptapContent = markdownToTiptap(markdown);
+  const tiptapContent = markdownToTiptap(finalMarkdown);
 
   const doc: Document = {
     meta: {

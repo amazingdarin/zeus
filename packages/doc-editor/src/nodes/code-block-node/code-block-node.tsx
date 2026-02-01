@@ -6,6 +6,7 @@ import { NodeViewContent, NodeViewWrapper } from "@tiptap/react"
 import type { NodeViewProps } from "@tiptap/react"
 
 import OpenApiSpecViewer from "../../viewer/OpenApiSpecViewer"
+import { MermaidViewer } from "../../viewer/MermaidViewer"
 import { ChevronDownIcon } from "../../icons/chevron-down-icon"
 import { ViewPreviewIcon } from "../../icons/view-preview-icon"
 import { ViewSplitIcon } from "../../icons/view-split-icon"
@@ -17,6 +18,7 @@ const LANGUAGE_OPTIONS = [
   { value: "", label: "Auto" },
   { value: "openapi", label: "OpenAPI" },
   { value: "html", label: "HTML" },
+  { value: "mermaid", label: "Mermaid" },
   { value: "json", label: "JSON" },
   { value: "yaml", label: "YAML" },
   { value: "typescript", label: "TypeScript" },
@@ -65,6 +67,12 @@ const DEFAULT_RENDERERS: CodeBlockRenderer[] = [
       />
     ),
   },
+  {
+    id: "mermaid",
+    label: "Mermaid",
+    match: ({ language }) => language === "mermaid",
+    render: ({ code }) => <MermaidViewer code={code} />,
+  },
 ]
 
 type ViewMode = "text" | "preview" | "split"
@@ -97,6 +105,9 @@ const resolveRenderer = (args: {
     if (explicitRenderer.id === "html" && language !== "html") {
       return null
     }
+    if (explicitRenderer.id === "mermaid" && language !== "mermaid") {
+      return null
+    }
     return explicitRenderer
   }
 
@@ -119,7 +130,7 @@ export function CodeBlockNodeView({ node, editor, extension, getPos }: NodeViewP
   const rendererAttr = typeof node.attrs.renderer === "string" ? node.attrs.renderer : "auto"
   const preview = Boolean(node.attrs.preview)
   const collapsed = Boolean(node.attrs.collapsed)
-  const supportsPreview = language === "openapi" || language === "html"
+  const supportsPreview = language === "openapi" || language === "html" || language === "mermaid"
   const rawViewMode = typeof node.attrs.view_mode === "string" ? node.attrs.view_mode : ""
   const viewMode: ViewMode = supportsPreview
     ? isViewMode(rawViewMode)
@@ -166,10 +177,10 @@ export function CodeBlockNodeView({ node, editor, extension, getPos }: NodeViewP
 
   const handleLanguageChange = (event: ChangeEvent<HTMLSelectElement>) => {
     const nextLanguage = event.target.value
-    const supportsPreview = nextLanguage === "openapi" || nextLanguage === "html"
-    const nextRenderer = supportsPreview ? nextLanguage : "auto"
-    const nextViewMode: ViewMode = supportsPreview ? viewMode : "text"
-    const nextPreview = supportsPreview ? nextViewMode !== "text" : false
+    const nextSupportsPreview = nextLanguage === "openapi" || nextLanguage === "html" || nextLanguage === "mermaid"
+    const nextRenderer = nextSupportsPreview ? nextLanguage : "auto"
+    const nextViewMode: ViewMode = nextSupportsPreview ? viewMode : "text"
+    const nextPreview = nextSupportsPreview ? nextViewMode !== "text" : false
     updateNodeAttrs({
       language: nextLanguage || null,
       renderer: nextRenderer,

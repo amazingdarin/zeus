@@ -32,6 +32,7 @@ import { ImageUploadNode } from "../../nodes/image-upload-node/image-upload-node
 import { HorizontalRule } from "../../nodes/horizontal-rule-node/horizontal-rule-node-extension"
 import { CodeBlockNode } from "../../nodes/code-block-node/code-block-node-extension"
 import { LinkPreviewNode } from "../../nodes/link-preview-node/link-preview-node-extension"
+import { TocNode } from "../../nodes/toc-node/toc-node-extension"
 import "../../nodes/blockquote-node/blockquote-node.scss"
 import "../../nodes/code-block-node/code-block-node.scss"
 import "../../nodes/horizontal-rule-node/horizontal-rule-node.scss"
@@ -40,6 +41,7 @@ import "../../nodes/image-node/image-node.scss"
 import "../../nodes/heading-node/heading-node.scss"
 import "../../nodes/paragraph-node/paragraph-node.scss"
 import "../../nodes/link-preview-node/link-preview-node.scss"
+import "../../nodes/toc-node/toc-node.scss"
 
 // --- Tiptap UI ---
 import { HeadingDropdownMenu } from "../../ui/heading-dropdown-menu"
@@ -49,6 +51,7 @@ import { LinkPreviewButton } from "../../ui/link-preview-button"
 import { ListDropdownMenu } from "../../ui/list-dropdown-menu"
 import { BlockquoteButton } from "../../ui/blockquote-button"
 import { CodeBlockButton } from "../../ui/code-block-button"
+import { TocButton } from "../../ui/toc-button"
 import {
   ColorHighlightPopover,
   ColorHighlightPopoverContent,
@@ -75,6 +78,7 @@ import {
   BlockIdExtension,
   ensureBlockIds,
 } from "../../extensions/BlockIdExtension"
+import { HeadingCollapseExtension } from "../../extensions/HeadingCollapseExtension"
 
 // --- Styles ---
 import "./doc-editor.scss"
@@ -125,6 +129,7 @@ const MainToolbarContent = ({
         />
         <BlockquoteButton />
         <CodeBlockButton />
+        <TocButton />
       </ToolbarGroup>
 
       <ToolbarSeparator />
@@ -233,6 +238,7 @@ export function DocEditor({
     },
     extensions: [
       BlockIdExtension,
+      HeadingCollapseExtension,
       StarterKit.configure({
         horizontalRule: false,
         codeBlock: false,
@@ -262,6 +268,7 @@ export function DocEditor({
       LinkPreviewNode.configure({
         fetchHtml: linkPreviewFetchHtml,
       }),
+      TocNode,
       ...extensions,
     ],
     content: initialContent,
@@ -317,6 +324,12 @@ export function DocEditor({
     lastContentRef.current = serialized
   }, [content, editor])
 
+  // Store onChange in a ref to avoid it as a dependency
+  const onChangeRef = useRef(onChange)
+  useEffect(() => {
+    onChangeRef.current = onChange
+  }, [onChange])
+
   useEffect(() => {
     if (!editor || !docId || !onLoadDocument) {
       return
@@ -330,6 +343,8 @@ export function DocEditor({
           const nextContent = ensureBlockIds(loadedContent)
           editor.commands.setContent(nextContent)
           lastContentRef.current = JSON.stringify(nextContent)
+          // Notify parent of the loaded content using ref
+          onChangeRef.current?.(nextContent)
         }
       } catch (error) {
         console.error("Failed to load document content:", error)

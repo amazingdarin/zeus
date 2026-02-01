@@ -330,3 +330,119 @@ function cleanMarkdownOutput(markdown: string): string {
 export function deleteTask(taskId: string): boolean {
   return activeTasks.delete(taskId);
 }
+
+// ============================================================================
+// Sync Format Optimization (for Smart Import)
+// ============================================================================
+
+const IMPORT_FORMAT_PROMPT = `你是一个专业的文档格式优化专家。请对以下 Markdown 文档进行格式优化：
+
+## 优化要求
+1. **标题层级**：确保标题层级合理，H1 仅用于文档标题，正文从 H2 开始
+2. **列表规范**：统一列表格式，有序列表用于步骤，无序列表用于枚举
+3. **代码块**：确保代码块有正确的语言标记
+4. **段落结构**：合理分段，每段聚焦一个主题
+5. **空白处理**：去除多余空行，保持格式整洁
+6. **特殊字符**：修复乱码或不规范的特殊字符
+
+## 重要规则
+- **只调整格式，不修改实际内容**
+- 保持原文内容含义完全不变
+- 不要添加、删除或修改任何实际内容
+- 输出纯 Markdown 格式，不要添加任何解释
+
+## 原文档
+\`\`\`markdown
+{{CONTENT}}
+\`\`\`
+
+请直接输出优化后的 Markdown 文档：`;
+
+/**
+ * Options for sync format optimization
+ */
+export type OptimizeFormatOptions = {
+  /** Maximum time to wait for optimization (ms), default: 30000 */
+  timeout?: number;
+  /** Maximum content length to optimize (chars), default: 50000 */
+  maxLength?: number;
+};
+
+/**
+ * Synchronously optimize markdown format using LLM
+ * 
+ * This is a fail-safe function designed for use during smart import:
+ * - If optimization succeeds, returns the optimized markdown
+ * - If optimization fails (timeout, error, no LLM config), returns the original markdown
+ * - Never throws an exception
+ */
+export async function optimizeFormatSync(
+  markdown: string,
+  options?: OptimizeFormatOptions
+): Promise<string> {
+  const timeout = options?.timeout ?? 30000;
+  const maxLength = options?.maxLength ?? 50000;
+
+  // Skip optimization for very short content
+  if (markdown.trim().length < 50) {
+    console.log("[optimize-format] Content too short, skipping optimization");
+    return markdown;
+  }
+
+  // Skip optimization for very long content
+  if (markdown.length > maxLength) {
+    console.log(`[optimize-format] Content too long (${markdown.length} > ${maxLength}), skipping optimization`);
+    return markdown;
+  }
+
+  try {
+    // Get LLM config
+    const config = await getLLMConfig();
+    if (!config || !config.enabled || !config.defaultModel) {
+      console.log("[optimize-format] No LLM config available, skipping optimization");
+      return markdown;
+    }
+
+    console.log(`[optimize-format] Starting format optimization, content length: ${markdown.length}`);
+
+    // Build prompt
+    const prompt = IMPORT_FORMAT_PROMPT.replace("{{CONTENT}}", markdown);
+
+    // Call LLM with timeout
+    const optimizePromise = llmGateway.chat({
+      provider: config.providerId,
+      model: config.defaultModel,
+      messages: [{ role: "user", content: prompt }],
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      temperature: 0.1, // Low temperature for consistent formatting
+    });
+
+    const timeoutPromise = new Promise<null>((resolve) => {
+      setTimeout(() => resolve(null), timeout);
+    });
+
+    const result = await Promise.race([optimizePromise, timeoutPromise]);
+
+    if (!result) {
+      console.log("[optimize-format] Optimization timed out, using original content");
+      return markdown;
+    }
+
+    // Clean up and validate output
+    const optimized = cleanMarkdownOutput(result.content);
+    
+    // Basic validation: ensure we got meaningful content back
+    if (optimized.length < markdown.length * 0.3) {
+      console.log("[optimize-format] Optimized content too short, using original content");
+      return markdown;
+    }
+
+    console.log(`[optimize-format] Optimization complete, result length: ${optimized.length}`);
+    return optimized;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error(`[optimize-format] Optimization failed: ${message}`);
+    return markdown;
+  }
+}

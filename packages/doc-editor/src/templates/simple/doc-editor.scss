@@ -21,7 +21,7 @@
 
 .doc-editor-content .tiptap.ProseMirror.doc-editor {
   flex: 1;
-  padding: 16px;
+  padding: 16px 16px 16px 32px; // Extra left padding for heading collapse buttons
   min-height: 280px;
   font-family: var(--font-sans);
   color: var(--ink);
@@ -29,6 +29,6 @@
 
 @media screen and (max-width: 480px) {
   .doc-editor-content .tiptap.ProseMirror.doc-editor {
-    padding: 12px;
+    padding: 12px 12px 12px 24px; // Extra left padding for heading collapse buttons
   }
 }

@@ -274,6 +274,8 @@ export type ImportGitRequest = {
   smart_import?: boolean;
   smart_import_types?: SmartImportType[];
   file_types?: FileTypeFilter[];
+  // Enable format optimization using LLM (optional, fail-safe)
+  enable_format_optimize?: boolean;
 };
 
 export type ImportGitResult = {
@@ -402,4 +404,39 @@ export const rejectProposal = async (
     if (!response.ok) {
         throw new Error("failed to reject proposal");
     }
+};
+
+export type OptimizeFormatResult = {
+    markdown: string;
+    optimized: boolean;
+};
+
+/**
+ * Optimize markdown format using LLM
+ * This is a fail-safe API: if optimization fails, returns original markdown
+ */
+export const optimizeFormat = async (
+    projectKey: string,
+    markdown: string,
+): Promise<OptimizeFormatResult> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeURIComponent(projectKey)}/documents/optimize-format`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ markdown }),
+        },
+    );
+    if (!response.ok) {
+        // Fail-safe: return original markdown if API fails
+        console.warn("Format optimization failed, using original markdown");
+        return { markdown, optimized: false };
+    }
+    const payload = await response.json();
+    return {
+        markdown: String(payload?.data?.markdown ?? markdown),
+        optimized: Boolean(payload?.data?.optimized ?? false),
+    };
 };

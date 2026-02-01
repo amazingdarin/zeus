@@ -11,6 +11,15 @@ const BLOCK_ID_NODE_TYPES = [
   "listItem",
   "taskItem",
   "blockquote",
+  "image",
+  "imageUpload",
+  "horizontalRule",
+  "linkPreview",
+  "fileBlock",
+  "blockRef",
+  "openapi",
+  "openapiRef",
+  "toc",
 ] as const
 
 const BLOCK_ID_NODE_SET = new Set<string>(BLOCK_ID_NODE_TYPES)

@@ -30,6 +30,7 @@ import {
   createTask as createOptimizeTask,
   getTask as getOptimizeTask,
   streamTask as streamOptimizeTask,
+  optimizeFormatSync,
   type OptimizeMode,
 } from "./services/optimize.js";
 
@@ -595,6 +596,36 @@ export const buildRouter = () => {
       } catch (err) {
         const message = err instanceof Error ? err.message : "Import failed";
         error(res, "IMPORT_FAILED", message);
+      }
+    },
+  );
+
+  /**
+   * Optimize markdown format using LLM
+   * POST /projects/:projectKey/documents/optimize-format
+   * Body: { markdown: string }
+   * 
+   * This is a fail-safe endpoint: if optimization fails, returns original markdown.
+   */
+  router.post(
+    "/projects/:projectKey/documents/optimize-format",
+    async (req: Request, res: Response) => {
+      try {
+        const markdown = String(req.body?.markdown ?? "");
+        if (!markdown.trim()) {
+          error(res, "INVALID_REQUEST", "markdown is required");
+          return;
+        }
+
+        const optimized = await optimizeFormatSync(markdown);
+        success(res, { 
+          markdown: optimized,
+          optimized: optimized !== markdown,
+        });
+      } catch (err) {
+        // This should not happen as optimizeFormatSync is fail-safe
+        const message = err instanceof Error ? err.message : "Optimization failed";
+        error(res, "OPTIMIZE_FAILED", message);
       }
     },
   );

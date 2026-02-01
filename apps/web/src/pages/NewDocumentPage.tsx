@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSONContent } from "@tiptap/react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { Modal } from "antd";
 
 import RichTextEditor from "../components/RichTextEditor";
 import RichTextViewer from "../components/RichTextViewer";
@@ -12,6 +13,19 @@ import { createDocument, fetchDocument } from "../api/documents";
 import { fetchStorageObjectDownload } from "../api/storage";
 import { useProjectContext } from "../context/ProjectContext";
 import { sanitizeFileName } from "../utils/fileName";
+
+// Import block-diff utilities from shared
+import {
+  blockDiff,
+  getStatusLabel,
+  wrapBlockInDoc,
+  type BlockDiffEntry,
+  type BlockDiffResult,
+  type RawBlock,
+} from "@zeus/shared";
+
+// Resolution action type
+type DiffResolution = "accept" | "reject";
 
 function NewDocumentPage() {
   const { currentProject } = useProjectContext();
@@ -31,6 +45,9 @@ function NewDocumentPage() {
   const [diffMode, setDiffMode] = useState(false);
   const [baselineContent, setBaselineContent] = useState<JSONContent | null>(null);
   const currentRequestRef = useRef<string | null>(null);
+  
+  // Diff resolution state - tracks which entries have been resolved and how
+  const [resolvedDiffs, setResolvedDiffs] = useState<Map<number, DiffResolution>>(new Map());
 
   const parentIdParam = useMemo(() => {
     return (searchParams.get("parent_id") || "").trim();
@@ -70,9 +87,51 @@ function NewDocumentPage() {
     return parsedJsonDraft ? null : "Invalid JSON content.";
   }, [jsonDraft, jsonMode, parsedJsonDraft]);
 
-  const diffEntries = useMemo(() => {
-    return buildBlockDiff(baselineContent, diffContent);
+  // Use new block-diff module
+  const diffResult: BlockDiffResult = useMemo(() => {
+    console.log(`[NewDocumentPage] diffResult useMemo triggered`);
+    // Only compute diff when both contents are available
+    if (!baselineContent || !diffContent) {
+      console.log(`[NewDocumentPage] diffResult: no content, returning empty`);
+      return { entries: [], stats: { added: 0, removed: 0, modified: 0, unchanged: 0, total: 0 } };
+    }
+    try {
+      console.log(`[NewDocumentPage] calling blockDiff...`);
+      const result = blockDiff(
+        baselineContent as RawBlock | null,
+        diffContent as RawBlock | null,
+        {
+          computeFieldChanges: true,
+          includeUnchanged: true,
+          mergeConsecutive: false,
+        }
+      );
+      console.log(`[NewDocumentPage] blockDiff done, entries=${result.entries.length}`);
+      return result;
+    } catch (err) {
+      console.error("[NewDocumentPage] blockDiff error:", err);
+      return { entries: [], stats: { added: 0, removed: 0, modified: 0, unchanged: 0, total: 0 } };
+    }
   }, [baselineContent, diffContent]);
+
+  // Compute changed entries and resolution progress
+  const changedEntries = useMemo(() => {
+    return diffResult.entries
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => entry.status !== "unchanged");
+  }, [diffResult.entries]);
+
+  const resolvedCount = useMemo(() => {
+    let count = 0;
+    for (const { index } of changedEntries) {
+      if (resolvedDiffs.has(index)) {
+        count++;
+      }
+    }
+    return count;
+  }, [changedEntries, resolvedDiffs]);
+
+  const allResolved = changedEntries.length > 0 && resolvedCount === changedEntries.length;
 
   useEffect(() => {
     if (jsonMode) {
@@ -270,25 +329,122 @@ function NewDocumentPage() {
 
   const handleToggleDiffMode = () => {
     setDiffMode((prev) => !prev);
+    // Clear resolutions when exiting diff mode
+    if (diffMode) {
+      setResolvedDiffs(new Map());
+    }
   };
+
+  // Block-level diff resolution handler
+  const handleResolveDiff = useCallback((entryIndex: number, action: DiffResolution) => {
+    setResolvedDiffs((prev) => {
+      const next = new Map(prev);
+      next.set(entryIndex, action);
+      return next;
+    });
+  }, []);
+
+  // Document-level: accept all remaining unresolved as 'accept'
+  const handleAcceptAllRemaining = useCallback(() => {
+    setResolvedDiffs((prev) => {
+      const next = new Map(prev);
+      for (const { index } of changedEntries) {
+        if (!next.has(index)) {
+          next.set(index, "accept");
+        }
+      }
+      return next;
+    });
+  }, [changedEntries]);
+
+  // Apply resolved diffs to content
+  const applyResolvedDiffs = useCallback(() => {
+    const newBlocks: RawBlock[] = [];
+
+    diffResult.entries.forEach((entry, index) => {
+      const resolution = resolvedDiffs.get(index);
+
+      if (entry.status === "unchanged") {
+        // Unchanged blocks are always kept
+        if (entry.original?.raw) {
+          newBlocks.push(entry.original.raw);
+        }
+      } else if (entry.status === "removed") {
+        // accept = delete, reject = keep
+        if (resolution === "reject" && entry.original?.raw) {
+          newBlocks.push(entry.original.raw);
+        }
+        // If accept or no resolution, the block is removed (not added to newBlocks)
+      } else if (entry.status === "added") {
+        // accept = keep, reject = delete
+        if (resolution === "accept" && entry.edited?.raw) {
+          newBlocks.push(entry.edited.raw);
+        }
+        // If reject or no resolution, the block is not added
+      } else if (entry.status === "modified") {
+        // accept = use new version, reject = use old version
+        if (resolution === "accept" && entry.edited?.raw) {
+          newBlocks.push(entry.edited.raw);
+        } else if (entry.original?.raw) {
+          newBlocks.push(entry.original.raw);
+        }
+      }
+    });
+
+    const newContent: JSONContent = { type: "doc", content: newBlocks as JSONContent[] };
+    setContent(newContent);
+    setBaselineContent(newContent);
+    setDiffMode(false);
+    setResolvedDiffs(new Map());
+  }, [diffResult.entries, resolvedDiffs]);
+
+  // Auto-prompt when all diffs are resolved
+  const hasShownAllResolvedModal = useRef(false);
+  
+  useEffect(() => {
+    // Reset the flag when entering diff mode or when resolutions change
+    if (!diffMode || !allResolved) {
+      hasShownAllResolvedModal.current = false;
+      return;
+    }
+
+    // Only show modal once when all are resolved
+    if (allResolved && !hasShownAllResolvedModal.current) {
+      hasShownAllResolvedModal.current = true;
+      Modal.confirm({
+        title: "确认应用更改",
+        content: `已解决所有 ${changedEntries.length} 处变更，是否应用并保存？`,
+        okText: "确认保存",
+        cancelText: "继续编辑",
+        onOk: () => {
+          applyResolvedDiffs();
+          // Trigger save after a short delay to let state update
+          setTimeout(() => {
+            handleSave();
+          }, 100);
+        },
+      });
+    }
+  }, [allResolved, diffMode, changedEntries.length, applyResolvedDiffs]);
 
   useEffect(() => {
     if (!diffMode) {
       return;
     }
-    const changes = diffEntries
+    const changes = diffResult.entries
       .filter((entry) => entry.status !== "unchanged")
       .map((entry) => ({
         status: entry.status,
-        before: entry.originalContent,
-        after: entry.editedContent,
-        fields: diffFieldChanges(entry.originalContent, entry.editedContent),
+        blockId: entry.blockId,
+        blockType: entry.blockType,
+        fieldChanges: entry.fieldChanges,
       }));
     console.log("document_diff", {
       documentId,
+      stats: diffResult.stats,
       changes,
     });
-  }, [diffEntries, diffMode, documentId]);
+  }, [diffResult, diffMode, documentId]);
 
   return (
     <div className="new-doc-page">
@@ -326,51 +482,162 @@ function NewDocumentPage() {
       <div className="new-doc-body">
         {diffMode ? (
           <div className="doc-diff-view">
-            {diffEntries.length === 0 ? (
-              <div className="doc-viewer-state">No changes detected.</div>
-            ) : (
-              diffEntries.map((entry, index) =>
-                entry.status === "unchanged" ? (
-                  <div key={`${entry.status}-${index}`} className="doc-diff-plain">
-                    {entry.content ? (
-                      <RichTextViewer
-                        content={entry.content}
-                        projectKey={currentProject?.key ?? ""}
-                      />
-                    ) : (
-                      <div className="doc-viewer-state">No content</div>
-                    )}
-                  </div>
+            {/* Diff toolbar with progress and actions */}
+            <div className="doc-diff-toolbar">
+              <div className="doc-diff-progress">
+                {changedEntries.length > 0 ? (
+                  <span>已解决 {resolvedCount}/{changedEntries.length}</span>
                 ) : (
-                  <div
-                    key={`${entry.status}-${index}`}
-                    className={`doc-diff-block doc-diff-${entry.status}`}
-                  >
-                    <div className="doc-diff-label">{renderDiffLabel(entry.status)}</div>
-                    <div className="doc-diff-change">
-                      {entry.originalContent ? (
-                        <div className="doc-diff-change-item">
-                          <div className="doc-diff-change-title">Before</div>
-                          <RichTextViewer
-                            content={entry.originalContent}
-                            projectKey={currentProject?.key ?? ""}
-                          />
-                        </div>
-                      ) : null}
-                      {entry.editedContent ? (
-                        <div className="doc-diff-change-item">
-                          <div className="doc-diff-change-title">After</div>
-                          <RichTextViewer
-                            content={entry.editedContent}
-                            projectKey={currentProject?.key ?? ""}
-                          />
-                        </div>
-                      ) : null}
+                  <span>无变更</span>
+                )}
+              </div>
+              <div className="doc-diff-toolbar-actions">
+                <button
+                  className="btn small primary"
+                  type="button"
+                  onClick={handleAcceptAllRemaining}
+                  disabled={changedEntries.length === 0 || allResolved}
+                >
+                  接受全部变更
+                </button>
+                <button
+                  className="btn small ghost"
+                  type="button"
+                  onClick={handleToggleDiffMode}
+                >
+                  退出 Diff
+                </button>
+              </div>
+            </div>
+
+            {/* Diff content */}
+            <div className="doc-diff-content">
+              {diffResult.entries.length === 0 ? (
+                <div className="doc-viewer-state">No changes detected.</div>
+              ) : (
+                diffResult.entries.map((entry, index) => {
+                  const originalDoc = entry.original ? wrapBlockInDoc(entry.original) : null;
+                  const editedDoc = entry.edited ? wrapBlockInDoc(entry.edited) : null;
+                  const isResolved = resolvedDiffs.has(index);
+                  const resolution = resolvedDiffs.get(index);
+
+                  return entry.status === "unchanged" ? (
+                    <div key={`${entry.status}-${index}`} className="doc-diff-plain">
+                      {originalDoc ? (
+                        <RichTextViewer
+                          content={originalDoc as JSONContent}
+                          projectKey={currentProject?.key ?? ""}
+                        />
+                      ) : (
+                        <div className="doc-viewer-state">No content</div>
+                      )}
                     </div>
-                  </div>
-                ),
-              )
-            )}
+                  ) : (
+                    <div
+                      key={`${entry.status}-${index}`}
+                      className={`doc-diff-block doc-diff-${entry.status}${isResolved ? " resolved" : ""}`}
+                    >
+                      <div className="doc-diff-label">
+                        {getStatusLabel(entry.status)}
+                        {isResolved && (
+                          <span className="doc-diff-resolution-badge">
+                            {resolution === "accept" ? "✓ 已接受" : "✗ 已拒绝"}
+                          </span>
+                        )}
+                      </div>
+                      <div className="doc-diff-change">
+                        {entry.status === "modified" ? (
+                          // Modified: show both versions with individual accept buttons
+                          <>
+                            {originalDoc && (
+                              <div className={`doc-diff-change-item${resolution === "reject" ? " selected" : ""}`}>
+                                <div className="doc-diff-change-header">
+                                  <span className="doc-diff-change-title">原始版本</span>
+                                  {!isResolved && (
+                                    <button
+                                      className="doc-diff-action-btn use"
+                                      type="button"
+                                      onClick={() => handleResolveDiff(index, "reject")}
+                                    >
+                                      采用此版本
+                                    </button>
+                                  )}
+                                </div>
+                                <RichTextViewer
+                                  content={originalDoc as JSONContent}
+                                  projectKey={currentProject?.key ?? ""}
+                                />
+                              </div>
+                            )}
+                            {editedDoc && (
+                              <div className={`doc-diff-change-item${resolution === "accept" ? " selected" : ""}`}>
+                                <div className="doc-diff-change-header">
+                                  <span className="doc-diff-change-title">修改版本</span>
+                                  {!isResolved && (
+                                    <button
+                                      className="doc-diff-action-btn use"
+                                      type="button"
+                                      onClick={() => handleResolveDiff(index, "accept")}
+                                    >
+                                      采用此版本
+                                    </button>
+                                  )}
+                                </div>
+                                <RichTextViewer
+                                  content={editedDoc as JSONContent}
+                                  projectKey={currentProject?.key ?? ""}
+                                />
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          // Added or Removed: show single content with accept/reject buttons
+                          <>
+                            {originalDoc && (
+                              <div className="doc-diff-change-item">
+                                <RichTextViewer
+                                  content={originalDoc as JSONContent}
+                                  projectKey={currentProject?.key ?? ""}
+                                />
+                              </div>
+                            )}
+                            {editedDoc && (
+                              <div className="doc-diff-change-item">
+                                <RichTextViewer
+                                  content={editedDoc as JSONContent}
+                                  projectKey={currentProject?.key ?? ""}
+                                />
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      {/* Hover action buttons for Added/Removed blocks */}
+                      {entry.status !== "modified" && !isResolved && (
+                        <div className="doc-diff-block-actions">
+                          <button
+                            className="doc-diff-action-btn accept"
+                            type="button"
+                            onClick={() => handleResolveDiff(index, "accept")}
+                            title={entry.status === "removed" ? "确认删除" : "确认添加"}
+                          >
+                            {entry.status === "removed" ? "确认删除" : "确认添加"}
+                          </button>
+                          <button
+                            className="doc-diff-action-btn reject"
+                            type="button"
+                            onClick={() => handleResolveDiff(index, "reject")}
+                            title={entry.status === "removed" ? "保留原内容" : "取消添加"}
+                          >
+                            {entry.status === "removed" ? "保留" : "取消"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
         ) : jsonMode ? (
           <div className="new-doc-json">
@@ -465,291 +732,4 @@ const parseContentJson = (raw: string) => {
   } catch {
     return null;
   }
-};
-
-type BlockDiffStatus = "added" | "removed" | "modified" | "unchanged";
-
-type BlockDiffEntry = {
-  status: BlockDiffStatus;
-  content: JSONContent | null;
-  originalContent?: JSONContent | null;
-  editedContent?: JSONContent | null;
-};
-
-const renderDiffLabel = (status: BlockDiffStatus) => {
-  switch (status) {
-    case "added":
-      return "Added";
-    case "removed":
-      return "Removed";
-    case "modified":
-      return "Modified";
-    default:
-      return "Unchanged";
-  }
-};
-
-const buildBlockDiff = (
-  original: JSONContent | null,
-  edited: JSONContent | null,
-): BlockDiffEntry[] => {
-  const originalBlocks = extractBlocks(original);
-  const editedBlocks = extractBlocks(edited);
-
-  // LCS-based diffing logic for block lists
-  const m = originalBlocks.length;
-  const n = editedBlocks.length;
-  const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
-
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const oldId = originalBlocks[i - 1].attrs?.id;
-      const newId = editedBlocks[j - 1].attrs?.id;
-
-      if (oldId && newId && oldId === newId) {
-        dp[i][j] = dp[i - 1][j - 1] + 1;
-      } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-      }
-    }
-  }
-
-
-  let i = m;
-  let j = n;
-
-  // Backtracking to find the diff path (raw unmerged)
-  const rawPath: BlockDiffEntry[] = [];
-  while (i > 0 || j > 0) {
-    const originalBlock = i > 0 ? originalBlocks[i - 1] : null;
-    const editedBlock = j > 0 ? editedBlocks[j - 1] : null;
-    const oldId = originalBlock?.attrs?.id;
-    const newId = editedBlock?.attrs?.id;
-
-    if (i > 0 && j > 0 && oldId && newId && oldId === newId) {
-      if (originalBlock && editedBlock) {
-        if (blocksEqual(originalBlock, editedBlock)) {
-          appendRawDiffBlock(rawPath, "unchanged", originalBlock, originalBlock);
-        } else {
-          appendRawDiffBlock(rawPath, "modified", originalBlock, editedBlock);
-        }
-      }
-      i--;
-      j--;
-    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      if (editedBlock && !isPureEmptyBlock(editedBlock)) {
-        appendRawDiffBlock(rawPath, "added", null, editedBlock);
-      }
-      j--;
-    } else {
-      if (originalBlock && !isPureEmptyBlock(originalBlock)) {
-        appendRawDiffBlock(rawPath, "removed", originalBlock, null);
-      }
-      i--;
-    }
-  }
-
-  // Reverse to get chronological order, then merge
-  const chronOrder = rawPath.reverse();
-  const mergedResults: BlockDiffEntry[] = [];
-
-  for (const entry of chronOrder) {
-    mergeDiffBlock(mergedResults, entry);
-  }
-
-  return mergedResults;
-};
-
-const appendRawDiffBlock = (
-  results: BlockDiffEntry[],
-  status: BlockDiffStatus,
-  originalBlock: JSONContent | null,
-  editedBlock: JSONContent | null,
-) => {
-  const entry: BlockDiffEntry = {
-    status,
-    content: null,
-    originalContent: originalBlock ? wrapDoc(originalBlock) : null,
-    editedContent: editedBlock ? wrapDoc(editedBlock) : null,
-  };
-  if (status === "unchanged" && originalBlock) {
-    entry.content = wrapDoc(originalBlock);
-  }
-  results.push(entry);
-};
-
-const mergeDiffBlock = (
-  results: BlockDiffEntry[],
-  entry: BlockDiffEntry
-) => {
-  const last = results[results.length - 1];
-  if (last && last.status === entry.status) {
-    // Merge logic
-    if (entry.originalContent?.content && last.originalContent?.content) {
-      last.originalContent.content.push(...entry.originalContent.content);
-    }
-    if (entry.editedContent?.content && last.editedContent?.content) {
-      last.editedContent.content.push(...entry.editedContent.content);
-    }
-    if (entry.content?.content && last.content?.content) {
-      last.content.content.push(...entry.content.content);
-    }
-    return;
-  }
-  results.push(entry);
-};
-
-
-const isPureEmptyBlock = (block: JSONContent): boolean => {
-  // A block is considered "pure empty" if it has no content array
-  // AND no meaningful attributes (other than ID)
-  // AND is a basic paragraph (usually default empty state)
-  if (block.type !== "paragraph") {
-    return false;
-  }
-  if (block.content && block.content.length > 0) {
-    return false;
-  }
-  // Check attrs
-  if (block.attrs) {
-    const attrs = { ...block.attrs };
-    delete attrs.id;
-    // If it has other attributes (like textAlign, class), it's not "pure empty"
-    // However, stripNullFields logic might leave empty objects, so we check keys
-    const validKeys = Object.keys(attrs).filter(
-      (k) => attrs[k] !== null && attrs[k] !== undefined,
-    );
-    if (validKeys.length > 0) {
-      return false;
-    }
-  }
-  return true;
-};
-
-
-const extractBlocks = (content: JSONContent | null): JSONContent[] => {
-  if (!content || !Array.isArray(content.content)) {
-    return [];
-  }
-  return content.content.filter((block) => block && typeof block === "object");
-};
-
-const wrapDoc = (block: JSONContent): JSONContent => ({
-  type: "doc",
-  content: [block],
-});
-
-const blocksEqual = (left: JSONContent, right: JSONContent): boolean => {
-  return normalizeBlock(left) === normalizeBlock(right);
-};
-
-const normalizeBlock = (block: JSONContent): string => {
-  const clone = JSON.parse(JSON.stringify(block)) as JSONContent;
-  const cleaned = stripNullFields(clone) as JSONContent;
-  if (cleaned.attrs && typeof cleaned.attrs === "object") {
-    delete cleaned.attrs.id;
-    if (Object.keys(cleaned.attrs).length === 0) {
-      delete cleaned.attrs;
-    }
-  }
-  return stableStringify(cleaned);
-};
-
-const stableStringify = (obj: unknown): string => {
-  if (obj !== null && typeof obj === "object") {
-    if (Array.isArray(obj)) {
-      return "[" + obj.map(stableStringify).join(",") + "]";
-    }
-    return (
-      "{" +
-      Object.keys(obj)
-        .sort()
-        .map((key) => JSON.stringify(key) + ":" + stableStringify((obj as Record<string, unknown>)[key]))
-        .join(",") +
-      "}"
-    );
-  }
-  return JSON.stringify(obj);
-};
-
-const stripNullFields = (value: unknown): unknown => {
-  if (Array.isArray(value)) {
-    return value.map(stripNullFields);
-  }
-  if (value && typeof value === "object") {
-    const entries = Object.entries(value).flatMap(([key, val]) => {
-      if (val === null || val === undefined) {
-        return [];
-      }
-      return [[key, stripNullFields(val)]] as Array<[string, unknown]>;
-    });
-    return Object.fromEntries(entries);
-  }
-  return value;
-};
-
-const diffFieldChanges = (
-  before: JSONContent | null | undefined,
-  after: JSONContent | null | undefined,
-) => {
-  const beforeValue = before ? stripNullFields(before) : null;
-  const afterValue = after ? stripNullFields(after) : null;
-  const differences: Array<{ path: string; before: unknown; after: unknown }> = [];
-  const seen = new Set<string>();
-
-  const walk = (left: unknown, right: unknown, path: string) => {
-    if (left === right) {
-      return;
-    }
-    const leftType = getValueType(left);
-    const rightType = getValueType(right);
-    if (leftType !== rightType) {
-      differences.push({ path, before: left, after: right });
-      return;
-    }
-    if (leftType === "array") {
-      const leftArray = left as unknown[];
-      const rightArray = right as unknown[];
-      const maxLength = Math.max(leftArray.length, rightArray.length);
-      for (let index = 0; index < maxLength; index += 1) {
-        walk(leftArray[index], rightArray[index], `${path}[${index}]`);
-      }
-      return;
-    }
-    if (leftType === "object") {
-      const leftObject = left as Record<string, unknown>;
-      const rightObject = right as Record<string, unknown>;
-      const keys = new Set([...Object.keys(leftObject), ...Object.keys(rightObject)]);
-      keys.forEach((key) => {
-        walk(leftObject[key], rightObject[key], path ? `${path}.${key}` : key);
-      });
-      return;
-    }
-    differences.push({ path, before: left, after: right });
-  };
-
-  walk(beforeValue, afterValue, "");
-  const unique = differences.filter((diff) => {
-    const key = `${diff.path}:${String(diff.before)}:${String(diff.after)}`;
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-
-  return unique;
-};
-
-const getValueType = (value: unknown) => {
-  if (Array.isArray(value)) {
-    return "array";
-  }
-  if (value && typeof value === "object") {
-    return "object";
-  }
-  if (value === null || value === undefined) {
-    return "null";
-  }
-  return "primitive";
 };
