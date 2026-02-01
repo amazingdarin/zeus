@@ -3865,8 +3865,23 @@ body {
   color: var(--ink) !important;
 }
 
+/* TreeSelect search input */
+[data-theme="dark"] .ant-tree-select-dropdown .ant-select-tree-list-holder-inner {
+  background: transparent !important;
+}
+
 [data-theme="dark"] .ant-select-tree-treenode {
   color: var(--ink) !important;
+}
+
+[data-theme="dark"] .ant-select-tree-treenode-selected {
+  background: var(--accent) !important;
+}
+
+[data-theme="dark"] .ant-select-tree-treenode-selected .ant-select-tree-node-content-wrapper,
+[data-theme="dark"] .ant-select-tree-treenode-selected .ant-select-tree-title {
+  color: #fff !important;
+  background: transparent !important;
 }
 
 [data-theme="dark"] .ant-select-tree-node-content-wrapper {
@@ -3878,7 +3893,7 @@ body {
 }
 
 [data-theme="dark"] .ant-select-tree-node-selected .ant-select-tree-node-content-wrapper {
-  background: var(--accent) !important;
+  background: transparent !important;
   color: #fff !important;
 }
 
@@ -3890,11 +3905,43 @@ body {
   color: var(--ink) !important;
 }
 
+[data-theme="dark"] .ant-select-tree-treenode-selected .ant-select-tree-switcher {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
 [data-theme="dark"] .ant-select-selection-item {
   color: var(--ink) !important;
 }
 
 [data-theme="dark"] .ant-select-arrow {
+  color: var(--muted) !important;
+}
+
+[data-theme="dark"] .ant-select-clear {
+  background: var(--input-bg) !important;
+  color: var(--muted) !important;
+}
+
+[data-theme="dark"] .ant-select-clear:hover {
+  color: var(--ink) !important;
+}
+
+/* TreeSelect search input in dropdown */
+[data-theme="dark"] .ant-select-tree-list-holder-inner,
+[data-theme="dark"] .ant-tree-select-dropdown .ant-select-tree-list {
+  background: transparent !important;
+}
+
+/* Fix for showSearch TreeSelect input */
+[data-theme="dark"] .ant-select-show-search .ant-select-selector {
+  background: var(--input-bg) !important;
+}
+
+[data-theme="dark"] .ant-select-show-search .ant-select-selection-search-input {
+  color: var(--ink) !important;
+}
+
+[data-theme="dark"] .ant-select-selection-placeholder {
   color: var(--muted) !important;
 }
 
