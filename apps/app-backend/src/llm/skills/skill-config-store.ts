@@ -111,10 +111,15 @@ export const skillConfigStore = {
         err &&
         typeof err === "object" &&
         "code" in err &&
-        err.code === "ECONNREFUSED"
+        (err.code === "ECONNREFUSED" || err.code === "42P01")
       ) {
-        dbAvailable = false;
-        console.warn("Database not available, returning empty skill config list");
+        // ECONNREFUSED = connection refused, 42P01 = relation does not exist
+        if (err.code === "42P01") {
+          console.warn("skill_config table does not exist, returning empty list (all skills enabled by default)");
+        } else {
+          dbAvailable = false;
+          console.warn("Database not available, returning empty skill config list");
+        }
         return [];
       }
       throw err;
@@ -136,9 +141,11 @@ export const skillConfigStore = {
         err &&
         typeof err === "object" &&
         "code" in err &&
-        err.code === "ECONNREFUSED"
+        (err.code === "ECONNREFUSED" || err.code === "42P01")
       ) {
-        dbAvailable = false;
+        if (err.code !== "42P01") {
+          dbAvailable = false;
+        }
         return [];
       }
       throw err;
@@ -184,10 +191,6 @@ export const skillConfigStore = {
    * Update skill enabled status
    */
   async updateEnabled(skillName: string, enabled: boolean): Promise<SkillConfig> {
-    if (!dbAvailable) {
-      throw new Error("Database not available. Please ensure PostgreSQL is running.");
-    }
-
     const category = getCategoryForSkill(skillName);
     const id = uuidv4();
 
@@ -215,8 +218,11 @@ export const skillConfigStore = {
         err &&
         typeof err === "object" &&
         "code" in err &&
-        err.code === "ECONNREFUSED"
+        (err.code === "ECONNREFUSED" || err.code === "42P01")
       ) {
+        if (err.code === "42P01") {
+          throw new Error("skill_config table does not exist. Please run database migrations.");
+        }
         dbAvailable = false;
         throw new Error("Database not available. Please ensure PostgreSQL is running.");
       }
@@ -284,10 +290,12 @@ export const skillConfigStore = {
         err &&
         typeof err === "object" &&
         "code" in err &&
-        err.code === "ECONNREFUSED"
+        (err.code === "ECONNREFUSED" || err.code === "42P01")
       ) {
-        dbAvailable = false;
-        // Default to enabled when database is unavailable
+        if (err.code !== "42P01") {
+          dbAvailable = false;
+        }
+        // Default to enabled when database is unavailable or table doesn't exist
         return true;
       }
       throw err;
