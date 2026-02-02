@@ -757,3 +757,167 @@ export function getAllSkillCommands(): Array<{
     category: skill.category,
   }));
 }
+
+// ============================================================================
+// Anthropic Skills Execution (LLM-guided mode)
+// ============================================================================
+
+import type { UnifiedSkillDefinition } from "./adapters/types.js";
+import { resourceLoader } from "./resources/resource-loader.js";
+import { scriptExecutor } from "./resources/script-executor.js";
+
+/**
+ * Execute an Anthropic Skill with streaming output
+ *
+ * Anthropic Skills 使用 LLM-guided 执行模式:
+ * 1. 加载技能指令 (Level 2)
+ * 2. 将指令和用户请求发送给 LLM
+ * 3. LLM 根据指令生成响应或调用脚本
+ */
+export async function* executeAnthropicSkillWithStream(
+  projectKey: string,
+  skill: UnifiedSkillDefinition,
+  userRequest: string,
+  context?: string,
+): AsyncGenerator<SkillStreamChunk> {
+  yield { type: "thinking", content: `正在执行技能: ${skill.name}...` };
+
+  try {
+    // 1. 加载技能指令
+    const instructions = await resourceLoader.loadInstructions(skill);
+    const fullInstructions = instructions.join("\n\n---\n\n");
+
+    // 2. 获取 LLM 配置
+    const modelConfig = await configStore.getInternalByType("llm");
+    if (!modelConfig) {
+      yield { type: "error", error: "No LLM model configured" };
+      return;
+    }
+
+    // 3. 构建 prompt
+    const systemPrompt = buildAnthropicSkillSystemPrompt(skill, fullInstructions);
+    const userPrompt = buildAnthropicSkillUserPrompt(userRequest, context);
+
+    // 4. 调用 LLM
+    yield { type: "thinking", content: "正在生成响应..." };
+
+    const stream = await llmGateway.chatStream({
+      model: modelConfig.defaultModel || "gpt-4",
+      provider: modelConfig.providerId,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    });
+
+    let fullContent = "";
+
+    // 使用 textStream 进行迭代
+    for await (const chunk of stream.textStream) {
+      fullContent += chunk;
+      yield { type: "delta", content: chunk };
+    }
+
+    // 5. 检查是否需要执行脚本
+    const scriptCommands = extractScriptCommands(fullContent, skill);
+    if (scriptCommands.length > 0) {
+      yield { type: "thinking", content: "正在执行脚本..." };
+
+      for (const cmd of scriptCommands) {
+        const result = await scriptExecutor.executeCommand(skill, cmd);
+        if (result.success) {
+          yield { type: "delta", content: `\n\n**脚本输出:**\n\`\`\`\n${result.stdout}\n\`\`\`` };
+        } else {
+          yield { type: "delta", content: `\n\n**脚本错误:**\n\`\`\`\n${result.stderr}\n\`\`\`` };
+        }
+      }
+    }
+
+    yield { type: "done", message: `技能 ${skill.name} 执行完成` };
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : "Unknown error";
+    yield { type: "error", error: `技能执行失败: ${errorMessage}` };
+  }
+}
+
+/**
+ * Build system prompt for Anthropic Skill execution
+ */
+function buildAnthropicSkillSystemPrompt(
+  skill: UnifiedSkillDefinition,
+  instructions: string,
+): string {
+  return `你是一个专门执行 "${skill.name}" 技能的 AI 助手。
+
+## 技能描述
+${skill.description}
+
+## 技能指令
+${instructions}
+
+## 执行规则
+1. 严格按照技能指令执行任务
+2. 如果需要执行脚本，使用以下格式:
+   \`\`\`execute
+   <command>
+   \`\`\`
+3. 确保输出清晰、结构化
+4. 如果无法完成任务，说明原因
+
+## 可用资源
+${skill.resources?.map((r) => `- ${r.path} (${r.type})`).join("\n") || "无额外资源"}
+`;
+}
+
+/**
+ * Build user prompt for Anthropic Skill execution
+ */
+function buildAnthropicSkillUserPrompt(request: string, context?: string): string {
+  let prompt = `## 用户请求\n${request}`;
+
+  if (context) {
+    prompt += `\n\n## 上下文\n${context}`;
+  }
+
+  return prompt;
+}
+
+/**
+ * Extract script commands from LLM response
+ */
+function extractScriptCommands(content: string, skill: UnifiedSkillDefinition): string[] {
+  const commands: string[] = [];
+
+  // 匹配 ```execute\n<command>\n``` 格式
+  const executeRegex = /```execute\n([\s\S]*?)```/g;
+  let match;
+
+  while ((match = executeRegex.exec(content)) !== null) {
+    const command = match[1].trim();
+    if (command && isAllowedCommand(command, skill)) {
+      commands.push(command);
+    }
+  }
+
+  return commands;
+}
+
+/**
+ * Check if a command is allowed for the skill
+ */
+function isAllowedCommand(command: string, skill: UnifiedSkillDefinition): boolean {
+  // 只允许执行技能目录中的脚本
+  const scriptResources = skill.resources?.filter((r) => r.type === "script") || [];
+  
+  for (const script of scriptResources) {
+    if (command.includes(script.path) || command.includes(script.name)) {
+      return true;
+    }
+  }
+
+  // 允许简单的 shell 命令 (echo, cat, ls 等)
+  const allowedCommands = ["echo", "cat", "ls", "pwd", "head", "tail", "grep"];
+  const firstWord = command.split(/\s+/)[0];
+  
+  return allowedCommands.includes(firstWord);
+}
