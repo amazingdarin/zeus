@@ -4,7 +4,7 @@
  * API client for managing AI skill configurations.
  */
 
-import { apiFetch } from "./fetch";
+import { apiFetch } from "../config/api";
 
 /**
  * Skill configuration (from database)
