@@ -10,6 +10,7 @@ import { QuestionCircleOutlined } from "@ant-design/icons";
 import {
   listSkills,
   updateSkillEnabled,
+  batchUpdateSkillEnabled,
   type SkillCategoryInfo,
 } from "../api/skills";
 
@@ -17,6 +18,7 @@ function SkillsPanel() {
   const [categories, setCategories] = useState<SkillCategoryInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState<string | null>(null);
+  const [updatingCategory, setUpdatingCategory] = useState<string | null>(null);
 
   const loadSkills = useCallback(async () => {
     try {
@@ -59,6 +61,41 @@ function SkillsPanel() {
     }
   };
 
+  const handleCategoryToggle = async (categoryId: string, enabled: boolean) => {
+    const category = categories.find((c) => c.id === categoryId);
+    if (!category) return;
+
+    const updates = category.skills.map((skill) => ({
+      skillName: skill.name,
+      enabled,
+    }));
+
+    try {
+      setUpdatingCategory(categoryId);
+      await batchUpdateSkillEnabled(updates);
+      // Update local state
+      setCategories((prev) =>
+        prev.map((cat) =>
+          cat.id === categoryId
+            ? {
+                ...cat,
+                skills: cat.skills.map((skill) => ({
+                  ...skill,
+                  config: { ...skill.config, enabled },
+                })),
+              }
+            : cat,
+        ),
+      );
+      message.success(enabled ? `${category.name}类技能已全部启用` : `${category.name}类技能已全部禁用`);
+    } catch (err) {
+      console.error("Failed to update category:", err);
+      message.error("更新分类状态失败");
+    } finally {
+      setUpdatingCategory(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="skills-panel-loading">
@@ -90,6 +127,8 @@ function SkillsPanel() {
             const enabledCount = category.skills.filter(
               (s) => s.config.enabled,
             ).length;
+            const allEnabled = enabledCount === category.skills.length;
+            const someEnabled = enabledCount > 0 && enabledCount < category.skills.length;
             return (
               <Collapse.Panel
                 key={category.id}
@@ -100,6 +139,18 @@ function SkillsPanel() {
                     <span className="skills-category-count">
                       {enabledCount}/{category.skills.length} 已启用
                     </span>
+                    <div
+                      className="skills-category-switch"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Switch
+                        checked={allEnabled}
+                        loading={updatingCategory === category.id}
+                        onChange={(checked) => handleCategoryToggle(category.id, checked)}
+                        size="small"
+                        className={someEnabled ? "switch-indeterminate" : ""}
+                      />
+                    </div>
                   </div>
                 }
               >

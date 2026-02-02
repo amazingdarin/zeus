@@ -5945,7 +5945,16 @@ body {
   margin-left: auto;
   font-size: 12px;
   color: var(--text-tertiary);
-  padding-right: 8px;
+}
+
+.skills-category-switch {
+  margin-left: 12px;
+  flex-shrink: 0;
+}
+
+/* Indeterminate switch style (some enabled) */
+.skills-category-switch .switch-indeterminate.ant-switch {
+  background: var(--accent-light, #91caff);
 }
 
 /* Skills list */
