@@ -19,6 +19,7 @@ export type SkillDefinition = {
   category: SkillCategory;
   command: string; // e.g., "/doc-create"
   description: string;
+  required: boolean; // Whether this skill is required (cannot be disabled)
   parameters: {
     type: "object";
     properties: Record<
@@ -109,6 +110,7 @@ export type SkillConfig = {
  */
 export type SkillInfo = SkillDefinition & {
   config: SkillConfig;
+  isConfigurable: boolean; // Whether the skill can be enabled/disabled (!required)
 };
 
 /**

@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Switch, Spin, message, Collapse, Tooltip } from "antd";
-import { QuestionCircleOutlined } from "@ant-design/icons";
+import { QuestionCircleOutlined, LockOutlined } from "@ant-design/icons";
 import {
   listSkills,
   updateSkillEnabled,
@@ -65,7 +65,14 @@ function SkillsPanel() {
     const category = categories.find((c) => c.id === categoryId);
     if (!category) return;
 
-    const updates = category.skills.map((skill) => ({
+    // Only update configurable skills (not required ones)
+    const configurableSkills = category.skills.filter((s) => s.isConfigurable);
+    if (configurableSkills.length === 0) {
+      message.info("该分类下没有可配置的技能");
+      return;
+    }
+
+    const updates = configurableSkills.map((skill) => ({
       skillName: skill.name,
       enabled,
     }));
@@ -73,21 +80,22 @@ function SkillsPanel() {
     try {
       setUpdatingCategory(categoryId);
       await batchUpdateSkillEnabled(updates);
-      // Update local state
+      // Update local state (only configurable skills)
       setCategories((prev) =>
         prev.map((cat) =>
           cat.id === categoryId
             ? {
                 ...cat,
-                skills: cat.skills.map((skill) => ({
-                  ...skill,
-                  config: { ...skill.config, enabled },
-                })),
+                skills: cat.skills.map((skill) =>
+                  skill.isConfigurable
+                    ? { ...skill, config: { ...skill.config, enabled } }
+                    : skill,
+                ),
               }
             : cat,
         ),
       );
-      message.success(enabled ? `${category.name}类技能已全部启用` : `${category.name}类技能已全部禁用`);
+      message.success(enabled ? `${category.name}类可配置技能已全部启用` : `${category.name}类可配置技能已全部禁用`);
     } catch (err) {
       console.error("Failed to update category:", err);
       message.error("更新分类状态失败");
@@ -124,11 +132,12 @@ function SkillsPanel() {
           className="skills-collapse"
         >
           {categories.map((category) => {
-            const enabledCount = category.skills.filter(
-              (s) => s.config.enabled,
-            ).length;
-            const allEnabled = enabledCount === category.skills.length;
-            const someEnabled = enabledCount > 0 && enabledCount < category.skills.length;
+            const configurableSkills = category.skills.filter((s) => s.isConfigurable);
+            const requiredSkills = category.skills.filter((s) => !s.isConfigurable);
+            const enabledConfigurable = configurableSkills.filter((s) => s.config.enabled).length;
+            const allConfigurableEnabled = configurableSkills.length === 0 || enabledConfigurable === configurableSkills.length;
+            const someConfigurableEnabled = enabledConfigurable > 0 && enabledConfigurable < configurableSkills.length;
+            const hasConfigurable = configurableSkills.length > 0;
             return (
               <Collapse.Panel
                 key={category.id}
@@ -137,38 +146,55 @@ function SkillsPanel() {
                     <span className="skills-category-icon">{category.icon}</span>
                     <span className="skills-category-name">{category.name}</span>
                     <span className="skills-category-count">
-                      {enabledCount}/{category.skills.length} 已启用
+                      {requiredSkills.length > 0 && (
+                        <span className="skills-required-badge">
+                          {requiredSkills.length} 必需
+                        </span>
+                      )}
+                      {hasConfigurable && (
+                        <span>{enabledConfigurable}/{configurableSkills.length} 可选已启用</span>
+                      )}
                     </span>
-                    <div
-                      className="skills-category-switch"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Switch
-                        checked={allEnabled}
-                        loading={updatingCategory === category.id}
-                        onChange={(checked) => handleCategoryToggle(category.id, checked)}
-                        size="small"
-                        className={someEnabled ? "switch-indeterminate" : ""}
-                      />
-                    </div>
+                    {hasConfigurable && (
+                      <div
+                        className="skills-category-switch"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Switch
+                          checked={allConfigurableEnabled}
+                          loading={updatingCategory === category.id}
+                          onChange={(checked) => handleCategoryToggle(category.id, checked)}
+                          size="small"
+                          className={someConfigurableEnabled ? "switch-indeterminate" : ""}
+                        />
+                      </div>
+                    )}
                   </div>
                 }
               >
                 <div className="skills-list">
                   {category.skills.map((skill) => (
-                    <div key={skill.name} className="skill-item">
+                    <div key={skill.name} className={`skill-item ${!skill.isConfigurable ? "skill-item-required" : ""}`}>
                       <div className="skill-info">
                         <span className="skill-command">{skill.command}</span>
                         <Tooltip title={skill.description}>
                           <QuestionCircleOutlined className="skill-help-icon" />
                         </Tooltip>
+                        {!skill.isConfigurable && (
+                          <Tooltip title="系统必需技能，无法禁用">
+                            <LockOutlined className="skill-required-icon" />
+                          </Tooltip>
+                        )}
                       </div>
-                      <Switch
-                        checked={skill.config.enabled}
-                        loading={updating === skill.name}
-                        onChange={(checked) => handleToggle(skill.name, checked)}
-                        size="small"
-                      />
+                      <Tooltip title={!skill.isConfigurable ? "系统必需技能，无法禁用" : undefined}>
+                        <Switch
+                          checked={skill.config.enabled}
+                          loading={updating === skill.name}
+                          onChange={(checked) => handleToggle(skill.name, checked)}
+                          size="small"
+                          disabled={!skill.isConfigurable}
+                        />
+                      </Tooltip>
                     </div>
                   ))}
                 </div>

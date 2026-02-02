@@ -24,6 +24,9 @@ type NavPathItem = {
   title: string;
 };
 
+/** Number of items per page */
+const PAGE_SIZE = 10;
+
 type MentionDropdownProps = {
   projectKey: string;
   query: string;
@@ -43,6 +46,7 @@ function MentionDropdown({
 }: MentionDropdownProps) {
   const [suggestions, setSuggestions] = useState<DocumentSuggestion[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [currentPage, setCurrentPage] = useState(0);
   const [loading, setLoading] = useState(false);
   // Navigation path: empty = search all, ["root"] = root level, [parentId] = children of parent
   const [navPath, setNavPath] = useState<NavPathItem[]>([]);
@@ -61,6 +65,7 @@ function MentionDropdown({
     if (!visible) {
       setNavPath([]);
       setSuggestions([]);
+      setCurrentPage(0);
     }
   }, [visible]);
 
@@ -80,9 +85,11 @@ function MentionDropdown({
     debounceRef.current = setTimeout(async () => {
       setLoading(true);
       try {
-        const results = await suggestDocuments(projectKey, query, 15, currentParentId);
+        // Fetch more items to support pagination (up to 50)
+        const results = await suggestDocuments(projectKey, query, 50, currentParentId);
         setSuggestions(results);
         setSelectedIndex(0);
+        setCurrentPage(0);
       } catch {
         setSuggestions([]);
       } finally {
@@ -98,9 +105,16 @@ function MentionDropdown({
   }, [projectKey, query, visible, currentParentId]);
 
   // Build display items: for documents with children, show two options
+  // Sort: documents with children first, then documents without children
   const displayItems = useMemo<DisplayItem[]>(() => {
+    // Sort suggestions: hasChildren = true first
+    const sortedSuggestions = [...suggestions].sort((a, b) => {
+      if (a.hasChildren === b.hasChildren) return 0;
+      return a.hasChildren ? -1 : 1;
+    });
+
     const items: DisplayItem[] = [];
-    for (const item of suggestions) {
+    for (const item of sortedSuggestions) {
       if (item.hasChildren) {
         // Show two options for folders
         items.push({
@@ -122,15 +136,22 @@ function MentionDropdown({
     return items;
   }, [suggestions]);
 
-  // Reset selected index when suggestions change
+  // Calculate pagination
+  const totalPages = Math.ceil(displayItems.length / PAGE_SIZE);
+  const startIndex = currentPage * PAGE_SIZE;
+  const endIndex = Math.min(startIndex + PAGE_SIZE, displayItems.length);
+  const visibleItems = displayItems.slice(startIndex, endIndex);
+
+  // Reset selected index when suggestions or page change
   useEffect(() => {
     setSelectedIndex(0);
-  }, [suggestions]);
+  }, [suggestions, currentPage]);
 
   // Navigate into a document's children
   const navigateInto = useCallback((docId: string, docTitle: string) => {
     setNavPath((prev) => [...prev, { id: docId, title: docTitle }]);
     setSelectedIndex(0);
+    setCurrentPage(0);
   }, []);
 
   // Navigate back one level
@@ -140,6 +161,7 @@ function MentionDropdown({
       return prev.slice(0, -1);
     });
     setSelectedIndex(0);
+    setCurrentPage(0);
   }, []);
 
   // Navigate to root level (show only root documents)
@@ -151,7 +173,22 @@ function MentionDropdown({
       setNavPath([]);
     }
     setSelectedIndex(0);
+    setCurrentPage(0);
   }, [navPath.length]);
+
+  // Page navigation
+  const goToNextPage = useCallback(() => {
+    setCurrentPage((prev) => {
+      const next = prev + 1;
+      return next < totalPages ? next : prev;
+    });
+  }, [totalPages]);
+
+  const goToPrevPage = useCallback(() => {
+    setCurrentPage((prev) => {
+      return prev > 0 ? prev - 1 : prev;
+    });
+  }, []);
 
   // Handle keyboard navigation
   const handleKeyDown = useCallback(
@@ -161,22 +198,48 @@ function MentionDropdown({
       switch (e.key) {
         case "ArrowDown":
           e.preventDefault();
-          setSelectedIndex((prev) =>
-            prev < displayItems.length - 1 ? prev + 1 : 0
-          );
+          setSelectedIndex((prev) => {
+            const next = prev + 1;
+            if (next >= visibleItems.length) {
+              // At bottom of current page, try to go to next page
+              if (currentPage < totalPages - 1) {
+                setCurrentPage(currentPage + 1);
+                return 0;
+              }
+              return 0; // Wrap to top
+            }
+            return next;
+          });
           break;
         case "ArrowUp":
           e.preventDefault();
-          setSelectedIndex((prev) =>
-            prev > 0 ? prev - 1 : displayItems.length - 1
-          );
+          setSelectedIndex((prev) => {
+            if (prev <= 0) {
+              // At top of current page, try to go to previous page
+              if (currentPage > 0) {
+                setCurrentPage(currentPage - 1);
+                return PAGE_SIZE - 1;
+              }
+              return visibleItems.length - 1; // Wrap to bottom
+            }
+            return prev - 1;
+          });
+          break;
+        case "PageDown":
+          e.preventDefault();
+          goToNextPage();
+          break;
+        case "PageUp":
+          e.preventDefault();
+          goToPrevPage();
           break;
         case "ArrowRight":
           e.preventDefault();
-          // Navigate into the selected document if it has children
-          if (displayItems[selectedIndex]) {
-            const item = displayItems[selectedIndex];
-            if (item.hasChildren) {
+          // Navigate into the selected document only if "includeChildren" option is selected
+          if (visibleItems[selectedIndex]) {
+            const item = visibleItems[selectedIndex];
+            // Only allow navigation when selecting "含子文档" option (includeChildren = true)
+            if (item.hasChildren && item.includeChildren) {
               navigateInto(item.id, item.title);
             }
           }
@@ -189,8 +252,8 @@ function MentionDropdown({
         case "Enter":
         case "Tab":
           e.preventDefault();
-          if (displayItems[selectedIndex]) {
-            const item = displayItems[selectedIndex];
+          if (visibleItems[selectedIndex]) {
+            const item = visibleItems[selectedIndex];
             onSelect({
               docId: item.id,
               title: item.title,
@@ -205,7 +268,7 @@ function MentionDropdown({
           break;
       }
     },
-    [visible, displayItems, selectedIndex, onSelect, onClose, navigateInto, navigateBack]
+    [visible, visibleItems, selectedIndex, currentPage, totalPages, onSelect, onClose, navigateInto, navigateBack, goToNextPage, goToPrevPage]
   );
 
   // Add keyboard event listener
@@ -249,15 +312,15 @@ function MentionDropdown({
     });
   };
 
-  // Double-click to navigate into
+  // Double-click to navigate into (only for "含子文档" option)
   const handleItemDoubleClick = (item: DisplayItem) => {
-    if (item.hasChildren) {
+    if (item.hasChildren && item.includeChildren) {
       navigateInto(item.id, item.title);
     }
   };
 
   // Adjust selected index for keyboard navigation
-  const safeSelectedIndex = Math.min(selectedIndex, displayItems.length - 1);
+  const safeSelectedIndex = Math.min(selectedIndex, visibleItems.length - 1);
 
   return (
     <div
@@ -286,6 +349,7 @@ function MentionDropdown({
                   // Navigate to this level
                   setNavPath(navPath.slice(0, index + 1));
                   setSelectedIndex(0);
+                  setCurrentPage(0);
                 }}
               >
                 {item.id === "root" ? "根目录" : item.title}
@@ -310,9 +374,9 @@ function MentionDropdown({
           {query ? "无匹配文档" : navPath.length > 0 ? "无子文档" : "输入文档名称搜索"}
         </div>
       )}
-      {!loading && displayItems.length > 0 && (
+      {!loading && visibleItems.length > 0 && (
         <ul className="mention-dropdown-list">
-          {displayItems.map((item, index) => (
+          {visibleItems.map((item, index) => (
             <li
               key={`${item.id}-${item.includeChildren ? "dir" : "doc"}`}
               className={`mention-dropdown-item ${
@@ -341,7 +405,7 @@ function MentionDropdown({
                   {item.includeChildren ? "含子文档" : "仅文档"}
                 </span>
               )}
-              {item.hasChildren && !item.includeChildren && (
+              {item.hasChildren && item.includeChildren && (
                 <span className="mention-dropdown-nav-hint" title="按 → 进入子文档">
                   →
                 </span>
@@ -350,11 +414,38 @@ function MentionDropdown({
           ))}
         </ul>
       )}
+      
+      {/* Pagination info */}
+      {totalPages > 1 && (
+        <div className="mention-dropdown-pagination">
+          <button
+            className="mention-dropdown-page-btn"
+            onClick={goToPrevPage}
+            disabled={currentPage === 0}
+            title="上一页 (PageUp)"
+          >
+            ‹
+          </button>
+          <span className="mention-dropdown-page-info">
+            {currentPage + 1} / {totalPages}
+          </span>
+          <button
+            className="mention-dropdown-page-btn"
+            onClick={goToNextPage}
+            disabled={currentPage >= totalPages - 1}
+            title="下一页 (PageDown)"
+          >
+            ›
+          </button>
+        </div>
+      )}
+      
       <div className="mention-dropdown-hint">
         <span>↑↓ 选择</span>
+        {totalPages > 1 && <span>PgUp/PgDn 翻页</span>}
         {navPath.length > 0 && <span>← 返回</span>}
         <span>→ 进入</span>
-        <span>Tab/Enter 确认</span>
+        <span>Enter 确认</span>
         <span>Esc 取消</span>
       </div>
     </div>

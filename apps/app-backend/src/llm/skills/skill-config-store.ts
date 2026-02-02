@@ -159,10 +159,18 @@ export const skillConfigStore = {
     const configs = await this.list();
     const configMap = new Map(configs.map((c) => [c.skillName, c]));
 
-    return allSkillDefinitions.map((def) => ({
-      ...def,
-      config: configMap.get(def.name) || createDefaultConfig(def),
-    }));
+    return allSkillDefinitions.map((def) => {
+      const config = configMap.get(def.name) || createDefaultConfig(def);
+      // Required skills are always enabled
+      if (def.required) {
+        config.enabled = true;
+      }
+      return {
+        ...def,
+        config,
+        isConfigurable: !def.required,
+      };
+    });
   },
 
   /**
@@ -191,6 +199,12 @@ export const skillConfigStore = {
    * Update skill enabled status
    */
   async updateEnabled(skillName: string, enabled: boolean): Promise<SkillConfig> {
+    // Check if skill is required (cannot be disabled)
+    const def = allSkillDefinitions.find((d) => d.name === skillName);
+    if (def?.required) {
+      throw new Error(`Cannot modify required skill: ${skillName}`);
+    }
+
     const category = getCategoryForSkill(skillName);
     const id = uuidv4();
 
@@ -232,11 +246,17 @@ export const skillConfigStore = {
 
   /**
    * Batch update enabled status
+   * Note: Required skills are silently skipped (not updated)
    */
   async batchUpdateEnabled(
     updates: { skillName: string; enabled: boolean }[],
   ): Promise<void> {
     for (const update of updates) {
+      // Skip required skills
+      const def = allSkillDefinitions.find((d) => d.name === update.skillName);
+      if (def?.required) {
+        continue;
+      }
       await this.updateEnabled(update.skillName, update.enabled);
     }
   },
@@ -254,6 +274,10 @@ export const skillConfigStore = {
     }
 
     return allSkillDefinitions.filter((def) => {
+      // Required skills are always enabled
+      if (def.required) {
+        return true;
+      }
       const config = configMap.get(def.name);
       // If no config exists, default to enabled
       return config ? config.enabled : true;
@@ -272,6 +296,12 @@ export const skillConfigStore = {
    * Check if a skill is enabled
    */
   async isEnabled(skillName: string): Promise<boolean> {
+    // Required skills are always enabled
+    const def = allSkillDefinitions.find((d) => d.name === skillName);
+    if (def?.required) {
+      return true;
+    }
+
     try {
       const result = await query<SkillConfigRow>(
         `SELECT enabled FROM skill_config WHERE skill_name = $1`,

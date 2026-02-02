@@ -27,6 +27,7 @@ export type SkillDefinition = {
   category: string;
   command: string;
   description: string;
+  required: boolean; // Whether this skill is required (cannot be disabled)
   parameters: {
     type: string;
     properties: Record<string, unknown>;
@@ -39,6 +40,7 @@ export type SkillDefinition = {
  */
 export type SkillInfo = SkillDefinition & {
   config: SkillConfig;
+  isConfigurable: boolean; // Whether the skill can be enabled/disabled (!required)
 };
 
 /**

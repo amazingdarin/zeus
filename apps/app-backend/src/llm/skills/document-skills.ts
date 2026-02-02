@@ -14,6 +14,7 @@ export const docReadSkill: SkillDefinition = {
   category: "doc",
   command: "/doc-read",
   description: "读取指定文档的内容。需要通过 @ 指定文档。",
+  required: false,
   parameters: {
     type: "object",
     properties: {
@@ -34,6 +35,7 @@ export const docCreateSkill: SkillDefinition = {
   category: "doc",
   command: "/doc-create",
   description: "创建新文档。可以指定标题和内容描述，AI 将生成文档内容。",
+  required: false,
   parameters: {
     type: "object",
     properties: {
@@ -63,6 +65,7 @@ export const docEditSkill: SkillDefinition = {
   category: "doc",
   command: "/doc-edit",
   description: "编辑已有文档。需要通过 @ 指定文档，并描述修改要求。",
+  required: false,
   parameters: {
     type: "object",
     properties: {
@@ -87,6 +90,7 @@ export const docOptimizeFormatSkill: SkillDefinition = {
   category: "doc",
   command: "/doc-optimize-format",
   description: "优化文档格式：规范标题层级、列表格式、代码块标记。需要通过 @ 指定文档。",
+  required: false,
   parameters: {
     type: "object",
     properties: {
@@ -107,6 +111,7 @@ export const docOptimizeContentSkill: SkillDefinition = {
   category: "doc",
   command: "/doc-optimize-content",
   description: "优化文档内容：改善语言表达、增强逻辑连贯性。需要通过 @ 指定文档。",
+  required: false,
   parameters: {
     type: "object",
     properties: {
