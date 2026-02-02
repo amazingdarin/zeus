@@ -163,41 +163,60 @@ function NewDocumentPage() {
         setParentID(String(metaValue.parent_id ?? metaValue.parent ?? "").trim());
 
         const bodyValue = detail?.body ?? detail?.content ?? {};
-        const contentValue =
-          bodyValue &&
-            typeof bodyValue === "object" &&
-            "type" in bodyValue &&
-            "content" in bodyValue
-            ? (bodyValue as { content?: unknown }).content
-            : bodyValue;
-        const contentMetaValue =
-          contentValue &&
-            typeof contentValue === "object" &&
-            "meta" in contentValue &&
-            typeof (contentValue as { meta?: unknown }).meta === "object"
-            ? ((contentValue as { meta?: EditorMeta }).meta ?? null)
-            : null;
-        setContentMeta(contentMetaValue as ContentMetaInput);
-
-        const nestedContent =
-          contentValue &&
-            typeof contentValue === "object" &&
-            "content" in contentValue
-            ? (contentValue as { content?: unknown }).content
-            : null;
-        if (
-          nestedContent &&
-          typeof nestedContent === "object" &&
-          !Array.isArray(nestedContent) &&
-          "type" in (nestedContent as Record<string, unknown>)
-        ) {
-          contentToReturn = nestedContent as JSONContent;
-        } else if (
-          contentValue &&
-          typeof contentValue === "object" &&
-          "type" in contentValue
-        ) {
-          contentToReturn = contentValue as JSONContent;
+        
+        // Extract JSONContent from various body formats
+        if (bodyValue && typeof bodyValue === "object" && "type" in bodyValue) {
+          const bodyType = (bodyValue as { type?: string }).type;
+          
+          // Case 1: body is directly { type: "doc", content: [...] }
+          if (bodyType === "doc" && "content" in bodyValue && Array.isArray((bodyValue as { content?: unknown }).content)) {
+            contentToReturn = bodyValue as JSONContent;
+            // Check for meta inside the wrapped format
+            if ("meta" in bodyValue && typeof (bodyValue as { meta?: unknown }).meta === "object") {
+              setContentMeta((bodyValue as { meta?: EditorMeta }).meta as ContentMetaInput);
+            }
+          }
+          // Case 2: body is { type: "tiptap", content: { meta: ..., content: { type: "doc", ... } } }
+          else if (bodyType === "tiptap" && "content" in bodyValue) {
+            const bodyContent = (bodyValue as { content?: unknown }).content;
+            if (bodyContent && typeof bodyContent === "object") {
+              // Check for nested { meta, content } format from exportContentJson
+              if ("meta" in bodyContent && typeof (bodyContent as { meta?: unknown }).meta === "object") {
+                setContentMeta((bodyContent as { meta?: EditorMeta }).meta as ContentMetaInput);
+              }
+              if ("content" in bodyContent) {
+                const nestedContent = (bodyContent as { content?: unknown }).content;
+                if (nestedContent && typeof nestedContent === "object" && "type" in nestedContent) {
+                  contentToReturn = nestedContent as JSONContent;
+                }
+              }
+              // Or bodyContent itself might be JSONContent
+              else if ("type" in bodyContent && (bodyContent as { type?: string }).type === "doc") {
+                contentToReturn = bodyContent as JSONContent;
+              }
+            }
+          }
+          // Case 3: body has content field that might contain JSONContent
+          else if ("content" in bodyValue) {
+            const contentValue = (bodyValue as { content?: unknown }).content;
+            if (contentValue && typeof contentValue === "object") {
+              // Check for meta in contentValue
+              if ("meta" in contentValue && typeof (contentValue as { meta?: unknown }).meta === "object") {
+                setContentMeta((contentValue as { meta?: EditorMeta }).meta as ContentMetaInput);
+              }
+              // Try to extract nested content
+              if ("content" in contentValue) {
+                const nestedContent = (contentValue as { content?: unknown }).content;
+                if (nestedContent && typeof nestedContent === "object" && !Array.isArray(nestedContent) && "type" in nestedContent) {
+                  contentToReturn = nestedContent as JSONContent;
+                }
+              }
+              // Or contentValue itself might be JSONContent
+              else if ("type" in contentValue) {
+                contentToReturn = contentValue as JSONContent;
+              }
+            }
+          }
         }
       } else {
         setTitle(String(detail?.title ?? ""));

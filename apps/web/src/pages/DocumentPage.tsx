@@ -2360,11 +2360,40 @@ function mapDocumentDetail(data: DocumentDetail | undefined | null, fallbackId: 
   const body = data?.body;
   let content: JSONContent | null = null;
   
-  // body is expected to be { type: "doc", content: [...] }
-  if (body && typeof body === "object" && "type" in body && "content" in body) {
-    content = body as JSONContent;
-  } else if (data?.content && typeof data.content === "object") {
-    // Fallback: try data.content directly
+  // Try to extract JSONContent from various body formats
+  if (body && typeof body === "object") {
+    // Case 1: body is directly { type: "doc", content: [...] }
+    if ("type" in body && (body as { type?: string }).type === "doc" && "content" in body) {
+      content = body as JSONContent;
+    }
+    // Case 2: body is { type: "tiptap", content: { meta: ..., content: { type: "doc", ... } } }
+    else if ("type" in body && (body as { type?: string }).type === "tiptap" && "content" in body) {
+      const bodyContent = (body as { content?: unknown }).content;
+      if (bodyContent && typeof bodyContent === "object") {
+        // Check for nested { meta, content } format from exportContentJson
+        if ("content" in bodyContent) {
+          const nestedContent = (bodyContent as { content?: unknown }).content;
+          if (nestedContent && typeof nestedContent === "object" && "type" in nestedContent) {
+            content = nestedContent as JSONContent;
+          }
+        }
+        // Or bodyContent itself might be JSONContent
+        else if ("type" in bodyContent && (bodyContent as { type?: string }).type === "doc") {
+          content = bodyContent as JSONContent;
+        }
+      }
+    }
+    // Case 3: body has content field that is JSONContent
+    else if ("content" in body) {
+      const bodyContent = (body as { content?: unknown }).content;
+      if (bodyContent && typeof bodyContent === "object" && "type" in bodyContent) {
+        content = bodyContent as JSONContent;
+      }
+    }
+  }
+  
+  // Fallback: try data.content directly
+  if (!content && data?.content && typeof data.content === "object") {
     if ("type" in data.content && "content" in data.content) {
       content = data.content as JSONContent;
     }
