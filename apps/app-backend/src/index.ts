@@ -3,6 +3,7 @@ import cors from "cors";
 
 import { initPool } from "./db/postgres.js";
 import { buildRouter } from "./router.js";
+import { skillRegistry } from "./llm/skills/index.js";
 
 const app = express();
 const port = Number(process.env.APP_BACKEND_PORT ?? 4870);
@@ -42,6 +43,15 @@ const start = async () => {
     console.log("[app-backend] PostgreSQL pool initialized");
   } catch (err) {
     console.warn("[app-backend] PostgreSQL not available, knowledge indexing disabled:", err);
+  }
+
+  // Initialize skill registry (discover Anthropic Skills)
+  try {
+    await skillRegistry.initialize();
+    const counts = skillRegistry.getCounts();
+    console.log(`[app-backend] Skill registry initialized: ${counts.native} native, ${counts.anthropic} Anthropic skills`);
+  } catch (err) {
+    console.warn("[app-backend] Skill registry initialization failed:", err);
   }
 
   app.listen(port, () => {

@@ -5,6 +5,7 @@ import { documentStore } from "../storage/document-store.js";
 import type { SearchResult } from "../storage/types.js";
 import {
   executeSkillWithStream,
+  executeAnthropicSkillWithStream,
   analyzeTrigger,
   extractDocIdsFromArgs,
   type SkillStreamChunk,
@@ -173,6 +174,7 @@ export function getRun(runId: string): ChatRun | null {
  *
  * Uses Hybrid Trigger to determine the appropriate mode:
  * - command: Explicit slash command (strong determinism)
+ * - anthropic: Anthropic Skill keyword match (medium determinism)
  * - natural: Natural language with LLM tool selection
  * - chat: Regular conversation (RAG-based)
  */
@@ -197,6 +199,10 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
   switch (trigger.mode) {
     case "command":
       yield* handleCommandMode(run, trigger);
+      return;
+
+    case "anthropic":
+      yield* handleAnthropicMode(run, trigger);
       return;
 
     case "natural":
@@ -240,6 +246,62 @@ async function* handleCommandMode(
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : "Skill execution failed";
     console.error("[chat] Command mode error:", errorMessage);
+
+    run.status = "failed";
+    run.updatedAt = Date.now();
+
+    yield { type: "error", error: errorMessage };
+  }
+}
+
+/**
+ * Handle Anthropic mode - execute Anthropic Skill (medium determinism)
+ */
+async function* handleAnthropicMode(
+  run: ChatRun,
+  trigger: TriggerResult,
+): AsyncGenerator<ChatStreamChunk> {
+  if (!trigger.anthropicSkill || !trigger.userRequest) {
+    yield { type: "error", error: "No Anthropic skill matched" };
+    return;
+  }
+
+  const skill = trigger.anthropicSkill;
+  console.log("[chat] Anthropic mode, executing skill:", skill.name);
+
+  try {
+    // Build context from referenced documents
+    let context: string | undefined;
+    if (run.docIds && run.docIds.length > 0) {
+      try {
+        const docs = await Promise.all(
+          run.docIds.slice(0, 3).map(async (docId) => {
+            const doc = await documentStore.get(run.projectKey, docId);
+            return `## ${doc.meta.title}\n${JSON.stringify(doc.body)}`;
+          }),
+        );
+        context = docs.join("\n\n---\n\n");
+      } catch {
+        // Ignore errors loading context
+      }
+    }
+
+    // Execute Anthropic Skill
+    for await (const chunk of executeAnthropicSkillWithStream(
+      run.projectKey,
+      skill,
+      trigger.userRequest,
+      context,
+    )) {
+      const mappedChunk = mapSkillChunkToChatChunk(chunk);
+      yield mappedChunk;
+    }
+
+    run.status = "completed";
+    run.updatedAt = Date.now();
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : "Anthropic skill execution failed";
+    console.error("[chat] Anthropic mode error:", errorMessage);
 
     run.status = "failed";
     run.updatedAt = Date.now();

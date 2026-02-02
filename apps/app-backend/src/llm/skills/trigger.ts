@@ -3,6 +3,7 @@
  *
  * Analyzes user input and determines the appropriate trigger mode:
  * - "command": Explicit slash command (strong determinism)
+ * - "anthropic": Matched Anthropic Skill by keywords (medium determinism)
  * - "natural": Natural language that may trigger a tool (LLM decides)
  * - "chat": Regular conversation (RAG-based response)
  */
@@ -10,11 +11,12 @@
 import { skillRegistry, type OpenAITool } from "./registry.js";
 import { skillConfigStore } from "./skill-config-store.js";
 import type { SkillIntent } from "./types.js";
+import type { UnifiedSkillDefinition } from "./adapters/types.js";
 
 /**
  * Trigger modes
  */
-export type TriggerMode = "command" | "natural" | "chat";
+export type TriggerMode = "command" | "anthropic" | "natural" | "chat";
 
 /**
  * Result of trigger analysis
@@ -24,6 +26,10 @@ export type TriggerResult = {
   mode: TriggerMode;
   /** Skill intent (only for command mode) */
   intent?: SkillIntent;
+  /** Matched Anthropic Skill (only for anthropic mode) */
+  anthropicSkill?: UnifiedSkillDefinition;
+  /** User request for Anthropic Skill */
+  userRequest?: string;
   /** OpenAI tools for LLM (only for natural mode) */
   tools?: OpenAITool[];
   /** System prompt for tool-aware LLM (only for natural mode) */
@@ -68,9 +74,20 @@ export async function analyzeTrigger(
     }
   }
 
-  // Path 2: Natural language mode - prepare tools for LLM
+  // Path 2: Check for Anthropic Skill keyword match (medium determinism)
+  const anthropicSkill = matchAnthropicSkillByKeywords(trimmed);
+  if (anthropicSkill) {
+    console.log(`[Trigger] Anthropic mode: matched skill "${anthropicSkill.name}"`);
+    return {
+      mode: "anthropic",
+      anthropicSkill,
+      userRequest: trimmed,
+    };
+  }
+
+  // Path 3: Natural language mode - prepare tools for LLM
   const enabledSkillNames = await skillConfigStore.getEnabledSkillNames();
-  const tools = skillRegistry.toOpenAITools(enabledSkillNames);
+  const tools = skillRegistry.toOpenAITools(enabledSkillNames, true); // Include Anthropic Skills
 
   if (tools.length > 0) {
     console.log(`[Trigger] Natural mode with ${tools.length} tools available`);
@@ -81,9 +98,40 @@ export async function analyzeTrigger(
     };
   }
 
-  // Path 3: Chat mode - no tools available
+  // Path 4: Chat mode - no tools available
   console.log("[Trigger] Chat mode (no tools available)");
   return { mode: "chat" };
+}
+
+/**
+ * Match Anthropic Skill by keywords in user message
+ *
+ * Returns the best matching skill if at least MIN_KEYWORD_MATCH keywords match.
+ */
+function matchAnthropicSkillByKeywords(
+  message: string,
+): UnifiedSkillDefinition | undefined {
+  const MIN_KEYWORD_MATCH = 2;
+  const lowerMessage = message.toLowerCase();
+
+  let bestMatch: UnifiedSkillDefinition | undefined;
+  let bestScore = 0;
+
+  for (const skill of skillRegistry.getAllAnthropic()) {
+    if (!skill.enabled) continue;
+
+    const keywords = skill.triggers.keywords || [];
+    const matchCount = keywords.filter((kw) =>
+      lowerMessage.includes(kw.toLowerCase()),
+    ).length;
+
+    if (matchCount >= MIN_KEYWORD_MATCH && matchCount > bestScore) {
+      bestScore = matchCount;
+      bestMatch = skill;
+    }
+  }
+
+  return bestMatch;
 }
 
 /**
