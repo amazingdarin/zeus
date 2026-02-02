@@ -80,12 +80,54 @@ export const docEditSkill: SkillDefinition = {
 };
 
 /**
+ * Optimize document format skill
+ */
+export const docOptimizeFormatSkill: SkillDefinition = {
+  name: "doc-optimize-format",
+  category: "doc",
+  command: "/doc-optimize-format",
+  description: "优化文档格式：规范标题层级、列表格式、代码块标记。需要通过 @ 指定文档。",
+  parameters: {
+    type: "object",
+    properties: {
+      doc_id: {
+        type: "string",
+        description: "要优化的文档 ID（从 @ 提及中解析）",
+      },
+    },
+    required: ["doc_id"],
+  },
+};
+
+/**
+ * Optimize document content skill
+ */
+export const docOptimizeContentSkill: SkillDefinition = {
+  name: "doc-optimize-content",
+  category: "doc",
+  command: "/doc-optimize-content",
+  description: "优化文档内容：改善语言表达、增强逻辑连贯性。需要通过 @ 指定文档。",
+  parameters: {
+    type: "object",
+    properties: {
+      doc_id: {
+        type: "string",
+        description: "要优化的文档 ID（从 @ 提及中解析）",
+      },
+    },
+    required: ["doc_id"],
+  },
+};
+
+/**
  * All document skills
  */
 export const documentSkills: SkillDefinition[] = [
   docReadSkill,
   docCreateSkill,
   docEditSkill,
+  docOptimizeFormatSkill,
+  docOptimizeContentSkill,
 ];
 
 /**

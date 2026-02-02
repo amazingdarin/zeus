@@ -23,6 +23,8 @@ import type {
 import { validateTiptapContent, fixCommonIssues } from "./validator.js";
 import { tiptapJsonToMarkdown, markdownToTiptapJson } from "../../utils/markdown.js";
 import { skillConfigStore } from "./skill-config-store.js";
+import { FORMAT_PROMPT, CONTENT_PROMPT } from "../../services/optimize.js";
+import { ensureBlockIds } from "../../utils/block-id.js";
 
 // Maximum retries for LLM content generation
 const MAX_RETRIES = 2;
@@ -65,6 +67,26 @@ export function detectSkillIntent(
     return {
       skill: "doc-read",
       command: "/doc-read",
+      args: {},
+      rawMessage: message,
+      docIds,
+    };
+  }
+
+  if (trimmed.startsWith("/doc-optimize-format")) {
+    return {
+      skill: "doc-optimize-format",
+      command: "/doc-optimize-format",
+      args: {},
+      rawMessage: message,
+      docIds,
+    };
+  }
+
+  if (trimmed.startsWith("/doc-optimize-content")) {
+    return {
+      skill: "doc-optimize-content",
+      command: "/doc-optimize-content",
       args: {},
       rawMessage: message,
       docIds,
@@ -170,6 +192,12 @@ export async function* executeSkillWithStream(
       break;
     case "doc-edit":
       yield* executeDocEdit(projectKey, intent);
+      break;
+    case "doc-optimize-format":
+      yield* executeDocOptimizeFormat(projectKey, intent);
+      break;
+    case "doc-optimize-content":
+      yield* executeDocOptimizeContent(projectKey, intent);
       break;
     default:
       yield { type: "error", error: `Unknown skill: ${intent.skill}` };
@@ -383,6 +411,174 @@ ${originalMarkdown}
       error: `编辑文档失败: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
+}
+
+/**
+ * Execute doc-optimize-format skill
+ */
+async function* executeDocOptimizeFormat(
+  projectKey: string,
+  intent: SkillIntent,
+): AsyncGenerator<SkillStreamChunk> {
+  if (!intent.docIds || intent.docIds.length === 0) {
+    yield { type: "error", error: "请使用 @ 指定要优化的文档" };
+    return;
+  }
+
+  const docId = intent.docIds[0];
+
+  yield { type: "thinking", content: "正在读取文档内容..." };
+
+  try {
+    // Get original document
+    const doc = await documentStore.get(projectKey, docId);
+    const originalContent = doc.body as JSONContent;
+    const originalMarkdown = tiptapJsonToMarkdown(originalContent);
+
+    yield { type: "thinking", content: "正在优化文档格式..." };
+
+    // Get LLM config
+    const llmConfig = await configStore.getInternalByType("llm");
+    if (!llmConfig) {
+      yield { type: "error", error: "LLM 未配置，请先在设置中配置对话模型" };
+      return;
+    }
+
+    // Build prompt from template
+    const prompt = FORMAT_PROMPT.replace("{{CONTENT}}", originalMarkdown);
+
+    // Generate content with streaming
+    let fullContent = "";
+    const stream = await llmGateway.chatStream({
+      provider: llmConfig.providerId,
+      model: llmConfig.defaultModel || "gpt-4o",
+      apiKey: llmConfig.apiKey,
+      baseUrl: llmConfig.baseUrl,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.3, // Lower temperature for more consistent formatting
+    });
+
+    for await (const chunk of stream.textStream) {
+      fullContent += chunk;
+      yield { type: "delta", content: chunk };
+    }
+
+    // Clean up markdown output (remove potential code block wrappers)
+    const cleanedMarkdown = cleanMarkdownOutput(fullContent);
+
+    // Convert to Tiptap JSON
+    const proposedContent = ensureBlockIds(markdownToTiptapJson(cleanedMarkdown)) as JSONContent;
+
+    // Create draft
+    const draft = draftService.create({
+      projectKey,
+      docId,
+      parentId: doc.meta.parent_id || null,
+      title: doc.meta.title,
+      originalContent,
+      proposedContent,
+    });
+
+    yield { type: "draft", draft };
+    yield { type: "done", message: "文档格式优化草稿已生成" };
+  } catch (err) {
+    yield {
+      type: "error",
+      error: `格式优化失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Execute doc-optimize-content skill
+ */
+async function* executeDocOptimizeContent(
+  projectKey: string,
+  intent: SkillIntent,
+): AsyncGenerator<SkillStreamChunk> {
+  if (!intent.docIds || intent.docIds.length === 0) {
+    yield { type: "error", error: "请使用 @ 指定要优化的文档" };
+    return;
+  }
+
+  const docId = intent.docIds[0];
+
+  yield { type: "thinking", content: "正在读取文档内容..." };
+
+  try {
+    // Get original document
+    const doc = await documentStore.get(projectKey, docId);
+    const originalContent = doc.body as JSONContent;
+    const originalMarkdown = tiptapJsonToMarkdown(originalContent);
+
+    yield { type: "thinking", content: "正在优化文档内容..." };
+
+    // Get LLM config
+    const llmConfig = await configStore.getInternalByType("llm");
+    if (!llmConfig) {
+      yield { type: "error", error: "LLM 未配置，请先在设置中配置对话模型" };
+      return;
+    }
+
+    // Build prompt from template
+    const prompt = CONTENT_PROMPT.replace("{{CONTENT}}", originalMarkdown);
+
+    // Generate content with streaming
+    let fullContent = "";
+    const stream = await llmGateway.chatStream({
+      provider: llmConfig.providerId,
+      model: llmConfig.defaultModel || "gpt-4o",
+      apiKey: llmConfig.apiKey,
+      baseUrl: llmConfig.baseUrl,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.5, // Slightly higher for content optimization
+    });
+
+    for await (const chunk of stream.textStream) {
+      fullContent += chunk;
+      yield { type: "delta", content: chunk };
+    }
+
+    // Clean up markdown output (remove potential code block wrappers)
+    const cleanedMarkdown = cleanMarkdownOutput(fullContent);
+
+    // Convert to Tiptap JSON
+    const proposedContent = ensureBlockIds(markdownToTiptapJson(cleanedMarkdown)) as JSONContent;
+
+    // Create draft
+    const draft = draftService.create({
+      projectKey,
+      docId,
+      parentId: doc.meta.parent_id || null,
+      title: doc.meta.title,
+      originalContent,
+      proposedContent,
+    });
+
+    yield { type: "draft", draft };
+    yield { type: "done", message: "文档内容优化草稿已生成" };
+  } catch (err) {
+    yield {
+      type: "error",
+      error: `内容优化失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Clean up markdown output from LLM
+ * Removes potential code block wrappers that LLM might add
+ */
+function cleanMarkdownOutput(markdown: string): string {
+  let result = markdown.trim();
+
+  // Remove leading ```markdown or ``` and trailing ```
+  const codeBlockMatch = result.match(/^```(?:markdown)?\s*\n([\s\S]*?)\n```$/);
+  if (codeBlockMatch) {
+    result = codeBlockMatch[1].trim();
+  }
+
+  return result;
 }
 
 /**

@@ -85,10 +85,10 @@ export function clearLLMConfigCache(): void {
 }
 
 // ============================================================================
-// Prompt Templates
+// Prompt Templates (exported for use by skill executor)
 // ============================================================================
 
-const FORMAT_PROMPT = `你是一个专业的文档格式优化专家。请对以下 Markdown 文档进行格式优化：
+export const FORMAT_PROMPT = `你是一个专业的文档格式优化专家。请对以下 Markdown 文档进行格式优化：
 
 ## 优化要求
 1. **标题层级**：确保标题层级合理，H1 仅用于文档标题，正文从 H2 开始
@@ -109,7 +109,7 @@ const FORMAT_PROMPT = `你是一个专业的文档格式优化专家。请对以
 
 请直接输出优化后的 Markdown 文档：`;
 
-const CONTENT_PROMPT = `你是一个专业的文档内容编辑专家。请对以下 Markdown 文档进行内容优化：
+export const CONTENT_PROMPT = `你是一个专业的文档内容编辑专家。请对以下 Markdown 文档进行内容优化：
 
 ## 优化要求
 1. **语言润色**：改善语言表达，使其更加专业、流畅

@@ -41,6 +41,22 @@ export const documentCommands: SlashCommand[] = [
     icon: "👁️",
     requiresDocScope: true,
   },
+  {
+    command: "/doc-optimize-format",
+    name: "格式优化",
+    description: "优化文档格式：规范标题层级、列表格式、代码块标记。需要先用 @ 指定文档",
+    category: "doc",
+    icon: "📐",
+    requiresDocScope: true,
+  },
+  {
+    command: "/doc-optimize-content",
+    name: "内容优化",
+    description: "优化文档内容：改善语言表达、增强逻辑连贯性。需要先用 @ 指定文档",
+    category: "doc",
+    icon: "✨",
+    requiresDocScope: true,
+  },
 ];
 
 /**

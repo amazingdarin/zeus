@@ -154,3 +154,12 @@ ON skill_config (category);
 
 CREATE INDEX IF NOT EXISTS idx_skill_config_enabled
 ON skill_config (enabled);
+
+-- Default skill configurations
+INSERT INTO skill_config (id, skill_name, category, enabled, priority) VALUES
+    (gen_random_uuid(), 'doc-read', 'doc', true, 10),
+    (gen_random_uuid(), 'doc-create', 'doc', true, 20),
+    (gen_random_uuid(), 'doc-edit', 'doc', true, 30),
+    (gen_random_uuid(), 'doc-optimize-format', 'doc', true, 40),
+    (gen_random_uuid(), 'doc-optimize-content', 'doc', true, 50)
+ON CONFLICT (skill_name) DO NOTHING;
