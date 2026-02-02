@@ -22,12 +22,13 @@ import type {
 } from "./types.js";
 import { validateTiptapContent, fixCommonIssues } from "./validator.js";
 import { tiptapJsonToMarkdown, markdownToTiptapJson } from "../../utils/markdown.js";
+import { skillConfigStore } from "./skill-config-store.js";
 
 // Maximum retries for LLM content generation
 const MAX_RETRIES = 2;
 
 /**
- * Detect skill intent from user message
+ * Detect skill intent from user message (sync version - doesn't check enabled status)
  */
 export function detectSkillIntent(
   message: string,
@@ -110,6 +111,27 @@ export function detectSkillIntent(
   }
 
   return null;
+}
+
+/**
+ * Detect skill intent with enabled status check
+ */
+export async function detectSkillIntentWithCheck(
+  message: string,
+  docIds?: string[],
+): Promise<SkillIntent | null> {
+  const intent = detectSkillIntent(message, docIds);
+  if (!intent) {
+    return null;
+  }
+
+  // Check if the skill is enabled
+  const isEnabled = await skillConfigStore.isEnabled(intent.skill);
+  if (!isEnabled) {
+    return null;
+  }
+
+  return intent;
 }
 
 /**
@@ -460,28 +482,37 @@ export function hasSkillTrigger(message: string): boolean {
 }
 
 /**
- * Get available skill commands
+ * Get available skill commands (async, only returns enabled skills)
  */
-export function getAvailableSkillCommands(): Array<{
+export async function getAvailableSkillCommands(): Promise<Array<{
   command: string;
   name: string;
   description: string;
+  category: string;
+}>> {
+  const enabledSkills = await skillConfigStore.getEnabledSkillDefinitions();
+  return enabledSkills.map((skill) => ({
+    command: skill.command,
+    name: skill.name,
+    description: skill.description,
+    category: skill.category,
+  }));
+}
+
+/**
+ * Get all skill commands (sync, returns all skills regardless of enabled status)
+ */
+export function getAllSkillCommands(): Array<{
+  command: string;
+  name: string;
+  description: string;
+  category: string;
 }> {
-  return [
-    {
-      command: "/doc-create",
-      name: "创建文档",
-      description: "创建新文档。使用方法：/doc-create [文档标题]",
-    },
-    {
-      command: "/doc-edit",
-      name: "编辑文档",
-      description: "编辑已有文档。需要先用 @ 指定文档，然后描述修改要求",
-    },
-    {
-      command: "/doc-read",
-      name: "读取文档",
-      description: "读取文档内容。使用方法：/doc-read @文档名",
-    },
-  ];
+  const allSkills = skillConfigStore.getAllSkillDefinitions();
+  return allSkills.map((skill) => ({
+    command: skill.command,
+    name: skill.name,
+    description: skill.description,
+    category: skill.category,
+  }));
 }

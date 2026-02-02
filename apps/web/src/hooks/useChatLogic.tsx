@@ -21,7 +21,8 @@ import { useProjectContext } from "../context/ProjectContext";
 import { getConfigByType, type ProviderConfig } from "../api/llm-config";
 import type { MentionItem } from "../components/MentionDropdown";
 import type { DocumentDraft } from "../api/drafts";
-import { filterCommands, type SlashCommand } from "../constants/slash-commands";
+import { filterCommands, setEnabledCommands, type SlashCommand } from "../constants/slash-commands";
+import { getEnabledCommands } from "../api/skills";
 
 // Types
 export type MentionState = {
@@ -325,6 +326,20 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       }
     };
     loadConfig();
+  }, []);
+
+  // Load enabled skills and update command filtering
+  useEffect(() => {
+    const loadEnabledSkills = async () => {
+      try {
+        const data = await getEnabledCommands();
+        setEnabledCommands(data.commands);
+      } catch {
+        // Default to all commands enabled if fetch fails
+        console.warn("Failed to load enabled commands, defaulting to all enabled");
+      }
+    };
+    loadEnabledSkills();
   }, []);
 
   // Load command history from localStorage

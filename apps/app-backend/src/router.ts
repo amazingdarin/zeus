@@ -35,6 +35,7 @@ import {
   optimizeFormatSync,
   type OptimizeMode,
 } from "./services/optimize.js";
+import { skillConfigStore } from "./llm/skills/skill-config-store.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -1788,6 +1789,83 @@ export const buildRouter = () => {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to list drafts";
       error(res, "LIST_DRAFTS_FAILED", msg, 500);
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Skills Configuration API
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get all skills grouped by category
+   * GET /skills
+   */
+  router.get("/skills", async (_req: Request, res: Response) => {
+    try {
+      const categories = await skillConfigStore.listByCategory();
+      success(res, { categories });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list skills";
+      error(res, "LIST_SKILLS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Get enabled skill commands (for frontend filtering)
+   * GET /skills/enabled-commands
+   */
+  router.get("/skills/enabled-commands", async (_req: Request, res: Response) => {
+    try {
+      const commands = await skillConfigStore.getEnabledCommands();
+      success(res, { commands });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to get enabled commands";
+      error(res, "GET_COMMANDS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Update skill enabled status
+   * PATCH /skills/:skillName
+   */
+  router.patch("/skills/:skillName", async (req: Request, res: Response) => {
+    try {
+      const { skillName } = req.params;
+      const { enabled } = req.body as { enabled?: boolean };
+
+      if (typeof enabled !== "boolean") {
+        error(res, "INVALID_REQUEST", "enabled must be a boolean");
+        return;
+      }
+
+      const config = await skillConfigStore.updateEnabled(skillName, enabled);
+      success(res, config);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update skill";
+      error(res, "UPDATE_SKILL_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Batch update skill enabled status
+   * PATCH /skills
+   */
+  router.patch("/skills", async (req: Request, res: Response) => {
+    try {
+      const { updates } = req.body as {
+        updates?: Array<{ skillName: string; enabled: boolean }>;
+      };
+
+      if (!Array.isArray(updates)) {
+        error(res, "INVALID_REQUEST", "updates must be an array");
+        return;
+      }
+
+      await skillConfigStore.batchUpdateEnabled(updates);
+      success(res, { success: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to batch update skills";
+      error(res, "BATCH_UPDATE_FAILED", msg, 500);
     }
   });
 

@@ -136,3 +136,21 @@ ON llm_provider_config (provider_id);
 
 CREATE INDEX IF NOT EXISTS idx_llm_provider_config_type
 ON llm_provider_config (config_type);
+
+-- Skill Configuration
+CREATE TABLE skill_config
+(
+    id          TEXT PRIMARY KEY,
+    skill_name  TEXT NOT NULL UNIQUE,
+    category    TEXT NOT NULL,
+    enabled     BOOLEAN NOT NULL DEFAULT true,
+    priority    INTEGER NOT NULL DEFAULT 0,
+    created_at  TIMESTAMPTZ DEFAULT now(),
+    updated_at  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_skill_config_category
+ON skill_config (category);
+
+CREATE INDEX IF NOT EXISTS idx_skill_config_enabled
+ON skill_config (enabled);

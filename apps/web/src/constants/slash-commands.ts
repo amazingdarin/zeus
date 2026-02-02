@@ -4,8 +4,6 @@
  * Defines available slash commands for the chat panel.
  */
 
-import type { ReactNode } from "react";
-
 export type SlashCommand = {
   command: string;
   name: string;
@@ -53,6 +51,32 @@ export const allCommands: SlashCommand[] = [
 ];
 
 /**
+ * Enabled commands set (dynamically updated)
+ */
+let enabledCommandsSet: Set<string> = new Set(allCommands.map((c) => c.command));
+
+/**
+ * Set enabled commands (called from useChatLogic on init)
+ */
+export function setEnabledCommands(commands: string[]): void {
+  enabledCommandsSet = new Set(commands);
+}
+
+/**
+ * Get currently enabled commands
+ */
+export function getEnabledCommands(): string[] {
+  return Array.from(enabledCommandsSet);
+}
+
+/**
+ * Check if a command is enabled
+ */
+export function isCommandEnabled(command: string): boolean {
+  return enabledCommandsSet.has(command);
+}
+
+/**
  * Get command by name
  */
 export function getCommand(command: string): SlashCommand | undefined {
@@ -60,9 +84,22 @@ export function getCommand(command: string): SlashCommand | undefined {
 }
 
 /**
- * Filter commands by query
+ * Filter commands by query (only returns enabled commands)
  */
 export function filterCommands(query: string): SlashCommand[] {
+  const lowerQuery = query.toLowerCase();
+  return allCommands.filter(
+    (c) =>
+      enabledCommandsSet.has(c.command) &&
+      (c.command.toLowerCase().includes(lowerQuery) ||
+        c.name.toLowerCase().includes(lowerQuery)),
+  );
+}
+
+/**
+ * Filter all commands by query (ignores enabled status)
+ */
+export function filterAllCommands(query: string): SlashCommand[] {
   const lowerQuery = query.toLowerCase();
   return allCommands.filter(
     (c) =>

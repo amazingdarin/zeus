@@ -90,3 +90,40 @@ export type SkillStreamChunk =
   | { type: "draft"; draft: DocumentDraft }
   | { type: "done"; message?: string }
   | { type: "error"; error: string };
+
+/**
+ * Skill configuration (database storage)
+ */
+export type SkillConfig = {
+  id: string;
+  skillName: string;
+  category: SkillCategory;
+  enabled: boolean;
+  priority: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * Complete skill info (definition + config)
+ */
+export type SkillInfo = SkillDefinition & {
+  config: SkillConfig;
+};
+
+/**
+ * Skill category metadata
+ */
+export type SkillCategoryMeta = {
+  id: SkillCategory;
+  name: string;
+  description: string;
+  icon: string;
+};
+
+/**
+ * Skill category info with skills
+ */
+export type SkillCategoryInfo = SkillCategoryMeta & {
+  skills: SkillInfo[];
+};
