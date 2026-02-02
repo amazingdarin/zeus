@@ -38,10 +38,13 @@ export type ChatRun = {
   sessionId: string;
   messages: ChatMessage[];
   docIds?: string[];  // Resolved document IDs for knowledge search scope
-  status: "pending" | "running" | "completed" | "failed";
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
   createdAt: number;
   updatedAt: number;
 };
+
+// Store AbortControllers for active runs (separate from ChatRun to avoid serialization issues)
+const runAbortControllers = new Map<string, AbortController>();
 
 export type ChatStreamChunk = {
   type: "delta" | "done" | "error" | "thinking" | "draft";
@@ -170,6 +173,61 @@ export function getRun(runId: string): ChatRun | null {
 }
 
 /**
+ * Cancel a running chat run
+ * @returns true if the run was cancelled, false if not found or already completed
+ */
+export function cancelRun(runId: string): boolean {
+  const run = activeRuns.get(runId);
+  if (!run) {
+    return false;
+  }
+
+  // Only cancel if running or pending
+  if (run.status !== "running" && run.status !== "pending") {
+    return false;
+  }
+
+  // Abort the controller if exists
+  const controller = runAbortControllers.get(runId);
+  if (controller) {
+    controller.abort();
+    runAbortControllers.delete(runId);
+  }
+
+  run.status = "cancelled";
+  run.updatedAt = Date.now();
+  console.log(`[chat] Run ${runId} cancelled`);
+  return true;
+}
+
+/**
+ * Get the AbortSignal for a run (creates one if not exists)
+ */
+function getOrCreateAbortSignal(runId: string): AbortSignal {
+  let controller = runAbortControllers.get(runId);
+  if (!controller) {
+    controller = new AbortController();
+    runAbortControllers.set(runId, controller);
+  }
+  return controller.signal;
+}
+
+/**
+ * Check if a run is aborted
+ */
+function isRunAborted(runId: string): boolean {
+  const controller = runAbortControllers.get(runId);
+  return controller?.signal.aborted ?? false;
+}
+
+/**
+ * Clean up abort controller for a run
+ */
+function cleanupAbortController(runId: string): void {
+  runAbortControllers.delete(runId);
+}
+
+/**
  * Stream a chat run response
  *
  * Uses Hybrid Trigger to determine the appropriate mode:
@@ -185,34 +243,42 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
     return;
   }
 
+  // Create abort signal for this run
+  const abortSignal = getOrCreateAbortSignal(runId);
+
   run.status = "running";
   run.updatedAt = Date.now();
 
-  // Extract user's latest message
-  const userQuery = run.messages[run.messages.length - 1]?.content || "";
+  try {
+    // Extract user's latest message
+    const userQuery = run.messages[run.messages.length - 1]?.content || "";
 
-  // Analyze trigger mode
-  const trigger = await analyzeTrigger(userQuery, run.docIds);
-  console.log(`[chat] Trigger mode: ${trigger.mode}`);
+    // Analyze trigger mode
+    const trigger = await analyzeTrigger(userQuery, run.docIds);
+    console.log(`[chat] Trigger mode: ${trigger.mode}`);
 
-  // Dispatch based on mode
-  switch (trigger.mode) {
-    case "command":
-      yield* handleCommandMode(run, trigger);
-      return;
+    // Dispatch based on mode
+    switch (trigger.mode) {
+      case "command":
+        yield* handleCommandMode(run, trigger, abortSignal);
+        return;
 
-    case "anthropic":
-      yield* handleAnthropicMode(run, trigger);
-      return;
+      case "anthropic":
+        yield* handleAnthropicMode(run, trigger, abortSignal);
+        return;
 
-    case "natural":
-      yield* handleNaturalMode(run, trigger, userQuery);
-      return;
+      case "natural":
+        yield* handleNaturalMode(run, trigger, userQuery, abortSignal);
+        return;
 
-    case "chat":
-    default:
-      yield* handleChatMode(run, userQuery);
-      return;
+      case "chat":
+      default:
+        yield* handleChatMode(run, userQuery, abortSignal);
+        return;
+    }
+  } finally {
+    // Cleanup abort controller when done
+    cleanupAbortController(runId);
   }
 }
 
@@ -222,6 +288,7 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
 async function* handleCommandMode(
   run: ChatRun,
   trigger: TriggerResult,
+  abortSignal: AbortSignal,
 ): AsyncGenerator<ChatStreamChunk> {
   if (!trigger.intent) {
     yield { type: "error", error: "No skill intent detected" };
@@ -232,6 +299,14 @@ async function* handleCommandMode(
 
   try {
     for await (const chunk of executeSkillWithStream(run.projectKey, trigger.intent)) {
+      // Check if aborted
+      if (abortSignal.aborted) {
+        console.log("[chat] Command mode aborted");
+        run.status = "cancelled";
+        run.updatedAt = Date.now();
+        return;
+      }
+
       const mappedChunk = mapSkillChunkToChatChunk(chunk);
       yield mappedChunk;
 
@@ -244,6 +319,13 @@ async function* handleCommandMode(
     run.status = "completed";
     run.updatedAt = Date.now();
   } catch (err) {
+    // Check if it's an abort error
+    if (abortSignal.aborted) {
+      run.status = "cancelled";
+      run.updatedAt = Date.now();
+      return;
+    }
+
     const errorMessage = err instanceof Error ? err.message : "Skill execution failed";
     console.error("[chat] Command mode error:", errorMessage);
 
@@ -260,6 +342,7 @@ async function* handleCommandMode(
 async function* handleAnthropicMode(
   run: ChatRun,
   trigger: TriggerResult,
+  abortSignal: AbortSignal,
 ): AsyncGenerator<ChatStreamChunk> {
   if (!trigger.anthropicSkill || !trigger.userRequest) {
     yield { type: "error", error: "No Anthropic skill matched" };
@@ -293,6 +376,14 @@ async function* handleAnthropicMode(
       trigger.userRequest,
       context,
     )) {
+      // Check if aborted
+      if (abortSignal.aborted) {
+        console.log("[chat] Anthropic mode aborted");
+        run.status = "cancelled";
+        run.updatedAt = Date.now();
+        return;
+      }
+
       const mappedChunk = mapSkillChunkToChatChunk(chunk);
       yield mappedChunk;
     }
@@ -300,6 +391,13 @@ async function* handleAnthropicMode(
     run.status = "completed";
     run.updatedAt = Date.now();
   } catch (err) {
+    // Check if it's an abort error
+    if (abortSignal.aborted) {
+      run.status = "cancelled";
+      run.updatedAt = Date.now();
+      return;
+    }
+
     const errorMessage = err instanceof Error ? err.message : "Anthropic skill execution failed";
     console.error("[chat] Anthropic mode error:", errorMessage);
 
@@ -317,19 +415,27 @@ async function* handleNaturalMode(
   run: ChatRun,
   trigger: TriggerResult,
   userQuery: string,
+  abortSignal: AbortSignal,
 ): AsyncGenerator<ChatStreamChunk> {
   const config = await getLLMConfig();
   if (!config?.enabled || !config.defaultModel) {
     // Fallback to chat mode if no LLM configured
     console.log("[chat] No LLM configured, falling back to chat mode");
-    yield* handleChatMode(run, userQuery);
+    yield* handleChatMode(run, userQuery, abortSignal);
     return;
   }
 
   if (!trigger.tools || trigger.tools.length === 0) {
     // No tools available, fallback to chat mode
     console.log("[chat] No tools available, falling back to chat mode");
-    yield* handleChatMode(run, userQuery);
+    yield* handleChatMode(run, userQuery, abortSignal);
+    return;
+  }
+
+  // Check if already aborted
+  if (abortSignal.aborted) {
+    run.status = "cancelled";
+    run.updatedAt = Date.now();
     return;
   }
 
@@ -371,6 +477,13 @@ async function* handleNaturalMode(
       tool_choice: "auto",
     });
 
+    // Check if aborted after LLM call
+    if (abortSignal.aborted) {
+      run.status = "cancelled";
+      run.updatedAt = Date.now();
+      return;
+    }
+
     // Check if LLM selected a tool
     if (response.toolCalls && response.toolCalls.length > 0) {
       const toolCall = response.toolCalls[0];
@@ -397,6 +510,14 @@ async function* handleNaturalMode(
 
       // Execute the selected skill
       for await (const chunk of executeSkillWithStream(run.projectKey, intent)) {
+        // Check if aborted
+        if (abortSignal.aborted) {
+          console.log("[chat] Natural mode aborted during skill execution");
+          run.status = "cancelled";
+          run.updatedAt = Date.now();
+          return;
+        }
+
         const mappedChunk = mapSkillChunkToChatChunk(chunk);
         yield mappedChunk;
 
@@ -424,12 +545,19 @@ async function* handleNaturalMode(
     run.status = "completed";
     run.updatedAt = Date.now();
   } catch (err) {
+    // Check if it's an abort error
+    if (abortSignal.aborted) {
+      run.status = "cancelled";
+      run.updatedAt = Date.now();
+      return;
+    }
+
     const errorMessage = err instanceof Error ? err.message : "Natural mode failed";
     console.error("[chat] Natural mode error:", errorMessage);
 
     // Fallback to chat mode on error
     console.log("[chat] Falling back to chat mode due to error");
-    yield* handleChatMode(run, userQuery);
+    yield* handleChatMode(run, userQuery, abortSignal);
   }
 }
 
@@ -439,6 +567,7 @@ async function* handleNaturalMode(
 async function* handleChatMode(
   run: ChatRun,
   userQuery: string,
+  abortSignal: AbortSignal,
 ): AsyncGenerator<ChatStreamChunk> {
   const config = await getLLMConfig();
   if (!config || !config.enabled) {
@@ -454,6 +583,13 @@ async function* handleChatMode(
   if (!config.defaultModel) {
     yield { type: "error", error: "No default model configured for LLM provider." };
     run.status = "failed";
+    run.updatedAt = Date.now();
+    return;
+  }
+
+  // Check if already aborted
+  if (abortSignal.aborted) {
+    run.status = "cancelled";
     run.updatedAt = Date.now();
     return;
   }
@@ -485,6 +621,13 @@ async function* handleChatMode(
       console.warn("[chat] Knowledge search failed:", searchErr);
     }
 
+    // Check if aborted after search
+    if (abortSignal.aborted) {
+      run.status = "cancelled";
+      run.updatedAt = Date.now();
+      return;
+    }
+
     // Build messages for the LLM
     const llmMessages = run.messages.map((m) => ({
       role: m.role as "user" | "assistant" | "system",
@@ -498,19 +641,36 @@ async function* handleChatMode(
       ...llmMessages,
     ];
 
-    // Call LLM gateway with streaming
+    // Call LLM gateway with streaming and abort signal
     const stream = await llmGateway.chatStream({
       provider: config.providerId,
       model: config.defaultModel,
       messages: messagesWithSystem,
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
+      abortSignal,
     });
 
     let fullResponse = "";
 
     // Stream the response
     for await (const chunk of stream.textStream) {
+      // Check if aborted during streaming
+      if (abortSignal.aborted) {
+        console.log("[chat] Chat mode aborted during streaming");
+        run.status = "cancelled";
+        run.updatedAt = Date.now();
+        
+        // Still save partial response to history if any
+        if (fullResponse) {
+          const history = sessionMessages.get(run.sessionId);
+          if (history) {
+            history.push({ role: "assistant", content: fullResponse + "\n\n[已停止]" });
+          }
+        }
+        return;
+      }
+
       fullResponse += chunk;
       yield { type: "delta", content: chunk };
     }
@@ -526,6 +686,14 @@ async function* handleChatMode(
 
     yield { type: "done", message: fullResponse, sources };
   } catch (err) {
+    // Check if it's an abort error
+    if (abortSignal.aborted || (err instanceof Error && err.name === "AbortError")) {
+      console.log("[chat] Chat mode aborted");
+      run.status = "cancelled";
+      run.updatedAt = Date.now();
+      return;
+    }
+
     const errorMessage = err instanceof Error ? err.message : "Chat failed";
     console.error("[chat] Chat mode error:", errorMessage);
 

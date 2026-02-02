@@ -1,6 +1,6 @@
 import type { KeyboardEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
-import { DownOutlined, UpOutlined } from "@ant-design/icons";
+import { DownOutlined, UpOutlined, StopOutlined, SendOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 
 import { createChatRun, buildChatStreamUrl } from "../api/chat";
@@ -637,6 +637,23 @@ function ChatDock() {
     },
     [appendMessage, resetAssistantBuffer],
   );
+
+  /**
+   * Stop the current generation
+   * Closes the SSE stream and saves partial response if any
+   */
+  const handleStop = useCallback(() => {
+    // Close the stream connection
+    closeStream();
+    
+    // If there's a partial response in the buffer, save it
+    if (assistantBufferRef.current) {
+      appendMessage("assistant", assistantBufferRef.current + "\n\n[已停止]");
+      resetAssistantBuffer();
+    }
+    
+    setIsGenerating(false);
+  }, [closeStream, appendMessage, resetAssistantBuffer]);
 
   const handleSend = useCallback(async () => {
     if (!canSend) {
@@ -1319,9 +1336,20 @@ function ChatDock() {
                 activeKey={activeDropdownKey}
               />
               <div className="chat-dock-actions">
-                <button type="button" onClick={handleSend} disabled={!canSend}>
-                  发送
-                </button>
+                {isGenerating ? (
+                  <button
+                    type="button"
+                    className="chat-dock-stop-btn"
+                    onClick={handleStop}
+                    title="停止生成"
+                  >
+                    <StopOutlined /> 停止
+                  </button>
+                ) : (
+                  <button type="button" onClick={handleSend} disabled={!canSend}>
+                    <SendOutlined /> 发送
+                  </button>
+                )}
                 <button
                   type="button"
                   className="chat-dock-toggle"

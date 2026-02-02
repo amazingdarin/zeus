@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   DeleteOutlined,
   SendOutlined,
+  StopOutlined,
   RobotOutlined,
   UserOutlined,
   LoadingOutlined,
@@ -64,6 +65,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     setError,
     setSlashSelectedIndex,
     handleSend,
+    handleStop,
     handleClearHistory,
     handleInputChange,
     handleKeyDown,
@@ -575,14 +577,25 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
             rows={1}
           />
           <div className="chat-dock-bar-actions">
-            <button
-              type="button"
-              className="chat-dock-send-btn"
-              onClick={handleSendWithExpand}
-              disabled={!canSend}
-            >
-              {isGenerating ? <LoadingOutlined spin /> : <SendOutlined />}
-            </button>
+            {isGenerating ? (
+              <button
+                type="button"
+                className="chat-dock-send-btn chat-dock-stop-btn"
+                onClick={handleStop}
+                title="停止生成"
+              >
+                <StopOutlined />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="chat-dock-send-btn"
+                onClick={handleSendWithExpand}
+                disabled={!canSend}
+              >
+                <SendOutlined />
+              </button>
+            )}
             <button
               type="button"
               className="chat-dock-toggle-btn"

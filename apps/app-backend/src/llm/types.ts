@@ -91,6 +91,8 @@ export type ChatOptions = {
   // OpenAI-compatible provider config
   baseUrl?: string;
   apiKey?: string;
+  // Abort signal for cancellation
+  abortSignal?: AbortSignal;
 };
 
 /**

@@ -234,6 +234,7 @@ export type UseChatLogicReturn = {
   setError: (error: string | null) => void;
   setSlashSelectedIndex: (index: number) => void;
   handleSend: () => Promise<void>;
+  handleStop: () => void;
   handleClearHistory: () => Promise<void>;
   handleInputChange: (e: ChangeEvent<HTMLTextAreaElement>) => void;
   handleKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
@@ -653,6 +654,23 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     }
   }, [projectKey, sessionId]);
 
+  /**
+   * Stop the current generation
+   * Closes the SSE stream and saves partial response if any
+   */
+  const handleStop = useCallback(() => {
+    // Close the stream connection
+    closeStream();
+    
+    // If there's a partial response in the buffer, save it
+    if (assistantBufferRef.current) {
+      appendMessage("assistant", assistantBufferRef.current + "\n\n[已停止]");
+      resetAssistantBuffer();
+    }
+    
+    setIsGenerating(false);
+  }, [closeStream, appendMessage, resetAssistantBuffer]);
+
   const handleDraftApplied = useCallback((docId: string, isNew: boolean) => {
     setPendingDraft(null);
     const action = isNew ? "创建" : "更新";
@@ -908,6 +926,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     setError,
     setSlashSelectedIndex,
     handleSend,
+    handleStop,
     handleClearHistory,
     handleInputChange,
     handleKeyDown,

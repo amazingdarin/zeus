@@ -3,7 +3,7 @@ import cors from "cors";
 
 import { initPool } from "./db/postgres.js";
 import { buildRouter } from "./router.js";
-import { skillRegistry } from "./llm/skills/index.js";
+import { skillRegistry, syncAnthropicSkillConfigs } from "./llm/skills/index.js";
 
 const app = express();
 const port = Number(process.env.APP_BACKEND_PORT ?? 4870);
@@ -50,6 +50,9 @@ const start = async () => {
     await skillRegistry.initialize();
     const counts = skillRegistry.getCounts();
     console.log(`[app-backend] Skill registry initialized: ${counts.native} native, ${counts.anthropic} Anthropic skills`);
+
+    // Sync Anthropic Skills enabled state from database
+    await syncAnthropicSkillConfigs();
   } catch (err) {
     console.warn("[app-backend] Skill registry initialization failed:", err);
   }

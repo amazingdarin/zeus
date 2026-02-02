@@ -88,6 +88,7 @@ export async function chat(options: ChatOptions): Promise<ChatResponse> {
 
 /**
  * Stream chat with an LLM model
+ * Supports cancellation via abortSignal
  */
 export async function chatStream(options: ChatOptions) {
   const model = providerRegistry.getLanguageModel(options.provider, options.model, {
@@ -104,6 +105,7 @@ export async function chatStream(options: ChatOptions) {
     temperature: options.temperature,
     maxOutputTokens: options.maxTokens,  // AI SDK 6.x renamed maxTokens to maxOutputTokens
     topP: options.topP,
+    abortSignal: options.abortSignal, // Pass abort signal for cancellation support
   });
 
   return result;

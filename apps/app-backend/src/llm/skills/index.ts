@@ -47,6 +47,9 @@ export {
   getAvailableSkillCommands,
 } from "./executor.js";
 
+// Skill config store
+export { syncAnthropicSkillConfigs } from "./skill-config-store.js";
+
 // Validator
 export {
   validateTiptapContent,

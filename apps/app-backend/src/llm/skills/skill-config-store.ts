@@ -2,11 +2,13 @@
  * Skill Configuration Store
  *
  * Manages persistence of skill enable/disable states in PostgreSQL.
+ * Supports both Native skills (SkillDefinition) and Anthropic skills (UnifiedSkillDefinition).
  */
 
 import { v4 as uuidv4 } from "uuid";
 import { query } from "../../db/postgres.js";
 import { documentSkills } from "./document-skills.js";
+import { skillRegistry } from "./registry.js";
 import type {
   SkillConfig,
   SkillDefinition,
@@ -15,6 +17,7 @@ import type {
   SkillCategory,
   SkillCategoryMeta,
 } from "./types.js";
+import type { UnifiedSkillDefinition } from "./adapters/types.js";
 
 /**
  * Database row type for skill_config table
@@ -30,13 +33,16 @@ type SkillConfigRow = {
 };
 
 /**
- * Category metadata
+ * Category metadata (including 'general' for uncategorized Anthropic Skills)
  */
-const CATEGORY_META: Record<SkillCategory, Omit<SkillCategoryMeta, "id">> = {
+type ExtendedSkillCategory = SkillCategory | "general";
+
+const CATEGORY_META: Record<ExtendedSkillCategory, Omit<SkillCategoryMeta, "id">> = {
   doc: { name: "文档", description: "文档创建、编辑、读取等操作", icon: "📄" },
   kb: { name: "知识库", description: "知识库检索与问答", icon: "🔍" },
   code: { name: "代码", description: "代码生成与分析", icon: "💻" },
   img: { name: "图像", description: "图像生成与处理", icon: "🖼️" },
+  general: { name: "通用", description: "第三方扩展技能", icon: "🔧" },
 };
 
 /**
@@ -310,18 +316,19 @@ export const skillConfigStore = {
 
   /**
    * Check if a skill is enabled
+   * Supports both native skill names (e.g., "doc-create") and Anthropic skill IDs (e.g., "anthropic:data-analysis")
    */
-  async isEnabled(skillName: string): Promise<boolean> {
-    // Required skills are always enabled
-    const def = allSkillDefinitions.find((d) => d.name === skillName);
-    if (def?.required) {
+  async isEnabled(skillNameOrId: string): Promise<boolean> {
+    // Required native skills are always enabled
+    const nativeDef = allSkillDefinitions.find((d) => d.name === skillNameOrId);
+    if (nativeDef?.required) {
       return true;
     }
 
     try {
       const result = await query<SkillConfigRow>(
         `SELECT enabled FROM skill_config WHERE skill_name = $1`,
-        [skillName],
+        [skillNameOrId],
       );
       dbAvailable = true;
 
@@ -349,6 +356,13 @@ export const skillConfigStore = {
   },
 
   /**
+   * Check if an Anthropic Skill is enabled by its ID
+   */
+  async isAnthropicSkillEnabled(skillId: string): Promise<boolean> {
+    return this.isEnabled(skillId);
+  },
+
+  /**
    * Get all skill definitions (for registration)
    */
   getAllSkillDefinitions(): SkillDefinition[] {
@@ -359,6 +373,229 @@ export const skillConfigStore = {
    * Get category metadata
    */
   getCategoryMeta(): Record<SkillCategory, Omit<SkillCategoryMeta, "id">> {
-    return CATEGORY_META;
+    return CATEGORY_META as Record<SkillCategory, Omit<SkillCategoryMeta, "id">>;
+  },
+
+  // ============================================================================
+  // Anthropic Skills Support
+  // ============================================================================
+
+  /**
+   * Get all Anthropic Skills with their config status
+   */
+  async listAnthropicSkillInfo(): Promise<Array<{
+    skill: UnifiedSkillDefinition;
+    config: SkillConfig;
+    isConfigurable: boolean;
+  }>> {
+    const configs = await this.list();
+    const configMap = new Map(configs.map((c) => [c.skillName, c]));
+    
+    const anthropicSkills = skillRegistry.getAllAnthropic();
+    
+    return anthropicSkills.map((skill) => {
+      const config = configMap.get(skill.id) || createDefaultAnthropicConfig(skill);
+      return {
+        skill,
+        config,
+        isConfigurable: true, // Anthropic Skills can always be disabled
+      };
+    });
+  },
+
+  /**
+   * Get enabled Anthropic Skills
+   */
+  async getEnabledAnthropicSkills(): Promise<UnifiedSkillDefinition[]> {
+    const skillInfos = await this.listAnthropicSkillInfo();
+    return skillInfos.filter((s) => s.config.enabled).map((s) => s.skill);
+  },
+
+  /**
+   * Get all skills grouped by category (including Anthropic Skills)
+   */
+  async listAllByCategory(): Promise<Array<{
+    id: string;
+    name: string;
+    description: string;
+    icon: string;
+    skills: Array<{
+      id: string;
+      name: string;
+      description: string;
+      source: "native" | "anthropic";
+      enabled: boolean;
+      isConfigurable: boolean;
+    }>;
+  }>> {
+    const nativeSkills = await this.listSkillInfo();
+    const anthropicSkillInfos = await this.listAnthropicSkillInfo();
+    
+    const categories = new Map<string, Array<{
+      id: string;
+      name: string;
+      description: string;
+      source: "native" | "anthropic";
+      enabled: boolean;
+      isConfigurable: boolean;
+    }>>();
+    
+    // Add native skills
+    for (const skill of nativeSkills) {
+      const cat = skill.category;
+      if (!categories.has(cat)) {
+        categories.set(cat, []);
+      }
+      categories.get(cat)!.push({
+        id: skill.name,
+        name: skill.name,
+        description: skill.description,
+        source: "native",
+        enabled: skill.config.enabled,
+        isConfigurable: skill.isConfigurable,
+      });
+    }
+    
+    // Add Anthropic skills
+    for (const { skill, config, isConfigurable } of anthropicSkillInfos) {
+      const cat = skill.category || "general";
+      if (!categories.has(cat)) {
+        categories.set(cat, []);
+      }
+      categories.get(cat)!.push({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        source: "anthropic",
+        enabled: config.enabled,
+        isConfigurable,
+      });
+    }
+    
+    // Build result with category metadata
+    const result: Array<{
+      id: string;
+      name: string;
+      description: string;
+      icon: string;
+      skills: Array<{
+        id: string;
+        name: string;
+        description: string;
+        source: "native" | "anthropic";
+        enabled: boolean;
+        isConfigurable: boolean;
+      }>;
+    }> = [];
+    
+    for (const [categoryId, skills] of categories) {
+      const meta = CATEGORY_META[categoryId as ExtendedSkillCategory] || {
+        name: categoryId,
+        description: "",
+        icon: "📦",
+      };
+      result.push({
+        id: categoryId,
+        name: meta.name,
+        description: meta.description,
+        icon: meta.icon,
+        skills,
+      });
+    }
+    
+    return result;
+  },
+
+  /**
+   * Update Anthropic Skill enabled status
+   */
+  async updateAnthropicSkillEnabled(skillId: string, enabled: boolean): Promise<SkillConfig> {
+    const skill = skillRegistry.getAnthropicById(skillId);
+    if (!skill) {
+      throw new Error(`Anthropic skill not found: ${skillId}`);
+    }
+    
+    const category = skill.category || "general";
+    const id = uuidv4();
+
+    try {
+      await query(
+        `INSERT INTO skill_config (id, skill_name, category, enabled, priority, updated_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())
+         ON CONFLICT (skill_name) DO UPDATE SET enabled = $4, updated_at = NOW()`,
+        [id, skillId, category, enabled, 0],
+      );
+      dbAvailable = true;
+
+      const result = await query<SkillConfigRow>(
+        `SELECT * FROM skill_config WHERE skill_name = $1`,
+        [skillId],
+      );
+
+      if (result.rows.length === 0) {
+        throw new Error(`Failed to update skill config for: ${skillId}`);
+      }
+
+      // Update the skill's enabled state in registry
+      skill.enabled = enabled;
+
+      return mapRowToConfig(result.rows[0]);
+    } catch (err) {
+      if (
+        err &&
+        typeof err === "object" &&
+        "code" in err &&
+        (err.code === "ECONNREFUSED" || err.code === "42P01")
+      ) {
+        if (err.code === "42P01") {
+          throw new Error("skill_config table does not exist. Please run database migrations.");
+        }
+        dbAvailable = false;
+        throw new Error("Database not available. Please ensure PostgreSQL is running.");
+      }
+      throw err;
+    }
   },
 };
+
+/**
+ * Create a default config for an Anthropic skill
+ */
+function createDefaultAnthropicConfig(skill: UnifiedSkillDefinition): SkillConfig {
+  return {
+    id: "",
+    skillName: skill.id,
+    category: (skill.category || "general") as SkillCategory,
+    enabled: skill.enabled, // Use the skill's default enabled state
+    priority: skill.priority,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Sync Anthropic Skills enabled state from database
+ *
+ * Should be called after skillRegistry is initialized.
+ * This updates the in-memory `enabled` state of Anthropic Skills
+ * based on the persisted configuration in database.
+ */
+export async function syncAnthropicSkillConfigs(): Promise<void> {
+  try {
+    const configs = await skillConfigStore.list();
+    const configMap = new Map(configs.map((c) => [c.skillName, c]));
+
+    for (const skill of skillRegistry.getAllAnthropic()) {
+      const config = configMap.get(skill.id);
+      if (config) {
+        // Update skill enabled state from database
+        skill.enabled = config.enabled;
+      }
+      // If no config in database, keep the default enabled state from SKILL.md
+    }
+
+    console.log(`[SkillConfigStore] Synced ${skillRegistry.getAllAnthropic().length} Anthropic skill configs`);
+  } catch (err) {
+    console.warn("[SkillConfigStore] Failed to sync Anthropic skill configs:", err);
+  }
+}

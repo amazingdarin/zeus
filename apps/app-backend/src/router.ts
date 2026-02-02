@@ -27,7 +27,7 @@ import {
   type LLMProviderId,
   type ConfigType,
 } from "./llm/index.js";
-import { createRun, getRun, streamRun, clearSession } from "./services/chat.js";
+import { createRun, getRun, streamRun, clearSession, cancelRun } from "./services/chat.js";
 import { draftService } from "./services/draft.js";
 import {
   createTask as createOptimizeTask,
@@ -1639,6 +1639,16 @@ export const buildRouter = () => {
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
 
+    // Listen for client disconnect to cancel the run
+    let clientDisconnected = false;
+    req.on("close", () => {
+      clientDisconnected = true;
+      const cancelled = cancelRun(runId);
+      if (cancelled) {
+        console.log(`[chat-stream] Client disconnected, cancelled run ${runId}`);
+      }
+    });
+
     try {
       const run = getRun(runId);
       if (!run) {
@@ -1649,6 +1659,11 @@ export const buildRouter = () => {
 
       // Stream the response
       for await (const chunk of streamRun(runId)) {
+        // Stop writing if client disconnected
+        if (clientDisconnected) {
+          break;
+        }
+
         if (chunk.type === "delta") {
           res.write(`event: assistant.delta\ndata: ${JSON.stringify(chunk.content)}\n\n`);
         } else if (chunk.type === "thinking") {
@@ -1665,11 +1680,30 @@ export const buildRouter = () => {
         }
       }
 
-      res.end();
+      if (!clientDisconnected) {
+        res.end();
+      }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Stream failed";
-      res.write(`event: run.error\ndata: ${JSON.stringify({ error: msg })}\n\n`);
-      res.end();
+      if (!clientDisconnected) {
+        const msg = err instanceof Error ? err.message : "Stream failed";
+        res.write(`event: run.error\ndata: ${JSON.stringify({ error: msg })}\n\n`);
+        res.end();
+      }
+    }
+  });
+
+  /**
+   * Cancel a chat run
+   * DELETE /projects/:projectKey/chat/runs/:runId
+   */
+  router.delete("/projects/:projectKey/chat/runs/:runId", async (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const cancelled = cancelRun(runId);
+      success(res, { cancelled });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to cancel run";
+      error(res, "CANCEL_RUN_FAILED", msg, 500);
     }
   });
 
@@ -1874,6 +1908,72 @@ export const buildRouter = () => {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to batch update skills";
       error(res, "BATCH_UPDATE_FAILED", msg, 500);
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Anthropic Skills Configuration API (Extended Skills)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get all skills (Native + Anthropic) grouped by category
+   * GET /skills/all
+   */
+  router.get("/skills/all", async (_req: Request, res: Response) => {
+    try {
+      const categories = await skillConfigStore.listAllByCategory();
+      success(res, { categories });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list all skills";
+      error(res, "LIST_ALL_SKILLS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Get Anthropic skills with their config
+   * GET /skills/anthropic
+   */
+  router.get("/skills/anthropic", async (_req: Request, res: Response) => {
+    try {
+      const skillInfos = await skillConfigStore.listAnthropicSkillInfo();
+      const skills = skillInfos.map(({ skill, config, isConfigurable }) => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        category: skill.category || "general",
+        source: skill.source,
+        sourcePath: skill.sourcePath,
+        triggers: skill.triggers,
+        enabled: config.enabled,
+        isConfigurable,
+        loadedAt: skill.loadedAt,
+      }));
+      success(res, { skills });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list Anthropic skills";
+      error(res, "LIST_ANTHROPIC_SKILLS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Update Anthropic skill enabled status
+   * PATCH /skills/anthropic/:skillId
+   */
+  router.patch("/skills/anthropic/:skillId", async (req: Request, res: Response) => {
+    try {
+      const { skillId } = req.params;
+      const { enabled } = req.body as { enabled?: boolean };
+
+      if (typeof enabled !== "boolean") {
+        error(res, "INVALID_REQUEST", "enabled must be a boolean");
+        return;
+      }
+
+      const config = await skillConfigStore.updateAnthropicSkillEnabled(skillId, enabled);
+      success(res, config);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update Anthropic skill";
+      error(res, "UPDATE_ANTHROPIC_SKILL_FAILED", msg, 500);
     }
   });
 
