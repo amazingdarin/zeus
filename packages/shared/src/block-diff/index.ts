@@ -83,3 +83,10 @@ export {
   computeLCSDiff,
 } from "./lcs";
 export type { DiffPathEntry } from "./lcs";
+
+// Markdown fingerprinting (for content comparison)
+export {
+  blockToMarkdown,
+  createMarkdownFingerprint,
+  simpleHash,
+} from "./block-markdown";

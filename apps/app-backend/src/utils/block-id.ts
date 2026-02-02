@@ -23,6 +23,10 @@ const BLOCK_ID_NODE_TYPES = new Set([
   "openapi",
   "openapiRef",
   "toc",
+  // List containers - need IDs for accurate DIFF matching
+  "bulletList",
+  "orderedList",
+  "taskList",
 ]);
 
 type JSONContent = {

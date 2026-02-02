@@ -2,16 +2,16 @@
  * Draft Preview Modal
  *
  * Modal for previewing AI-generated document drafts with DIFF view for edits.
+ * Uses DocumentDiffViewer for the diff display.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Modal, Button, message, TreeSelect, Spin } from "antd";
+import { useCallback, useEffect, useState } from "react";
+import { Modal, Button, message, TreeSelect, Spin, Radio, Input } from "antd";
 import {
-  CheckOutlined,
-  CloseOutlined,
   FileTextOutlined,
   EditOutlined,
   FolderOutlined,
+  CopyOutlined,
 } from "@ant-design/icons";
 import type { JSONContent } from "@tiptap/react";
 
@@ -19,13 +19,7 @@ import type { DocumentDraft } from "../api/drafts";
 import { applyDraft, rejectDraft } from "../api/drafts";
 import { fetchDocumentTree, type DocumentTreeItem } from "../api/documents";
 import RichTextViewer from "./RichTextViewer";
-import {
-  blockDiff,
-  getStatusLabel,
-  wrapBlockInDoc,
-  type BlockDiffResult,
-  type RawBlock,
-} from "@zeus/shared";
+import DocumentDiffViewer from "./DocumentDiffViewer";
 
 type DraftPreviewModalProps = {
   draft: DocumentDraft;
@@ -33,8 +27,6 @@ type DraftPreviewModalProps = {
   onClose: () => void;
   onApplied: (docId: string, isNew: boolean) => void;
 };
-
-type DiffResolution = "accept" | "reject";
 
 // Convert document tree to TreeSelect format
 type TreeSelectNode = {
@@ -64,24 +56,29 @@ function DraftPreviewModal({
   onApplied,
 }: DraftPreviewModalProps) {
   const [applying, setApplying] = useState(false);
-  const [resolvedDiffs, setResolvedDiffs] = useState<Map<number, DiffResolution>>(
-    new Map(),
-  );
 
-  // Parent document state (only for new documents)
+  // Parent document state
   const [parentId, setParentId] = useState<string | null>(draft.parentId);
   const [treeData, setTreeData] = useState<TreeSelectNode[]>([]);
   const [loadingTree, setLoadingTree] = useState(false);
 
+  // Save mode state (only for edit mode)
+  const [saveMode, setSaveMode] = useState<"overwrite" | "new">("overwrite");
+  const [newTitle, setNewTitle] = useState<string>(`${draft.title} (副本)`);
+
+  // Track resolved content from DocumentDiffViewer
+  const [resolvedContent, setResolvedContent] = useState<JSONContent | null>(null);
+  const [diffProgress, setDiffProgress] = useState({ resolved: 0, total: 0 });
+
+  const isEditMode = draft.originalContent !== null;
+
   // Load document tree for parent selection
   useEffect(() => {
-    if (!draft.docId && projectKey) {
-      // Only load tree for new documents
+    if (projectKey) {
       setLoadingTree(true);
       fetchDocumentTree(projectKey)
         .then((tree) => {
           const data = convertToTreeSelectData(tree);
-          // Add root option
           setTreeData([
             { value: "", title: "根目录" },
             ...data,
@@ -94,131 +91,47 @@ function DraftPreviewModal({
           setLoadingTree(false);
         });
     }
-  }, [draft.docId, projectKey]);
+  }, [projectKey]);
 
-  // Compute diff for edit mode
-  const diffResult: BlockDiffResult | null = useMemo(() => {
-    if (!draft.originalContent) {
-      // New document - no diff needed
-      return null;
-    }
+  // Handle diff resolved callback
+  const handleDiffResolved = useCallback((finalContent: JSONContent) => {
+    setResolvedContent(finalContent);
+  }, []);
 
-    try {
-      return blockDiff(
-        draft.originalContent as RawBlock | null,
-        draft.proposedContent as RawBlock | null,
-        {
-          ignoreAttrs: ["id", "updated_at", "created_at"],
-          mergeConsecutive: false,
-        },
-      );
-    } catch (err) {
-      console.error("[DraftPreviewModal] blockDiff error:", err);
-      return null;
-    }
-  }, [draft.originalContent, draft.proposedContent]);
+  // Handle diff progress callback
+  const handleDiffProgress = useCallback((resolved: number, total: number) => {
+    setDiffProgress({ resolved, total });
+  }, []);
 
-  // Changed entries (non-unchanged)
-  const changedEntries = useMemo(() => {
-    if (!diffResult) return [];
-    return diffResult.entries.filter((entry) => entry.status !== "unchanged");
-  }, [diffResult]);
-
-  // Resolution tracking
-  const resolvedCount = resolvedDiffs.size;
-  const allResolved =
-    changedEntries.length > 0 && resolvedCount >= changedEntries.length;
-
-  // Handle diff resolution
-  const handleResolveDiff = useCallback(
-    (entryIndex: number, action: DiffResolution) => {
-      setResolvedDiffs((prev) => {
-        const next = new Map(prev);
-        next.set(entryIndex, action);
-        return next;
-      });
-    },
-    [],
-  );
-
-  // Accept all remaining changes
-  const handleAcceptAllRemaining = useCallback(() => {
-    if (!diffResult) return;
-
-    setResolvedDiffs((prev) => {
-      const next = new Map(prev);
-      diffResult.entries.forEach((entry, index) => {
-        if (entry.status !== "unchanged" && !next.has(index)) {
-          next.set(index, "accept");
-        }
-      });
-      return next;
-    });
-  }, [diffResult]);
-
-  // Build final content based on resolutions
-  const buildFinalContent = useCallback((): JSONContent => {
-    if (!diffResult) {
-      // New document - use proposed content as is
-      return draft.proposedContent;
-    }
-
-    // Build content based on resolutions
-    const finalBlocks: JSONContent[] = [];
-
-    diffResult.entries.forEach((entry, index) => {
-      const resolution = resolvedDiffs.get(index);
-
-      if (entry.status === "unchanged") {
-        // Keep unchanged blocks
-        if (entry.original) {
-          finalBlocks.push(entry.original);
-        }
-      } else if (entry.status === "added") {
-        // Include added blocks if accepted (default) or not explicitly rejected
-        if (resolution !== "reject") {
-          if (entry.edited) {
-            finalBlocks.push(entry.edited);
-          }
-        }
-      } else if (entry.status === "removed") {
-        // Include removed blocks if rejected (i.e., keep original)
-        if (resolution === "reject") {
-          if (entry.original) {
-            finalBlocks.push(entry.original);
-          }
-        }
-        // If accepted, block is removed (not added to final)
-      } else if (entry.status === "modified") {
-        // Use edited version if accepted (default), original if rejected
-        if (resolution === "reject") {
-          if (entry.original) {
-            finalBlocks.push(entry.original);
-          }
-        } else {
-          if (entry.edited) {
-            finalBlocks.push(entry.edited);
-          }
-        }
-      }
-    });
-
-    return {
-      type: "doc",
-      content: finalBlocks,
-    };
-  }, [draft.proposedContent, diffResult, resolvedDiffs]);
+  // Check if can apply
+  const canApply = !isEditMode || diffProgress.total === 0 || resolvedContent !== null;
 
   // Handle apply
   const handleApply = useCallback(async () => {
     setApplying(true);
     try {
-      const finalContent = buildFinalContent();
+      // Determine final content
+      let finalContent: JSONContent;
+      if (isEditMode && resolvedContent) {
+        finalContent = resolvedContent;
+      } else {
+        finalContent = draft.proposedContent;
+      }
+
+      const isSaveAsNew = isEditMode && saveMode === "new";
+      
       const result = await applyDraft(projectKey, draft.id, {
         modifiedContent: finalContent,
-        parentId: !draft.docId ? parentId : undefined, // Only pass parentId for new documents
+        parentId: (!draft.docId || isSaveAsNew) ? parentId : undefined,
+        saveAsNew: isSaveAsNew,
+        newTitle: isSaveAsNew ? newTitle : undefined,
       });
-      message.success(result.isNew ? "文档已创建" : "文档已更新");
+      
+      if (isSaveAsNew) {
+        message.success("文档副本已创建");
+      } else {
+        message.success(result.isNew ? "文档已创建" : "文档已更新");
+      }
       onApplied(result.docId, result.isNew);
       onClose();
     } catch (err) {
@@ -226,7 +139,7 @@ function DraftPreviewModal({
     } finally {
       setApplying(false);
     }
-  }, [buildFinalContent, draft.id, draft.docId, onApplied, onClose, projectKey, parentId]);
+  }, [draft, isEditMode, resolvedContent, saveMode, projectKey, parentId, newTitle, onApplied, onClose]);
 
   // Handle reject
   const handleReject = useCallback(async () => {
@@ -254,6 +167,13 @@ function DraftPreviewModal({
     };
     return findNode(treeData) || id;
   }, [treeData]);
+
+  // Determine apply button text
+  const getApplyButtonText = () => {
+    if (!isEditMode) return "创建文档";
+    if (saveMode === "new") return "创建副本";
+    return "应用修改";
+  };
 
   // Render new document preview
   const renderNewDocumentPreview = () => (
@@ -296,136 +216,88 @@ function DraftPreviewModal({
     </div>
   );
 
-  // Render edit diff view
-  const renderEditDiffView = () => {
-    if (!diffResult) {
-      return (
-        <div className="draft-preview-content">
-          <div className="doc-viewer-state">无法计算差异</div>
-        </div>
-      );
-    }
+  // Render save mode selector (for edit mode)
+  const renderSaveModeSelector = () => (
+    <div className="draft-save-mode-section">
+      <div className="draft-save-mode-label">保存方式：</div>
+      <Radio.Group
+        value={saveMode}
+        onChange={(e) => setSaveMode(e.target.value)}
+        optionType="button"
+        buttonStyle="solid"
+        size="small"
+      >
+        <Radio.Button value="overwrite">
+          <EditOutlined /> 覆盖原文档
+        </Radio.Button>
+        <Radio.Button value="new">
+          <CopyOutlined /> 另存为新文档
+        </Radio.Button>
+      </Radio.Group>
 
+      {saveMode === "new" && (
+        <div className="draft-save-new-options">
+          <div className="draft-save-new-row">
+            <label className="draft-parent-label">
+              <FileTextOutlined />
+              <span>新文档标题：</span>
+            </label>
+            <Input
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              placeholder="输入新文档标题"
+              style={{ width: 300 }}
+            />
+          </div>
+          <div className="draft-save-new-row">
+            <label className="draft-parent-label">
+              <FolderOutlined />
+              <span>父文档：</span>
+            </label>
+            {loadingTree ? (
+              <Spin size="small" />
+            ) : (
+              <TreeSelect
+                value={parentId || ""}
+                onChange={(value) => setParentId(value || null)}
+                treeData={treeData}
+                placeholder="选择父文档"
+                allowClear
+                treeDefaultExpandAll
+                style={{ width: 300 }}
+                dropdownStyle={{ maxHeight: 400, overflow: "auto" }}
+              />
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  // Render edit diff view using DocumentDiffViewer
+  const renderEditDiffView = () => {
     return (
       <div className="draft-preview-content">
         <div className="draft-preview-header">
           <EditOutlined />
           <span>文档修改预览</span>
-          {changedEntries.length > 0 && (
-            <span className="draft-preview-progress">
-              已解决 {resolvedCount}/{changedEntries.length}
-            </span>
-          )}
         </div>
 
-        <div className="draft-preview-diff">
-          {diffResult.entries.length === 0 ? (
-            <div className="doc-viewer-state">未检测到变更</div>
-          ) : (
-            diffResult.entries.map((entry, index) => {
-              const originalDoc = entry.original
-                ? wrapBlockInDoc(entry.original)
-                : null;
-              const editedDoc = entry.edited ? wrapBlockInDoc(entry.edited) : null;
-              const isResolved = resolvedDiffs.has(index);
-              const resolution = resolvedDiffs.get(index);
+        {/* Save mode selector */}
+        {renderSaveModeSelector()}
 
-              if (entry.status === "unchanged") {
-                return (
-                  <div key={`unchanged-${index}`} className="draft-diff-plain">
-                    {originalDoc && (
-                      <RichTextViewer
-                        content={originalDoc as JSONContent}
-                        projectKey={projectKey}
-                      />
-                    )}
-                  </div>
-                );
-              }
-
-              return (
-                <div
-                  key={`${entry.status}-${index}`}
-                  className={`draft-diff-block draft-diff-${entry.status}${isResolved ? " resolved" : ""}`}
-                >
-                  <div className="draft-diff-label">
-                    {getStatusLabel(entry.status)}
-                    {isResolved && (
-                      <span className="draft-diff-resolution">
-                        {resolution === "accept" ? "✓ 已接受" : "✗ 已拒绝"}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="draft-diff-content">
-                    {entry.status === "modified" && (
-                      <>
-                        <div className="draft-diff-side draft-diff-original">
-                          <div className="draft-diff-side-label">原始</div>
-                          {originalDoc && (
-                            <RichTextViewer
-                              content={originalDoc as JSONContent}
-                              projectKey={projectKey}
-                            />
-                          )}
-                        </div>
-                        <div className="draft-diff-side draft-diff-edited">
-                          <div className="draft-diff-side-label">修改后</div>
-                          {editedDoc && (
-                            <RichTextViewer
-                              content={editedDoc as JSONContent}
-                              projectKey={projectKey}
-                            />
-                          )}
-                        </div>
-                      </>
-                    )}
-
-                    {entry.status === "added" && editedDoc && (
-                      <RichTextViewer
-                        content={editedDoc as JSONContent}
-                        projectKey={projectKey}
-                      />
-                    )}
-
-                    {entry.status === "removed" && originalDoc && (
-                      <RichTextViewer
-                        content={originalDoc as JSONContent}
-                        projectKey={projectKey}
-                      />
-                    )}
-                  </div>
-
-                  {!isResolved && (
-                    <div className="draft-diff-actions">
-                      <Button
-                        size="small"
-                        type="primary"
-                        icon={<CheckOutlined />}
-                        onClick={() => handleResolveDiff(index, "accept")}
-                      >
-                        接受
-                      </Button>
-                      <Button
-                        size="small"
-                        icon={<CloseOutlined />}
-                        onClick={() => handleResolveDiff(index, "reject")}
-                      >
-                        拒绝
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
+        {/* Diff viewer in confirm mode */}
+        <DocumentDiffViewer
+          originalContent={draft.originalContent!}
+          proposedContent={draft.proposedContent}
+          projectKey={projectKey}
+          mode="confirm"
+          onResolved={handleDiffResolved}
+          onProgress={handleDiffProgress}
+        />
       </div>
     );
   };
-
-  const isEditMode = draft.originalContent !== null;
-  const canApply = !isEditMode || changedEntries.length === 0 || allResolved;
 
   return (
     <Modal
@@ -443,17 +315,15 @@ function DraftPreviewModal({
       className="draft-preview-modal"
       footer={
         <div className="draft-preview-footer">
-          {isEditMode && changedEntries.length > 0 && !allResolved && (
-            <Button onClick={handleAcceptAllRemaining}>接受全部变更</Button>
-          )}
           <Button onClick={handleReject}>拒绝</Button>
           <Button
             type="primary"
             onClick={handleApply}
             loading={applying}
             disabled={!canApply}
+            icon={saveMode === "new" ? <CopyOutlined /> : undefined}
           >
-            {isEditMode ? "应用修改" : "创建文档"}
+            {getApplyButtonText()}
           </Button>
         </div>
       }

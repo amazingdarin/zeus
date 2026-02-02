@@ -77,8 +77,17 @@ export function blockDiff(
 
     if (pathEntry.type === "match") {
       // Matched by ID - check if content changed
-      const origBlock = normalizedOriginal[pathEntry.originalIndex!];
-      const editBlock = normalizedEdited[pathEntry.editedIndex!];
+      const origBlock = pathEntry.originalIndex != null 
+        ? normalizedOriginal[pathEntry.originalIndex] 
+        : null;
+      const editBlock = pathEntry.editedIndex != null 
+        ? normalizedEdited[pathEntry.editedIndex] 
+        : null;
+
+      // Skip if either block is missing
+      if (!origBlock || !editBlock) {
+        continue;
+      }
 
       if (blocksEqual(origBlock, editBlock)) {
         // Unchanged
@@ -93,19 +102,23 @@ export function blockDiff(
       }
     } else if (pathEntry.type === "added") {
       // Added block
-      const editBlock = normalizedEdited[pathEntry.editedIndex!];
+      const editBlock = pathEntry.editedIndex != null 
+        ? normalizedEdited[pathEntry.editedIndex] 
+        : null;
 
-      // Skip pure empty blocks
-      if (!isPureEmptyBlock(editBlock)) {
+      // Skip pure empty blocks or missing blocks
+      if (editBlock && !isPureEmptyBlock(editBlock)) {
         entry = createEntry("added", null, editBlock, opts);
         stats.added++;
       }
     } else if (pathEntry.type === "removed") {
       // Removed block
-      const origBlock = normalizedOriginal[pathEntry.originalIndex!];
+      const origBlock = pathEntry.originalIndex != null 
+        ? normalizedOriginal[pathEntry.originalIndex] 
+        : null;
 
-      // Skip pure empty blocks
-      if (!isPureEmptyBlock(origBlock)) {
+      // Skip pure empty blocks or missing blocks
+      if (origBlock && !isPureEmptyBlock(origBlock)) {
         entry = createEntry("removed", origBlock, null, opts);
         stats.removed++;
       }

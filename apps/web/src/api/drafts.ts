@@ -52,14 +52,27 @@ export async function applyDraft(
   options?: {
     modifiedContent?: JSONContent;
     parentId?: string | null;
+    saveAsNew?: boolean;
+    newTitle?: string;
   },
 ): Promise<{ docId: string; isNew: boolean }> {
-  const body: { modifiedContent?: JSONContent; parentId?: string | null } = {};
+  const body: { 
+    modifiedContent?: JSONContent; 
+    parentId?: string | null;
+    saveAsNew?: boolean;
+    newTitle?: string;
+  } = {};
   if (options?.modifiedContent) {
     body.modifiedContent = options.modifiedContent;
   }
   if (options?.parentId !== undefined) {
     body.parentId = options.parentId;
+  }
+  if (options?.saveAsNew !== undefined) {
+    body.saveAsNew = options.saveAsNew;
+  }
+  if (options?.newTitle !== undefined) {
+    body.newTitle = options.newTitle;
   }
 
   const response = await apiFetch(

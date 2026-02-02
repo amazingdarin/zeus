@@ -2358,14 +2358,15 @@ function mapDocumentMeta(data: DocumentDetail | undefined | null, fallbackId: st
 function mapDocumentDetail(data: DocumentDetail | undefined | null, fallbackId: string): DocumentData {
   const meta = mapDocumentMeta(data, fallbackId);
   const body = data?.body;
-  const contentPayload = body?.content ?? data?.content;
   let content: JSONContent | null = null;
   
-  if (contentPayload && typeof contentPayload === "object") {
-    if ("content" in contentPayload && Array.isArray(contentPayload.content)) {
-      content = contentPayload as JSONContent;
-    } else if ("content" in contentPayload && typeof contentPayload.content === "object" && contentPayload.content !== null) {
-      content = contentPayload.content as JSONContent;
+  // body is expected to be { type: "doc", content: [...] }
+  if (body && typeof body === "object" && "type" in body && "content" in body) {
+    content = body as JSONContent;
+  } else if (data?.content && typeof data.content === "object") {
+    // Fallback: try data.content directly
+    if ("type" in data.content && "content" in data.content) {
+      content = data.content as JSONContent;
     }
   }
   

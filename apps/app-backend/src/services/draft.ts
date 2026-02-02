@@ -90,6 +90,8 @@ export const draftService = {
   /**
    * Apply a draft (save to document store)
    * @param modifiedContent - Optional modified content (if user made changes in DIFF view)
+   * @param saveAsNew - If true, create a new document even if draft has docId (for "save as copy")
+   * @param newTitle - Title for the new document when saveAsNew is true
    */
   async apply(
     projectKey: string,
@@ -97,6 +99,8 @@ export const draftService = {
     options?: {
       modifiedContent?: JSONContent;
       parentId?: string | null;
+      saveAsNew?: boolean;
+      newTitle?: string;
     },
   ): Promise<{ docId: string; isNew: boolean }> {
     const draft = this.get(draftId);
@@ -115,13 +119,14 @@ export const draftService = {
     const contentToSave = options?.modifiedContent ?? draft.proposedContent;
     // Use provided parentId if specified, otherwise fall back to draft's parentId
     const parentId = options?.parentId !== undefined ? options.parentId : draft.parentId;
+    const saveAsNew = options?.saveAsNew ?? false;
 
     try {
       let docId: string;
       let isNew = false;
 
-      if (draft.docId) {
-        // Update existing document
+      if (draft.docId && !saveAsNew) {
+        // Update existing document (normal edit mode)
         const existingDoc = await documentStore.get(projectKey, draft.docId);
         await documentStore.save(projectKey, {
           meta: {
@@ -132,13 +137,19 @@ export const draftService = {
         });
         docId = draft.docId;
       } else {
-        // Create new document
+        // Create new document (either new document or save as copy)
+        const title = saveAsNew && options?.newTitle 
+          ? options.newTitle 
+          : saveAsNew 
+            ? `${draft.title} (副本)` 
+            : draft.title;
+        
         const newDoc = await documentStore.save(projectKey, {
           meta: {
             id: uuidv4(),
             schema_version: "v1",
-            title: draft.title,
-            slug: generateSlug(draft.title),
+            title,
+            slug: generateSlug(title),
             path: "",
             parent_id: parentId || null,
             created_at: new Date().toISOString(),

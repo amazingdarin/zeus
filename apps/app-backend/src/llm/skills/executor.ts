@@ -243,8 +243,7 @@ async function* executeDocCreate(
   projectKey: string,
   intent: SkillIntent,
 ): AsyncGenerator<SkillStreamChunk> {
-  const title = String(intent.args.title || "新文档");
-  const description = String(intent.args.description || "");
+  const description = String(intent.args.description || intent.args.title || "");
   const parentId = intent.args.parent_id as string | undefined;
 
   yield { type: "thinking", content: "正在生成文档内容..." };
@@ -257,13 +256,28 @@ async function* executeDocCreate(
       return;
     }
 
-    // Build prompt
+    // Build prompt - ask AI to generate both title and content
     const systemPrompt = buildCreateDocumentPrompt();
-    const userPrompt = `请创建一个标题为「${title}」的文档。
+    const userPrompt = `请根据以下需求创建一个文档：
 
-${description ? `文档内容要求：${description}` : "请根据标题生成合适的文档内容。"}
+${description || "创建一个新文档"}
 
-请直接输出 Tiptap JSON 格式的文档正文（body 部分），不要添加任何说明文字。`;
+请输出一个 JSON 对象，包含以下字段：
+1. "title": 一个简洁、准确的文档标题（不超过 50 个字符）
+2. "body": Tiptap JSON 格式的文档正文
+
+输出格式示例：
+\`\`\`json
+{
+  "title": "简洁的标题",
+  "body": {
+    "type": "doc",
+    "content": [...]
+  }
+}
+\`\`\`
+
+请直接输出 JSON，不要添加任何说明文字。`;
 
     // Generate content with streaming
     let fullContent = "";
@@ -284,9 +298,16 @@ ${description ? `文档内容要求：${description}` : "请根据标题生成�
       yield { type: "delta", content: chunk };
     }
 
-    // Parse and validate content
+    // Parse the response to extract title and body
+    const { title, body, error: extractError } = extractTitleAndBody(fullContent);
+    if (extractError) {
+      yield { type: "error", error: extractError };
+      return;
+    }
+
+    // Validate and process the body content
     const { content: proposedContent, error: parseError } = await parseAndValidateContent(
-      fullContent,
+      JSON.stringify(body),
       projectKey,
       intent,
       llmConfig,
@@ -297,12 +318,12 @@ ${description ? `文档内容要求：${description}` : "请根据标题生成�
       return;
     }
 
-    // Create draft
+    // Create draft with AI-generated title
     const draft = draftService.create({
       projectKey,
       docId: null,
       parentId: parentId || null,
-      title,
+      title: title || "新文档",
       originalContent: null,
       proposedContent: proposedContent!,
     });
@@ -313,6 +334,50 @@ ${description ? `文档内容要求：${description}` : "请根据标题生成�
     yield {
       type: "error",
       error: `生成文档失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Extract title and body from AI response
+ */
+function extractTitleAndBody(content: string): { 
+  title: string | null; 
+  body: JSONContent | null; 
+  error: string | null;
+} {
+  try {
+    // Try to extract JSON from markdown code block
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+    const jsonStr = jsonMatch ? jsonMatch[1].trim() : content.trim();
+    
+    const parsed = JSON.parse(jsonStr);
+    
+    if (typeof parsed !== "object" || parsed === null) {
+      return { title: null, body: null, error: "AI 返回的不是有效的 JSON 对象" };
+    }
+
+    const title = typeof parsed.title === "string" ? parsed.title.trim() : null;
+    const body = parsed.body;
+
+    if (!body || typeof body !== "object") {
+      // Maybe the AI returned just the body without wrapper
+      if (parsed.type === "doc" && Array.isArray(parsed.content)) {
+        return { title: title || "新文档", body: parsed as JSONContent, error: null };
+      }
+      return { title: null, body: null, error: "AI 返回的 JSON 缺少 body 字段" };
+    }
+
+    if (body.type !== "doc" || !Array.isArray(body.content)) {
+      return { title: null, body: null, error: "AI 返回的 body 不是有效的文档格式" };
+    }
+
+    return { title: title || "新文档", body: body as JSONContent, error: null };
+  } catch (err) {
+    return { 
+      title: null, 
+      body: null, 
+      error: `解析 AI 返回内容失败: ${err instanceof Error ? err.message : String(err)}` 
     };
   }
 }
@@ -393,6 +458,12 @@ ${originalMarkdown}
       return;
     }
 
+    // Debug logging
+    console.log("[doc-edit] originalContent type:", originalContent?.type);
+    console.log("[doc-edit] originalContent has content:", Array.isArray(originalContent?.content));
+    console.log("[doc-edit] proposedContent type:", proposedContent?.type);
+    console.log("[doc-edit] proposedContent has content:", Array.isArray((proposedContent as Record<string, unknown>)?.content));
+
     // Create draft
     const draft = draftService.create({
       projectKey,
@@ -467,7 +538,14 @@ async function* executeDocOptimizeFormat(
     const cleanedMarkdown = cleanMarkdownOutput(fullContent);
 
     // Convert to Tiptap JSON
-    const proposedContent = ensureBlockIds(markdownToTiptapJson(cleanedMarkdown)) as JSONContent;
+    const rawJson = markdownToTiptapJson(cleanedMarkdown);
+    const proposedContent = ensureBlockIds(rawJson) as JSONContent;
+    
+    // Debug logging
+    console.log("[doc-optimize-format] originalContent type:", originalContent?.type);
+    console.log("[doc-optimize-format] originalContent has content:", Array.isArray(originalContent?.content));
+    console.log("[doc-optimize-format] proposedContent type:", proposedContent?.type);
+    console.log("[doc-optimize-format] proposedContent has content:", Array.isArray((proposedContent as Record<string, unknown>)?.content));
 
     // Create draft
     const draft = draftService.create({

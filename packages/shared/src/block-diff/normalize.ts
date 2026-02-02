@@ -5,26 +5,47 @@
  */
 
 import type { RawBlock, NormalizedBlock } from "./types";
+import { createMarkdownFingerprint } from "./block-markdown";
+
+/**
+ * Check if a value is considered "empty" for comparison purposes.
+ * Empty values: null, undefined, empty string
+ * 
+ * Note: 0 is NOT considered empty because it may be a meaningful value
+ * (e.g., size: 0 means zero-byte file, which is different from size: undefined)
+ */
+function isEmptyValue(value: unknown, stripEmptyStrings = false): boolean {
+  if (value === null || value === undefined) {
+    return true;
+  }
+  if (stripEmptyStrings && value === "") {
+    return true;
+  }
+  return false;
+}
 
 /**
  * Recursively strips null and undefined values from an object or array.
  * Empty objects/arrays after stripping are preserved.
+ * 
+ * @param value - The value to strip
+ * @param stripEmptyStrings - If true, also strips empty string values
  */
-export function deepStripNulls<T>(value: T): T {
-  if (value === null || value === undefined) {
+export function deepStripNulls<T>(value: T, stripEmptyStrings = false): T {
+  if (isEmptyValue(value, stripEmptyStrings)) {
     return undefined as T;
   }
 
   if (Array.isArray(value)) {
     return value
-      .map((item) => deepStripNulls(item))
+      .map((item) => deepStripNulls(item, stripEmptyStrings))
       .filter((item) => item !== undefined) as T;
   }
 
   if (typeof value === "object") {
     const result: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(value)) {
-      const stripped = deepStripNulls(val);
+      const stripped = deepStripNulls(val, stripEmptyStrings);
       if (stripped !== undefined) {
         result[key] = stripped;
       }
@@ -96,7 +117,12 @@ export function extractTopLevelBlocks(
  * Check if a block is "pure empty" - an empty paragraph with no meaningful content.
  * Used to filter out trivial empty blocks from diff.
  */
-export function isPureEmptyBlock(block: NormalizedBlock): boolean {
+export function isPureEmptyBlock(block: NormalizedBlock | null | undefined): boolean {
+  // Handle null/undefined blocks
+  if (!block) {
+    return true; // Treat missing blocks as empty
+  }
+  
   // Only paragraphs can be considered "pure empty"
   if (block.type !== "paragraph") {
     return false;
@@ -146,14 +172,11 @@ export function stableStringify(value: unknown): string {
 /**
  * Create a comparison key for a normalized block (excluding id).
  * Used to determine if two blocks with the same id have different content.
+ * 
+ * Uses Markdown representation as canonical form for comparison.
+ * This ensures content-equivalent blocks are considered equal even if
+ * their JSON structure differs (e.g., different attribute order, empty strings).
  */
 export function blockContentKey(block: NormalizedBlock): string {
-  const forComparison = {
-    type: block.type,
-    attrs: block.attrs,
-    content: block.content,
-    text: block.text,
-    marks: block.marks,
-  };
-  return stableStringify(deepStripNulls(forComparison));
+  return createMarkdownFingerprint(block);
 }
