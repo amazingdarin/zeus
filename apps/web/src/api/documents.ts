@@ -453,16 +453,21 @@ export type DocumentSuggestion = {
 
 /**
  * Get document suggestions matching a query
+ * @param parentId - Optional: Only search children of this parent ("root" or "" for root level)
  */
 export const suggestDocuments = async (
     projectKey: string,
     query: string,
     limit = 10,
+    parentId?: string,
 ): Promise<DocumentSuggestion[]> => {
     const params = new URLSearchParams({
         q: query,
         limit: String(limit),
     });
+    if (parentId !== undefined) {
+        params.set("parentId", parentId);
+    }
     const response = await apiFetch(
         `/api/projects/${encodeURIComponent(projectKey)}/documents/suggest?${params.toString()}`,
     );

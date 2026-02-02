@@ -130,15 +130,18 @@ export const buildRouter = () => {
 
   /**
    * Suggest documents matching a query (for @ mention autocomplete)
-   * GET /projects/:projectKey/documents/suggest?q=xxx&limit=10
+   * GET /projects/:projectKey/documents/suggest?q=xxx&limit=10&parentId=xxx
+   * @param parentId - Optional: Only search children of this parent ("root" or "" for root level)
    */
   router.get("/projects/:projectKey/documents/suggest", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
       const query = String(req.query.q || "");
       const limit = Math.min(Math.max(1, Number(req.query.limit) || 10), 50);
+      // parentId: undefined = search all, "root" or "" = root level only, other = children of that doc
+      const parentId = req.query.parentId !== undefined ? String(req.query.parentId) : undefined;
 
-      const suggestions = await documentStore.suggest(projectKey, query, limit);
+      const suggestions = await documentStore.suggest(projectKey, query, limit, parentId);
       success(res, suggestions);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Suggest failed";

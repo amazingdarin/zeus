@@ -3,7 +3,7 @@ import path from "node:path";
 import { v4 as uuidv4 } from "uuid";
 
 import { indexManager } from "./index-manager.js";
-import type { Document, DocumentMeta, TreeItem } from "./types.js";
+import type { Document, DocumentMeta, TreeItem, CachedDoc } from "./types.js";
 
 const REPO_ROOT = process.env.REPO_ROOT || "./data/repos";
 
@@ -604,11 +604,13 @@ export const documentStore = {
   /**
    * Suggest documents matching a query string
    * Matches against document titles and title paths
+   * @param parentId - Optional: Only search children of this parent (empty string or "root" = root level)
    */
   async suggest(
     projectKey: string,
     query: string,
     limit = 10,
+    parentId?: string,
   ): Promise<Array<{
     id: string;
     title: string;
@@ -618,7 +620,21 @@ export const documentStore = {
     const root = projectRoot(projectKey);
     await indexManager.ensure(projectKey, root);
 
-    const allDocs = indexManager.getAll(projectKey);
+    // If parentId is provided, only get children of that parent
+    let docsToSearch: Array<[string, CachedDoc]>;
+    if (parentId !== undefined) {
+      const normalizedParentId = parentId === "" || parentId === "root" ? "root" : parentId;
+      const children = await this.getChildren(projectKey, normalizedParentId);
+      docsToSearch = children
+        .map((child) => {
+          const cached = indexManager.get(projectKey, child.id);
+          return cached ? [child.id, cached] as [string, CachedDoc] : null;
+        })
+        .filter((item): item is [string, CachedDoc] => item !== null);
+    } else {
+      docsToSearch = Array.from(indexManager.getAll(projectKey));
+    }
+
     const results: Array<{
       id: string;
       title: string;
@@ -630,7 +646,7 @@ export const documentStore = {
     const queryLower = query.toLowerCase().trim();
     const queryParts = queryLower.split("/").filter(Boolean);
 
-    for (const [docId, cached] of allDocs) {
+    for (const [docId, cached] of docsToSearch) {
       const titlePath = indexManager.buildTitlePath(projectKey, docId);
       const titlePathLower = titlePath.toLowerCase();
       const titleLower = cached.title.toLowerCase();

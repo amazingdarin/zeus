@@ -4733,6 +4733,95 @@ body {
   color: var(--muted);
 }
 
+.mention-dropdown-nav-hint {
+  font-size: 12px;
+  color: var(--muted);
+  opacity: 0.6;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.mention-dropdown-item:hover .mention-dropdown-nav-hint,
+.mention-dropdown-item.selected .mention-dropdown-nav-hint {
+  opacity: 1;
+  color: var(--accent);
+}
+
+/* Breadcrumb Navigation */
+.mention-dropdown-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-secondary, var(--surface));
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.mention-dropdown-breadcrumb-item {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.mention-dropdown-breadcrumb-item:hover {
+  background: var(--hover-bg);
+  color: var(--ink);
+}
+
+.mention-dropdown-breadcrumb-item.current {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.mention-dropdown-breadcrumb-home {
+  color: var(--accent);
+}
+
+.mention-dropdown-breadcrumb-home:hover {
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.mention-dropdown-breadcrumb-segment {
+  display: inline-flex;
+  align-items: center;
+}
+
+.mention-dropdown-breadcrumb-sep {
+  color: var(--muted);
+  opacity: 0.5;
+  margin: 0 2px;
+}
+
+.mention-dropdown-breadcrumb-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  margin-left: auto;
+  border: none;
+  background: var(--hover-bg);
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.mention-dropdown-breadcrumb-back:hover {
+  background: var(--active-bg);
+  color: var(--ink);
+}
+
 /* ============================================
    @ Mention Tags
    ============================================ */
