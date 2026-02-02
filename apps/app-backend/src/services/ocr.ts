@@ -495,7 +495,7 @@ async function parseWithLLMVision(request: OCRRequest): Promise<OCRResponse> {
         },
       ],
       temperature: 0.1, // Low temperature for more deterministic output
-      maxTokens: 4096,
+      maxOutputTokens: 4096,  // AI SDK 6.x renamed maxTokens to maxOutputTokens
     });
 
     const rawResponse = result.text;
@@ -672,7 +672,7 @@ export async function getProviderStatus(): Promise<OCRProviderStatus> {
 
   return {
     llm: {
-      available: llmVisionAvailable || llmFallbackAvailable,
+      available: !!(llmVisionAvailable || llmFallbackAvailable),  // Ensure boolean type
       model: llmVisionAvailable ? visionConfig?.defaultModel : llmConfig?.defaultModel,
     },
     paddle: {

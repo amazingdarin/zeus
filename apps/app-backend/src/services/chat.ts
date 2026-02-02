@@ -4,10 +4,13 @@ import { knowledgeSearch } from "../knowledge/search.js";
 import { documentStore } from "../storage/document-store.js";
 import type { SearchResult } from "../storage/types.js";
 import {
-  detectSkillIntent,
   executeSkillWithStream,
+  analyzeTrigger,
+  extractDocIdsFromArgs,
   type SkillStreamChunk,
   type DocumentDraft,
+  type SkillIntent,
+  type TriggerResult,
 } from "../llm/skills/index.js";
 
 export type ChatMessage = {
@@ -167,6 +170,11 @@ export function getRun(runId: string): ChatRun | null {
 
 /**
  * Stream a chat run response
+ *
+ * Uses Hybrid Trigger to determine the appropriate mode:
+ * - command: Explicit slash command (strong determinism)
+ * - natural: Natural language with LLM tool selection
+ * - chat: Regular conversation (RAG-based)
  */
 export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk> {
   const run = activeRuns.get(runId);
@@ -181,50 +189,201 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
   // Extract user's latest message
   const userQuery = run.messages[run.messages.length - 1]?.content || "";
 
-  // Check for skill intent first
-  const skillIntent = detectSkillIntent(userQuery, run.docIds);
-  if (skillIntent) {
-    console.log("[chat] Detected skill intent:", skillIntent.skill);
-    
-    try {
-      // Execute skill with streaming
-      for await (const chunk of executeSkillWithStream(run.projectKey, skillIntent)) {
-        // Map skill chunks to chat chunks
+  // Analyze trigger mode
+  const trigger = await analyzeTrigger(userQuery, run.docIds);
+  console.log(`[chat] Trigger mode: ${trigger.mode}`);
+
+  // Dispatch based on mode
+  switch (trigger.mode) {
+    case "command":
+      yield* handleCommandMode(run, trigger);
+      return;
+
+    case "natural":
+      yield* handleNaturalMode(run, trigger, userQuery);
+      return;
+
+    case "chat":
+    default:
+      yield* handleChatMode(run, userQuery);
+      return;
+  }
+}
+
+/**
+ * Handle command mode - direct skill execution (strong determinism)
+ */
+async function* handleCommandMode(
+  run: ChatRun,
+  trigger: TriggerResult,
+): AsyncGenerator<ChatStreamChunk> {
+  if (!trigger.intent) {
+    yield { type: "error", error: "No skill intent detected" };
+    return;
+  }
+
+  console.log("[chat] Command mode, executing skill:", trigger.intent.skill);
+
+  try {
+    for await (const chunk of executeSkillWithStream(run.projectKey, trigger.intent)) {
+      const mappedChunk = mapSkillChunkToChatChunk(chunk);
+      yield mappedChunk;
+
+      // If it's a draft, add a summary to session history
+      if (chunk.type === "draft") {
+        addDraftToHistory(run.sessionId, chunk.draft);
+      }
+    }
+
+    run.status = "completed";
+    run.updatedAt = Date.now();
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : "Skill execution failed";
+    console.error("[chat] Command mode error:", errorMessage);
+
+    run.status = "failed";
+    run.updatedAt = Date.now();
+
+    yield { type: "error", error: errorMessage };
+  }
+}
+
+/**
+ * Handle natural language mode - LLM selects tools
+ */
+async function* handleNaturalMode(
+  run: ChatRun,
+  trigger: TriggerResult,
+  userQuery: string,
+): AsyncGenerator<ChatStreamChunk> {
+  const config = await getLLMConfig();
+  if (!config?.enabled || !config.defaultModel) {
+    // Fallback to chat mode if no LLM configured
+    console.log("[chat] No LLM configured, falling back to chat mode");
+    yield* handleChatMode(run, userQuery);
+    return;
+  }
+
+  if (!trigger.tools || trigger.tools.length === 0) {
+    // No tools available, fallback to chat mode
+    console.log("[chat] No tools available, falling back to chat mode");
+    yield* handleChatMode(run, userQuery);
+    return;
+  }
+
+  console.log(
+    "[chat] Natural mode with tools:",
+    trigger.tools.map((t) => t.function.name),
+  );
+
+  try {
+    // Build messages with tool-aware system prompt
+    const systemPrompt = trigger.toolSystemPrompt || buildDefaultToolPrompt();
+    const messages = [
+      { role: "system" as const, content: systemPrompt },
+      ...run.messages.map((m) => ({
+        role: m.role as "user" | "assistant" | "system",
+        content: m.content,
+      })),
+    ];
+
+    // Add context about mentioned documents
+    if (run.docIds && run.docIds.length > 0) {
+      const docContext = `用户通过 @ 提到的文档 ID: ${run.docIds.join(", ")}`;
+      messages.push({
+        role: "system",
+        content: docContext,
+      });
+    }
+
+    // Call LLM with tools
+    yield { type: "thinking", content: "正在分析请求..." };
+
+    const response = await llmGateway.chatWithTools({
+      provider: config.providerId,
+      model: config.defaultModel,
+      messages,
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      tools: trigger.tools,
+      tool_choice: "auto",
+    });
+
+    // Check if LLM selected a tool
+    if (response.toolCalls && response.toolCalls.length > 0) {
+      const toolCall = response.toolCalls[0];
+      console.log("[chat] LLM selected tool:", toolCall.function.name);
+
+      // Parse arguments
+      let args: Record<string, unknown> = {};
+      try {
+        args = JSON.parse(toolCall.function.arguments);
+      } catch {
+        console.warn("[chat] Failed to parse tool arguments:", toolCall.function.arguments);
+      }
+
+      // Build intent from tool call
+      const intent: SkillIntent = {
+        skill: toolCall.function.name,
+        command: `/${toolCall.function.name}`,
+        args,
+        rawMessage: userQuery,
+        docIds: extractDocIdsFromArgs(args, run.docIds),
+      };
+
+      yield { type: "thinking", content: `正在执行 ${toolCall.function.name}...` };
+
+      // Execute the selected skill
+      for await (const chunk of executeSkillWithStream(run.projectKey, intent)) {
         const mappedChunk = mapSkillChunkToChatChunk(chunk);
         yield mappedChunk;
 
-        // If it's a draft, add a summary to session history
         if (chunk.type === "draft") {
-          const history = sessionMessages.get(run.sessionId);
-          if (history) {
-            const draftType = chunk.draft.docId ? "编辑" : "创建";
-            history.push({
-              role: "assistant",
-              content: `已生成${draftType}文档「${chunk.draft.title}」的草稿，请查看并确认。`,
-            });
-          }
+          addDraftToHistory(run.sessionId, chunk.draft);
         }
       }
-
-      run.status = "completed";
-      run.updatedAt = Date.now();
-      return;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Skill execution failed";
-      console.error("[chat] Skill execution error:", errorMessage);
+    } else {
+      // LLM decided not to use any tool, return its text response
+      console.log("[chat] LLM did not select any tool, returning text response");
       
-      run.status = "failed";
-      run.updatedAt = Date.now();
+      if (response.content) {
+        yield { type: "delta", content: response.content };
+        
+        // Add to history
+        const history = sessionMessages.get(run.sessionId);
+        if (history) {
+          history.push({ role: "assistant", content: response.content });
+        }
+      }
       
-      yield { type: "error", error: errorMessage };
-      return;
+      yield { type: "done", message: response.content };
     }
-  }
 
-  // Get LLM config for regular chat
+    run.status = "completed";
+    run.updatedAt = Date.now();
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : "Natural mode failed";
+    console.error("[chat] Natural mode error:", errorMessage);
+
+    // Fallback to chat mode on error
+    console.log("[chat] Falling back to chat mode due to error");
+    yield* handleChatMode(run, userQuery);
+  }
+}
+
+/**
+ * Handle chat mode - regular RAG conversation
+ */
+async function* handleChatMode(
+  run: ChatRun,
+  userQuery: string,
+): AsyncGenerator<ChatStreamChunk> {
   const config = await getLLMConfig();
   if (!config || !config.enabled) {
-    yield { type: "error", error: "No LLM provider configured. Please configure an LLM provider in settings." };
+    yield {
+      type: "error",
+      error: "No LLM provider configured. Please configure an LLM provider in settings.",
+    };
     run.status = "failed";
     run.updatedAt = Date.now();
     return;
@@ -251,7 +410,7 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
           text: userQuery,
           mode: "hybrid",
           limit: 5,
-          doc_ids: run.docIds,  // Apply document scope filter
+          doc_ids: run.docIds,
         },
       );
 
@@ -261,7 +420,6 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
         sources = contextData.sources;
       }
     } catch (searchErr) {
-      // Log but don't fail - continue without RAG context
       console.warn("[chat] Knowledge search failed:", searchErr);
     }
 
@@ -307,11 +465,11 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
     yield { type: "done", message: fullResponse, sources };
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : "Chat failed";
-    console.error("[chat] Stream error:", errorMessage);
-    
+    console.error("[chat] Chat mode error:", errorMessage);
+
     run.status = "failed";
     run.updatedAt = Date.now();
-    
+
     yield { type: "error", error: errorMessage };
   }
 }
@@ -337,6 +495,31 @@ function mapSkillChunkToChatChunk(chunk: SkillStreamChunk): ChatStreamChunk {
 }
 
 /**
+ * Add draft summary to session history
+ */
+function addDraftToHistory(sessionId: string, draft: DocumentDraft): void {
+  const history = sessionMessages.get(sessionId);
+  if (history) {
+    const draftType = draft.docId ? "编辑" : "创建";
+    history.push({
+      role: "assistant",
+      content: `已生成${draftType}文档「${draft.title}」的草稿，请查看并确认。`,
+    });
+  }
+}
+
+/**
+ * Build default tool-aware system prompt
+ */
+function buildDefaultToolPrompt(): string {
+  return `你是 Zeus 文档管理系统的智能助手。
+
+你可以使用工具帮助用户完成文档操作。
+当用户明确表达创建、编辑、读取、优化文档的意图时，选择合适的工具。
+如果用户只是提问或闲聊，直接回答，不要使用工具。`;
+}
+
+/**
  * Build context from search results
  */
 async function buildContextFromResults(
@@ -347,7 +530,6 @@ async function buildContextFromResults(
   const contextParts: string[] = [];
 
   for (const result of results) {
-    // Try to get document title
     let title = result.metadata?.title || "";
     if (!title) {
       try {
@@ -366,7 +548,6 @@ async function buildContextFromResults(
       score: result.score,
     });
 
-    // Build context text with block location hint
     const locationHint = result.block_id ? ` (block: ${result.block_id.slice(0, 8)}...)` : "";
     contextParts.push(`【${title}${locationHint}】\n${result.snippet}`);
   }

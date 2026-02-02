@@ -1,4 +1,9 @@
 import mammoth from "mammoth";
+
+// mammoth types are incomplete, extend with convertToMarkdown
+const mammothExtended = mammoth as typeof mammoth & {
+  convertToMarkdown: (input: { buffer: Buffer }) => Promise<{ value: string }>;
+};
 import pdf from "pdf-parse";
 import TurndownService from "turndown";
 import { JSDOM } from "jsdom";
@@ -30,7 +35,7 @@ export const convertDocument = async (
   }
 
   if (source === "docx") {
-    const result = await mammoth.convertToMarkdown({ buffer: file.buffer });
+    const result = await mammothExtended.convertToMarkdown({ buffer: file.buffer });
     return { content: result.value || "", output_type: "markdown" };
   }
 

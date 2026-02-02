@@ -176,6 +176,7 @@ const DEFAULT_MODELS: Record<LLMProviderId, LLMModelConfig[]> = {
     },
   ],
   "openai-compatible": [],
+  paddleocr: [],  // PaddleOCR is a special provider for OCR only, no LLM models
 };
 
 /**
@@ -413,7 +414,7 @@ class ProviderRegistry {
         const openai = createOpenAI({
           apiKey: apiKey || "ollama", // Ollama doesn't need a real key, but SDK requires one
           baseURL: ollamaBaseUrl,
-          compatibility: "compatible",
+          // Note: compatibility option removed in AI SDK 6.x, use .chat() to force chat completions API
         });
         // Use .chat() to force chat completions API instead of responses API
         return openai.chat(modelId);
@@ -429,7 +430,7 @@ class ProviderRegistry {
         const openai = createOpenAI({
           apiKey: apiKey || config?.apiKey || "",
           baseURL: effectiveBaseUrl,
-          compatibility: "compatible",
+          // Note: compatibility option removed in AI SDK 6.x, use .chat() to force chat completions API
         });
         // Use .chat() to force Chat Completions API instead of Responses API
         // Most OpenAI-compatible providers (DashScope, DeepSeek, etc.) don't support the Responses API
@@ -469,7 +470,7 @@ class ProviderRegistry {
         const openai = createOpenAI({
           apiKey: apiKey || config?.apiKey,
           baseURL: baseUrl || config?.baseUrl,
-          compatibility: providerId === "openai-compatible" ? "compatible" : "strict",
+          // Note: compatibility option removed in AI SDK 6.x
         });
         return openai.embedding(modelId);
       }
@@ -483,7 +484,7 @@ class ProviderRegistry {
         const openai = createOpenAI({
           apiKey: apiKey || "ollama",
           baseURL: ollamaBaseUrl,
-          compatibility: "compatible",
+          // Note: compatibility option removed in AI SDK 6.x
         });
         return openai.embedding(modelId);
       }

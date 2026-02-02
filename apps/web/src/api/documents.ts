@@ -310,6 +310,8 @@ export const importGit = async (
     directories: Number(result.directories ?? 0),
     files: Number(result.files ?? 0),
     skipped: Number(result.skipped ?? 0),
+    converted: Number(result.converted ?? 0),
+    fallback: Number(result.fallback ?? 0),
   };
 };
 

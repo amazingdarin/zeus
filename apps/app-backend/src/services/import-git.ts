@@ -1,6 +1,6 @@
 import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
-import simpleGit from "simple-git";
+import { simpleGit } from "simple-git";
 import { v4 as uuidv4 } from "uuid";
 
 import { convertDocument } from "./convert.js";
@@ -494,7 +494,7 @@ const createSmartDocument = async (
       fileBlock,
       ...(Array.isArray(tiptapContent.content) ? tiptapContent.content : []),
     ],
-  };
+  } as import("@tiptap/core").JSONContent;
   const contentWithIds = ensureBlockIds(rawContent);
 
   const doc: Document = {
@@ -584,7 +584,7 @@ function buildFileBlockDoc(assetMeta: {
   const doc = {
     type: "doc",
     content: [buildFileBlockNode(assetMeta)],
-  };
+  } as import("@tiptap/core").JSONContent;
   return ensureBlockIds(doc);
 }
 

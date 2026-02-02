@@ -30,7 +30,10 @@ import { ensureBlockIds } from "../../utils/block-id.js";
 const MAX_RETRIES = 2;
 
 /**
- * Detect skill intent from user message (sync version - doesn't check enabled status)
+ * Detect skill intent from user message (sync version - only checks explicit commands)
+ *
+ * @deprecated Use `analyzeTrigger` from trigger.ts for natural language support.
+ * This function only detects explicit slash commands for backward compatibility.
  */
 export function detectSkillIntent(
   message: string,
@@ -38,10 +41,11 @@ export function detectSkillIntent(
 ): SkillIntent | null {
   const trimmed = message.trim();
 
-  // Check for explicit slash commands
+  // Check for explicit slash commands only
+  // Natural language patterns are now handled by analyzeTrigger + LLM tool selection
+
   if (trimmed.startsWith("/doc-create")) {
     const rest = trimmed.slice("/doc-create".length).trim();
-    // If user specified documents with @, use the first one as parent
     const parentId = docIds && docIds.length > 0 ? docIds[0] : null;
     return {
       skill: "doc-create",
@@ -93,45 +97,8 @@ export function detectSkillIntent(
     };
   }
 
-  // Check for natural language patterns with @ document reference
-  if (docIds && docIds.length > 0) {
-    const editPatterns = [
-      /修改|编辑|更新|调整|补充|添加|删除|移除|改进|优化|重写/,
-    ];
-
-    for (const pattern of editPatterns) {
-      if (pattern.test(trimmed)) {
-        return {
-          skill: "doc-edit",
-          command: "",
-          args: { instructions: trimmed },
-          rawMessage: message,
-          docIds,
-        };
-      }
-    }
-  }
-
-  // Check for creation patterns (@ reference optional, used as parent if provided)
-  const createPatterns = [
-    /^(创建|新建|写|生成|帮我写|写一个|创建一个).*(文档|文章|说明|指南|教程)/,
-    /^(请|帮我)?(创建|新建|写|生成).*/,
-  ];
-
-  for (const pattern of createPatterns) {
-    if (pattern.test(trimmed)) {
-      // If user specified documents with @, use the first one as parent
-      const parentId = docIds && docIds.length > 0 ? docIds[0] : null;
-      return {
-        skill: "doc-create",
-        command: "",
-        args: { title: extractTitle(trimmed), description: trimmed, parent_id: parentId },
-        rawMessage: message,
-        docIds,
-      };
-    }
-  }
-
+  // No explicit command found
+  // Natural language is now handled by analyzeTrigger in trigger.ts
   return null;
 }
 

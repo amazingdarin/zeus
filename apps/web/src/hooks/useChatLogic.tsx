@@ -226,8 +226,8 @@ export type UseChatLogicReturn = {
   projectKey: string;
 
   // Refs
-  messagesRef: RefObject<HTMLDivElement>;
-  inputRef: RefObject<HTMLTextAreaElement>;
+  messagesRef: RefObject<HTMLDivElement | null>;
+  inputRef: RefObject<HTMLTextAreaElement | null>;
 
   // Actions
   setInput: (value: string) => void;

@@ -49,3 +49,14 @@ export {
   ensureBlockIds,
   type ValidationResult,
 } from "./validator.js";
+
+// Skill registry (Tool-Augmented LLM)
+export { skillRegistry, type OpenAITool } from "./registry.js";
+
+// Hybrid trigger (Tool-Augmented LLM)
+export {
+  analyzeTrigger,
+  extractDocIdsFromArgs,
+  type TriggerMode,
+  type TriggerResult,
+} from "./trigger.js";

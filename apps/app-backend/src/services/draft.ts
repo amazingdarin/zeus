@@ -133,7 +133,7 @@ export const draftService = {
             ...existingDoc.meta,
             title: draft.title,
           },
-          body: contentToSave,
+          body: { type: "tiptap", content: contentToSave },
         });
         docId = draft.docId;
       } else {
@@ -151,11 +151,11 @@ export const draftService = {
             title,
             slug: generateSlug(title),
             path: "",
-            parent_id: parentId || null,
+            parent_id: parentId ?? "root",  // Use "root" instead of null
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           },
-          body: contentToSave,
+          body: { type: "tiptap", content: contentToSave },
         });
         docId = newDoc.meta.id;
         isNew = true;

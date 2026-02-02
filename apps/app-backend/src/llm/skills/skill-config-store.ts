@@ -153,6 +153,22 @@ export const skillConfigStore = {
   },
 
   /**
+   * Get names of enabled skills
+   * Returns all skill names if database is not available (default to all enabled)
+   */
+  async getEnabledSkillNames(): Promise<string[]> {
+    try {
+      // Get all skill info which includes both definitions and configs
+      const skillInfos = await this.listSkillInfo();
+      // Filter to enabled skills and return their names
+      return skillInfos.filter((s) => s.config.enabled).map((s) => s.name);
+    } catch {
+      // If error, return all skill names (default to all enabled)
+      return allSkillDefinitions.map((d) => d.name);
+    }
+  },
+
+  /**
    * Get complete skill info (definition + config)
    */
   async listSkillInfo(): Promise<SkillInfo[]> {

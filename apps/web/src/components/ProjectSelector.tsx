@@ -118,7 +118,7 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
     setRebuilding(true);
     try {
       const data = await rebuildProjectRag(activeProject.key, { with_summary: withSummary });
-      const taskId = data.task_id;
+      const taskId = data.taskId;
       const status = data.status;
       if (taskId) {
         localStorage.setItem(rebuildStorageKey(activeProject.key), taskId);

@@ -6,7 +6,7 @@
  * - confirm: Interactive diff with accept/reject actions (for AI draft preview)
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "antd";
 import { CheckOutlined, CloseOutlined } from "@ant-design/icons";
 import type { JSONContent } from "@tiptap/react";
@@ -367,8 +367,8 @@ export default function DocumentDiffViewer({
         switch (node.type) {
           case 'heading': {
             const level = (node.attrs?.level as number) || 1;
-            const Tag = `h${level}` as keyof JSX.IntrinsicElements;
-            return <Tag key={key}>{children}</Tag>;
+            // Use React.createElement for dynamic heading tags to avoid JSX type issues
+            return React.createElement(`h${level}`, { key }, children);
           }
           case 'paragraph':
             return <p key={key}>{children && (Array.isArray(children) && children.length > 0) ? children : '\u00A0'}</p>;

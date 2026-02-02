@@ -353,14 +353,16 @@ function getSerializer(): MarkdownSerializer {
         state.write("```");
         state.closeBlock(node);
       },
-    } as Record<string, unknown>,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any,
     {
       bold: baseMarks.strong,
       italic: baseMarks.em,
       strike: baseMarks.del,
       code: baseMarks.code,
       link: baseMarks.link,
-    } as Record<string, unknown>,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any,
   );
 
   return cachedSerializer;

@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
+import type { JSONContent } from "@tiptap/core";
 
 import { convertDocument } from "./services/convert.js";
 import { fetchUrl } from "./services/fetch-url.js";
@@ -249,7 +250,7 @@ export const buildRouter = () => {
         },
         body: {
           ...body.body,
-          content: body.body?.content ? ensureBlockIds(body.body.content) : body.body?.content,
+          content: body.body?.content ? ensureBlockIds(body.body.content as JSONContent) : body.body?.content,
         },
       };
 
@@ -289,7 +290,7 @@ export const buildRouter = () => {
         },
         body: {
           ...updatedBody,
-          content: updatedBody?.content ? ensureBlockIds(updatedBody.content) : updatedBody?.content,
+          content: updatedBody?.content ? ensureBlockIds(updatedBody.content as JSONContent) : updatedBody?.content,
         },
       };
 
@@ -1732,9 +1733,9 @@ export const buildRouter = () => {
       };
 
       // Validate modified content if provided
-      let validatedContent = undefined;
+      let validatedContent: JSONContent | undefined = undefined;
       if (modifiedContent && typeof modifiedContent === "object") {
-        validatedContent = modifiedContent as { type: string; content?: unknown[] };
+        validatedContent = modifiedContent as JSONContent;
       }
 
       const result = await draftService.apply(projectKey, draftId, {

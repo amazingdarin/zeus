@@ -23,7 +23,7 @@ export const initPool = async (): Promise<void> => {
   }
 };
 
-export const query = async <T = Record<string, unknown>>(
+export const query = async <T extends pg.QueryResultRow = Record<string, unknown>>(
   text: string,
   params?: unknown[],
 ): Promise<pg.QueryResult<T>> => {

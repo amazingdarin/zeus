@@ -44,7 +44,7 @@ export function deepStripNulls<T>(value: T, stripEmptyStrings = false): T {
 
   if (typeof value === "object") {
     const result: Record<string, unknown> = {};
-    for (const [key, val] of Object.entries(value)) {
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
       const stripped = deepStripNulls(val, stripEmptyStrings);
       if (stripped !== undefined) {
         result[key] = stripped;
