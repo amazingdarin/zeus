@@ -3,7 +3,43 @@
 import { NodeViewWrapper } from "@tiptap/react"
 import type { NodeViewProps } from "@tiptap/react"
 import abcjs from "abcjs"
-import { useRef, useState, useCallback, useEffect } from "react"
+import { useRef, useState, useCallback, useEffect, useMemo } from "react"
+
+/**
+ * Normalize ABC notation to ensure it has minimal required headers.
+ * ABC notation requires at least X: (tune number) and K: (key) to render.
+ */
+function normalizeAbc(abc: string): string {
+  const trimmed = abc.trim()
+  if (!trimmed) return ""
+  
+  // Check if it already has required headers
+  const hasX = /^X:\s*\d+/m.test(trimmed)
+  const hasK = /^K:/m.test(trimmed)
+  
+  if (hasX && hasK) {
+    return trimmed
+  }
+  
+  // Build minimal headers for simple notation
+  let normalized = ""
+  if (!hasX) {
+    normalized += "X:1\n"
+  }
+  if (!hasK) {
+    // Add default key signature
+    normalized += "K:C\n"
+  }
+  
+  // If the input already has some headers, preserve them
+  if (hasX || hasK) {
+    normalized = trimmed
+  } else {
+    normalized += trimmed
+  }
+  
+  return normalized
+}
 
 export function MusicNodeView({
   node,
@@ -19,6 +55,9 @@ export function MusicNodeView({
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
+  // Normalize ABC for rendering
+  const normalizedAbc = useMemo(() => normalizeAbc(abc), [abc])
+
   // Focus input when entering edit mode
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -29,13 +68,13 @@ export function MusicNodeView({
 
   // Render ABC notation using abcjs
   useEffect(() => {
-    if (!isEditing && containerRef.current && abc) {
+    if (!isEditing && containerRef.current && normalizedAbc) {
       try {
-        const result = abcjs.renderAbc(containerRef.current, abc, {
+        const result = abcjs.renderAbc(containerRef.current, normalizedAbc, {
           responsive: "resize",
           add_classes: true,
-          staffwidth: display ? 600 : 300,
-          scale: display ? 1 : 0.8,
+          staffwidth: display ? 600 : 200,
+          scale: display ? 1 : 0.7,
           paddingtop: 0,
           paddingbottom: 0,
           paddingleft: 0,
@@ -50,17 +89,19 @@ export function MusicNodeView({
         setRenderError(error instanceof Error ? error.message : "Unknown error")
       }
     }
-  }, [abc, display, isEditing])
+  }, [normalizedAbc, display, isEditing])
 
   // Render preview in edit mode
   const previewRef = useRef<HTMLDivElement>(null)
+  const normalizedPreview = useMemo(() => normalizeAbc(editValue), [editValue])
+  
   useEffect(() => {
-    if (isEditing && previewRef.current && editValue) {
+    if (isEditing && previewRef.current && normalizedPreview) {
       try {
-        abcjs.renderAbc(previewRef.current, editValue, {
+        abcjs.renderAbc(previewRef.current, normalizedPreview, {
           responsive: "resize",
           add_classes: true,
-          staffwidth: display ? 500 : 250,
+          staffwidth: display ? 500 : 200,
           scale: display ? 0.8 : 0.6,
           paddingtop: 0,
           paddingbottom: 0,
@@ -71,7 +112,7 @@ export function MusicNodeView({
         // Ignore preview errors
       }
     }
-  }, [editValue, display, isEditing])
+  }, [normalizedPreview, display, isEditing])
 
   const handleDoubleClick = useCallback(() => {
     if (isEditable) {
@@ -124,7 +165,7 @@ export function MusicNodeView({
             rows={display ? 6 : 2}
           />
           <div className="music-editor-preview" ref={previewRef}>
-            {!editValue && <span className="music-placeholder">Preview</span>}
+            {!normalizedPreview && <span className="music-placeholder">Preview</span>}
           </div>
           <div className="music-editor-actions">
             <button
@@ -154,7 +195,7 @@ export function MusicNodeView({
       contentEditable={false}
       onDoubleClick={handleDoubleClick}
     >
-      {abc ? (
+      {normalizedAbc ? (
         <>
           <div ref={containerRef} className="music-content" />
           {renderError && <span className="music-error">{renderError}</span>}
