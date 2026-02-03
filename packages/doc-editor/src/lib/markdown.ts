@@ -16,6 +16,7 @@ import { FileBlockNode } from "../nodes/file-block-node/file-block-node-extensio
 import { HorizontalRule } from "../nodes/horizontal-rule-node/horizontal-rule-node-extension"
 import { createTableExtensions } from "../nodes/table-node/table-node-extension"
 import { MathNode } from "../nodes/math-node/math-node-extension"
+import { MusicNode } from "../nodes/music-node/music-node-extension"
 
 export type MarkdownConversionOptions = {
   extensions?: Extensions
@@ -36,6 +37,7 @@ const DEFAULT_EXTENSIONS: Extensions = [
   Image,
   FileBlockNode,
   MathNode,
+  MusicNode,
   ...createTableExtensions(),
 ]
 
@@ -169,6 +171,45 @@ const createMarkdownParser = (schema: ReturnType<typeof createMarkdownSchema>) =
     return true
   })
 
+  // Add inline music rule: ~abc:...~
+  markdown.inline.ruler.after("escape", "music_inline", (state, silent) => {
+    if (state.src[state.pos] !== "~") {
+      return false
+    }
+    // Check for ~abc:
+    if (state.src.slice(state.pos, state.pos + 5) !== "~abc:") {
+      return false
+    }
+
+    const start = state.pos + 5
+    let end = start
+    while (end < state.posMax && state.src[end] !== "~") {
+      if (state.src[end] === "\\") {
+        end += 2
+      } else {
+        end++
+      }
+    }
+
+    if (end >= state.posMax || state.src[end] !== "~") {
+      return false
+    }
+
+    const abc = state.src.slice(start, end)
+    if (!abc.trim()) {
+      return false
+    }
+
+    if (!silent) {
+      const token = state.push("music_inline", "span", 0)
+      token.content = abc
+      token.markup = "~abc:"
+    }
+
+    state.pos = end + 1
+    return true
+  })
+
   markdown.core.ruler.push("file_block_fence", (state) => {
     for (const token of state.tokens) {
       if (token.type !== "fence") {
@@ -177,6 +218,12 @@ const createMarkdownParser = (schema: ReturnType<typeof createMarkdownSchema>) =
       const { language } = parseFenceInfo(token.info || "")
       if (language === "file") {
         token.type = "file_block"
+        token.tag = "div"
+        continue
+      }
+      // Handle ABC music notation blocks
+      if (language === "abc") {
+        token.type = "music_block"
         token.tag = "div"
         continue
       }
@@ -251,6 +298,22 @@ const createMarkdownParser = (schema: ReturnType<typeof createMarkdownSchema>) =
       node: "math",
       getAttrs: (token: any) => ({
         latex: token.content,
+        display: true,
+      }),
+    },
+    // Music tokens
+    music_inline: {
+      node: "music",
+      getAttrs: (token: any) => ({
+        abc: token.content,
+        display: false,
+      }),
+    },
+    music_block: {
+      node: "music",
+      noCloseToken: true,
+      getAttrs: (token: any) => ({
+        abc: token.content,
         display: true,
       }),
     },
@@ -409,6 +472,22 @@ const createMarkdownSerializer = (_schema: ReturnType<typeof createMarkdownSchem
         } else {
           // Inline math
           state.write(`$${latex}$`)
+        }
+      },
+      // Music serializer
+      music: (state: any, node: any) => {
+        const abc = node.attrs.abc || ""
+        const display = node.attrs.display || false
+        if (display) {
+          // Block music
+          state.write("```abc\n")
+          state.write(abc)
+          state.ensureNewLine()
+          state.write("```")
+          state.closeBlock(node)
+        } else {
+          // Inline music
+          state.write(`~abc:${abc}~`)
         }
       },
     },

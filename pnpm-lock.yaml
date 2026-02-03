@@ -373,6 +373,9 @@ importers:
       '@vue-office/pptx':
         specifier: ^1.0.1
         version: 1.0.1(vue-demi@0.14.10(vue@3.5.27(typescript@5.8.3)))(vue@3.5.27(typescript@5.8.3))
+      abcjs:
+        specifier: ^6.6.0
+        version: 6.6.0
       katex:
         specifier: ^0.16.28
         version: 0.16.28
@@ -2635,6 +2638,9 @@ packages:
   '@xmldom/xmldom@0.8.11':
     resolution: {integrity: sha512-cQzWCtO6C8TQiYl1ruKNn2U6Ao4o4WBBcbL61yJl84x+j5sOWWFU9X7DpND8XZG3daDppSsigMdfAIl2upQBRw==}
     engines: {node: '>=10.0.0'}
+
+  abcjs@6.6.0:
+    resolution: {integrity: sha512-lYS+qwOOxFcFY5ZjNmS1l4RT6BxGd2juBOzLD5/PfLZ+jd0zz29CMI/SwxCWb0+cdKjTBc/EHO43lUGB93FaAw==}
 
   accepts@1.3.8:
     resolution: {integrity: sha512-PYAthTa2m2VKxuvSD3DPC/Gy+U+sOA1LAuT8mkmRuvw+NACSaeXEQ+NHcVF7rONl6qcaxV3Uuemwawk+7+SJLw==}
@@ -7448,6 +7454,8 @@ snapshots:
   '@vue/shared@3.5.27': {}
 
   '@xmldom/xmldom@0.8.11': {}
+
+  abcjs@6.6.0: {}
 
   accepts@1.3.8:
     dependencies:

@@ -34,6 +34,7 @@ import { CodeBlockNode } from "../../nodes/code-block-node/code-block-node-exten
 import { LinkPreviewNode } from "../../nodes/link-preview-node/link-preview-node-extension"
 import { TocNode } from "../../nodes/toc-node/toc-node-extension"
 import { MathNode } from "../../nodes/math-node/math-node-extension"
+import { MusicNode } from "../../nodes/music-node/music-node-extension"
 import { createTableExtensions } from "../../nodes/table-node/table-node-extension"
 import "../../nodes/blockquote-node/blockquote-node.scss"
 import "../../nodes/code-block-node/code-block-node.scss"
@@ -46,7 +47,9 @@ import "../../nodes/link-preview-node/link-preview-node.scss"
 import "../../nodes/toc-node/toc-node.scss"
 import "../../nodes/table-node/table-node.scss"
 import "../../nodes/math-node/math-node.scss"
+import "../../nodes/music-node/music-node.scss"
 import "../../ui/table-button/table-menu.scss"
+import "../../ui/music-button/music-button.scss"
 
 // --- Tiptap UI ---
 import { HeadingDropdownMenu } from "../../ui/heading-dropdown-menu"
@@ -59,6 +62,7 @@ import { CodeBlockButton } from "../../ui/code-block-button"
 import { TocButton } from "../../ui/toc-button"
 import { TableMenu } from "../../ui/table-button"
 import { MathButton } from "../../ui/math-button"
+import { MusicButton } from "../../ui/music-button"
 import {
   ColorHighlightPopover,
   ColorHighlightPopoverContent,
@@ -139,6 +143,7 @@ const MainToolbarContent = ({
         <BlockquoteButton />
         <CodeBlockButton />
         <MathButton />
+        <MusicButton />
         <TableMenu />
         <TocButton />
       </ToolbarGroup>
@@ -294,6 +299,7 @@ export function DocEditor({
       }),
       TocNode,
       MathNode,
+      MusicNode,
       ...createTableExtensions(),
       ...extensions,
     ],
