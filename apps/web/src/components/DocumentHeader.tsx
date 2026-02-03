@@ -6,6 +6,22 @@ type BreadcrumbItem = {
   to?: string;
 };
 
+const MAX_BREADCRUMB_LENGTH_CN = 7;
+const MAX_BREADCRUMB_LENGTH_EN = 15;
+
+// 检测字符串是否包含中文
+function hasChinese(str: string): boolean {
+  return /[\u4e00-\u9fff]/.test(str);
+}
+
+function truncateLabel(label: string): string {
+  const maxLength = hasChinese(label) ? MAX_BREADCRUMB_LENGTH_CN : MAX_BREADCRUMB_LENGTH_EN;
+  if (label.length <= maxLength) {
+    return label;
+  }
+  return label.slice(0, maxLength) + "...";
+}
+
 type DocumentHeaderProps = {
   breadcrumbItems: BreadcrumbItem[];
   mode: "view" | "edit";
@@ -113,11 +129,13 @@ function DocumentHeader({
           <span key={`${item.label}-${index}`}>
             {index > 0 ? <span className="kb-breadcrumb-sep">/</span> : null}
             {item.to ? (
-              <Link className="kb-breadcrumb-link" to={item.to}>
-                {item.label}
+              <Link className="kb-breadcrumb-link" to={item.to} title={item.label}>
+                {truncateLabel(item.label)}
               </Link>
             ) : (
-              <span className="kb-breadcrumb-plain">{item.label}</span>
+              <span className="kb-breadcrumb-plain" title={item.label}>
+                {truncateLabel(item.label)}
+              </span>
             )}
           </span>
         ))}
