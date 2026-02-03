@@ -643,6 +643,11 @@ function cleanMarkdownOutput(markdown: string): string {
 // Document Summary Skill
 // ============================================================================
 
+// Summary skill constants
+const SUMMARY_MAX_DOCS = 30; // Maximum documents to process in directory mode
+const SUMMARY_MAX_DEPTH = 5; // Maximum recursion depth for directory mode
+const SUMMARY_MAX_CONTENT_LEN = 500; // Maximum content length per document
+
 /**
  * Execute doc-summary skill
  * 
@@ -667,34 +672,54 @@ async function* executeDocSummary(
   try {
     // 2. Read target document
     const doc = await documentStore.get(projectKey, docId);
-    const originalContent = doc.body as JSONContent;
+    
+    // Extract the actual document content (handle nested structure)
+    const originalContent = extractDocContent(doc.body as JSONContent);
 
-    // 3. Check if has children (determine if directory or single document)
+    // 3. Check if already has a summary block at top
+    const existingSummary = checkExistingSummary(originalContent);
+    if (existingSummary) {
+      yield { type: "thinking", content: `检测到已有摘要，将进行替换...` };
+    }
+
+    // 4. Check if has children (determine if directory or single document)
     const children = await documentStore.getChildren(projectKey, docId);
     const isDirectory = children.length > 0;
 
     let summaryBlock: JSONContent;
 
-    // Prepare typed doc for summary generation
+    // Prepare typed doc for summary generation (use extracted content)
     const typedDoc = {
       meta: { title: doc.meta.title },
-      body: doc.body as JSONContent,
+      body: originalContent,
     };
 
     if (isDirectory) {
-      // Directory mode
+      // Directory mode with progress feedback
       yield { type: "thinking", content: `正在读取目录下的文档 (${children.length} 个直接子文档)...` };
-      summaryBlock = await generateDirectorySummary(projectKey, docId, typedDoc, intent);
+      
+      // Pass a progress callback generator
+      const progressCallback = async function*(msg: string) {
+        yield { type: "thinking" as const, content: msg };
+      };
+      
+      summaryBlock = await generateDirectorySummaryWithProgress(
+        projectKey, 
+        docId, 
+        typedDoc, 
+        intent,
+        progressCallback,
+      );
     } else {
       // Single document mode
       yield { type: "thinking", content: "正在生成文档摘要..." };
       summaryBlock = await generateDocumentSummary(typedDoc, intent);
     }
 
-    // 4. Insert summary at document top
+    // 5. Insert summary at document top (preserving original content)
     const newContent = insertSummaryAtTop(originalContent, summaryBlock);
 
-    // 5. Create draft
+    // 6. Create draft
     const draft = draftService.create({
       projectKey,
       docId,
@@ -705,7 +730,12 @@ async function* executeDocSummary(
     });
 
     yield { type: "draft", draft };
-    yield { type: "done", message: isDirectory ? "目录摘要已生成" : "文档摘要已生成" };
+    yield { 
+      type: "done", 
+      message: isDirectory 
+        ? `目录摘要已生成${existingSummary ? "（已替换原摘要）" : ""}` 
+        : `文档摘要已生成${existingSummary ? "（已替换原摘要）" : ""}` 
+    };
   } catch (err) {
     yield {
       type: "error",
@@ -715,13 +745,68 @@ async function* executeDocSummary(
 }
 
 /**
+ * Extract the actual document content from potentially nested body structure
+ * Handles both { type: "doc", content: [...] } and { type: "tiptap", content: { type: "doc", content: [...] } }
+ */
+function extractDocContent(body: JSONContent): JSONContent {
+  // If already a doc type, return as is
+  if (body.type === "doc" && Array.isArray(body.content)) {
+    return body;
+  }
+  
+  // Handle tiptap wrapper: { type: "tiptap", content: { type: "doc", content: [...] } }
+  if (body.type === "tiptap" && body.content) {
+    const inner = body.content as JSONContent;
+    if (inner.type === "doc" && Array.isArray(inner.content)) {
+      return inner;
+    }
+    // If content is an array, wrap it
+    if (Array.isArray(inner)) {
+      return { type: "doc", content: inner };
+    }
+  }
+  
+  // Fallback: if body has content array, wrap it as doc
+  if (Array.isArray(body.content)) {
+    return { type: "doc", content: body.content as JSONContent[] };
+  }
+  
+  // Last resort: return empty doc
+  console.warn("[extractDocContent] Unable to extract content from body:", body);
+  return { type: "doc", content: [] };
+}
+
+/**
+ * Check if the document already has a summary block at the top
+ */
+function checkExistingSummary(content: JSONContent): boolean {
+  if (content.type !== "doc" || !Array.isArray(content.content) || content.content.length === 0) {
+    return false;
+  }
+  
+  const firstBlock = content.content[0];
+  if (firstBlock.type !== "blockquote") return false;
+  
+  const firstPara = (firstBlock.content as JSONContent[] | undefined)?.[0];
+  if (firstPara?.type !== "paragraph") return false;
+  
+  const firstText = (firstPara.content as JSONContent[] | undefined)?.[0];
+  if (firstText?.type !== "text") return false;
+  
+  const text = (firstText as { text?: string }).text || "";
+  return text.startsWith("📝 摘要：") || text.startsWith("📁 目录摘要：");
+}
+
+/**
  * Generate summary for a single document
  */
 async function generateDocumentSummary(
   doc: { meta: { title: string }; body: JSONContent },
   _intent: SkillIntent,
 ): Promise<JSONContent> {
-  const markdown = tiptapJsonToMarkdown(doc.body);
+  // Ensure content is properly extracted
+  const content = doc.body.type === "doc" ? doc.body : extractDocContent(doc.body);
+  const markdown = tiptapJsonToMarkdown(content);
 
   // Get LLM config
   const llmConfig = await configStore.getInternalByType("llm");
@@ -755,29 +840,68 @@ ${markdown}
 }
 
 /**
- * Generate summary for a directory and all its child documents
+ * Recursively collect descendant IDs with depth limit
  */
-async function generateDirectorySummary(
+async function collectDescendantsWithLimit(
+  projectKey: string,
+  parentId: string,
+  maxDepth: number,
+  currentDepth = 0,
+): Promise<string[]> {
+  if (currentDepth >= maxDepth) {
+    return [];
+  }
+  
+  const children = await documentStore.getChildren(projectKey, parentId);
+  const ids: string[] = [];
+  
+  for (const child of children) {
+    ids.push(child.id);
+    // Recursively collect descendants with depth tracking
+    const descendants = await collectDescendantsWithLimit(
+      projectKey, 
+      child.id, 
+      maxDepth, 
+      currentDepth + 1
+    );
+    ids.push(...descendants);
+  }
+  
+  return ids;
+}
+
+/**
+ * Generate summary for a directory and all its child documents
+ * With progress feedback support
+ */
+async function generateDirectorySummaryWithProgress(
   projectKey: string,
   dirId: string,
   dirDoc: { meta: { title: string }; body: JSONContent },
   _intent: SkillIntent,
+  _progressCallback?: (msg: string) => AsyncGenerator<SkillStreamChunk>,
 ): Promise<JSONContent> {
-  // Recursively collect all descendant IDs
-  const allDescendantIds = await documentStore.collectAllDescendantIds(projectKey, dirId);
+  // Recursively collect descendant IDs with depth limit
+  const allDescendantIds = await collectDescendantsWithLimit(
+    projectKey, 
+    dirId, 
+    SUMMARY_MAX_DEPTH
+  );
 
   // Read all child document contents (with limit)
   const docSummaries: Array<{ title: string; content: string }> = [];
-  const MAX_DOCS = 20; // Limit to avoid too large prompts
-  const MAX_CONTENT_LEN = 500; // Limit content length per document
-
-  for (const id of allDescendantIds.slice(0, MAX_DOCS)) {
+  const totalToProcess = Math.min(allDescendantIds.length, SUMMARY_MAX_DOCS);
+  
+  for (let i = 0; i < totalToProcess; i++) {
+    const id = allDescendantIds[i];
     try {
       const childDoc = await documentStore.get(projectKey, id);
-      const markdown = tiptapJsonToMarkdown(childDoc.body as JSONContent);
+      // Extract content properly
+      const extractedContent = extractDocContent(childDoc.body as JSONContent);
+      const markdown = tiptapJsonToMarkdown(extractedContent);
       docSummaries.push({
         title: childDoc.meta.title,
-        content: markdown.slice(0, MAX_CONTENT_LEN),
+        content: markdown.slice(0, SUMMARY_MAX_CONTENT_LEN),
       });
     } catch {
       // Skip documents that fail to load
@@ -790,10 +914,14 @@ async function generateDirectorySummary(
     throw new Error("LLM 未配置，请先在设置中配置对话模型");
   }
 
+  const limitNote = allDescendantIds.length > SUMMARY_MAX_DOCS 
+    ? `（共 ${allDescendantIds.length} 个，仅处理前 ${SUMMARY_MAX_DOCS} 个，最大深度 ${SUMMARY_MAX_DEPTH} 层）` 
+    : "";
+
   const prompt = `请为以下目录生成一个整体摘要。
 
 目录标题：${dirDoc.meta.title}
-包含 ${docSummaries.length} 个文档${allDescendantIds.length > MAX_DOCS ? `（共 ${allDescendantIds.length} 个，仅展示前 ${MAX_DOCS} 个）` : ""}：
+包含 ${docSummaries.length} 个文档${limitNote}：
 
 ${docSummaries.map((d, i) => `${i + 1}. ${d.title}\n${d.content}`).join("\n\n---\n\n")}
 
