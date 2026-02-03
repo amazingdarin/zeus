@@ -387,13 +387,28 @@ export const buildRouter = () => {
         const doc = await documentStore.get(projectKey, docId);
 
         // Update block attrs in content
-        const content = doc.body?.content as JSONContent | undefined;
-        if (!content) {
+        // Document structure: body.content = { meta: {...}, content: { type: "doc", content: [...] } }
+        // or body.content = { type: "doc", content: [...] }
+        const bodyContent = doc.body?.content as JSONContent | undefined;
+        if (!bodyContent) {
           error(res, "INVALID_DOCUMENT", "Document has no content");
           return;
         }
 
-        const updated = updateBlockAttrsInContent(content, blockId, attrs);
+        // Extract the actual tiptap document content
+        let docContent: JSONContent;
+        if (bodyContent.type === "doc") {
+          // Direct tiptap format
+          docContent = bodyContent;
+        } else if (bodyContent.content && typeof bodyContent.content === "object" && (bodyContent.content as JSONContent).type === "doc") {
+          // Nested format: { meta: {...}, content: { type: "doc", ... } }
+          docContent = bodyContent.content as JSONContent;
+        } else {
+          error(res, "INVALID_DOCUMENT", "Invalid document content structure");
+          return;
+        }
+
+        const updated = updateBlockAttrsInContent(docContent, blockId, attrs);
         if (!updated) {
           error(res, "BLOCK_NOT_FOUND", `Block ${blockId} not found in document`, 404);
           return;
