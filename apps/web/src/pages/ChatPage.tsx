@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import {
   DeleteOutlined,
   SendOutlined,
+  StopOutlined,
   RobotOutlined,
   UserOutlined,
   LoadingOutlined,
@@ -56,6 +57,7 @@ function ChatPage() {
     setError,
     setSlashSelectedIndex,
     handleSend,
+    handleStop,
     handleClearHistory,
     handleInputChange,
     handleKeyDown,
@@ -494,14 +496,25 @@ function ChatPage() {
             disabled={!projectKey || isGenerating}
             rows={1}
           />
-          <button
-            type="button"
-            className="chat-page-send-btn"
-            onClick={handleSend}
-            disabled={!canSend}
-          >
-            {isGenerating ? <LoadingOutlined spin /> : <SendOutlined />}
-          </button>
+          {isGenerating ? (
+            <button
+              type="button"
+              className="chat-page-send-btn chat-page-stop-btn"
+              onClick={handleStop}
+              title="停止生成"
+            >
+              <StopOutlined />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="chat-page-send-btn"
+              onClick={handleSend}
+              disabled={!canSend}
+            >
+              <SendOutlined />
+            </button>
+          )}
         </div>
       </div>
     </div>
