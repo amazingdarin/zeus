@@ -8,10 +8,14 @@ import {
   executeAnthropicSkillWithStream,
   analyzeTrigger,
   extractDocIdsFromArgs,
+  skillRegistry,
   type SkillStreamChunk,
   type DocumentDraft,
   type SkillIntent,
   type TriggerResult,
+  type PendingToolCall,
+  type SkillDefinition,
+  type RiskLevel,
 } from "../llm/skills/index.js";
 
 export type ChatMessage = {
@@ -38,7 +42,9 @@ export type ChatRun = {
   sessionId: string;
   messages: ChatMessage[];
   docIds?: string[];  // Resolved document IDs for knowledge search scope
-  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  status: "pending" | "running" | "completed" | "failed" | "cancelled" | "awaiting_confirmation";
+  pendingTool?: PendingToolCall;  // Tool awaiting user confirmation
+  pendingIntent?: SkillIntent;    // Intent to execute after confirmation
   createdAt: number;
   updatedAt: number;
 };
@@ -47,17 +53,28 @@ export type ChatRun = {
 const runAbortControllers = new Map<string, AbortController>();
 
 export type ChatStreamChunk = {
-  type: "delta" | "done" | "error" | "thinking" | "draft";
+  type: "delta" | "done" | "error" | "thinking" | "draft" | "tool_pending" | "tool_rejected";
   content?: string;
   message?: string;
   error?: string;
   sources?: SourceReference[];
   draft?: DocumentDraft;
+  pendingTool?: PendingToolCall;  // For tool_pending type
 };
 
 // In-memory storage for active chat runs
 const activeRuns = new Map<string, ChatRun>();
 const sessionMessages = new Map<string, ChatMessage[]>();
+
+// Pending tool confirmation timeout (5 minutes)
+const PENDING_TOOL_TTL = 5 * 60 * 1000;
+
+// Event emitters for pending tool confirmation
+// Map of runId -> resolve function for confirmation waiting
+const pendingConfirmations = new Map<string, {
+  resolve: (confirmed: boolean) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}>();
 
 // Cleanup old runs after 1 hour
 const RUN_TTL = 60 * 60 * 1000;
@@ -225,6 +242,104 @@ function isRunAborted(runId: string): boolean {
  */
 function cleanupAbortController(runId: string): void {
   runAbortControllers.delete(runId);
+}
+
+// ============================================================================
+// Tool Confirmation Logic
+// ============================================================================
+
+/**
+ * Check if a skill requires confirmation before execution
+ */
+function shouldRequireConfirmation(skill: SkillDefinition): boolean {
+  return skill.confirmation?.required === true;
+}
+
+/**
+ * Create a pending tool call for confirmation
+ */
+function createPendingToolCall(
+  skill: SkillDefinition,
+  args: Record<string, unknown>,
+): PendingToolCall {
+  const now = Date.now();
+  return {
+    id: uuidv4(),
+    skillName: skill.name,
+    skillDescription: skill.description,
+    args,
+    riskLevel: skill.confirmation?.riskLevel || "medium",
+    warningMessage: skill.confirmation?.warningMessage,
+    createdAt: now,
+    expiresAt: now + PENDING_TOOL_TTL,
+  };
+}
+
+/**
+ * Wait for user confirmation on a pending tool
+ * Returns true if confirmed, false if rejected or timeout
+ */
+async function waitForConfirmation(runId: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      // Timeout - treat as rejection
+      pendingConfirmations.delete(runId);
+      resolve(false);
+    }, PENDING_TOOL_TTL);
+
+    pendingConfirmations.set(runId, { resolve, timeout });
+  });
+}
+
+/**
+ * Confirm a pending tool execution
+ */
+export function confirmTool(runId: string): boolean {
+  const run = activeRuns.get(runId);
+  if (!run || run.status !== "awaiting_confirmation") {
+    return false;
+  }
+
+  const pending = pendingConfirmations.get(runId);
+  if (pending) {
+    clearTimeout(pending.timeout);
+    pending.resolve(true);
+    pendingConfirmations.delete(runId);
+  }
+
+  return true;
+}
+
+/**
+ * Reject a pending tool execution
+ */
+export function rejectTool(runId: string): boolean {
+  const run = activeRuns.get(runId);
+  if (!run || run.status !== "awaiting_confirmation") {
+    return false;
+  }
+
+  const pending = pendingConfirmations.get(runId);
+  if (pending) {
+    clearTimeout(pending.timeout);
+    pending.resolve(false);
+    pendingConfirmations.delete(runId);
+  }
+
+  run.status = "completed";
+  run.pendingTool = undefined;
+  run.pendingIntent = undefined;
+  run.updatedAt = Date.now();
+
+  return true;
+}
+
+/**
+ * Get the pending tool for a run
+ */
+export function getPendingTool(runId: string): PendingToolCall | undefined {
+  const run = activeRuns.get(runId);
+  return run?.pendingTool;
 }
 
 /**
@@ -505,6 +620,41 @@ async function* handleNaturalMode(
         rawMessage: userQuery,
         docIds: extractDocIdsFromArgs(args, run.docIds),
       };
+
+      // Check if skill requires confirmation
+      const skill = skillRegistry.getNativeByName(toolCall.function.name);
+      if (skill && shouldRequireConfirmation(skill)) {
+        console.log("[chat] Skill requires confirmation:", skill.name);
+
+        // Create pending tool and pause for confirmation
+        const pendingTool = createPendingToolCall(skill, args);
+        run.status = "awaiting_confirmation";
+        run.pendingTool = pendingTool;
+        run.pendingIntent = intent;
+        run.updatedAt = Date.now();
+
+        // Yield pending tool event
+        yield { type: "tool_pending", pendingTool };
+
+        // Wait for user confirmation
+        const confirmed = await waitForConfirmation(run.id);
+
+        if (!confirmed) {
+          console.log("[chat] Tool execution rejected or timed out");
+          run.pendingTool = undefined;
+          run.pendingIntent = undefined;
+          run.status = "completed";
+          run.updatedAt = Date.now();
+          yield { type: "tool_rejected", message: "操作已取消" };
+          return;
+        }
+
+        console.log("[chat] Tool execution confirmed");
+        run.pendingTool = undefined;
+        run.pendingIntent = undefined;
+        run.status = "running";
+        run.updatedAt = Date.now();
+      }
 
       yield { type: "thinking", content: `正在执行 ${toolCall.function.name}...` };
 

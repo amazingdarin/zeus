@@ -17,6 +17,9 @@ export type {
   DocumentDraft,
   CreateDraftInput,
   SkillStreamChunk,
+  RiskLevel,
+  SkillConfirmation,
+  PendingToolCall,
 } from "./types.js";
 
 // Document skills

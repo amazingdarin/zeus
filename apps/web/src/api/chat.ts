@@ -56,3 +56,51 @@ export const clearChatSession = async (
     throw new Error("Failed to clear chat session");
   }
 };
+
+/**
+ * Pending tool call type for confirmation UI
+ */
+export type PendingToolCall = {
+  id: string;
+  skillName: string;
+  skillDescription: string;
+  args: Record<string, unknown>;
+  riskLevel: "low" | "medium" | "high";
+  warningMessage?: string;
+  createdAt: number;
+  expiresAt: number;
+};
+
+/**
+ * Confirm a pending tool execution
+ */
+export const confirmTool = async (
+  projectKey: string,
+  runId: string,
+): Promise<void> => {
+  const response = await apiFetch(
+    `/api/projects/${projectKey}/chat/runs/${encodeURIComponent(runId)}/confirm-tool`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.message || "Failed to confirm tool");
+  }
+};
+
+/**
+ * Reject a pending tool execution
+ */
+export const rejectTool = async (
+  projectKey: string,
+  runId: string,
+): Promise<void> => {
+  const response = await apiFetch(
+    `/api/projects/${projectKey}/chat/runs/${encodeURIComponent(runId)}/reject-tool`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.message || "Failed to reject tool");
+  }
+};

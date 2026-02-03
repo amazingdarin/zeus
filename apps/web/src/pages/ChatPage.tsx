@@ -30,6 +30,7 @@ import {
 import MentionDropdown from "../components/MentionDropdown";
 import DraftPreviewModal from "../components/DraftPreviewModal";
 import SettingsModal from "../components/SettingsModal";
+import ToolConfirmDialog from "../components/ToolConfirmDialog";
 
 function ChatPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -69,6 +70,9 @@ function ChatPage() {
     handleDraftClose,
     handleDocumentNavigate,
     handleProposalAction,
+    handleConfirmTool,
+    handleRejectTool,
+    pendingTool,
     toggleSourcesExpanded,
   } = useChatLogic({ autoScrollEnabled: true });
 
@@ -257,6 +261,14 @@ function ChatPage() {
           onApplied={handleDraftApplied}
         />
       )}
+
+      {/* Tool Confirmation Dialog */}
+      <ToolConfirmDialog
+        visible={!!pendingTool}
+        pendingTool={pendingTool}
+        onConfirm={handleConfirmTool}
+        onReject={handleRejectTool}
+      />
 
       {/* Settings Modal */}
       <SettingsModal

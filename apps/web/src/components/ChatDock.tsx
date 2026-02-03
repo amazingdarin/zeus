@@ -3,8 +3,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, u
 import { DownOutlined, UpOutlined, StopOutlined, SendOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 
-import { createChatRun, buildChatStreamUrl } from "../api/chat";
+import { createChatRun, buildChatStreamUrl, confirmTool, rejectTool, type PendingToolCall } from "../api/chat";
 import { applyProposal, rejectProposal } from "../api/documents";
+import ToolConfirmDialog from "./ToolConfirmDialog";
 import { executeCommand } from "../api/commands";
 import { useProjectContext } from "../context/ProjectContext";
 import type { PromptTemplate } from "../lib/promptRegistry";
@@ -197,6 +198,8 @@ function ChatDock() {
     [],
   );
   const [activeDropdownKey, setActiveDropdownKey] = useState<string | null>(null);
+  const [pendingTool, setPendingTool] = useState<PendingToolCall | null>(null);
+  const currentRunIdRef = useRef<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const hasCustomEventsRef = useRef(false);
   const prevInputModeRef = useRef<InputMode>("normal");
@@ -678,6 +681,7 @@ function ChatDock() {
       }
       const outboundMessage = buildPromptMessage(message, inputState.activePrompt);
       const runId = await createChatRun(projectKey, outboundMessage);
+      currentRunIdRef.current = runId;
       const url = buildChatStreamUrl(projectKey, runId);
       const source = new EventSource(url, { withCredentials: true });
       eventSourceRef.current = source;
@@ -697,6 +701,26 @@ function ChatDock() {
         const { message, artifacts } = normalizeDonePayload(payload);
         setIsGenerating(false);
         commitAssistantBuffer(artifacts, message);
+        closeStream();
+      });
+
+      source.addEventListener("assistant.tool_pending", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        if (payload && typeof payload === "object") {
+          setPendingTool(payload as PendingToolCall);
+        }
+      });
+
+      source.addEventListener("assistant.tool_rejected", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        const msg = typeof payload === "object" && payload !== null
+          ? String((payload as { message?: string }).message ?? "操作已取消")
+          : "操作已取消";
+        appendMessage("system", msg);
+        setPendingTool(null);
+        setIsGenerating(false);
         closeStream();
       });
 
@@ -943,6 +967,43 @@ function ChatDock() {
     [appendMessage, handleDocumentNavigate, projectKey],
   );
 
+  const handleConfirmTool = useCallback(async () => {
+    const runId = currentRunIdRef.current;
+    if (!projectKey || !runId || !pendingTool) return;
+
+    try {
+      await confirmTool(projectKey, runId);
+      setPendingTool(null);
+      // The SSE stream will continue after confirmation
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "确认失败";
+      appendMessage("system", `Error: ${msg}`);
+      setPendingTool(null);
+      setIsGenerating(false);
+    }
+  }, [projectKey, pendingTool, appendMessage]);
+
+  const handleRejectTool = useCallback(async () => {
+    const runId = currentRunIdRef.current;
+    if (!projectKey || !runId) {
+      setPendingTool(null);
+      return;
+    }
+
+    try {
+      await rejectTool(projectKey, runId);
+      setPendingTool(null);
+      appendMessage("system", "操作已取消");
+      setIsGenerating(false);
+      closeStream();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "取消失败";
+      appendMessage("system", `Error: ${msg}`);
+      setPendingTool(null);
+      setIsGenerating(false);
+    }
+  }, [projectKey, appendMessage, closeStream]);
+
   const applySlashSelection = useCallback(
     (value: string) => {
       const before =
@@ -1151,6 +1212,13 @@ function ChatDock() {
 
   return (
     <section className="chat-dock">
+      {/* Tool Confirmation Dialog */}
+      <ToolConfirmDialog
+        visible={!!pendingTool}
+        pendingTool={pendingTool}
+        onConfirm={handleConfirmTool}
+        onReject={handleRejectTool}
+      />
       {showPanel ? (
         <div className="chat-dock-panel" style={{ height: `${historyHeight}px` }}>
           <div

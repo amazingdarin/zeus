@@ -8,6 +8,7 @@ import type { SkillDefinition } from "./types.js";
 
 /**
  * Read document content skill
+ * No confirmation needed - read-only operation
  */
 export const docReadSkill: SkillDefinition = {
   name: "doc-read",
@@ -15,6 +16,10 @@ export const docReadSkill: SkillDefinition = {
   command: "/doc-read",
   description: "读取指定文档的内容。需要通过 @ 指定文档。",
   required: false,
+  confirmation: {
+    required: false,
+    riskLevel: "low",
+  },
   parameters: {
     type: "object",
     properties: {
@@ -29,6 +34,7 @@ export const docReadSkill: SkillDefinition = {
 
 /**
  * Create new document skill
+ * Low risk - creates new content without modifying existing
  */
 export const docCreateSkill: SkillDefinition = {
   name: "doc-create",
@@ -36,6 +42,10 @@ export const docCreateSkill: SkillDefinition = {
   command: "/doc-create",
   description: "创建新文档。可以指定标题和内容描述，AI 将生成文档内容。",
   required: false,
+  confirmation: {
+    required: false,
+    riskLevel: "low",
+  },
   parameters: {
     type: "object",
     properties: {
@@ -59,6 +69,7 @@ export const docCreateSkill: SkillDefinition = {
 
 /**
  * Edit existing document skill
+ * Medium risk - modifies existing document content
  */
 export const docEditSkill: SkillDefinition = {
   name: "doc-edit",
@@ -66,6 +77,11 @@ export const docEditSkill: SkillDefinition = {
   command: "/doc-edit",
   description: "编辑已有文档。需要通过 @ 指定文档，并描述修改要求。",
   required: false,
+  confirmation: {
+    required: true,
+    riskLevel: "medium",
+    warningMessage: "此操作将修改现有文档内容，请确认后执行。",
+  },
   parameters: {
     type: "object",
     properties: {
@@ -84,6 +100,7 @@ export const docEditSkill: SkillDefinition = {
 
 /**
  * Optimize document format skill
+ * Medium risk - modifies document structure
  */
 export const docOptimizeFormatSkill: SkillDefinition = {
   name: "doc-optimize-format",
@@ -91,6 +108,11 @@ export const docOptimizeFormatSkill: SkillDefinition = {
   command: "/doc-optimize-format",
   description: "优化文档格式：规范标题层级、列表格式、代码块标记。需要通过 @ 指定文档。",
   required: false,
+  confirmation: {
+    required: true,
+    riskLevel: "medium",
+    warningMessage: "此操作将优化文档格式结构，请确认后执行。",
+  },
   parameters: {
     type: "object",
     properties: {
@@ -105,6 +127,7 @@ export const docOptimizeFormatSkill: SkillDefinition = {
 
 /**
  * Optimize document content skill
+ * Medium risk - modifies document content
  */
 export const docOptimizeContentSkill: SkillDefinition = {
   name: "doc-optimize-content",
@@ -112,6 +135,11 @@ export const docOptimizeContentSkill: SkillDefinition = {
   command: "/doc-optimize-content",
   description: "优化文档内容：改善语言表达、增强逻辑连贯性。需要通过 @ 指定文档。",
   required: false,
+  confirmation: {
+    required: true,
+    riskLevel: "medium",
+    warningMessage: "此操作将优化文档内容表达，请确认后执行。",
+  },
   parameters: {
     type: "object",
     properties: {

@@ -12,6 +12,20 @@ import type { JSONContent } from "@tiptap/core";
 export type SkillCategory = "doc" | "kb" | "code" | "img";
 
 /**
+ * Risk level for skill confirmation
+ */
+export type RiskLevel = "low" | "medium" | "high";
+
+/**
+ * Confirmation configuration for skills
+ */
+export type SkillConfirmation = {
+  required: boolean; // Whether confirmation is needed before execution
+  riskLevel?: RiskLevel; // Risk level for UI display
+  warningMessage?: string; // Custom warning message to show
+};
+
+/**
  * Skill definition for registration
  */
 export type SkillDefinition = {
@@ -20,6 +34,7 @@ export type SkillDefinition = {
   command: string; // e.g., "/doc-create"
   description: string;
   required: boolean; // Whether this skill is required (cannot be disabled)
+  confirmation?: SkillConfirmation; // Confirmation settings for dangerous operations
   parameters: {
     type: "object";
     properties: Record<
@@ -44,6 +59,20 @@ export type SkillIntent = {
   args: Record<string, unknown>; // Parsed arguments
   rawMessage: string; // Original user message
   docIds?: string[]; // Referenced document IDs from @ mentions
+};
+
+/**
+ * Pending tool call awaiting user confirmation
+ */
+export type PendingToolCall = {
+  id: string; // Unique ID for this pending call
+  skillName: string; // Name of the skill to execute
+  skillDescription: string; // Human-readable description
+  args: Record<string, unknown>; // Arguments for the skill
+  riskLevel: RiskLevel; // Risk level for UI display
+  warningMessage?: string; // Optional warning message
+  createdAt: number; // Timestamp when created
+  expiresAt: number; // Expiration timestamp (for cleanup)
 };
 
 /**

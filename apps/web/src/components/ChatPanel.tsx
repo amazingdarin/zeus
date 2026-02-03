@@ -31,6 +31,7 @@ import {
 } from "../hooks/useChatLogic";
 import MentionDropdown from "./MentionDropdown";
 import DraftPreviewModal from "./DraftPreviewModal";
+import ToolConfirmDialog from "./ToolConfirmDialog";
 
 type ChatPanelProps = {
   onOpenSettings?: () => void;
@@ -77,6 +78,9 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     handleDraftClose,
     handleDocumentNavigate,
     handleProposalAction,
+    handleConfirmTool,
+    handleRejectTool,
+    pendingTool,
     toggleSourcesExpanded,
   } = useChatLogic({ autoScrollEnabled: isExpanded });
 
@@ -297,6 +301,14 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
             onApplied={handleDraftApplied}
           />
         )}
+
+        {/* Tool Confirmation Dialog */}
+        <ToolConfirmDialog
+          visible={!!pendingTool}
+          pendingTool={pendingTool}
+          onConfirm={handleConfirmTool}
+          onReject={handleRejectTool}
+        />
         <button
           type="button"
           className="chat-floating-btn"
@@ -323,6 +335,14 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
           onApplied={handleDraftApplied}
         />
       )}
+
+      {/* Tool Confirmation Dialog */}
+      <ToolConfirmDialog
+        visible={!!pendingTool}
+        pendingTool={pendingTool}
+        onConfirm={handleConfirmTool}
+        onReject={handleRejectTool}
+      />
 
       {/* Expanded Panel */}
       {isExpanded && (

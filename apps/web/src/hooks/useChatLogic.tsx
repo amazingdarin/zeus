@@ -14,7 +14,7 @@ import {
 } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { createChatRun, buildChatStreamUrl, clearChatSession, type DocumentScope } from "../api/chat";
+import { createChatRun, buildChatStreamUrl, clearChatSession, confirmTool, rejectTool, type DocumentScope, type PendingToolCall } from "../api/chat";
 import { applyProposal, rejectProposal } from "../api/documents";
 import { executeCommand } from "../api/commands";
 import { useProjectContext } from "../context/ProjectContext";
@@ -216,6 +216,7 @@ export type UseChatLogicReturn = {
   mentions: MentionItem[];
   mentionState: MentionState;
   pendingDraft: DocumentDraft | null;
+  pendingTool: PendingToolCall | null;
   slashActive: boolean;
   slashQuery: string;
   slashSelectedIndex: number;
@@ -246,6 +247,8 @@ export type UseChatLogicReturn = {
   handleDraftClose: () => void;
   handleDocumentNavigate: (docId: string, options?: { proposalId?: string; blockId?: string }) => void;
   handleProposalAction: (action: string, docId: string, proposalId: string) => Promise<void>;
+  handleConfirmTool: () => Promise<void>;
+  handleRejectTool: () => Promise<void>;
   toggleSourcesExpanded: (messageId: string) => void;
 
   // Render helpers
@@ -277,6 +280,10 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
 
   // Draft state for AI-generated document changes
   const [pendingDraft, setPendingDraft] = useState<DocumentDraft | null>(null);
+
+  // Pending tool confirmation state
+  const [pendingTool, setPendingTool] = useState<PendingToolCall | null>(null);
+  const currentRunIdRef = useRef<string | null>(null);
 
   // Slash command state
   const [slashActive, setSlashActive] = useState(false);
@@ -533,6 +540,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         : undefined;
 
       const runId = await createChatRun(projectKey, message, sessionId, documentScope);
+      currentRunIdRef.current = runId;
       const url = buildChatStreamUrl(projectKey, runId);
       const source = new EventSource(url, { withCredentials: true });
       eventSourceRef.current = source;
@@ -561,6 +569,26 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         if (payload && typeof payload === "object") {
           setPendingDraft(payload as DocumentDraft);
         }
+      });
+
+      source.addEventListener("assistant.tool_pending", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        if (payload && typeof payload === "object") {
+          setPendingTool(payload as PendingToolCall);
+        }
+      });
+
+      source.addEventListener("assistant.tool_rejected", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        const msg = typeof payload === "object" && payload !== null
+          ? String((payload as { message?: string }).message ?? "操作已取消")
+          : "操作已取消";
+        appendMessage("system", msg);
+        setPendingTool(null);
+        setIsGenerating(false);
+        closeStream();
       });
 
       source.addEventListener("assistant.done", (event) => {
@@ -681,6 +709,43 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   const handleDraftClose = useCallback(() => {
     setPendingDraft(null);
   }, []);
+
+  const handleConfirmTool = useCallback(async () => {
+    const runId = currentRunIdRef.current;
+    if (!projectKey || !runId || !pendingTool) return;
+
+    try {
+      await confirmTool(projectKey, runId);
+      setPendingTool(null);
+      // The SSE stream will continue after confirmation
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "确认失败";
+      appendMessage("system", `错误: ${msg}`);
+      setPendingTool(null);
+      setIsGenerating(false);
+    }
+  }, [projectKey, pendingTool, appendMessage]);
+
+  const handleRejectTool = useCallback(async () => {
+    const runId = currentRunIdRef.current;
+    if (!projectKey || !runId) {
+      setPendingTool(null);
+      return;
+    }
+
+    try {
+      await rejectTool(projectKey, runId);
+      setPendingTool(null);
+      appendMessage("system", "操作已取消");
+      setIsGenerating(false);
+      closeStream();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "取消失败";
+      appendMessage("system", `错误: ${msg}`);
+      setPendingTool(null);
+      setIsGenerating(false);
+    }
+  }, [projectKey, appendMessage, closeStream]);
 
   const mentionStateRef = useRef(mentionState);
   useEffect(() => {
@@ -908,6 +973,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     mentions,
     mentionState,
     pendingDraft,
+    pendingTool,
     slashActive,
     slashQuery,
     slashSelectedIndex,
@@ -938,6 +1004,8 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     handleDraftClose,
     handleDocumentNavigate,
     handleProposalAction,
+    handleConfirmTool,
+    handleRejectTool,
     toggleSourcesExpanded,
 
     // Render helpers

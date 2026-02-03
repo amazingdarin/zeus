@@ -27,7 +27,7 @@ import {
   type LLMProviderId,
   type ConfigType,
 } from "./llm/index.js";
-import { createRun, getRun, streamRun, clearSession, cancelRun } from "./services/chat.js";
+import { createRun, getRun, streamRun, clearSession, cancelRun, confirmTool, rejectTool } from "./services/chat.js";
 import { draftService } from "./services/draft.js";
 import {
   createTask as createOptimizeTask,
@@ -1675,6 +1675,10 @@ export const buildRouter = () => {
             message: chunk.message,
             sources: chunk.sources || [],
           })}\n\n`);
+        } else if (chunk.type === "tool_pending") {
+          res.write(`event: assistant.tool_pending\ndata: ${JSON.stringify(chunk.pendingTool)}\n\n`);
+        } else if (chunk.type === "tool_rejected") {
+          res.write(`event: assistant.tool_rejected\ndata: ${JSON.stringify({ message: chunk.message })}\n\n`);
         } else if (chunk.type === "error") {
           res.write(`event: run.error\ndata: ${JSON.stringify({ error: chunk.error })}\n\n`);
         }
@@ -1704,6 +1708,44 @@ export const buildRouter = () => {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to cancel run";
       error(res, "CANCEL_RUN_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Confirm a pending tool execution
+   * POST /projects/:projectKey/chat/runs/:runId/confirm-tool
+   */
+  router.post("/projects/:projectKey/chat/runs/:runId/confirm-tool", async (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const confirmed = confirmTool(runId);
+      if (!confirmed) {
+        error(res, "NOT_FOUND", "No pending tool confirmation for this run", 404);
+        return;
+      }
+      success(res, { confirmed: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to confirm tool";
+      error(res, "CONFIRM_TOOL_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Reject a pending tool execution
+   * POST /projects/:projectKey/chat/runs/:runId/reject-tool
+   */
+  router.post("/projects/:projectKey/chat/runs/:runId/reject-tool", async (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const rejected = rejectTool(runId);
+      if (!rejected) {
+        error(res, "NOT_FOUND", "No pending tool confirmation for this run", 404);
+        return;
+      }
+      success(res, { rejected: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to reject tool";
+      error(res, "REJECT_TOOL_FAILED", msg, 500);
     }
   });
 
