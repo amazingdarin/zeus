@@ -186,7 +186,7 @@ export const MathButton = forwardRef<HTMLButtonElement, MathButtonProps>(
             <>
               <Icon className="tiptap-button-icon" />
               {text && <span className="tiptap-button-text">{text}</span>}
-              <ChevronDownIcon className="tiptap-button-dropdown" />
+              <ChevronDownIcon className="tiptap-button-dropdown-small" />
               {showShortcut && (
                 <MathShortcutBadge shortcutKeys={inlineShortcutKeys} />
               )}
