@@ -153,6 +153,38 @@ export const docOptimizeContentSkill: SkillDefinition = {
 };
 
 /**
+ * Document summary skill
+ * Medium risk - inserts summary at document top
+ * 
+ * Supports two modes:
+ * 1. Single document mode: generates summary for a single document
+ * 2. Directory mode: recursively summarizes all child documents
+ */
+export const docSummarySkill: SkillDefinition = {
+  name: "doc-summary",
+  category: "doc",
+  command: "/doc-summary",
+  description:
+    "为文档或目录生成摘要。单文档模式：提取摘要插入顶部；目录模式：递归汇总所有子文档生成整体摘要。需要通过 @ 指定目标。",
+  required: false,
+  confirmation: {
+    required: true,
+    riskLevel: "medium",
+    warningMessage: "此操作将在文档顶部插入摘要，请确认后执行。",
+  },
+  parameters: {
+    type: "object",
+    properties: {
+      doc_id: {
+        type: "string",
+        description: "目标文档或目录的 ID（从 @ 提及中解析）",
+      },
+    },
+    required: ["doc_id"],
+  },
+};
+
+/**
  * All document skills
  */
 export const documentSkills: SkillDefinition[] = [
@@ -161,6 +193,7 @@ export const documentSkills: SkillDefinition[] = [
   docEditSkill,
   docOptimizeFormatSkill,
   docOptimizeContentSkill,
+  docSummarySkill,
 ];
 
 /**

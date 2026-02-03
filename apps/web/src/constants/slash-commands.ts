@@ -57,6 +57,14 @@ export const documentCommands: SlashCommand[] = [
     icon: "✨",
     requiresDocScope: true,
   },
+  {
+    command: "/doc-summary",
+    name: "生成摘要",
+    description: "为文档或目录生成摘要。单文档：提取摘要插入顶部；目录：递归汇总所有子文档。需要先用 @ 指定文档",
+    category: "doc",
+    icon: "📋",
+    requiresDocScope: true,
+  },
 ];
 
 /**

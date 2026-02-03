@@ -97,6 +97,16 @@ export function detectSkillIntent(
     };
   }
 
+  if (trimmed.startsWith("/doc-summary")) {
+    return {
+      skill: "doc-summary",
+      command: "/doc-summary",
+      args: {},
+      rawMessage: message,
+      docIds,
+    };
+  }
+
   // No explicit command found
   // Natural language is now handled by analyzeTrigger in trigger.ts
   return null;
@@ -165,6 +175,9 @@ export async function* executeSkillWithStream(
       break;
     case "doc-optimize-content":
       yield* executeDocOptimizeContent(projectKey, intent);
+      break;
+    case "doc-summary":
+      yield* executeDocSummary(projectKey, intent);
       break;
     default:
       yield { type: "error", error: `Unknown skill: ${intent.skill}` };
@@ -624,6 +637,311 @@ function cleanMarkdownOutput(markdown: string): string {
   }
 
   return result;
+}
+
+// ============================================================================
+// Document Summary Skill
+// ============================================================================
+
+/**
+ * Execute doc-summary skill
+ * 
+ * Supports two modes:
+ * 1. Single document: Generate summary for a single document
+ * 2. Directory: Recursively summarize all child documents
+ */
+async function* executeDocSummary(
+  projectKey: string,
+  intent: SkillIntent,
+): AsyncGenerator<SkillStreamChunk> {
+  // 1. Validate document ID
+  if (!intent.docIds || intent.docIds.length === 0) {
+    yield { type: "error", error: "请使用 @ 指定要生成摘要的文档" };
+    return;
+  }
+
+  const docId = intent.docIds[0];
+
+  yield { type: "thinking", content: "正在读取文档信息..." };
+
+  try {
+    // 2. Read target document
+    const doc = await documentStore.get(projectKey, docId);
+    const originalContent = doc.body as JSONContent;
+
+    // 3. Check if has children (determine if directory or single document)
+    const children = await documentStore.getChildren(projectKey, docId);
+    const isDirectory = children.length > 0;
+
+    let summaryBlock: JSONContent;
+
+    // Prepare typed doc for summary generation
+    const typedDoc = {
+      meta: { title: doc.meta.title },
+      body: doc.body as JSONContent,
+    };
+
+    if (isDirectory) {
+      // Directory mode
+      yield { type: "thinking", content: `正在读取目录下的文档 (${children.length} 个直接子文档)...` };
+      summaryBlock = await generateDirectorySummary(projectKey, docId, typedDoc, intent);
+    } else {
+      // Single document mode
+      yield { type: "thinking", content: "正在生成文档摘要..." };
+      summaryBlock = await generateDocumentSummary(typedDoc, intent);
+    }
+
+    // 4. Insert summary at document top
+    const newContent = insertSummaryAtTop(originalContent, summaryBlock);
+
+    // 5. Create draft
+    const draft = draftService.create({
+      projectKey,
+      docId,
+      parentId: doc.meta.parent_id || null,
+      title: doc.meta.title,
+      originalContent,
+      proposedContent: newContent,
+    });
+
+    yield { type: "draft", draft };
+    yield { type: "done", message: isDirectory ? "目录摘要已生成" : "文档摘要已生成" };
+  } catch (err) {
+    yield {
+      type: "error",
+      error: `生成摘要失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Generate summary for a single document
+ */
+async function generateDocumentSummary(
+  doc: { meta: { title: string }; body: JSONContent },
+  _intent: SkillIntent,
+): Promise<JSONContent> {
+  const markdown = tiptapJsonToMarkdown(doc.body);
+
+  // Get LLM config
+  const llmConfig = await configStore.getInternalByType("llm");
+  if (!llmConfig) {
+    throw new Error("LLM 未配置，请先在设置中配置对话模型");
+  }
+
+  const prompt = `请为以下文档生成一个简洁的摘要（2-3句话）。
+
+文档标题：${doc.meta.title}
+文档内容：
+${markdown}
+
+要求：
+- 以"📝 摘要："开头
+- 突出核心主题和关键信息
+- 使用客观专业的语言
+- 直接输出摘要文本，不要添加任何其他格式或说明`;
+
+  const response = await llmGateway.chat({
+    provider: llmConfig.providerId,
+    model: llmConfig.defaultModel || "gpt-4o",
+    apiKey: llmConfig.apiKey,
+    baseUrl: llmConfig.baseUrl,
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.5,
+  });
+
+  const summaryText = response.content.trim();
+  return buildSummaryBlock(summaryText);
+}
+
+/**
+ * Generate summary for a directory and all its child documents
+ */
+async function generateDirectorySummary(
+  projectKey: string,
+  dirId: string,
+  dirDoc: { meta: { title: string }; body: JSONContent },
+  _intent: SkillIntent,
+): Promise<JSONContent> {
+  // Recursively collect all descendant IDs
+  const allDescendantIds = await documentStore.collectAllDescendantIds(projectKey, dirId);
+
+  // Read all child document contents (with limit)
+  const docSummaries: Array<{ title: string; content: string }> = [];
+  const MAX_DOCS = 20; // Limit to avoid too large prompts
+  const MAX_CONTENT_LEN = 500; // Limit content length per document
+
+  for (const id of allDescendantIds.slice(0, MAX_DOCS)) {
+    try {
+      const childDoc = await documentStore.get(projectKey, id);
+      const markdown = tiptapJsonToMarkdown(childDoc.body as JSONContent);
+      docSummaries.push({
+        title: childDoc.meta.title,
+        content: markdown.slice(0, MAX_CONTENT_LEN),
+      });
+    } catch {
+      // Skip documents that fail to load
+    }
+  }
+
+  // Get LLM config
+  const llmConfig = await configStore.getInternalByType("llm");
+  if (!llmConfig) {
+    throw new Error("LLM 未配置，请先在设置中配置对话模型");
+  }
+
+  const prompt = `请为以下目录生成一个整体摘要。
+
+目录标题：${dirDoc.meta.title}
+包含 ${docSummaries.length} 个文档${allDescendantIds.length > MAX_DOCS ? `（共 ${allDescendantIds.length} 个，仅展示前 ${MAX_DOCS} 个）` : ""}：
+
+${docSummaries.map((d, i) => `${i + 1}. ${d.title}\n${d.content}`).join("\n\n---\n\n")}
+
+要求：
+1. 先输出一个整体摘要（以"📁 目录摘要："开头）
+2. 然后列出每个文档的一句话概述
+3. 使用 JSON 格式输出：
+\`\`\`json
+{
+  "overview": "📁 目录摘要：...",
+  "documents": [
+    { "title": "文档标题", "summary": "一句话概述" },
+    ...
+  ]
+}
+\`\`\``;
+
+  const response = await llmGateway.chat({
+    provider: llmConfig.providerId,
+    model: llmConfig.defaultModel || "gpt-4o",
+    apiKey: llmConfig.apiKey,
+    baseUrl: llmConfig.baseUrl,
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.5,
+  });
+
+  return buildDirectorySummaryBlock(response.content);
+}
+
+/**
+ * Build summary block for a single document
+ */
+function buildSummaryBlock(summaryText: string): JSONContent {
+  return {
+    type: "blockquote",
+    attrs: { id: uuidv4() },
+    content: [
+      {
+        type: "paragraph",
+        attrs: { id: uuidv4() },
+        content: [
+          {
+            type: "text",
+            text: summaryText,
+            marks: [{ type: "bold" }],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/**
+ * Build summary block for a directory (with document list)
+ */
+function buildDirectorySummaryBlock(jsonResponse: string): JSONContent {
+  // Try to extract JSON from the response
+  let parsed: { overview: string; documents: Array<{ title: string; summary: string }> };
+  
+  try {
+    // Try to extract JSON from markdown code block
+    const jsonMatch = jsonResponse.match(/```(?:json)?\s*([\s\S]*?)```/);
+    const jsonStr = jsonMatch ? jsonMatch[1].trim() : jsonResponse.trim();
+    parsed = JSON.parse(jsonStr);
+  } catch (err) {
+    // Fallback: use response as overview
+    console.warn("[buildDirectorySummaryBlock] Failed to parse JSON:", err);
+    return buildSummaryBlock(`📁 目录摘要：${jsonResponse.slice(0, 200)}...`);
+  }
+
+  const listItems = (parsed.documents || []).map((doc) => ({
+    type: "listItem" as const,
+    attrs: { id: uuidv4() },
+    content: [
+      {
+        type: "paragraph" as const,
+        attrs: { id: uuidv4() },
+        content: [{ type: "text" as const, text: `${doc.title}：${doc.summary}` }],
+      },
+    ],
+  }));
+
+  const content: JSONContent[] = [
+    {
+      type: "paragraph",
+      attrs: { id: uuidv4() },
+      content: [
+        {
+          type: "text",
+          text: parsed.overview || "📁 目录摘要：",
+          marks: [{ type: "bold" }],
+        },
+      ],
+    },
+  ];
+
+  if (listItems.length > 0) {
+    content.push({
+      type: "bulletList",
+      attrs: { id: uuidv4() },
+      content: listItems,
+    } as JSONContent);
+  }
+
+  return {
+    type: "blockquote",
+    attrs: { id: uuidv4() },
+    content,
+  };
+}
+
+/**
+ * Insert summary block at the top of document content
+ */
+function insertSummaryAtTop(originalContent: JSONContent, summaryBlock: JSONContent): JSONContent {
+  // Ensure the content is in the correct format
+  if (originalContent.type !== "doc" || !Array.isArray(originalContent.content)) {
+    return {
+      type: "doc",
+      content: [summaryBlock],
+    };
+  }
+
+  // Check if there's already a summary block at the top (blockquote starting with 📝 or 📁)
+  const existingSummaryIdx = originalContent.content.findIndex((block) => {
+    if (block.type !== "blockquote") return false;
+    const firstPara = (block.content as JSONContent[] | undefined)?.[0];
+    if (firstPara?.type !== "paragraph") return false;
+    const firstText = (firstPara.content as JSONContent[] | undefined)?.[0];
+    if (firstText?.type !== "text") return false;
+    const text = (firstText as { text?: string }).text || "";
+    return text.startsWith("📝 摘要：") || text.startsWith("📁 目录摘要：");
+  });
+
+  let newContent: JSONContent[];
+  if (existingSummaryIdx !== -1) {
+    // Replace existing summary
+    newContent = [...originalContent.content];
+    newContent[existingSummaryIdx] = summaryBlock;
+  } else {
+    // Insert at top
+    newContent = [summaryBlock, ...originalContent.content];
+  }
+
+  return {
+    type: "doc",
+    content: newContent,
+  };
 }
 
 /**
