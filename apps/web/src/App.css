@@ -6798,3 +6798,125 @@ body {
 [data-theme="dark"] .deep-search-phase.completed .deep-search-phase-icon {
   background: rgba(34, 197, 94, 0.25);
 }
+
+/* ============================================================================
+   Web Search Panel (Settings)
+   ============================================================================ */
+
+.web-search-panel {
+  padding: 0 4px;
+}
+
+.web-search-panel-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 0;
+  gap: 16px;
+  color: var(--muted);
+}
+
+.web-search-panel-header {
+  margin-bottom: 24px;
+}
+
+.web-search-panel-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--ink);
+}
+
+.web-search-panel-desc {
+  font-size: 14px;
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.6;
+}
+
+.web-search-panel-card {
+  margin-bottom: 24px;
+}
+
+.web-search-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.web-search-status-provider {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.web-search-provider-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.web-search-provider-name {
+  font-weight: 500;
+}
+
+.web-search-provider-desc {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.web-search-provider-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.web-search-provider-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.web-search-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.web-search-hint {
+  background: var(--hover-bg);
+  border-radius: 8px;
+  padding: 16px 20px;
+}
+
+.web-search-hint h4 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 12px;
+  color: var(--ink);
+}
+
+.web-search-hint ol {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.web-search-hint li {
+  font-size: 13px;
+  color: var(--ink-secondary);
+  line-height: 1.8;
+}
+
+.web-search-hint .anticon {
+  color: var(--accent);
+}

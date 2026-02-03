@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { RobotOutlined, SettingOutlined, CloseOutlined, BgColorsOutlined, ThunderboltOutlined } from "@ant-design/icons";
+import { RobotOutlined, SettingOutlined, CloseOutlined, BgColorsOutlined, ThunderboltOutlined, GlobalOutlined } from "@ant-design/icons";
 
 import SettingsMenu, { type SettingsMenuItem } from "./SettingsMenu";
 import AIProviderPanel from "./AIProviderPanel";
 import AppearancePanel from "./AppearancePanel";
 import SkillsPanel from "./SkillsPanel";
+import WebSearchPanel from "./WebSearchPanel";
 
 /**
  * Settings menu items
@@ -14,6 +15,11 @@ const SETTINGS_MENU_ITEMS: SettingsMenuItem[] = [
     key: "ai-providers",
     label: "AI 提供商",
     icon: <RobotOutlined />,
+  },
+  {
+    key: "web-search",
+    label: "网络搜索",
+    icon: <GlobalOutlined />,
   },
   {
     key: "skills",
@@ -73,6 +79,8 @@ function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     switch (activeKey) {
       case "ai-providers":
         return <AIProviderPanel />;
+      case "web-search":
+        return <WebSearchPanel />;
       case "skills":
         return <SkillsPanel />;
       case "appearance":

@@ -17,6 +17,8 @@ const isAppBackendPath = (path: string): boolean => {
   if (path.match(/^\/api\/projects\/[^/]+\/knowledge/)) return true;
   // Asset operations
   if (path.match(/^\/api\/projects\/[^/]+\/assets/)) return true;
+  // Settings (web-search, skills, etc.)
+  if (path.startsWith("/api/settings/")) return true;
   return false;
 };
 
