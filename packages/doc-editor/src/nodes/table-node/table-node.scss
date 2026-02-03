@@ -10,24 +10,31 @@
   // Table container - match both .zeus-table and native table
   table,
   .zeus-table {
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     table-layout: fixed;
     width: 100%;
     margin: 0;
-    overflow: hidden;
-    border: 2px solid var(--zeus-table-border-color, #d0d0d0);
+    border: 2px solid var(--zeus-table-border-color, #bbb);
     border-radius: 6px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
 
     // Common cell styles
     td,
     th {
       min-width: 80px;
       padding: 8px 12px;
-      border: 1px solid var(--zeus-border-color, #e0e0e0);
+      border-bottom: 1px solid var(--zeus-border-color, #e0e0e0);
+      border-right: 1px solid var(--zeus-border-color, #e0e0e0);
       vertical-align: top;
       box-sizing: border-box;
       position: relative;
+
+      // Remove right border on last cell
+      &:last-child {
+        border-right: none;
+      }
 
       // Paragraph inside cell
       > p {
@@ -38,6 +45,12 @@
       &.selectedCell {
         background-color: var(--zeus-table-selected-bg, rgba(200, 200, 255, 0.4));
       }
+    }
+
+    // Remove bottom border on last row
+    tr:last-child td,
+    tr:last-child th {
+      border-bottom: none;
     }
 
     // Header cell styles
