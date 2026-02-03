@@ -15,6 +15,7 @@ import { CodeBlockNode } from "../nodes/code-block-node/code-block-node-extensio
 import { FileBlockNode } from "../nodes/file-block-node/file-block-node-extension"
 import { HorizontalRule } from "../nodes/horizontal-rule-node/horizontal-rule-node-extension"
 import { createTableExtensions } from "../nodes/table-node/table-node-extension"
+import { MathNode } from "../nodes/math-node/math-node-extension"
 
 export type MarkdownConversionOptions = {
   extensions?: Extensions
@@ -34,6 +35,7 @@ const DEFAULT_EXTENSIONS: Extensions = [
   CodeBlockNode,
   Image,
   FileBlockNode,
+  MathNode,
   ...createTableExtensions(),
 ]
 
@@ -72,6 +74,100 @@ const createMarkdownParser = (schema: ReturnType<typeof createMarkdownSchema>) =
   })
   // Enable GFM tables
   markdown.enable("table")
+
+  // Add inline math rule: $...$
+  markdown.inline.ruler.after("escape", "math_inline", (state, silent) => {
+    if (state.src[state.pos] !== "$") {
+      return false
+    }
+    // Check for $$
+    if (state.src[state.pos + 1] === "$") {
+      return false
+    }
+
+    const start = state.pos + 1
+    let end = start
+    while (end < state.posMax && state.src[end] !== "$") {
+      if (state.src[end] === "\\") {
+        end += 2
+      } else {
+        end++
+      }
+    }
+
+    if (end >= state.posMax || state.src[end] !== "$") {
+      return false
+    }
+
+    const latex = state.src.slice(start, end)
+    if (!latex.trim()) {
+      return false
+    }
+
+    if (!silent) {
+      const token = state.push("math_inline", "span", 0)
+      token.content = latex
+      token.markup = "$"
+    }
+
+    state.pos = end + 1
+    return true
+  })
+
+  // Add block math rule: $$...$$
+  markdown.block.ruler.before("fence", "math_block", (state, startLine, endLine, silent) => {
+    const pos = state.bMarks[startLine] + state.tShift[startLine]
+    const max = state.eMarks[startLine]
+
+    if (pos + 2 > max) {
+      return false
+    }
+    if (state.src.slice(pos, pos + 2) !== "$$") {
+      return false
+    }
+
+    // Find closing $$
+    let nextLine = startLine
+    let content = ""
+
+    // Check if it's a single-line block: $$...$$ on same line
+    const restOfLine = state.src.slice(pos + 2, max).trim()
+    if (restOfLine.endsWith("$$") && restOfLine.length > 2) {
+      content = restOfLine.slice(0, -2)
+      nextLine = startLine + 1
+    } else {
+      // Multi-line block
+      nextLine = startLine + 1
+      while (nextLine < endLine) {
+        const lineStart = state.bMarks[nextLine] + state.tShift[nextLine]
+        const lineEnd = state.eMarks[nextLine]
+        const line = state.src.slice(lineStart, lineEnd)
+
+        if (line.trim() === "$$") {
+          break
+        }
+        content += (content ? "\n" : "") + line
+        nextLine++
+      }
+
+      if (nextLine >= endLine) {
+        return false
+      }
+      nextLine++
+    }
+
+    if (silent) {
+      return true
+    }
+
+    const token = state.push("math_block", "div", 0)
+    token.content = content.trim()
+    token.markup = "$$"
+    token.map = [startLine, nextLine]
+
+    state.line = nextLine
+    return true
+  })
 
   markdown.core.ruler.push("file_block_fence", (state) => {
     for (const token of state.tokens) {
@@ -143,6 +239,21 @@ const createMarkdownParser = (schema: ReturnType<typeof createMarkdownSchema>) =
       }),
     },
     code_inline: { mark: "code" },
+    // Math tokens
+    math_inline: {
+      node: "math",
+      getAttrs: (token: any) => ({
+        latex: token.content,
+        display: false,
+      }),
+    },
+    math_block: {
+      node: "math",
+      getAttrs: (token: any) => ({
+        latex: token.content,
+        display: true,
+      }),
+    },
     // Table tokens
     table: { block: "table" },
     thead: { ignore: true }, // thead/tbody are structural, content goes in rows
@@ -283,6 +394,22 @@ const createMarkdownSerializer = (_schema: ReturnType<typeof createMarkdownSchem
       },
       tableCell: () => {
         // Handled by table serializer
+      },
+      // Math serializer
+      math: (state: any, node: any) => {
+        const latex = node.attrs.latex || ""
+        const display = node.attrs.display || false
+        if (display) {
+          // Block math
+          state.write("$$\n")
+          state.write(latex)
+          state.ensureNewLine()
+          state.write("$$")
+          state.closeBlock(node)
+        } else {
+          // Inline math
+          state.write(`$${latex}$`)
+        }
       },
     },
     {

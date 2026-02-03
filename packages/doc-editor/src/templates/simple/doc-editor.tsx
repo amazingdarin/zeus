@@ -33,6 +33,7 @@ import { HorizontalRule } from "../../nodes/horizontal-rule-node/horizontal-rule
 import { CodeBlockNode } from "../../nodes/code-block-node/code-block-node-extension"
 import { LinkPreviewNode } from "../../nodes/link-preview-node/link-preview-node-extension"
 import { TocNode } from "../../nodes/toc-node/toc-node-extension"
+import { MathNode } from "../../nodes/math-node/math-node-extension"
 import { createTableExtensions } from "../../nodes/table-node/table-node-extension"
 import "../../nodes/blockquote-node/blockquote-node.scss"
 import "../../nodes/code-block-node/code-block-node.scss"
@@ -44,6 +45,7 @@ import "../../nodes/paragraph-node/paragraph-node.scss"
 import "../../nodes/link-preview-node/link-preview-node.scss"
 import "../../nodes/toc-node/toc-node.scss"
 import "../../nodes/table-node/table-node.scss"
+import "../../nodes/math-node/math-node.scss"
 import "../../ui/table-button/table-menu.scss"
 
 // --- Tiptap UI ---
@@ -56,6 +58,7 @@ import { BlockquoteButton } from "../../ui/blockquote-button"
 import { CodeBlockButton } from "../../ui/code-block-button"
 import { TocButton } from "../../ui/toc-button"
 import { TableMenu } from "../../ui/table-button"
+import { MathButton } from "../../ui/math-button"
 import {
   ColorHighlightPopover,
   ColorHighlightPopoverContent,
@@ -135,6 +138,7 @@ const MainToolbarContent = ({
         />
         <BlockquoteButton />
         <CodeBlockButton />
+        <MathButton />
         <TableMenu />
         <TocButton />
       </ToolbarGroup>
@@ -289,6 +293,7 @@ export function DocEditor({
         fetchHtml: linkPreviewFetchHtml,
       }),
       TocNode,
+      MathNode,
       ...createTableExtensions(),
       ...extensions,
     ],
