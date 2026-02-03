@@ -73,9 +73,7 @@ export const TableMenu = forwardRef<HTMLButtonElement, TableMenuProps>(
       handleInsert()
     }, [handleInsert])
 
-    if (!editor || !editor.isEditable) {
-      return null
-    }
+    const isDisabled = !editor || !editor.isEditable
 
     return (
       <DropdownMenu.Root>
@@ -85,6 +83,8 @@ export const TableMenu = forwardRef<HTMLButtonElement, TableMenuProps>(
               type="button"
               data-style="ghost"
               data-active-state={inTable ? "on" : "off"}
+              disabled={isDisabled}
+              data-disabled={isDisabled}
               tabIndex={-1}
               aria-label="Table options"
               tooltip="Table"
