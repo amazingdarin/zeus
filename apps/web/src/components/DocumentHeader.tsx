@@ -13,7 +13,9 @@ type DocumentHeaderProps = {
   allowEdit?: boolean;
   allowDelete?: boolean;
   allowOptimize?: boolean;
+  allowRefresh?: boolean;
   deleting?: boolean;
+  refreshing?: boolean;
   onEdit: () => void;
   onSave: () => void;
   onCancel: () => void;
@@ -22,6 +24,7 @@ type DocumentHeaderProps = {
   onDelete?: () => void;
   onExport?: () => void;
   onOptimize?: () => void;
+  onRefresh?: () => void;
 };
 
 function DocumentHeader({
@@ -31,7 +34,9 @@ function DocumentHeader({
   allowEdit = true,
   allowDelete = false,
   allowOptimize = false,
+  allowRefresh = false,
   deleting = false,
+  refreshing = false,
   onEdit,
   onSave,
   onCancel,
@@ -40,6 +45,7 @@ function DocumentHeader({
   onDelete,
   onExport,
   onOptimize,
+  onRefresh,
 }: DocumentHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -117,6 +123,32 @@ function DocumentHeader({
         ))}
       </div>
       <div className="kb-header-menu">
+        {allowRefresh && onRefresh ? (
+          <button
+            className="kb-refresh-button"
+            type="button"
+            aria-label="刷新文档"
+            onClick={onRefresh}
+            disabled={refreshing}
+            title="刷新文档"
+          >
+            <svg
+              className={`kb-refresh-icon${refreshing ? " spinning" : ""}`}
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M23 4v6h-6" />
+              <path d="M1 20v-6h6" />
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+            </svg>
+          </button>
+        ) : null}
         <button
           className="kb-menu-button"
           type="button"

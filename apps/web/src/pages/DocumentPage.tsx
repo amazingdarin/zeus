@@ -243,6 +243,7 @@ function DocumentPage() {
   const [error, setError] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [refreshingDocument, setRefreshingDocument] = useState(false);
   const [diffData, setDiffData] = useState<{ metaDiff: string; contentDiff: string } | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
@@ -1011,6 +1012,33 @@ function DocumentPage() {
     }
     navigate(`/documents/new?document_id=${encodeURIComponent(activeDocument.id)}`);
   };
+
+  const handleRefreshDocument = useCallback(async () => {
+    if (!resolvedProjectKey || !resolvedDocumentId || refreshingDocument) {
+      return;
+    }
+    setRefreshingDocument(true);
+    try {
+      // Clear cache for this document
+      const requestKey = `${resolvedProjectKey}:${resolvedDocumentId}`;
+      documentCache.delete(requestKey);
+      documentPromiseCache.delete(requestKey);
+      documentHierarchyCache.delete(requestKey);
+      documentHierarchyPromiseCache.delete(requestKey);
+      
+      // Fetch fresh document
+      const detail = await fetchDocument(resolvedProjectKey, resolvedDocumentId);
+      const mapped = mapDocumentDetail(detail, resolvedDocumentId);
+      
+      // Update cache and state
+      documentCache.set(requestKey, mapped);
+      setDocument(mapped);
+    } catch (err) {
+      console.error("Refresh document failed:", err);
+    } finally {
+      setRefreshingDocument(false);
+    }
+  }, [resolvedProjectKey, resolvedDocumentId, refreshingDocument]);
 
   const handleExport = useCallback(() => {
     if (!activeDocument) {
@@ -1819,7 +1847,9 @@ function DocumentPage() {
           allowEdit={Boolean(activeDocument)}
           allowDelete={Boolean(activeDocument)}
           allowOptimize={Boolean(activeDocument)}
+          allowRefresh={Boolean(activeDocument)}
           deleting={deleting}
+          refreshing={refreshingDocument}
           onEdit={handleEdit}
           onSave={() => { }}
           onCancel={() => { }}
@@ -1828,6 +1858,7 @@ function DocumentPage() {
           onDelete={handleDelete}
           onExport={activeDocument ? handleExport : undefined}
           onOptimize={activeDocument ? handleOpenOptimize : undefined}
+          onRefresh={activeDocument ? handleRefreshDocument : undefined}
         />
         <div className="doc-viewer-page">{bodyContent()}</div>
         {importModalOpen ? (
