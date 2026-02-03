@@ -203,6 +203,8 @@ export function renderMarkdown(content: string): React.ReactNode {
 type UseChatLogicOptions = {
   onOpenSettings?: () => void;
   autoScrollEnabled?: boolean;
+  deepSearchEnabled?: boolean;
+  onDeepSearchChange?: (enabled: boolean) => void;
 };
 
 export type UseChatLogicReturn = {
@@ -210,6 +212,7 @@ export type UseChatLogicReturn = {
   messages: ChatMessage[];
   input: string;
   isGenerating: boolean;
+  deepSearchEnabled: boolean;
   error: string | null;
   assistantBuffer: string;
   llmConfig: ProviderConfig | null;
@@ -234,6 +237,7 @@ export type UseChatLogicReturn = {
   setInput: (value: string) => void;
   setError: (error: string | null) => void;
   setSlashSelectedIndex: (index: number) => void;
+  setDeepSearchEnabled: (enabled: boolean) => void;
   handleSend: () => Promise<void>;
   handleStop: () => void;
   handleClearHistory: () => Promise<void>;
@@ -257,7 +261,7 @@ export type UseChatLogicReturn = {
 };
 
 export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicReturn {
-  const { autoScrollEnabled = true } = options;
+  const { autoScrollEnabled = true, deepSearchEnabled: externalDeepSearch, onDeepSearchChange } = options;
   const { currentProject } = useProjectContext();
   const projectKey = currentProject?.key ?? "";
   const navigate = useNavigate();
@@ -265,7 +269,18 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [internalDeepSearch, setInternalDeepSearch] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Use external deepSearch state if provided, otherwise internal
+  const deepSearchEnabled = externalDeepSearch ?? internalDeepSearch;
+  const setDeepSearchEnabled = useCallback((enabled: boolean) => {
+    if (onDeepSearchChange) {
+      onDeepSearchChange(enabled);
+    } else {
+      setInternalDeepSearch(enabled);
+    }
+  }, [onDeepSearchChange]);
   const [assistantBuffer, setAssistantBuffer] = useState("");
   const [llmConfig, setLlmConfig] = useState<ProviderConfig | null>(null);
   const [sessionId, setSessionId] = useState<string>(() => `session-${createId()}`);
@@ -539,7 +554,11 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
           }))
         : undefined;
 
-      const runId = await createChatRun(projectKey, message, sessionId, documentScope);
+      const runId = await createChatRun(projectKey, message, {
+        sessionId,
+        documentScope,
+        deepSearch: deepSearchEnabled,
+      });
       currentRunIdRef.current = runId;
       const url = buildChatStreamUrl(projectKey, runId);
       const source = new EventSource(url, { withCredentials: true });
@@ -967,6 +986,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     messages,
     input,
     isGenerating,
+    deepSearchEnabled,
     error,
     assistantBuffer,
     llmConfig,
@@ -991,6 +1011,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     setInput,
     setError,
     setSlashSelectedIndex,
+    setDeepSearchEnabled,
     handleSend,
     handleStop,
     handleClearHistory,

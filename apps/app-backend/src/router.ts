@@ -1592,10 +1592,11 @@ export const buildRouter = () => {
   router.post("/projects/:projectKey/chat/runs", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
-      const { session_id, message, document_scope } = req.body as { 
+      const { session_id, message, document_scope, deep_search } = req.body as { 
         session_id?: string; 
         message?: string;
         document_scope?: Array<{ doc_id: string; include_children: boolean }>;
+        deep_search?: boolean;
       };
 
       if (!message || typeof message !== "string" || !message.trim()) {
@@ -1616,7 +1617,9 @@ export const buildRouter = () => {
             }))
         : undefined;
 
-      const runId = await createRun(projectKey, sessionId, message.trim(), docScope);
+      const runId = await createRun(projectKey, sessionId, message.trim(), docScope, {
+        deepSearch: deep_search === true,
+      });
 
       success(res, { run_id: runId });
     } catch (err) {
@@ -1667,7 +1670,24 @@ export const buildRouter = () => {
         if (chunk.type === "delta") {
           res.write(`event: assistant.delta\ndata: ${JSON.stringify(chunk.content)}\n\n`);
         } else if (chunk.type === "thinking") {
-          res.write(`event: assistant.thinking\ndata: ${JSON.stringify({ content: chunk.content })}\n\n`);
+          res.write(`event: assistant.thinking\ndata: ${JSON.stringify({
+            content: chunk.content,
+            phase: chunk.phase,
+            subQueries: chunk.subQueries,
+          })}\n\n`);
+        } else if (chunk.type === "search_start") {
+          res.write(`event: assistant.search_start\ndata: ${JSON.stringify({
+            content: chunk.content,
+            phase: chunk.phase,
+            searchQuery: chunk.searchQuery,
+          })}\n\n`);
+        } else if (chunk.type === "search_result") {
+          res.write(`event: assistant.search_result\ndata: ${JSON.stringify({
+            content: chunk.content,
+            phase: chunk.phase,
+            searchQuery: chunk.searchQuery,
+            resultCount: chunk.resultCount,
+          })}\n\n`);
         } else if (chunk.type === "draft") {
           res.write(`event: assistant.draft\ndata: ${JSON.stringify(chunk.draft)}\n\n`);
         } else if (chunk.type === "done") {
@@ -2016,6 +2036,101 @@ export const buildRouter = () => {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to update Anthropic skill";
       error(res, "UPDATE_ANTHROPIC_SKILL_FAILED", msg, 500);
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Web Search Configuration API
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get web search configuration
+   * GET /settings/web-search
+   */
+  router.get("/settings/web-search", async (_req: Request, res: Response) => {
+    try {
+      const { webSearchConfigStore } = await import("./services/web-search-config.js");
+      const config = await webSearchConfigStore.get();
+      success(res, config);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to get web search config";
+      error(res, "GET_WEB_SEARCH_CONFIG_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Set (upsert) web search configuration
+   * PUT /settings/web-search
+   */
+  router.put("/settings/web-search", async (req: Request, res: Response) => {
+    try {
+      const { webSearchConfigStore } = await import("./services/web-search-config.js");
+      const { provider, api_key, enabled } = req.body as {
+        provider?: string;
+        api_key?: string;
+        enabled?: boolean;
+      };
+
+      if (!provider) {
+        error(res, "INVALID_REQUEST", "provider is required");
+        return;
+      }
+
+      if (!["tavily", "serpapi", "duckduckgo"].includes(provider)) {
+        error(res, "INVALID_REQUEST", "provider must be 'tavily', 'serpapi', or 'duckduckgo'");
+        return;
+      }
+
+      const config = await webSearchConfigStore.upsert({
+        provider: provider as "tavily" | "serpapi" | "duckduckgo",
+        apiKey: api_key,
+        enabled,
+      });
+
+      success(res, config);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to set web search config";
+      error(res, "SET_WEB_SEARCH_CONFIG_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Delete web search configuration
+   * DELETE /settings/web-search
+   */
+  router.delete("/settings/web-search", async (_req: Request, res: Response) => {
+    try {
+      const { webSearchConfigStore } = await import("./services/web-search-config.js");
+      const deleted = await webSearchConfigStore.delete();
+      success(res, { deleted });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to delete web search config";
+      error(res, "DELETE_WEB_SEARCH_CONFIG_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Test web search
+   * POST /settings/web-search/test
+   */
+  router.post("/settings/web-search/test", async (req: Request, res: Response) => {
+    try {
+      const { webSearch, isWebSearchAvailable } = await import("./services/web-search.js");
+
+      const available = await isWebSearchAvailable();
+      if (!available) {
+        error(res, "NOT_CONFIGURED", "Web search is not configured or disabled");
+        return;
+      }
+
+      const { query: testQuery } = req.body as { query?: string };
+      const searchQuery = testQuery || "test search query";
+
+      const results = await webSearch(searchQuery, { limit: 3 });
+      success(res, { results });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Web search test failed";
+      error(res, "WEB_SEARCH_TEST_FAILED", msg, 500);
     }
   });
 

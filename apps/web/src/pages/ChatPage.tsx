@@ -18,6 +18,7 @@ import {
   CloseCircleOutlined,
   FolderOutlined,
   FileTextOutlined,
+  SearchOutlined,
 } from "@ant-design/icons";
 
 import {
@@ -39,6 +40,7 @@ function ChatPage() {
     messages,
     input,
     isGenerating,
+    deepSearchEnabled,
     error,
     assistantBuffer,
     llmConfig,
@@ -57,6 +59,7 @@ function ChatPage() {
     setInput,
     setError,
     setSlashSelectedIndex,
+    setDeepSearchEnabled,
     handleSend,
     handleStop,
     handleClearHistory,
@@ -508,6 +511,15 @@ function ChatPage() {
             disabled={!projectKey || isGenerating}
             rows={1}
           />
+          <button
+            type="button"
+            className={`chat-page-deep-search-btn ${deepSearchEnabled ? "active" : ""}`}
+            onClick={() => setDeepSearchEnabled(!deepSearchEnabled)}
+            title={deepSearchEnabled ? "关闭深度搜索" : "开启深度搜索"}
+            disabled={isGenerating}
+          >
+            <SearchOutlined />
+          </button>
           {isGenerating ? (
             <button
               type="button"

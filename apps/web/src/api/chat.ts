@@ -5,12 +5,19 @@ export type DocumentScope = {
   includeChildren: boolean;
 };
 
+export type CreateChatRunOptions = {
+  sessionId?: string;
+  documentScope?: DocumentScope[];
+  deepSearch?: boolean;
+};
+
 export const createChatRun = async (
   projectKey: string,
   message: string,
-  sessionId?: string,
-  documentScope?: DocumentScope[],
+  options?: CreateChatRunOptions,
 ): Promise<string> => {
+  const { sessionId, documentScope, deepSearch } = options || {};
+
   // Convert to API format
   const apiDocScope = documentScope?.map((s) => ({
     doc_id: s.docId,
@@ -26,6 +33,7 @@ export const createChatRun = async (
       ...(sessionId ? { session_id: sessionId } : {}),
       message,
       ...(apiDocScope && apiDocScope.length > 0 ? { document_scope: apiDocScope } : {}),
+      ...(deepSearch ? { deep_search: true } : {}),
     }),
   });
   const payload = await response.json().catch(() => null);

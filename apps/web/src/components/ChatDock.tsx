@@ -1,6 +1,6 @@
 import type { KeyboardEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
-import { DownOutlined, UpOutlined, StopOutlined, SendOutlined } from "@ant-design/icons";
+import { DownOutlined, UpOutlined, StopOutlined, SendOutlined, SearchOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 
 import { createChatRun, buildChatStreamUrl, confirmTool, rejectTool, type PendingToolCall } from "../api/chat";
@@ -188,6 +188,7 @@ function ChatDock() {
   const [inputState, dispatchInput] = useReducer(inputReducer, initialInputState);
   const input = inputState.rawText;
   const [isGenerating, setIsGenerating] = useState(false);
+  const [deepSearchEnabled, setDeepSearchEnabled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [assistantBuffer, setAssistantBuffer] = useState("");
   const [assistantActive, setAssistantActive] = useState(false);
@@ -680,7 +681,9 @@ function ChatDock() {
         return;
       }
       const outboundMessage = buildPromptMessage(message, inputState.activePrompt);
-      const runId = await createChatRun(projectKey, outboundMessage);
+      const runId = await createChatRun(projectKey, outboundMessage, {
+        deepSearch: deepSearchEnabled,
+      });
       currentRunIdRef.current = runId;
       const url = buildChatStreamUrl(projectKey, runId);
       const source = new EventSource(url, { withCredentials: true });
@@ -1404,6 +1407,15 @@ function ChatDock() {
                 activeKey={activeDropdownKey}
               />
               <div className="chat-dock-actions">
+                <button
+                  type="button"
+                  className={`chat-dock-deep-search-toggle ${deepSearchEnabled ? "active" : ""}`}
+                  onClick={() => setDeepSearchEnabled((prev) => !prev)}
+                  title={deepSearchEnabled ? "关闭深度搜索" : "开启深度搜索"}
+                  disabled={isGenerating}
+                >
+                  <SearchOutlined />
+                </button>
                 {isGenerating ? (
                   <button
                     type="button"

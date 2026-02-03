@@ -163,3 +163,19 @@ INSERT INTO skill_config (id, skill_name, category, enabled, priority) VALUES
     (gen_random_uuid(), 'doc-optimize-format', 'doc', true, 40),
     (gen_random_uuid(), 'doc-optimize-content', 'doc', true, 50)
 ON CONFLICT (skill_name) DO NOTHING;
+
+-- Web Search Configuration
+CREATE TABLE web_search_config
+(
+    id              TEXT PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider        TEXT NOT NULL,              -- tavily, serpapi, duckduckgo
+    api_key_cipher  TEXT,                       -- AES-256-GCM encrypted
+    api_key_iv      TEXT,                       -- initialization vector
+    enabled         BOOLEAN DEFAULT false,
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    updated_at      TIMESTAMPTZ DEFAULT now()
+);
+
+-- Only allow one web search config (singleton pattern)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_web_search_config_singleton
+ON web_search_config ((true));

@@ -17,6 +17,7 @@ import {
   type SkillDefinition,
   type RiskLevel,
 } from "../llm/skills/index.js";
+import { executeDeepSearch, type DeepSearchChunk, type DeepSearchConfig } from "./deep-search.js";
 
 export type ChatMessage = {
   role: "user" | "assistant" | "system";
@@ -42,6 +43,7 @@ export type ChatRun = {
   sessionId: string;
   messages: ChatMessage[];
   docIds?: string[];  // Resolved document IDs for knowledge search scope
+  deepSearch?: boolean;  // Enable deep search mode
   status: "pending" | "running" | "completed" | "failed" | "cancelled" | "awaiting_confirmation";
   pendingTool?: PendingToolCall;  // Tool awaiting user confirmation
   pendingIntent?: SkillIntent;    // Intent to execute after confirmation
@@ -53,13 +55,18 @@ export type ChatRun = {
 const runAbortControllers = new Map<string, AbortController>();
 
 export type ChatStreamChunk = {
-  type: "delta" | "done" | "error" | "thinking" | "draft" | "tool_pending" | "tool_rejected";
+  type: "delta" | "done" | "error" | "thinking" | "draft" | "tool_pending" | "tool_rejected" | "search_start" | "search_result";
   content?: string;
   message?: string;
   error?: string;
   sources?: SourceReference[];
   draft?: DocumentDraft;
   pendingTool?: PendingToolCall;  // For tool_pending type
+  // Deep search specific fields
+  phase?: "decompose" | "search_kb" | "evaluate" | "search_web" | "synthesize";
+  subQueries?: string[];
+  searchQuery?: string;
+  resultCount?: number;
 };
 
 // In-memory storage for active chat runs
@@ -136,6 +143,10 @@ async function resolveDocumentScopes(
   return Array.from(docIds);
 }
 
+export type CreateRunOptions = {
+  deepSearch?: boolean;  // Enable deep search mode
+};
+
 /**
  * Create a new chat run
  */
@@ -144,6 +155,7 @@ export async function createRun(
   sessionId: string,
   message: string,
   documentScope?: DocumentScope[],
+  options?: CreateRunOptions,
 ): Promise<string> {
   const runId = uuidv4();
   
@@ -173,6 +185,7 @@ export async function createRun(
     sessionId,
     messages: [...history],
     docIds,
+    deepSearch: options?.deepSearch,
     status: "pending",
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -346,6 +359,7 @@ export function getPendingTool(runId: string): PendingToolCall | undefined {
  * Stream a chat run response
  *
  * Uses Hybrid Trigger to determine the appropriate mode:
+ * - deepSearch: Multi-round search with question decomposition
  * - command: Explicit slash command (strong determinism)
  * - anthropic: Anthropic Skill keyword match (medium determinism)
  * - natural: Natural language with LLM tool selection
@@ -367,6 +381,13 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
   try {
     // Extract user's latest message
     const userQuery = run.messages[run.messages.length - 1]?.content || "";
+
+    // Check for deep search mode first
+    if (run.deepSearch) {
+      console.log("[chat] Deep search mode enabled");
+      yield* handleDeepSearchMode(run, userQuery, abortSignal);
+      return;
+    }
 
     // Analyze trigger mode
     const trigger = await analyzeTrigger(userQuery, run.docIds);
@@ -851,6 +872,108 @@ async function* handleChatMode(
     run.updatedAt = Date.now();
 
     yield { type: "error", error: errorMessage };
+  }
+}
+
+/**
+ * Handle deep search mode - multi-round search with synthesis
+ */
+async function* handleDeepSearchMode(
+  run: ChatRun,
+  userQuery: string,
+  abortSignal: AbortSignal,
+): AsyncGenerator<ChatStreamChunk> {
+  try {
+    for await (const chunk of executeDeepSearch(
+      run.projectKey,
+      userQuery,
+      run.docIds,
+      undefined, // Use default config
+      abortSignal,
+    )) {
+      // Check if aborted
+      if (abortSignal.aborted) {
+        console.log("[chat] Deep search mode aborted");
+        run.status = "cancelled";
+        run.updatedAt = Date.now();
+        return;
+      }
+
+      // Map deep search chunk to chat chunk
+      const chatChunk = mapDeepSearchChunkToChatChunk(chunk);
+      yield chatChunk;
+
+      // Update status when done
+      if (chunk.type === "done") {
+        run.status = "completed";
+        run.updatedAt = Date.now();
+
+        // Add response to session history
+        if (chunk.message) {
+          const history = sessionMessages.get(run.sessionId);
+          if (history) {
+            history.push({ role: "assistant", content: chunk.message });
+          }
+        }
+      }
+    }
+  } catch (err) {
+    // Check if it's an abort error
+    if (abortSignal.aborted) {
+      run.status = "cancelled";
+      run.updatedAt = Date.now();
+      return;
+    }
+
+    const errorMessage = err instanceof Error ? err.message : "Deep search failed";
+    console.error("[chat] Deep search mode error:", errorMessage);
+
+    run.status = "failed";
+    run.updatedAt = Date.now();
+
+    yield { type: "error", error: errorMessage };
+  }
+}
+
+/**
+ * Map deep search chunk to chat chunk
+ */
+function mapDeepSearchChunkToChatChunk(chunk: DeepSearchChunk): ChatStreamChunk {
+  switch (chunk.type) {
+    case "thinking":
+      return {
+        type: "thinking",
+        content: chunk.content,
+        phase: chunk.phase,
+        subQueries: chunk.subQueries,
+      };
+    case "search_start":
+      return {
+        type: "search_start",
+        content: chunk.content,
+        phase: chunk.phase,
+        searchQuery: chunk.searchQuery,
+      };
+    case "search_result":
+      return {
+        type: "search_result",
+        content: chunk.content,
+        phase: chunk.phase,
+        searchQuery: chunk.searchQuery,
+        resultCount: chunk.resultCount,
+      };
+    case "delta":
+      return { type: "delta", content: chunk.content };
+    case "done":
+      return {
+        type: "done",
+        message: chunk.message,
+        sources: chunk.sources,
+      };
+    case "error":
+      return { type: "error", error: chunk.error };
+    default:
+      return { type: "error", error: "Unknown deep search chunk type" };
   }
 }
 
