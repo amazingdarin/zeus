@@ -14,6 +14,7 @@ import {
 import { CodeBlockNode } from "../nodes/code-block-node/code-block-node-extension"
 import { FileBlockNode } from "../nodes/file-block-node/file-block-node-extension"
 import { HorizontalRule } from "../nodes/horizontal-rule-node/horizontal-rule-node-extension"
+import { createTableExtensions } from "../nodes/table-node/table-node-extension"
 
 export type MarkdownConversionOptions = {
   extensions?: Extensions
@@ -33,6 +34,7 @@ const DEFAULT_EXTENSIONS: Extensions = [
   CodeBlockNode,
   Image,
   FileBlockNode,
+  ...createTableExtensions(),
 ]
 
 const ATTR_PAIR_REGEX = /([a-zA-Z0-9_-]+)\s*=\s*("[^"]*"|'[^']*'|[^,\s}]+)/g
@@ -62,11 +64,14 @@ const createMarkdownSchema = (extensions?: Extensions) => {
 }
 
 const createMarkdownParser = (schema: ReturnType<typeof createMarkdownSchema>) => {
-  const markdown = new MarkdownIt("commonmark", {
+  // Use "default" preset instead of "commonmark" to enable GFM tables
+  const markdown = new MarkdownIt("default", {
     html: false,
     linkify: true,
     breaks: true,
   })
+  // Enable GFM tables
+  markdown.enable("table")
 
   markdown.core.ruler.push("file_block_fence", (state) => {
     for (const token of state.tokens) {
@@ -138,9 +143,53 @@ const createMarkdownParser = (schema: ReturnType<typeof createMarkdownSchema>) =
       }),
     },
     code_inline: { mark: "code" },
+    // Table tokens
+    table: { block: "table" },
+    thead: { ignore: true }, // thead/tbody are structural, content goes in rows
+    tbody: { ignore: true },
+    tr: { block: "tableRow" },
+    th: {
+      block: "tableHeader",
+      getAttrs: (token: any) => ({
+        colspan: Number(token.attrGet("colspan")) || 1,
+        rowspan: Number(token.attrGet("rowspan")) || 1,
+        colwidth: null,
+      }),
+    },
+    td: {
+      block: "tableCell",
+      getAttrs: (token: any) => ({
+        colspan: Number(token.attrGet("colspan")) || 1,
+        rowspan: Number(token.attrGet("rowspan")) || 1,
+        colwidth: null,
+      }),
+    },
   }
 
   return new MarkdownParser(schema, markdown, tokens)
+}
+
+/**
+ * Serialize cell content to plain text for markdown table
+ */
+const serializeCellContent = (cell: any): string => {
+  let text = ""
+  cell.forEach((child: any) => {
+    if (child.isText) {
+      text += child.text || ""
+    } else if (child.type.name === "paragraph") {
+      child.forEach((inline: any) => {
+        if (inline.isText) {
+          text += inline.text || ""
+        }
+      })
+    } else {
+      // For other block types, recursively get text content
+      text += child.textContent || ""
+    }
+  })
+  // Escape pipe characters in cell content
+  return text.replace(/\|/g, "\\|").trim()
 }
 
 const createMarkdownSerializer = (_schema: ReturnType<typeof createMarkdownSchema>) => {
@@ -175,6 +224,65 @@ const createMarkdownSerializer = (_schema: ReturnType<typeof createMarkdownSchem
         state.write(`\`\`\`${info}\n`)
         state.write("```")
         state.closeBlock(node)
+      },
+      // Table serializers
+      table: (state: any, node: any) => {
+        // Collect all rows and cells to compute column widths
+        const rows: string[][] = []
+        const isHeaderRow: boolean[] = []
+
+        node.forEach((row: any) => {
+          const cells: string[] = []
+          let hasHeader = false
+          row.forEach((cell: any) => {
+            // Serialize cell content to string
+            const cellContent = serializeCellContent(cell)
+            cells.push(cellContent)
+            if (cell.type.name === "tableHeader") {
+              hasHeader = true
+            }
+          })
+          rows.push(cells)
+          isHeaderRow.push(hasHeader)
+        })
+
+        if (rows.length === 0) {
+          state.closeBlock(node)
+          return
+        }
+
+        // Calculate column widths
+        const colCount = Math.max(...rows.map((r) => r.length))
+        const colWidths = new Array(colCount).fill(3)
+        for (const row of rows) {
+          for (let i = 0; i < row.length; i++) {
+            colWidths[i] = Math.max(colWidths[i], row[i].length)
+          }
+        }
+
+        // Write table
+        for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+          const row = rows[rowIdx]
+          const cells = row.map((cell, i) => cell.padEnd(colWidths[i]))
+          state.write(`| ${cells.join(" | ")} |\n`)
+
+          // Write separator after header row
+          if (isHeaderRow[rowIdx] && (rowIdx === 0 || !isHeaderRow[rowIdx - 1])) {
+            const separator = colWidths.map((w) => "-".repeat(w))
+            state.write(`| ${separator.join(" | ")} |\n`)
+          }
+        }
+
+        state.closeBlock(node)
+      },
+      tableRow: () => {
+        // Handled by table serializer
+      },
+      tableHeader: () => {
+        // Handled by table serializer
+      },
+      tableCell: () => {
+        // Handled by table serializer
       },
     },
     {

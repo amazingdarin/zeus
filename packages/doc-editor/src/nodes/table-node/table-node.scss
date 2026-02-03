@@ -1,0 +1,127 @@
+// Table Node Styles
+
+.ProseMirror {
+  // Table container
+  .zeus-table {
+    border-collapse: collapse;
+    table-layout: fixed;
+    width: 100%;
+    margin: 1em 0;
+    overflow: hidden;
+    border: 1px solid var(--zeus-border-color, #e0e0e0);
+    border-radius: 4px;
+
+    // Common cell styles
+    td,
+    th {
+      min-width: 80px;
+      padding: 8px 12px;
+      border: 1px solid var(--zeus-border-color, #e0e0e0);
+      vertical-align: top;
+      box-sizing: border-box;
+      position: relative;
+
+      // Paragraph inside cell
+      > p {
+        margin: 0;
+      }
+
+      // Selection state
+      &.selectedCell {
+        background-color: var(--zeus-table-selected-bg, rgba(200, 200, 255, 0.4));
+      }
+    }
+
+    // Header cell styles
+    th,
+    .zeus-table-header {
+      background-color: var(--zeus-table-header-bg, #f5f5f5);
+      font-weight: 600;
+      text-align: left;
+    }
+
+    // Regular cell styles
+    td,
+    .zeus-table-cell {
+      background-color: var(--zeus-table-cell-bg, #fff);
+    }
+
+    // Row hover effect
+    tr:hover td,
+    tr:hover th {
+      background-color: var(--zeus-table-hover-bg, #fafafa);
+    }
+
+    tr:hover th {
+      background-color: var(--zeus-table-header-hover-bg, #ebebeb);
+    }
+  }
+
+  // Column resize handle
+  .tableWrapper {
+    overflow-x: auto;
+    margin: 1em 0;
+  }
+
+  .column-resize-handle {
+    position: absolute;
+    right: -2px;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background-color: var(--zeus-primary-color, #4a90d9);
+    pointer-events: none;
+    z-index: 20;
+  }
+
+  // Resize cursor
+  &.resize-cursor {
+    cursor: col-resize;
+  }
+
+  // Selected cells border
+  .selectedCell::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    border: 2px solid var(--zeus-primary-color, #4a90d9);
+    z-index: 10;
+  }
+}
+
+// Dark mode support
+@media (prefers-color-scheme: dark) {
+  .ProseMirror {
+    .zeus-table {
+      border-color: var(--zeus-border-color-dark, #3a3a3a);
+
+      td,
+      th {
+        border-color: var(--zeus-border-color-dark, #3a3a3a);
+      }
+
+      th,
+      .zeus-table-header {
+        background-color: var(--zeus-table-header-bg-dark, #2a2a2a);
+      }
+
+      td,
+      .zeus-table-cell {
+        background-color: var(--zeus-table-cell-bg-dark, #1a1a1a);
+      }
+
+      tr:hover td,
+      tr:hover th {
+        background-color: var(--zeus-table-hover-bg-dark, #252525);
+      }
+
+      tr:hover th {
+        background-color: var(--zeus-table-header-hover-bg-dark, #333);
+      }
+    }
+  }
+}

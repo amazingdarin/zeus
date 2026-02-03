@@ -1,0 +1,109 @@
+// Table Menu Styles
+
+.zeus-table-menu-content {
+  min-width: 180px;
+  background-color: var(--zeus-menu-bg, #fff);
+  border: 1px solid var(--zeus-border-color, #e0e0e0);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  animation: fadeIn 0.15s ease-out;
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+.zeus-table-menu-label {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--zeus-text-muted, #888);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.zeus-table-menu-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--zeus-text-color, #333);
+  border-radius: 4px;
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+
+  &:hover,
+  &:focus {
+    background-color: var(--zeus-menu-hover-bg, #f5f5f5);
+  }
+
+  &[data-disabled] {
+    color: var(--zeus-text-disabled, #aaa);
+    pointer-events: none;
+  }
+
+  // Delete item style
+  &:last-child {
+    color: var(--zeus-danger-color, #dc3545);
+
+    &:hover,
+    &:focus {
+      background-color: var(--zeus-danger-bg, #fef2f2);
+    }
+  }
+}
+
+.zeus-table-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background-color: var(--zeus-border-color, #e0e0e0);
+}
+
+// Dark mode support
+@media (prefers-color-scheme: dark) {
+  .zeus-table-menu-content {
+    background-color: var(--zeus-menu-bg-dark, #2a2a2a);
+    border-color: var(--zeus-border-color-dark, #3a3a3a);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  }
+
+  .zeus-table-menu-label {
+    color: var(--zeus-text-muted-dark, #888);
+  }
+
+  .zeus-table-menu-item {
+    color: var(--zeus-text-color-dark, #e0e0e0);
+
+    &:hover,
+    &:focus {
+      background-color: var(--zeus-menu-hover-bg-dark, #3a3a3a);
+    }
+
+    &[data-disabled] {
+      color: var(--zeus-text-disabled-dark, #666);
+    }
+
+    &:last-child {
+      color: var(--zeus-danger-color, #ef4444);
+
+      &:hover,
+      &:focus {
+        background-color: var(--zeus-danger-bg-dark, #3f1e1e);
+      }
+    }
+  }
+
+  .zeus-table-menu-separator {
+    background-color: var(--zeus-border-color-dark, #3a3a3a);
+  }
+}

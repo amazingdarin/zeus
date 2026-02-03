@@ -553,3 +553,160 @@
   "marks": [{ "type": "bold" }]
 }
 ```
+
+---
+
+## table
+
+表格容器节点，包含表格行。
+
+### 属性
+
+无特殊属性。
+
+### 内容
+
+只能包含 `tableRow` 节点。
+
+### 示例
+
+```json
+{
+  "type": "table",
+  "content": [
+    {
+      "type": "tableRow",
+      "content": [
+        {
+          "type": "tableHeader",
+          "attrs": { "colspan": 1, "rowspan": 1 },
+          "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "Header 1" }] }]
+        },
+        {
+          "type": "tableHeader",
+          "attrs": { "colspan": 1, "rowspan": 1 },
+          "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "Header 2" }] }]
+        }
+      ]
+    },
+    {
+      "type": "tableRow",
+      "content": [
+        {
+          "type": "tableCell",
+          "attrs": { "colspan": 1, "rowspan": 1 },
+          "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "Cell 1" }] }]
+        },
+        {
+          "type": "tableCell",
+          "attrs": { "colspan": 1, "rowspan": 1 },
+          "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "Cell 2" }] }]
+        }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+## tableRow
+
+表格行节点。
+
+### 属性
+
+无特殊属性。
+
+### 内容
+
+只能包含 `tableHeader` 或 `tableCell` 节点。
+
+### 示例
+
+```json
+{
+  "type": "tableRow",
+  "content": [
+    {
+      "type": "tableCell",
+      "attrs": { "colspan": 1, "rowspan": 1 },
+      "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "Cell" }] }]
+    }
+  ]
+}
+```
+
+---
+
+## tableHeader
+
+表头单元格节点，用于表格第一行或第一列。
+
+### 属性
+
+| 属性 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `colspan` | `number` | 否 | `1` | 列跨度 |
+| `rowspan` | `number` | 否 | `1` | 行跨度 |
+| `colwidth` | `number[] \| null` | 否 | `null` | 列宽数组 |
+
+### 内容
+
+可包含任意块级节点，通常包含 `paragraph`。
+
+### 示例
+
+```json
+{
+  "type": "tableHeader",
+  "attrs": {
+    "colspan": 2,
+    "rowspan": 1,
+    "colwidth": null
+  },
+  "content": [
+    {
+      "type": "paragraph",
+      "content": [{ "type": "text", "text": "Merged Header" }]
+    }
+  ]
+}
+```
+
+---
+
+## tableCell
+
+表格普通单元格节点。
+
+### 属性
+
+| 属性 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `colspan` | `number` | 否 | `1` | 列跨度 |
+| `rowspan` | `number` | 否 | `1` | 行跨度 |
+| `colwidth` | `number[] \| null` | 否 | `null` | 列宽数组 |
+
+### 内容
+
+可包含任意块级节点，通常包含 `paragraph`。
+
+### 示例
+
+```json
+{
+  "type": "tableCell",
+  "attrs": {
+    "colspan": 1,
+    "rowspan": 1,
+    "colwidth": null
+  },
+  "content": [
+    {
+      "type": "paragraph",
+      "content": [{ "type": "text", "text": "Cell content" }]
+    }
+  ]
+}
+```
