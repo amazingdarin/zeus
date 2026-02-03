@@ -2366,20 +2366,23 @@ function mapDocumentDetail(data: DocumentDetail | undefined | null, fallbackId: 
     if ("type" in body && (body as { type?: string }).type === "doc" && "content" in body) {
       content = body as JSONContent;
     }
-    // Case 2: body is { type: "tiptap", content: { meta: ..., content: { type: "doc", ... } } }
+    // Case 2: body is { type: "tiptap", content: { type: "doc", content: [...] } }
+    // or { type: "tiptap", content: { meta: ..., content: { type: "doc", ... } } }
     else if ("type" in body && (body as { type?: string }).type === "tiptap" && "content" in body) {
       const bodyContent = (body as { content?: unknown }).content;
       if (bodyContent && typeof bodyContent === "object") {
-        // Check for nested { meta, content } format from exportContentJson
-        if ("content" in bodyContent) {
+        // First check: bodyContent itself is { type: "doc", content: [...] }
+        if ("type" in bodyContent && (bodyContent as { type?: string }).type === "doc" && "content" in bodyContent) {
+          content = bodyContent as JSONContent;
+        }
+        // Second check: nested { meta, content: { type: "doc", ... } } format from exportContentJson
+        else if ("content" in bodyContent) {
           const nestedContent = (bodyContent as { content?: unknown }).content;
           if (nestedContent && typeof nestedContent === "object" && "type" in nestedContent) {
-            content = nestedContent as JSONContent;
+            if ((nestedContent as { type?: string }).type === "doc") {
+              content = nestedContent as JSONContent;
+            }
           }
-        }
-        // Or bodyContent itself might be JSONContent
-        else if ("type" in bodyContent && (bodyContent as { type?: string }).type === "doc") {
-          content = bodyContent as JSONContent;
         }
       }
     }
