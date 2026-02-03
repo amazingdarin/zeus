@@ -36,6 +36,7 @@ export async function getWebSearchConfig(): Promise<WebSearchConfig | null> {
     throw new Error("Failed to get web search config");
   }
   const payload = await response.json();
+  console.log("[web-search API] getWebSearchConfig response:", payload);
   return payload?.data || null;
 }
 

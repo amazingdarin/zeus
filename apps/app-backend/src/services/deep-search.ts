@@ -166,9 +166,10 @@ export async function* executeDeepSearch(
       resultCount: kbResults.length,
     };
 
-    // Collect sources
+    // Collect KB sources
     for (const r of kbResults) {
       allSources.push({
+        type: "kb",
         docId: r.doc_id,
         blockId: r.block_id,
         title: r.metadata?.title || r.doc_id,
@@ -180,41 +181,82 @@ export async function* executeDeepSearch(
     // Phase 3: Evaluate and optionally search web
     let webResults: WebSearchResult[] = [];
 
-    if (cfg.enableWebSearch && kbResults.length < cfg.kbResultThreshold) {
+    if (cfg.enableWebSearch) {
       if (abortSignal?.aborted) return;
 
-      yield {
-        type: "thinking",
-        phase: "evaluate",
-        content: `知识库结果不足，尝试网络搜索...`,
-      };
+      // Determine if we need web search
+      let needWebSearch = false;
+      let reason = "";
 
-      // Import web search dynamically to avoid circular dependency
-      try {
-        const { webSearch } = await import("./web-search.js");
-        yield {
-          type: "search_start",
-          phase: "search_web",
-          content: `网络搜索: ${subQuery}`,
-          searchQuery: subQuery,
-        };
-
-        webResults = await webSearch(subQuery, { limit: 3 });
-
-        yield {
-          type: "search_result",
-          phase: "search_web",
-          content: `网络找到 ${webResults.length} 条结果`,
-          searchQuery: subQuery,
-          resultCount: webResults.length,
-        };
-      } catch (err) {
-        console.warn("[deep-search] Web search failed:", err);
+      if (kbResults.length < cfg.kbResultThreshold) {
+        // Not enough KB results
+        needWebSearch = true;
+        reason = `知识库结果不足 (${kbResults.length} < ${cfg.kbResultThreshold})`;
+      } else {
+        // Check relevance of KB results
         yield {
           type: "thinking",
-          phase: "search_web",
-          content: "网络搜索未配置或失败，跳过",
+          phase: "evaluate",
+          content: `正在评估知识库结果的相关性...`,
         };
+
+        const relevance = await evaluateResultRelevance(
+          llmConfig,
+          subQuery,
+          kbResults,
+        );
+
+        if (!relevance.isRelevant) {
+          needWebSearch = true;
+          reason = relevance.reason || "知识库结果与问题不相关";
+        }
+      }
+
+      if (needWebSearch) {
+        yield {
+          type: "thinking",
+          phase: "evaluate",
+          content: reason + "，尝试网络搜索...",
+        };
+
+        // Import web search dynamically to avoid circular dependency
+        try {
+          const { webSearch } = await import("./web-search.js");
+          yield {
+            type: "search_start",
+            phase: "search_web",
+            content: `网络搜索: ${subQuery}`,
+            searchQuery: subQuery,
+          };
+
+          webResults = await webSearch(subQuery, { limit: 3 });
+
+          // Collect web sources
+          for (const wr of webResults) {
+            allSources.push({
+              type: "web",
+              url: wr.url,
+              title: wr.title,
+              snippet: wr.snippet,
+              score: 0.5,  // Default score for web results
+            });
+          }
+
+          yield {
+            type: "search_result",
+            phase: "search_web",
+            content: `网络找到 ${webResults.length} 条结果`,
+            searchQuery: subQuery,
+            resultCount: webResults.length,
+          };
+        } catch (err) {
+          console.warn("[deep-search] Web search failed:", err);
+          yield {
+            type: "thinking",
+            phase: "search_web",
+            content: "网络搜索未配置或失败，跳过",
+          };
+        }
       }
     }
 
@@ -308,6 +350,70 @@ async function decomposeQuery(
 }
 
 // ============================================================================
+// Result Relevance Evaluation
+// ============================================================================
+
+const RELEVANCE_PROMPT = `你是一个搜索结果评估助手。请判断以下知识库搜索结果是否与用户问题相关。
+
+用户问题: {query}
+
+知识库搜索结果摘要:
+{snippets}
+
+请评估这些结果是否能够回答用户的问题。注意：
+1. 如果问题涉及实时信息（如"今天"、"最新"、"当前"等），而结果是静态文档，则视为不相关
+2. 如果问题领域与结果完全不匹配，则视为不相关
+3. 如果结果只是偶然包含相同关键词但内容不相关，则视为不相关
+
+请严格按照以下 JSON 格式输出:
+{"isRelevant": true/false, "reason": "简短说明原因"}`;
+
+async function evaluateResultRelevance(
+  config: ProviderConfigInternal,
+  query: string,
+  results: SearchResult[],
+): Promise<{ isRelevant: boolean; reason?: string }> {
+  // Build snippets summary
+  const snippets = results
+    .slice(0, 5)  // Only evaluate top 5 results
+    .map((r, i) => `${i + 1}. ${r.metadata?.title || "无标题"}: ${r.snippet?.slice(0, 200) || ""}`)
+    .join("\n");
+
+  const prompt = RELEVANCE_PROMPT
+    .replace("{query}", query)
+    .replace("{snippets}", snippets);
+
+  try {
+    const response = await llmGateway.chat({
+      provider: config.providerId,
+      model: config.defaultModel!,
+      messages: [
+        { role: "system", content: "You are a helpful assistant that outputs valid JSON only." },
+        { role: "user", content: prompt },
+      ],
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      temperature: 0.1,
+    });
+
+    // Parse JSON response
+    const text = response.content.trim();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.warn("[deep-search] Failed to parse relevance evaluation:", text);
+      return { isRelevant: true }; // Default to relevant if parsing fails
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]) as { isRelevant: boolean; reason?: string };
+    console.log("[deep-search] Relevance evaluation:", parsed);
+    return parsed;
+  } catch (err) {
+    console.warn("[deep-search] Relevance evaluation failed:", err);
+    return { isRelevant: true }; // Default to relevant if evaluation fails
+  }
+}
+
+// ============================================================================
 // Answer Synthesis
 // ============================================================================
 
@@ -385,9 +491,14 @@ function deduplicateSources(sources: SourceReference[]): SourceReference[] {
   const unique: SourceReference[] = [];
 
   for (const source of sources) {
-    const key = source.blockId
-      ? `${source.docId}:${source.blockId}`
-      : source.docId;
+    let key: string;
+    if (source.type === "web") {
+      key = `web:${source.url}`;
+    } else {
+      key = source.blockId
+        ? `kb:${source.docId}:${source.blockId}`
+        : `kb:${source.docId}`;
+    }
 
     if (!seen.has(key)) {
       seen.add(key);
@@ -395,6 +506,6 @@ function deduplicateSources(sources: SourceReference[]): SourceReference[] {
     }
   }
 
-  // Sort by score descending and limit to top 10
-  return unique.sort((a, b) => b.score - a.score).slice(0, 10);
+  // Sort by score descending and limit to top 15 (allow more with web results)
+  return unique.sort((a, b) => b.score - a.score).slice(0, 15);
 }

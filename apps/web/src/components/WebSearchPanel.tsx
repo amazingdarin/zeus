@@ -38,28 +38,43 @@ function WebSearchPanel() {
   /**
    * Load configuration
    */
-  const loadConfig = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await getWebSearchConfig();
-      setConfig(data);
-      if (data) {
-        form.setFieldsValue({
-          provider: data.provider,
-          apiKey: data.apiKeyMasked || "",
-          enabled: data.enabled,
-        });
-      }
-    } catch (err) {
-      console.error("Failed to load web search config:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [form]);
-
   useEffect(() => {
-    loadConfig();
-  }, [loadConfig]);
+    let mounted = true;
+    
+    const doLoad = async () => {
+      setLoading(true);
+      try {
+        const data = await getWebSearchConfig();
+        console.log("[WebSearchPanel] Loaded config:", data);
+        if (!mounted) return;
+        
+        setConfig(data);
+        if (data) {
+          // Use setTimeout to ensure form is ready
+          setTimeout(() => {
+            if (!mounted) return;
+            form.setFieldsValue({
+              provider: data.provider,
+              apiKey: data.apiKeyMasked || "",
+              enabled: data.enabled,
+            });
+          }, 50);
+        }
+      } catch (err) {
+        console.error("Failed to load web search config:", err);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+    
+    doLoad();
+    
+    return () => {
+      mounted = false;
+    };
+  }, [form]);
 
   /**
    * Save configuration

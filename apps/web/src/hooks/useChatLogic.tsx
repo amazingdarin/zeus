@@ -45,8 +45,10 @@ export type ChatArtifact = {
 };
 
 export type SourceReference = {
-  docId: string;
-  blockId?: string;
+  type?: "kb" | "web";  // "kb" = knowledge base (default), "web" = web search
+  docId?: string;       // For KB sources
+  blockId?: string;     // For KB sources
+  url?: string;         // For web sources
   title: string;
   snippet: string;
   score: number;

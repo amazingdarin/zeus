@@ -247,6 +247,12 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     if (!sources || sources.length === 0) return null;
 
     const isSourceExpanded = expandedSources.has(messageId);
+    const kbSources = sources.filter((s) => s.type !== "web");
+    const webSources = sources.filter((s) => s.type === "web");
+
+    const totalLabel = [];
+    if (kbSources.length > 0) totalLabel.push(`${kbSources.length} 个文档`);
+    if (webSources.length > 0) totalLabel.push(`${webSources.length} 个网页`);
 
     return (
       <div className="chat-sources">
@@ -255,9 +261,9 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
           className="chat-sources-toggle"
           onClick={() => toggleSourcesExpanded(messageId)}
         >
-          <span className="chat-sources-icon">📚</span>
+          <span className="chat-sources-icon">{webSources.length > 0 ? "🔍" : "📚"}</span>
           <span className="chat-sources-label">
-            引用了 {sources.length} 个文档
+            引用了 {totalLabel.join("、")}
           </span>
           <span className={`chat-sources-arrow ${isSourceExpanded ? "expanded" : ""}`}>
             {isSourceExpanded ? <DownOutlined /> : <UpOutlined />}
@@ -265,13 +271,15 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
         </button>
         {isSourceExpanded && (
           <div className="chat-sources-list">
-            {sources.map((source, index) => (
+            {/* KB Sources */}
+            {kbSources.map((source, index) => (
               <div
-                key={`${source.docId}-${source.blockId || ""}-${index}`}
-                className="chat-source-item"
-                onClick={() => handleDocumentNavigate(source.docId, { blockId: source.blockId })}
+                key={`kb-${source.docId}-${source.blockId || ""}-${index}`}
+                className="chat-source-item chat-source-kb"
+                onClick={() => source.docId && handleDocumentNavigate(source.docId, { blockId: source.blockId })}
               >
                 <div className="chat-source-title">
+                  <span className="chat-source-type-icon">📄</span>
                   {source.title}
                   {source.blockId && (
                     <span className="chat-source-block-hint">
@@ -281,6 +289,24 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
                 </div>
                 <div className="chat-source-snippet">{source.snippet}</div>
               </div>
+            ))}
+            {/* Web Sources */}
+            {webSources.map((source, index) => (
+              <a
+                key={`web-${source.url}-${index}`}
+                className="chat-source-item chat-source-web"
+                href={source.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="chat-source-title">
+                  <span className="chat-source-type-icon">🌐</span>
+                  {source.title}
+                </div>
+                <div className="chat-source-snippet">{source.snippet}</div>
+                <div className="chat-source-url">{source.url}</div>
+              </a>
             ))}
           </div>
         )}

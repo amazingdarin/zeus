@@ -4687,9 +4687,9 @@ body {
   gap: 6px;
 }
 
-.chat-source-title::before {
-  content: "📄";
+.chat-source-type-icon {
   font-size: 12px;
+  flex-shrink: 0;
 }
 
 .chat-source-block-hint {
@@ -4711,6 +4711,30 @@ body {
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Web source specific styles */
+.chat-source-web {
+  text-decoration: none;
+  display: block;
+}
+
+.chat-source-web .chat-source-title {
+  color: #2563eb;
+}
+
+.chat-source-web:hover .chat-source-title {
+  text-decoration: underline;
+}
+
+.chat-source-url {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.7;
 }
 
 /* ============================================

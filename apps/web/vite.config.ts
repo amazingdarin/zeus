@@ -20,6 +20,7 @@ const isAppBackendRoute = (url: string): boolean => {
     url.startsWith("/api/llm") ||
     url.startsWith("/api/ocr") ||
     url.startsWith("/api/skills") ||
+    url.startsWith("/api/settings") ||
     url.startsWith("/api/app")
   );
 };
