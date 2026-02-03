@@ -91,6 +91,32 @@ function error(res: Response, code: string, message: string, status = 400): void
   res.status(status).json({ code, message });
 }
 
+/**
+ * Recursively update block attributes in document content
+ */
+function updateBlockAttrsInContent(
+  content: JSONContent,
+  blockId: string,
+  newAttrs: Record<string, unknown>,
+): boolean {
+  // Check if this node matches
+  if (content.attrs?.id === blockId) {
+    content.attrs = { ...content.attrs, ...newAttrs };
+    return true;
+  }
+
+  // Recursively check children
+  if (content.content && Array.isArray(content.content)) {
+    for (const child of content.content) {
+      if (updateBlockAttrsInContent(child, blockId, newAttrs)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 export const buildRouter = () => {
   const router = Router();
 
@@ -340,6 +366,62 @@ export const buildRouter = () => {
       error(res, "DELETE_FAILED", message, 500);
     }
   });
+
+  /**
+   * Update block attributes (for taskItem checked state, etc.)
+   * PATCH /projects/:projectKey/documents/:docId/blocks/:blockId
+   */
+  router.patch(
+    "/projects/:projectKey/documents/:docId/blocks/:blockId",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId, blockId } = req.params;
+        const { attrs } = req.body as { attrs: Record<string, unknown> };
+
+        if (!attrs || typeof attrs !== "object") {
+          error(res, "INVALID_REQUEST", "attrs is required and must be an object");
+          return;
+        }
+
+        // Get existing document
+        const doc = await documentStore.get(projectKey, docId);
+
+        // Update block attrs in content
+        const content = doc.body?.content as JSONContent | undefined;
+        if (!content) {
+          error(res, "INVALID_DOCUMENT", "Document has no content");
+          return;
+        }
+
+        const updated = updateBlockAttrsInContent(content, blockId, attrs);
+        if (!updated) {
+          error(res, "BLOCK_NOT_FOUND", `Block ${blockId} not found in document`, 404);
+          return;
+        }
+
+        // Save updated document
+        const savedDoc: Document = {
+          meta: doc.meta,
+          body: doc.body,
+        };
+        await documentStore.save(projectKey, savedDoc);
+
+        // Re-index asynchronously
+        knowledgeSearch.indexDocument(projectKey, savedDoc).catch((err) => {
+          console.error("Index error:", err);
+        });
+
+        success(res, { blockId, attrs });
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          error(res, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Update block failed";
+        error(res, "UPDATE_BLOCK_FAILED", message, 500);
+      }
+    },
+  );
 
   /**
    * Move a document to a new parent

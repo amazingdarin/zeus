@@ -28,6 +28,7 @@ import {
   fetchUrlHtml,
   importGit,
   optimizeFormat,
+  updateBlockAttrs,
   type DocumentDetail,
   type DocumentTreeItem,
 } from "../api/documents";
@@ -1040,6 +1041,63 @@ function DocumentPage() {
     }
   }, [resolvedProjectKey, resolvedDocumentId, refreshingDocument]);
 
+  /**
+   * Handle task item checkbox toggle in view mode
+   */
+  const handleTaskCheckChange = useCallback(
+    async (blockId: string, checked: boolean) => {
+      if (!resolvedProjectKey || !activeDocument) {
+        return;
+      }
+      try {
+        // Call API to persist the change
+        await updateBlockAttrs(resolvedProjectKey, activeDocument.id, blockId, { checked });
+
+        // Optimistically update local content state
+        if (activeDocument.content) {
+          const updateBlockInContent = (content: JSONContent): JSONContent => {
+            if (content.attrs?.id === blockId) {
+              return {
+                ...content,
+                attrs: { ...content.attrs, checked },
+              };
+            }
+            if (content.content && Array.isArray(content.content)) {
+              return {
+                ...content,
+                content: content.content.map(updateBlockInContent),
+              };
+            }
+            return content;
+          };
+
+          const updatedContent = updateBlockInContent(activeDocument.content);
+          setDocument((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  content: updatedContent,
+                }
+              : null,
+          );
+
+          // Also update cache
+          const requestKey = `${resolvedProjectKey}:${activeDocument.id}`;
+          const cached = documentCache.get(requestKey);
+          if (cached) {
+            documentCache.set(requestKey, {
+              ...cached,
+              content: updatedContent,
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Failed to update task check state:", err);
+      }
+    },
+    [resolvedProjectKey, activeDocument],
+  );
+
   const handleExport = useCallback(() => {
     if (!activeDocument) {
       return;
@@ -1810,6 +1868,7 @@ function DocumentPage() {
             content={activeDocument.content}
             projectKey={resolvedProjectKey}
             onEditorReady={(editor) => setViewerReady(!!editor)}
+            onTaskCheckChange={handleTaskCheckChange}
           />
         ) : (
           <div className="doc-viewer-state">No document content</div>

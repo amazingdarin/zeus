@@ -16,6 +16,8 @@ interface RichTextViewerProps {
   content: JSONContent;
   projectKey?: string;
   onEditorReady?: (editor: Editor | null) => void;
+  /** Callback when a task item checkbox is toggled */
+  onTaskCheckChange?: (blockId: string, checked: boolean) => void;
 }
 
 const openApiExtensions = (projectKey?: string): Extensions => [
@@ -33,7 +35,7 @@ const openApiExtensions = (projectKey?: string): Extensions => [
   }),
 ];
 
-function RichTextViewer({ content, projectKey, onEditorReady }: RichTextViewerProps) {
+function RichTextViewer({ content, projectKey, onEditorReady, onTaskCheckChange }: RichTextViewerProps) {
   const openapi = openApiExtensions(projectKey);
   const extensions: Extensions = [
     ...openapi,
@@ -57,6 +59,7 @@ function RichTextViewer({ content, projectKey, onEditorReady }: RichTextViewerPr
           return data.html
         }}
         onEditorReady={onEditorReady}
+        onTaskCheckChange={onTaskCheckChange}
       />
     </div>
   );

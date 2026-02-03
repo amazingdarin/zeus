@@ -487,3 +487,26 @@ export const suggestDocuments = async (
         hasChildren: Boolean(item.hasChildren),
     }));
 };
+
+/**
+ * Update block attributes in a document (e.g., taskItem checked state)
+ */
+export const updateBlockAttrs = async (
+    projectKey: string,
+    docId: string,
+    blockId: string,
+    attrs: Record<string, unknown>,
+): Promise<void> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(docId)}/blocks/${encodeURIComponent(blockId)}`,
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ attrs }),
+        },
+    );
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.message || "Failed to update block attributes");
+    }
+};

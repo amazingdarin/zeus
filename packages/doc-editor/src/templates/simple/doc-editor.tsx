@@ -92,6 +92,8 @@ type DocEditorProps = {
   onLoadDocument?: (id: string) => Promise<JSONContent>
   onEditorReady?: (editor: Editor | null) => void
   linkPreviewFetchHtml?: (url: string) => Promise<string>
+  /** Callback when a task item checkbox is toggled in view mode */
+  onTaskCheckChange?: (blockId: string, checked: boolean) => void
 }
 
 const defaultContent: JSONContent = {
@@ -202,6 +204,7 @@ export function DocEditor({
   onLoadDocument,
   onEditorReady,
   linkPreviewFetchHtml,
+  onTaskCheckChange,
 }: DocEditorProps) {
   const isEditable = mode === "edit"
   const isMobile = useIsBreakpoint()
@@ -211,6 +214,9 @@ export function DocEditor({
   )
   const toolbarRef = useRef<HTMLDivElement>(null)
   const lastContentRef = useRef<string | null>(null)
+  const taskCheckChangeRef = useRef(onTaskCheckChange)
+  taskCheckChangeRef.current = onTaskCheckChange
+
   const initialContent = useMemo(
     () => ensureBlockIds(content ?? defaultContent),
     [content]
@@ -251,7 +257,16 @@ export function DocEditor({
       HorizontalRule,
       TextAlign.configure({ types: ["heading", "paragraph"] }),
       TaskList,
-      TaskItem.configure({ nested: true }),
+      TaskItem.configure({
+        nested: true,
+        onReadOnlyChecked: (node, checked) => {
+          const blockId = node.attrs?.id as string | undefined
+          if (blockId && taskCheckChangeRef.current) {
+            taskCheckChangeRef.current(blockId, checked)
+          }
+          return true // Allow visual update
+        },
+      }),
       Highlight.configure({ multicolor: true }),
       Image,
       Typography,
