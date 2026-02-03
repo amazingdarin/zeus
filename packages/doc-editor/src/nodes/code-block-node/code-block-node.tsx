@@ -1,7 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
-import type { ChangeEvent } from "react"
+import { useMemo, useCallback } from "react"
 import { NodeViewContent, NodeViewWrapper } from "@tiptap/react"
 import type { NodeViewProps } from "@tiptap/react"
 
@@ -175,20 +174,6 @@ export function CodeBlockNodeView({ node, editor, extension, getPos }: NodeViewP
       .run()
   }
 
-  const handleLanguageChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    const nextLanguage = event.target.value
-    const nextSupportsPreview = nextLanguage === "openapi" || nextLanguage === "html" || nextLanguage === "mermaid"
-    const nextRenderer = nextSupportsPreview ? nextLanguage : "auto"
-    const nextViewMode: ViewMode = nextSupportsPreview ? viewMode : "text"
-    const nextPreview = nextSupportsPreview ? nextViewMode !== "text" : false
-    updateNodeAttrs({
-      language: nextLanguage || null,
-      renderer: nextRenderer,
-      preview: nextPreview,
-      view_mode: nextViewMode,
-    })
-  }
-
   const handleSetViewMode = (mode: ViewMode) => {
     if (!supportsPreview) {
       return
@@ -222,25 +207,36 @@ export function CodeBlockNodeView({ node, editor, extension, getPos }: NodeViewP
   const shouldShowViewerBar = shouldRenderViewer
   const shouldShowContent = shouldRenderViewer ? !collapsed : true
 
+  // Emit custom events for code block hover state
+  const handleMouseEnter = useCallback(() => {
+    if (isEditable) {
+      document.dispatchEvent(new CustomEvent("codeblock-hover", { 
+        detail: { hover: true },
+        bubbles: true 
+      }))
+    }
+  }, [isEditable])
+
+  const handleMouseLeave = useCallback(() => {
+    if (isEditable) {
+      document.dispatchEvent(new CustomEvent("codeblock-hover", { 
+        detail: { hover: false },
+        bubbles: true 
+      }))
+    }
+  }, [isEditable])
+
   return (
     <NodeViewWrapper className="code-block-node">
+      <div
+        className="code-block-hover-wrapper"
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
       {isEditable ? (
         <div className="code-block-editor">
-          <div className="code-block-toolbar">
-            <span className="code-block-label">Language</span>
-            <select
-              className="code-block-select"
-              value={language}
-              onChange={handleLanguageChange}
-              aria-label="Code block language"
-            >
-              {LANGUAGE_OPTIONS.map((option) => (
-                <option key={option.value || "auto"} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            {showPreviewToggle ? (
+          {showPreviewToggle ? (
+            <div className="code-block-view-toolbar" contentEditable={false}>
               <div className="code-block-view-modes" role="group" aria-label="Code block view">
                 <button
                   type="button"
@@ -270,8 +266,8 @@ export function CodeBlockNodeView({ node, editor, extension, getPos }: NodeViewP
                   <ViewSplitIcon className="code-block-view-icon" />
                 </button>
               </div>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
           {supportsPreview ? (
             viewMode === "split" ? (
               <div className="code-block-edit-split">
@@ -331,6 +327,7 @@ export function CodeBlockNodeView({ node, editor, extension, getPos }: NodeViewP
           ) : null}
         </div>
       )}
+      </div>
     </NodeViewWrapper>
   )
 }
