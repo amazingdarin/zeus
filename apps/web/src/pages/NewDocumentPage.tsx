@@ -180,19 +180,27 @@ function NewDocumentPage() {
           else if (bodyType === "tiptap" && "content" in bodyValue) {
             const bodyContent = (bodyValue as { content?: unknown }).content;
             if (bodyContent && typeof bodyContent === "object") {
+              // First: bodyContent itself may already be a valid Tiptap doc.
+              if (
+                "type" in bodyContent &&
+                (bodyContent as { type?: string }).type === "doc" &&
+                "content" in bodyContent &&
+                Array.isArray((bodyContent as { content?: unknown }).content)
+              ) {
+                contentToReturn = bodyContent as JSONContent;
+              }
+
               // Check for nested { meta, content } format from exportContentJson
               if ("meta" in bodyContent && typeof (bodyContent as { meta?: unknown }).meta === "object") {
                 setContentMeta((bodyContent as { meta?: EditorMeta }).meta as ContentMetaInput);
               }
-              if ("content" in bodyContent) {
+
+              // Then handle wrapped { meta, content: { type: "doc", ... } } payloads.
+              if (!contentToReturn && "content" in bodyContent) {
                 const nestedContent = (bodyContent as { content?: unknown }).content;
                 if (nestedContent && typeof nestedContent === "object" && "type" in nestedContent) {
                   contentToReturn = nestedContent as JSONContent;
                 }
-              }
-              // Or bodyContent itself might be JSONContent
-              else if ("type" in bodyContent && (bodyContent as { type?: string }).type === "doc") {
-                contentToReturn = bodyContent as JSONContent;
               }
             }
           }
