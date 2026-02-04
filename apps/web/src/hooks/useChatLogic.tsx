@@ -23,6 +23,8 @@ import type { MentionItem } from "../components/MentionDropdown";
 import type { DocumentDraft } from "../api/drafts";
 import { filterCommands, setEnabledCommands, type SlashCommand } from "../constants/slash-commands";
 import { getEnabledCommands } from "../api/skills";
+import { useChatAttachments, isValidUrl } from "./useChatAttachments";
+import type { ChatAttachment } from "../types/chat-attachment";
 
 // Types
 export type MentionState = {
@@ -231,6 +233,11 @@ export type UseChatLogicReturn = {
   canSend: boolean;
   projectKey: string;
 
+  // Attachments
+  attachments: ChatAttachment[];
+  hasAttachments: boolean;
+  attachmentsLoading: boolean;
+
   // Refs
   messagesRef: RefObject<HTMLDivElement | null>;
   inputRef: RefObject<HTMLTextAreaElement | null>;
@@ -256,6 +263,8 @@ export type UseChatLogicReturn = {
   handleConfirmTool: () => Promise<void>;
   handleRejectTool: () => Promise<void>;
   toggleSourcesExpanded: (messageId: string) => void;
+  handlePaste: (e: React.ClipboardEvent) => void;
+  removeAttachment: (id: string) => void;
 
   // Render helpers
   renderMarkdown: typeof renderMarkdown;
@@ -273,6 +282,18 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   const [isGenerating, setIsGenerating] = useState(false);
   const [internalDeepSearch, setInternalDeepSearch] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Chat attachments
+  const {
+    attachments,
+    addFile: addAttachmentFile,
+    addUrl: addAttachmentUrl,
+    removeAttachment,
+    clearAttachments,
+    hasAttachments,
+    isLoading: attachmentsLoading,
+    getAttachmentsContext,
+  } = useChatAttachments();
 
   // Use external deepSearch state if provided, otherwise internal
   const deepSearchEnabled = externalDeepSearch ?? internalDeepSearch;
@@ -512,6 +533,10 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     const message = (commandPrefix + input).trim();
     const currentMentions = [...mentions];
 
+    // Get attachments context before clearing
+    const attachmentsContext = getAttachmentsContext();
+    const currentAttachments = [...attachments];
+
     // Save to command history before clearing
     const historyEntry: CommandHistoryEntry = {
       input: input,
@@ -528,12 +553,16 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     setSelectedCommand(null);
     setMentionState({ active: false, query: "", startPos: 0 });
     setError(null);
+    clearAttachments();
 
-    // Build display message with mention info
+    // Build display message with mention info and attachments
     const mentionInfo = currentMentions.length > 0
       ? `[检索范围: ${currentMentions.map((m) => m.titlePath + (m.includeChildren ? "/" : "")).join(", ")}]\n`
       : "";
-    appendMessage("user", mentionInfo + message);
+    const attachmentInfo = currentAttachments.length > 0
+      ? `[附件: ${currentAttachments.map((a) => a.name).join(", ")}]\n`
+      : "";
+    appendMessage("user", mentionInfo + attachmentInfo + message);
     setIsGenerating(true);
     resetAssistantBuffer();
     closeStream();
@@ -556,7 +585,12 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
           }))
         : undefined;
 
-      const runId = await createChatRun(projectKey, message, {
+      // Combine message with attachments context
+      const fullMessage = attachmentsContext
+        ? `${message}\n\n---\n附件内容:\n${attachmentsContext}`
+        : message;
+
+      const runId = await createChatRun(projectKey, fullMessage, {
         sessionId,
         documentScope,
         deepSearch: deepSearchEnabled,
@@ -803,6 +837,35 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     setMentions((prev) => prev.filter((m) => m.docId !== docId));
   }, []);
 
+  // Paste handling for attachments
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      if (!projectKey) return;
+
+      // Check for files (images, etc.)
+      const files = e.clipboardData?.files;
+      if (files && files.length > 0) {
+        e.preventDefault();
+        for (let i = 0; i < files.length; i++) {
+          addAttachmentFile(projectKey, files[i]);
+        }
+        return;
+      }
+
+      // Check for URL text
+      const text = e.clipboardData?.getData("text/plain") || "";
+      const trimmedText = text.trim();
+      if (isValidUrl(trimmedText)) {
+        e.preventDefault();
+        addAttachmentUrl(projectKey, trimmedText);
+        return;
+      }
+
+      // Let normal paste behavior continue for plain text
+    },
+    [projectKey, addAttachmentFile, addAttachmentUrl]
+  );
+
   const filteredSlashCommands = useMemo(() => {
     if (!slashActive) return [];
     return filterCommands(slashQuery);
@@ -1005,6 +1068,11 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     canSend,
     projectKey,
 
+    // Attachments
+    attachments,
+    hasAttachments,
+    attachmentsLoading,
+
     // Refs
     messagesRef,
     inputRef,
@@ -1030,6 +1098,8 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     handleConfirmTool,
     handleRejectTool,
     toggleSourcesExpanded,
+    handlePaste,
+    removeAttachment,
 
     // Render helpers
     renderMarkdown,

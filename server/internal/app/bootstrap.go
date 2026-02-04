@@ -20,8 +20,14 @@ import (
 	"zeus/internal/infra/gitadmin"
 	"zeus/internal/infra/gitclient"
 	ingestions3 "zeus/internal/infra/ingestion/s3"
+	"zeus/internal/infra/jwt"
 	httpsession "zeus/internal/infra/session"
+	authsvc "zeus/internal/modules/auth/service"
 	projectrepo "zeus/internal/modules/project/repository/postgres"
+	teampostgres "zeus/internal/modules/team/repository/postgres"
+	teamsvc "zeus/internal/modules/team/service"
+	userpostgres "zeus/internal/modules/user/repository/postgres"
+	usersvc "zeus/internal/modules/user/service"
 	"zeus/internal/repository"
 	"zeus/internal/repository/postgres"
 )
@@ -109,6 +115,45 @@ func InitRepository(db *gorm.DB, gitClientManager *gitclient.GitClientManager) r
 	}
 }
 
+func InitJWTManager() *jwt.JWTManager {
+	accessTTL, err := config.AppConfig.Auth.AccessTokenTTLDuration()
+	if err != nil {
+		log.Fatalf("parse access_token_ttl: %v", err)
+	}
+	refreshTTL, err := config.AppConfig.Auth.RefreshTokenTTLDuration()
+	if err != nil {
+		log.Fatalf("parse refresh_token_ttl: %v", err)
+	}
+	return jwt.NewJWTManager(
+		config.AppConfig.Auth.JWTSecret,
+		accessTTL,
+		refreshTTL,
+	)
+}
+
+func InitAuthService(db *gorm.DB, projectSvc *projectsvc.Service, jwtManager *jwt.JWTManager) *authsvc.AuthService {
+	userRepo := userpostgres.NewUserRepository(db)
+	sessionRepo := userpostgres.NewSessionRepository(db)
+	return authsvc.NewAuthService(
+		userRepo,
+		sessionRepo,
+		projectSvc,
+		jwtManager,
+		config.AppConfig.Auth.BcryptCost,
+	)
+}
+
+func InitUserService(db *gorm.DB) *usersvc.UserService {
+	userRepo := userpostgres.NewUserRepository(db)
+	return usersvc.NewUserService(userRepo, config.AppConfig.Auth.BcryptCost)
+}
+
+func InitTeamService(db *gorm.DB) *teamsvc.TeamService {
+	teamRepo := teampostgres.NewTeamRepository(db)
+	userRepo := userpostgres.NewUserRepository(db)
+	return teamsvc.NewTeamService(teamRepo, userRepo)
+}
+
 func BuildRouter(ctx context.Context) *gin.Engine {
 	InitLogger()
 	InitConfig(ctx)
@@ -118,7 +163,12 @@ func BuildRouter(ctx context.Context) *gin.Engine {
 	_, _ = InitS3(ctx)
 	repos := InitRepository(db, gitClientManager)
 
+	// Initialize services
 	projectSvc := projectsvc.NewService(repos, gitAdmin, gitClientManager)
+	jwtManager := InitJWTManager()
+	authSvc := InitAuthService(db, projectSvc, jwtManager)
+	userSvc := InitUserService(db)
+	teamSvc := InitTeamService(db)
 	sessionManager := httpsession.NewSessionManager(nil)
 
 	router := gin.Default()
@@ -127,7 +177,13 @@ func BuildRouter(ctx context.Context) *gin.Engine {
 	router.Use(coremiddleware.SessionMiddleware(sessionManager))
 	handler.RegisterRoutes(
 		router,
-		projectSvc,
+		handler.Services{
+			ProjectSvc: projectSvc,
+			AuthSvc:    authSvc,
+			UserSvc:    userSvc,
+			TeamSvc:    teamSvc,
+			JWTManager: jwtManager,
+		},
 	)
 
 	return router

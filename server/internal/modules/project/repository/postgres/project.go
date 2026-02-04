@@ -91,8 +91,29 @@ func (r *ProjectRepository) List(
 	}
 
 	query := r.db.WithContext(ctx).Model(&model.Project{})
+	
 	if filter.Status != "" {
 		query = query.Where("status = ?", string(filter.Status))
+	}
+	
+	// Filter by specific owner
+	if filter.OwnerType != "" && filter.OwnerID != "" {
+		query = query.Where("owner_type = ? AND owner_id = ?", string(filter.OwnerType), filter.OwnerID)
+	}
+	
+	// Filter by user access (user's own projects OR team projects)
+	if filter.UserID != "" {
+		if len(filter.TeamIDs) > 0 {
+			// User can access: their own projects OR projects of their teams
+			query = query.Where(
+				"(owner_type = ? AND owner_id = ?) OR (owner_type = ? AND owner_id IN ?)",
+				string(domain.OwnerTypeUser), filter.UserID,
+				string(domain.OwnerTypeTeam), filter.TeamIDs,
+			)
+		} else {
+			// User can only access their own projects
+			query = query.Where("owner_type = ? AND owner_id = ?", string(domain.OwnerTypeUser), filter.UserID)
+		}
 	}
 
 	var total int64
@@ -108,7 +129,7 @@ func (r *ProjectRepository) List(
 	}
 
 	var models []model.Project
-	if err := query.Find(&models).Error; err != nil {
+	if err := query.Order("created_at DESC").Find(&models).Error; err != nil {
 		return nil, 0, fmt.Errorf("list projects: %w", err)
 	}
 

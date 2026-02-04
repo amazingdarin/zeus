@@ -18,6 +18,7 @@ type Config struct {
 	Embedding     EmbeddingConfig     `mapstructure:"embedding"`
 	Security      SecurityConfig      `mapstructure:"security"`
 	Providers     ProvidersConfig     `mapstructure:"providers"`
+	Auth          AuthConfig          `mapstructure:"auth"`
 }
 
 var AppConfig *Config
@@ -102,6 +103,27 @@ type CopilotConfig struct {
 	Scopes   []string `mapstructure:"scopes"`
 }
 
+type AuthConfig struct {
+	JWTSecret       string `mapstructure:"jwt_secret"`
+	AccessTokenTTL  string `mapstructure:"access_token_ttl"`
+	RefreshTokenTTL string `mapstructure:"refresh_token_ttl"`
+	BcryptCost      int    `mapstructure:"bcrypt_cost"`
+}
+
+func (a AuthConfig) AccessTokenTTLDuration() (time.Duration, error) {
+	if a.AccessTokenTTL == "" {
+		return 15 * time.Minute, nil
+	}
+	return time.ParseDuration(a.AccessTokenTTL)
+}
+
+func (a AuthConfig) RefreshTokenTTLDuration() (time.Duration, error) {
+	if a.RefreshTokenTTL == "" {
+		return 7 * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(a.RefreshTokenTTL)
+}
+
 func Load(path string) (*Config, error) {
 	if path == "" {
 		return nil, fmt.Errorf("config path is required")
@@ -155,5 +177,18 @@ func applyDefaults(cfg *Config) {
 	if strings.TrimSpace(cfg.Security.ActiveKeyID) == "" || cfg.Security.ActiveKeyVersion == 0 {
 		cfg.Security.ActiveKeyID = strings.TrimSpace(cfg.Security.EncryptionKeys[0].ID)
 		cfg.Security.ActiveKeyVersion = cfg.Security.EncryptionKeys[0].Version
+	}
+	// Auth defaults
+	if cfg.Auth.JWTSecret == "" {
+		cfg.Auth.JWTSecret = "zeus-dev-jwt-secret-change-in-production"
+	}
+	if cfg.Auth.AccessTokenTTL == "" {
+		cfg.Auth.AccessTokenTTL = "15m"
+	}
+	if cfg.Auth.RefreshTokenTTL == "" {
+		cfg.Auth.RefreshTokenTTL = "168h" // 7 days
+	}
+	if cfg.Auth.BcryptCost == 0 {
+		cfg.Auth.BcryptCost = 12
 	}
 }

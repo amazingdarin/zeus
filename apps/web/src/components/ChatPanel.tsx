@@ -32,6 +32,7 @@ import {
 import MentionDropdown from "./MentionDropdown";
 import DraftPreviewModal from "./DraftPreviewModal";
 import ToolConfirmDialog from "./ToolConfirmDialog";
+import ChatAttachmentTags from "./ChatAttachmentTags";
 
 type ChatPanelProps = {
   onOpenSettings?: () => void;
@@ -82,6 +83,10 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     handleRejectTool,
     pendingTool,
     toggleSourcesExpanded,
+    // Attachments
+    attachments,
+    handlePaste,
+    removeAttachment,
   } = useChatLogic({ autoScrollEnabled: isExpanded });
 
   // Focus input when panel opens
@@ -564,6 +569,12 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
           </div>
         )}
 
+        {/* Attachment Tags (above input) */}
+        <ChatAttachmentTags
+          attachments={attachments}
+          onRemove={removeAttachment}
+        />
+
         {/* Mention Dropdown - positioned relative to chat-dock-bar */}
         <MentionDropdown
           projectKey={projectKey}
@@ -619,6 +630,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             disabled={!projectKey || isGenerating}
             rows={1}
           />

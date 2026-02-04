@@ -5,7 +5,13 @@ import AppShell from "./layout/AppShell";
 import DocumentPage from "./pages/DocumentPage";
 import NewDocumentPage from "./pages/NewDocumentPage";
 import ChatPage from "./pages/ChatPage";
+import { LoginPage } from "./pages/LoginPage";
+import { RegisterPage } from "./pages/RegisterPage";
+import { TeamsPage } from "./pages/TeamsPage";
+import { TeamSettingsPage } from "./pages/TeamSettingsPage";
 import { ProjectProvider } from "./context/ProjectContext";
+import { AuthProvider } from "./context/AuthContext";
+import { ProtectedRoute } from "./components/ProtectedRoute";
 import { ensureSystemSession } from "./config/api";
 import "./App.css";
 
@@ -31,20 +37,82 @@ function App() {
   }
 
   return (
-    <ProjectProvider>
-      <HashRouter>
-        <AppShell>
+    <AuthProvider>
+      <ProjectProvider>
+        <HashRouter>
           <Routes>
-            <Route path="/" element={<Navigate to="/documents" replace />} />
-            <Route path="/documents" element={<DocumentPage />} />
-            <Route path="/documents/:documentId" element={<DocumentPage />} />
-            <Route path="/knowledge" element={<Navigate to="/documents" replace />} />
-            <Route path="/documents/new" element={<NewDocumentPage />} />
-            <Route path="/chat" element={<ChatPage />} />
+            {/* Public routes */}
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+            
+            {/* Protected routes */}
+            <Route path="/" element={
+              <ProtectedRoute>
+                <AppShell>
+                  <Navigate to="/documents" replace />
+                </AppShell>
+              </ProtectedRoute>
+            } />
+            <Route path="/documents" element={
+              <ProtectedRoute>
+                <AppShell>
+                  <DocumentPage />
+                </AppShell>
+              </ProtectedRoute>
+            } />
+            <Route path="/documents/:documentId" element={
+              <ProtectedRoute>
+                <AppShell>
+                  <DocumentPage />
+                </AppShell>
+              </ProtectedRoute>
+            } />
+            <Route path="/knowledge" element={
+              <ProtectedRoute>
+                <AppShell>
+                  <Navigate to="/documents" replace />
+                </AppShell>
+              </ProtectedRoute>
+            } />
+            <Route path="/documents/new" element={
+              <ProtectedRoute>
+                <AppShell>
+                  <NewDocumentPage />
+                </AppShell>
+              </ProtectedRoute>
+            } />
+            <Route path="/chat" element={
+              <ProtectedRoute>
+                <AppShell>
+                  <ChatPage />
+                </AppShell>
+              </ProtectedRoute>
+            } />
+            <Route path="/teams" element={
+              <ProtectedRoute>
+                <AppShell>
+                  <TeamsPage />
+                </AppShell>
+              </ProtectedRoute>
+            } />
+            <Route path="/teams/:slug" element={
+              <ProtectedRoute>
+                <AppShell>
+                  <TeamSettingsPage />
+                </AppShell>
+              </ProtectedRoute>
+            } />
+            <Route path="/teams/:slug/settings" element={
+              <ProtectedRoute>
+                <AppShell>
+                  <TeamSettingsPage />
+                </AppShell>
+              </ProtectedRoute>
+            } />
           </Routes>
-        </AppShell>
-      </HashRouter>
-    </ProjectProvider>
+        </HashRouter>
+      </ProjectProvider>
+    </AuthProvider>
   );
 }
 

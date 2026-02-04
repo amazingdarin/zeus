@@ -38,6 +38,7 @@
     "@vue-office/pdf": "^2.0.10",
     "@vue-office/pptx": "^1.0.1",
     "abcjs": "^6.6.0",
+    "echarts": "^6.0.0",
     "katex": "^0.16.28",
     "lodash.throttle": "^4.1.1",
     "lowlight": "^3.3.0",

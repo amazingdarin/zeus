@@ -9,20 +9,39 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"zeus/internal/api/types"
+	"zeus/internal/core/middleware"
 	"zeus/internal/domain"
 )
 
-type ProjectHandler struct {
-	svc service.ProjectService
+// TeamIDsGetter is an interface to get team IDs for a user
+type TeamIDsGetter interface {
+	GetTeamIDsForUser(userID string) []string
 }
 
-func NewProjectHandler(svc service.ProjectService) *ProjectHandler {
-	return &ProjectHandler{svc: svc}
+type ProjectHandler struct {
+	svc           service.ProjectService
+	teamIDsGetter TeamIDsGetter
+}
+
+func NewProjectHandler(svc service.ProjectService, teamIDsGetter TeamIDsGetter) *ProjectHandler {
+	return &ProjectHandler{
+		svc:           svc,
+		teamIDsGetter: teamIDsGetter,
+	}
 }
 
 // Create
 // @route POST /api/projects
 func (h *ProjectHandler) Create(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, types.CreateProjectResponse{
+			Code:    "UNAUTHORIZED",
+			Message: "user not authenticated",
+		})
+		return
+	}
+
 	var req types.CreateProjectRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, types.CreateProjectResponse{
@@ -36,6 +55,9 @@ func (h *ProjectHandler) Create(c *gin.Context) {
 		Key:         req.Key,
 		Name:        req.Name,
 		Description: req.Description,
+		OwnerType:   domain.OwnerTypeUser,
+		OwnerID:     userID,
+		Visibility:  domain.ProjectVisibilityPrivate,
 		Status:      domain.ProjectStatusActive,
 	}
 
@@ -69,7 +91,22 @@ func (h *ProjectHandler) Create(c *gin.Context) {
 // List
 // @route GET /api/projects
 func (h *ProjectHandler) List(c *gin.Context) {
-	projects, err := h.svc.List(c.Request.Context())
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, types.ListProjectResponse{
+			Code:    "UNAUTHORIZED",
+			Message: "user not authenticated",
+		})
+		return
+	}
+
+	// Get user's team IDs
+	var teamIDs []string
+	if h.teamIDsGetter != nil {
+		teamIDs = h.teamIDsGetter.GetTeamIDsForUser(userID)
+	}
+
+	projects, err := h.svc.ListForUser(c.Request.Context(), userID, teamIDs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, types.ListProjectResponse{
 			Code:    "LIST_PROJECT_FAILED",

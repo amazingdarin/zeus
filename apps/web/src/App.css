@@ -157,6 +157,21 @@ body {
   background: rgba(31, 35, 40, 0.12);
 }
 
+.topbar-spacer {
+  flex: 1;
+}
+
+.topbar-user {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.topbar-user:hover .ant-avatar {
+  opacity: 0.85;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.3);
+}
+
 .app-body {
   display: grid;
   grid-template-columns: 240px 1fr;
@@ -5025,6 +5040,121 @@ body {
   color: #ff4d4f;
 }
 
+/* Chat Attachment Tags */
+.chat-attachment-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.chat-attachment-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 14px;
+  font-size: 12px;
+  color: var(--ink);
+  max-width: 200px;
+  transition: all 0.2s ease;
+}
+
+[data-theme="dark"] .chat-attachment-tag {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.chat-attachment-tag--image {
+  background: rgba(236, 72, 153, 0.1);
+  border-color: rgba(236, 72, 153, 0.3);
+}
+
+[data-theme="dark"] .chat-attachment-tag--image {
+  background: rgba(236, 72, 153, 0.15);
+  border-color: rgba(236, 72, 153, 0.4);
+}
+
+.chat-attachment-tag--url {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+[data-theme="dark"] .chat-attachment-tag--url {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.chat-attachment-tag--loading {
+  opacity: 0.7;
+}
+
+.chat-attachment-tag--error {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+}
+
+[data-theme="dark"] .chat-attachment-tag--error {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.chat-attachment-tag-preview {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.chat-attachment-tag-icon {
+  color: var(--muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.chat-attachment-tag--image .chat-attachment-tag-icon {
+  color: #ec4899;
+}
+
+.chat-attachment-tag--url .chat-attachment-tag-icon {
+  color: #10b981;
+}
+
+.chat-attachment-tag--error .chat-attachment-tag-icon {
+  color: #ef4444;
+}
+
+.chat-attachment-tag-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-attachment-tag-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  margin-left: 2px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  transition: color 0.15s ease;
+}
+
+.chat-attachment-tag-remove:hover {
+  color: #ff4d4f;
+}
+
 /* Command Tag (Inline, left of input) */
 .chat-command-tag-inline {
   display: inline-flex;
@@ -6943,4 +7073,124 @@ body {
 
 .web-search-hint .anticon {
   color: var(--accent);
+}
+
+/* ========================================
+   Login Page Styles
+   ======================================== */
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  position: relative;
+}
+
+.login-page::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: 
+    radial-gradient(circle at 20% 20%, rgba(63, 72, 84, 0.08) 0%, transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(63, 72, 84, 0.06) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+[data-theme="dark"] .login-page::before {
+  background: 
+    radial-gradient(circle at 20% 20%, rgba(88, 166, 255, 0.08) 0%, transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(88, 166, 255, 0.06) 0%, transparent 50%);
+}
+
+.login-card {
+  width: 400px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  position: relative;
+  z-index: 1;
+}
+
+.login-card .ant-card-body {
+  padding: 40px;
+}
+
+.login-logo {
+  font-family: var(--font-serif);
+  color: var(--ink);
+  margin-bottom: 8px !important;
+  letter-spacing: 0.5px;
+}
+
+.login-card .ant-form-item-label > label {
+  color: var(--ink);
+}
+
+.login-card .ant-input,
+.login-card .ant-input-password .ant-input {
+  background: var(--input-bg);
+  border-color: var(--border);
+  color: var(--ink);
+}
+
+.login-card .ant-input:hover,
+.login-card .ant-input-password:hover .ant-input {
+  border-color: var(--border-strong);
+}
+
+.login-card .ant-input:focus,
+.login-card .ant-input-password .ant-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(63, 72, 84, 0.1);
+}
+
+[data-theme="dark"] .login-card .ant-input:focus,
+[data-theme="dark"] .login-card .ant-input-password .ant-input:focus {
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
+}
+
+.login-card .ant-input-prefix {
+  color: var(--muted);
+}
+
+.login-card .ant-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  height: 44px;
+  font-weight: 500;
+}
+
+.login-card .ant-btn-primary:hover {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+}
+
+.login-card .ant-checkbox-wrapper {
+  color: var(--ink-secondary);
+}
+
+.login-card .ant-divider {
+  border-color: var(--border);
+}
+
+.login-card .ant-divider-inner-text {
+  color: var(--muted);
+}
+
+.login-card .ant-typography-secondary {
+  color: var(--muted);
+}
+
+.login-card a {
+  color: var(--accent);
+}
+
+.login-card a:hover {
+  color: var(--accent-light);
 }

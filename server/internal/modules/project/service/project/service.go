@@ -95,6 +95,18 @@ func (s *Service) List(ctx context.Context) ([]*domain.Project, error) {
 	return projects, nil
 }
 
+func (s *Service) ListForUser(ctx context.Context, userID string, teamIDs []string) ([]*domain.Project, error) {
+	filter := projectrepo.ProjectFilter{
+		UserID:  userID,
+		TeamIDs: teamIDs,
+	}
+	projects, _, err := s.projectRepo.List(ctx, filter, projectrepo.ProjectOption{})
+	if err != nil {
+		return nil, fmt.Errorf("list projects for user: %w", err)
+	}
+	return projects, nil
+}
+
 func (s *Service) GetByKey(ctx context.Context, key string) (*domain.Project, error) {
 	if s.projectRepo == nil {
 		return nil, fmt.Errorf("project repository is required")

@@ -1895,6 +1895,7 @@ function DocumentPage() {
           onRefresh={handleRefresh}
           onRebuildIndex={handleRebuildIndex}
           onEmptyAreaClick={() => navigate("/documents")}
+          onAddDocument={() => navigate("/documents/new")}
         />
       }
     >

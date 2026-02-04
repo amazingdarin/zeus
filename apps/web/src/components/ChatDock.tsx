@@ -13,6 +13,8 @@ import { filterPromptTemplates, findPromptTemplate } from "../lib/promptRegistry
 import SlashCommandPanel from "./SlashCommandPanel";
 import PromptSlashPanel from "./PromptSlashPanel";
 import { parseZeusText, renderZeusText } from "../lib/zeusText";
+import ChatAttachmentTags from "./ChatAttachmentTags";
+import { useChatAttachments, isValidUrl } from "../hooks/useChatAttachments";
 
 
 type ChatArtifact = {
@@ -209,6 +211,16 @@ function ChatDock() {
   const resizeStartRef = useRef<{ y: number; height: number } | null>(null);
   const inputRef = useRef<HTMLDivElement>(null);
   const lastAppliedCaretRef = useRef<number | null>(null);
+
+  // Attachments
+  const {
+    attachments,
+    addFile: addAttachmentFile,
+    addUrl: addAttachmentUrl,
+    removeAttachment,
+    clearAttachments,
+    getAttachmentsContext,
+  } = useChatAttachments();
 
   const canSend = useMemo(() => {
     return !isGenerating && input.trim().length > 0 && projectKey !== "";
@@ -664,9 +676,20 @@ function ChatDock() {
       return;
     }
     const message = input.trim();
+    
+    // Get attachments context before clearing
+    const attachmentsContext = getAttachmentsContext();
+    const currentAttachments = [...attachments];
+    
     dispatchInput({ type: "RESET" });
     setError(null);
-    appendMessage("user", message);
+    clearAttachments();
+    
+    // Build display message with attachments info
+    const attachmentInfo = currentAttachments.length > 0
+      ? `[附件: ${currentAttachments.map((a) => a.name).join(", ")}]\n`
+      : "";
+    appendMessage("user", attachmentInfo + message);
     setHistoryOpen(true);
     setIsGenerating(true);
     resetAssistantBuffer();
@@ -681,7 +704,13 @@ function ChatDock() {
         return;
       }
       const outboundMessage = buildPromptMessage(message, inputState.activePrompt);
-      const runId = await createChatRun(projectKey, outboundMessage, {
+      
+      // Combine message with attachments context
+      const fullMessage = attachmentsContext
+        ? `${outboundMessage}\n\n---\n附件内容:\n${attachmentsContext}`
+        : outboundMessage;
+      
+      const runId = await createChatRun(projectKey, fullMessage, {
         deepSearch: deepSearchEnabled,
       });
       currentRunIdRef.current = runId;
@@ -940,6 +969,35 @@ function ChatDock() {
       return true;
     },
     [input, inputState.isComposing, updateInput],
+  );
+
+  // Paste handling for attachments
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      if (!projectKey) return;
+
+      // Check for files (images, etc.)
+      const files = e.clipboardData?.files;
+      if (files && files.length > 0) {
+        e.preventDefault();
+        for (let i = 0; i < files.length; i++) {
+          addAttachmentFile(projectKey, files[i]);
+        }
+        return;
+      }
+
+      // Check for URL text
+      const text = e.clipboardData?.getData("text/plain") || "";
+      const trimmedText = text.trim();
+      if (isValidUrl(trimmedText)) {
+        e.preventDefault();
+        addAttachmentUrl(projectKey, trimmedText);
+        return;
+      }
+
+      // Let normal paste behavior continue for plain text
+    },
+    [projectKey, addAttachmentFile, addAttachmentUrl]
   );
 
   const handleProposalAction = useCallback(
@@ -1275,6 +1333,11 @@ function ChatDock() {
         </div>
       ) : null}
       <div className="chat-dock-bar">
+        {/* Attachment Tags */}
+        <ChatAttachmentTags
+          attachments={attachments}
+          onRemove={removeAttachment}
+        />
         {isGenerating ? <span className="chat-dock-bar-status">Generating...</span> : null}
         <div className="chat-dock-input">
           <div className="chat-dock-input-body">
@@ -1403,6 +1466,7 @@ function ChatDock() {
                 }}
                 onCompositionStart={() => setComposing(true)}
                 onCompositionEnd={() => setComposing(false)}
+                onPaste={handlePaste}
                 disabled={!projectKey || isGenerating}
                 activeKey={activeDropdownKey}
               />

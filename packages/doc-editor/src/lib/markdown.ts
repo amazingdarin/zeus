@@ -17,6 +17,7 @@ import { HorizontalRule } from "../nodes/horizontal-rule-node/horizontal-rule-no
 import { createTableExtensions } from "../nodes/table-node/table-node-extension"
 import { MathNode } from "../nodes/math-node/math-node-extension"
 import { MusicNode } from "../nodes/music-node/music-node-extension"
+import { ChartNode } from "../nodes/chart-node/chart-node-extension"
 
 export type MarkdownConversionOptions = {
   extensions?: Extensions
@@ -38,6 +39,7 @@ const DEFAULT_EXTENSIONS: Extensions = [
   FileBlockNode,
   MathNode,
   MusicNode,
+  ChartNode,
   ...createTableExtensions(),
 ]
 
@@ -227,6 +229,12 @@ const createMarkdownParser = (schema: ReturnType<typeof createMarkdownSchema>) =
         token.tag = "div"
         continue
       }
+      // Handle ECharts chart blocks
+      if (language === "echarts") {
+        token.type = "chart_block"
+        token.tag = "div"
+        continue
+      }
       token.type = "code_block"
       token.tag = "code"
     }
@@ -315,6 +323,19 @@ const createMarkdownParser = (schema: ReturnType<typeof createMarkdownSchema>) =
       getAttrs: (token: any) => ({
         abc: token.content,
         display: true,
+      }),
+    },
+    // Chart tokens
+    chart_block: {
+      node: "chart",
+      noCloseToken: true,
+      getAttrs: (token: any) => ({
+        options: token.content,
+        mode: "advanced",
+        chartType: "bar",
+        simpleData: "",
+        width: 100,
+        height: 300,
       }),
     },
     // Table tokens
@@ -489,6 +510,18 @@ const createMarkdownSerializer = (_schema: ReturnType<typeof createMarkdownSchem
           // Inline music
           state.write(`~abc:${abc}~`)
         }
+      },
+      // Chart serializer
+      chart: (state: any, node: any) => {
+        const options = node.attrs.options || ""
+        // If options is set, use it directly
+        // Otherwise, serialize from simpleData (though typically options should be computed)
+        const content = options || "{}"
+        state.write("```echarts\n")
+        state.write(content)
+        state.ensureNewLine()
+        state.write("```")
+        state.closeBlock(node)
       },
     },
     {

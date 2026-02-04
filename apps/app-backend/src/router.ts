@@ -78,6 +78,27 @@ function getAssetKind(mime: string): string {
 }
 
 /**
+ * Extract text content from HTML (simple extraction)
+ */
+function extractTextFromHtml(html: string): string {
+  // Remove scripts and styles
+  let text = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
+  text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
+  // Remove HTML tags
+  text = text.replace(/<[^>]+>/g, " ");
+  // Decode common HTML entities
+  text = text.replace(/&nbsp;/g, " ");
+  text = text.replace(/&amp;/g, "&");
+  text = text.replace(/&lt;/g, "<");
+  text = text.replace(/&gt;/g, ">");
+  text = text.replace(/&quot;/g, '"');
+  text = text.replace(/&#39;/g, "'");
+  // Normalize whitespace
+  text = text.replace(/\s+/g, " ").trim();
+  return text;
+}
+
+/**
  * Standard API response helper
  */
 function success<T>(res: Response, data: T, status = 200): void {
@@ -2230,6 +2251,94 @@ export const buildRouter = () => {
       error(res, "WEB_SEARCH_TEST_FAILED", msg, 500);
     }
   });
+
+  // ===== Chat Attachments =====
+
+  /**
+   * Upload a chat attachment (file or URL)
+   * POST /projects/:projectKey/chat/attachments
+   */
+  router.post(
+    "/projects/:projectKey/chat/attachments",
+    upload.single("file"),
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey } = req.params;
+        const { url } = req.body as { url?: string };
+        const file = req.file;
+
+        // Handle URL attachment
+        if (url && typeof url === "string") {
+          const trimmedUrl = url.trim();
+          if (!trimmedUrl) {
+            error(res, "INVALID_URL", "URL is empty");
+            return;
+          }
+
+          try {
+            const result = await fetchUrl(projectKey, trimmedUrl);
+            // Extract text content from HTML (simple extraction)
+            const textContent = extractTextFromHtml(result.html);
+            const truncatedContent = textContent.slice(0, 10000); // Limit content size
+
+            success(res, {
+              id: uuidv4(),
+              type: "url",
+              name: trimmedUrl,
+              content: truncatedContent,
+              originalUrl: result.url,
+              fetchedAt: result.fetched_at,
+            });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to fetch URL";
+            error(res, "FETCH_URL_FAILED", msg, 500);
+          }
+          return;
+        }
+
+        // Handle file attachment
+        if (!file) {
+          error(res, "NO_ATTACHMENT", "No file or URL provided");
+          return;
+        }
+
+        const fileName = fixFilename(file.originalname);
+        const mimeType = file.mimetype || "application/octet-stream";
+        const isImage = mimeType.startsWith("image/");
+        const isText = mimeType.startsWith("text/") || 
+                       mimeType === "application/json" ||
+                       mimeType === "application/xml";
+
+        let content = "";
+        let preview: string | undefined;
+
+        if (isText) {
+          // Extract text content from text files
+          content = file.buffer.toString("utf-8").slice(0, 10000);
+        } else if (isImage) {
+          // For images, create a base64 preview
+          preview = `data:${mimeType};base64,${file.buffer.toString("base64")}`;
+          content = `[Image: ${fileName}]`;
+        } else {
+          // For other files, just note the file type
+          content = `[File: ${fileName} (${mimeType})]`;
+        }
+
+        success(res, {
+          id: uuidv4(),
+          type: isImage ? "image" : "file",
+          name: fileName,
+          mimeType,
+          size: file.size,
+          content,
+          preview,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Attachment upload failed";
+        error(res, "ATTACHMENT_UPLOAD_FAILED", msg, 500);
+      }
+    }
+  );
 
   return router;
 };

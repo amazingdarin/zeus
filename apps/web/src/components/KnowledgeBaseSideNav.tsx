@@ -43,6 +43,7 @@ type KnowledgeBaseSideNavProps = {
   onRefresh?: () => void;
   onRebuildIndex?: () => void;
   onEmptyAreaClick?: () => void;
+  onAddDocument?: () => void;
 };
 
 const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
@@ -60,6 +61,7 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
   onRefresh,
   onRebuildIndex,
   onEmptyAreaClick,
+  onAddDocument,
 }: KnowledgeBaseSideNavProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{
@@ -358,7 +360,7 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
         ) : documents.length === 0 ? (
           <div 
             className="kb-doc-empty kb-doc-empty-clickable"
-            onClick={() => onEmptyAreaClick?.()}
+            onClick={() => onAddDocument?.()}
           >
             点击添加文档
           </div>

@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import { fetchProjects } from "../api/projects";
+import { useAuth } from "./AuthContext";
 
 export type Project = {
   id: string;
@@ -41,11 +42,12 @@ type ProjectProviderProps = {
 };
 
 function ProjectProvider({ children }: ProjectProviderProps) {
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProjectKey, setCurrentProjectKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const mountedRef = useRef(true);
-  const initialLoadRef = useRef(false);
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -55,6 +57,13 @@ function ProjectProvider({ children }: ProjectProviderProps) {
   }, []);
 
   const reloadProjects = useCallback(async () => {
+    // Don't load if not authenticated
+    if (!isAuthenticated) {
+      setProjects([]);
+      setCurrentProjectKey(null);
+      return;
+    }
+
     setLoading(true);
     try {
       const items = await fetchProjects();
@@ -82,21 +91,34 @@ function ProjectProvider({ children }: ProjectProviderProps) {
       if (!mountedRef.current) {
         return;
       }
+      console.error("Failed to load projects:", error);
       setProjects([]);
     } finally {
       if (mountedRef.current) {
         setLoading(false);
       }
     }
-  }, []);
+  }, [isAuthenticated]);
 
+  // Load projects when auth state changes (after auth loading completes)
   useEffect(() => {
-    if (initialLoadRef.current) {
+    // Wait for auth to finish loading
+    if (authLoading) {
       return;
     }
-    initialLoadRef.current = true;
-    reloadProjects();
-  }, [reloadProjects]);
+
+    // Only load if authenticated
+    if (isAuthenticated) {
+      // Reload projects when user becomes authenticated
+      reloadProjects();
+      hasLoadedRef.current = true;
+    } else {
+      // Clear projects when user logs out
+      setProjects([]);
+      setCurrentProjectKey(null);
+      hasLoadedRef.current = false;
+    }
+  }, [isAuthenticated, authLoading, reloadProjects]);
 
   useEffect(() => {
     if (projects.length === 0) {

@@ -1,6 +1,17 @@
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").trim();
 const appBackendUrl = (import.meta.env.VITE_APP_BACKEND_URL ?? "http://localhost:4870").trim();
+const serverUrl = (import.meta.env.VITE_SERVER_URL ?? "http://localhost:8080").trim();
 const useProxy = Boolean(import.meta.env.DEV);
+
+/**
+ * Get the Go server URL for auth and management APIs
+ */
+export const getServerUrl = (): string => {
+  if (useProxy || !serverUrl) {
+    return "";
+  }
+  return serverUrl;
+};
 
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, "");
 const trimLeadingSlash = (value: string) => value.replace(/^\/+/, "");
@@ -44,8 +55,24 @@ export const buildApiUrl = (path: string) => {
   return `${trimTrailingSlash(apiBaseUrl)}${normalizedPath}`;
 };
 
+const getAccessToken = (): string | null => {
+  return localStorage.getItem('zeus_access_token');
+};
+
 const fetchWithCredentials = (path: string, init: RequestInit = {}) => {
-  return fetch(buildApiUrl(path), { ...init, credentials: "include" });
+  const token = getAccessToken();
+  const headers = new Headers(init.headers);
+  
+  // Add Authorization header if we have a token
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+  
+  return fetch(buildApiUrl(path), { 
+    ...init, 
+    headers,
+    credentials: "include" 
+  });
 };
 
 const getCallerFrames = () => {
