@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test:agent-skills": "node --import tsx --test --test-force-exit tests/agent-optimize-skills.test.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.31",
