@@ -112,8 +112,17 @@ type BlockNodeType =
   | "imageUpload"
   | "link_preview"
   | "file_block"
+  | "table"
+  | "tableRow"
+  | "tableHeader"
+  | "tableCell"
+  | "chart"           // ECharts 图表（块级）
 
-type InlineNodeType = "text" | "hardBreak"
+type InlineNodeType = 
+  | "text" 
+  | "hardBreak"
+  | "math"            // 数学公式（内联/块级）
+  | "music"           // 乐谱（内联/块级）
 
 type MarkType =
   | "bold"

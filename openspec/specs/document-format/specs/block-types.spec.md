@@ -710,3 +710,195 @@
   ]
 }
 ```
+
+---
+
+## math
+
+数学公式节点，使用 KaTeX 渲染。支持内联和块级两种模式。
+
+### 属性
+
+| 属性 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `latex` | `string` | 是 | `""` | LaTeX 公式内容 |
+| `display` | `boolean` | 否 | `false` | 是否为块级显示模式 |
+
+### 内容
+
+无内容（原子节点）。
+
+### 输入规则
+
+- 内联公式：`$公式$`
+- 块级公式：`$$公式$$`
+
+### 快捷键
+
+- `Cmd/Ctrl+Shift+m`：插入内联公式
+- `Cmd/Ctrl+Shift+M`：插入块级公式
+
+### 示例
+
+内联公式：
+
+```json
+{
+  "type": "math",
+  "attrs": {
+    "latex": "E = mc^2",
+    "display": false
+  }
+}
+```
+
+块级公式：
+
+```json
+{
+  "type": "math",
+  "attrs": {
+    "latex": "\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}",
+    "display": true
+  }
+}
+```
+
+---
+
+## music
+
+乐谱节点，使用 ABC Notation 格式，通过 abcjs 渲染。支持内联和块级两种模式。
+
+### 属性
+
+| 属性 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `abc` | `string` | 是 | `""` | ABC Notation 乐谱内容 |
+| `display` | `boolean` | 否 | `false` | 是否为块级显示模式 |
+
+### 内容
+
+无内容（原子节点）。
+
+### 输入规则
+
+- 内联乐谱：`~abc:乐谱~`
+- 块级乐谱：在 Markdown 中使用 ` ```abc ` 代码块
+
+### 快捷键
+
+- `Cmd/Ctrl+Shift+u`：插入内联乐谱
+- `Cmd/Ctrl+Shift+U`：插入块级乐谱
+
+### 示例
+
+内联乐谱：
+
+```json
+{
+  "type": "music",
+  "attrs": {
+    "abc": "CDEF GABc",
+    "display": false
+  }
+}
+```
+
+块级乐谱：
+
+```json
+{
+  "type": "music",
+  "attrs": {
+    "abc": "X:1\nT:示例曲目\nM:4/4\nK:C\nCDEF GABc|c2 B2 A2 G2|",
+    "display": true
+  }
+}
+```
+
+---
+
+## chart
+
+图表节点，使用 ECharts 渲染。支持简化模式（向导式）和高级模式（JSON 编辑）。
+
+### 属性
+
+| 属性 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `options` | `string` | 否 | `""` | ECharts 配置 JSON 字符串 |
+| `chartType` | `"bar" \| "line" \| "pie" \| "scatter" \| "radar" \| "funnel"` | 否 | `"bar"` | 图表类型 |
+| `simpleData` | `string` | 否 | 默认数据 | 简化模式的数据 JSON |
+| `mode` | `"simple" \| "advanced"` | 否 | `"simple"` | 编辑模式 |
+| `width` | `number` | 否 | `100` | 宽度百分比 |
+| `height` | `number` | 否 | `300` | 高度像素值 |
+
+### 内容
+
+无内容（原子节点）。
+
+### 图表类型
+
+- `bar`：柱状图
+- `line`：折线图
+- `pie`：饼图
+- `scatter`：散点图
+- `radar`：雷达图
+- `funnel`：漏斗图
+
+### 输入规则
+
+- ` ```chart `：插入默认柱状图
+
+### 快捷键
+
+- `Cmd/Ctrl+Shift+c`：插入柱状图
+
+### simpleData 格式
+
+简化模式数据遵循以下结构：
+
+```json
+{
+  "labels": ["类别A", "类别B", "类别C"],
+  "datasets": [
+    { "name": "系列1", "values": [120, 200, 150] },
+    { "name": "系列2", "values": [80, 120, 90] }
+  ]
+}
+```
+
+### 示例
+
+简化模式柱状图：
+
+```json
+{
+  "type": "chart",
+  "attrs": {
+    "chartType": "bar",
+    "mode": "simple",
+    "simpleData": "{\"labels\":[\"A\",\"B\",\"C\"],\"datasets\":[{\"name\":\"数据\",\"values\":[120,200,150]}]}",
+    "options": "",
+    "width": 100,
+    "height": 300
+  }
+}
+```
+
+高级模式（自定义 ECharts 配置）：
+
+```json
+{
+  "type": "chart",
+  "attrs": {
+    "chartType": "bar",
+    "mode": "advanced",
+    "simpleData": "",
+    "options": "{\"xAxis\":{\"type\":\"category\",\"data\":[\"Mon\",\"Tue\",\"Wed\"]},\"yAxis\":{\"type\":\"value\"},\"series\":[{\"data\":[120,200,150],\"type\":\"bar\"}]}",
+    "width": 100,
+    "height": 400
+  }
+}
+```

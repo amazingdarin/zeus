@@ -1,0 +1,55 @@
+{
+  "description": "数学公式节点示例",
+  "examples": [
+    {
+      "name": "内联公式 - 质能方程",
+      "node": {
+        "type": "math",
+        "attrs": {
+          "latex": "E = mc^2",
+          "display": false
+        }
+      }
+    },
+    {
+      "name": "内联公式 - 二次方程",
+      "node": {
+        "type": "math",
+        "attrs": {
+          "latex": "x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}",
+          "display": false
+        }
+      }
+    },
+    {
+      "name": "块级公式 - 高斯积分",
+      "node": {
+        "type": "math",
+        "attrs": {
+          "latex": "\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}",
+          "display": true
+        }
+      }
+    },
+    {
+      "name": "块级公式 - 欧拉公式",
+      "node": {
+        "type": "math",
+        "attrs": {
+          "latex": "e^{i\\pi} + 1 = 0",
+          "display": true
+        }
+      }
+    },
+    {
+      "name": "块级公式 - 矩阵",
+      "node": {
+        "type": "math",
+        "attrs": {
+          "latex": "\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}",
+          "display": true
+        }
+      }
+    }
+  ]
+}

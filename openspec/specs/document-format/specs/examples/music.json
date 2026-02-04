@@ -1,0 +1,45 @@
+{
+  "description": "乐谱节点示例 (ABC Notation)",
+  "examples": [
+    {
+      "name": "内联乐谱 - 简单音阶",
+      "node": {
+        "type": "music",
+        "attrs": {
+          "abc": "CDEF GABc",
+          "display": false
+        }
+      }
+    },
+    {
+      "name": "块级乐谱 - 简单曲目",
+      "node": {
+        "type": "music",
+        "attrs": {
+          "abc": "X:1\nT:示例曲目\nM:4/4\nL:1/4\nK:C\nCDEF|GABc|c2BA|G4|",
+          "display": true
+        }
+      }
+    },
+    {
+      "name": "块级乐谱 - 小星星",
+      "node": {
+        "type": "music",
+        "attrs": {
+          "abc": "X:1\nT:小星星\nM:4/4\nL:1/4\nK:C\nC C G G|A A G2|F F E E|D D C2|",
+          "display": true
+        }
+      }
+    },
+    {
+      "name": "块级乐谱 - 带歌词",
+      "node": {
+        "type": "music",
+        "attrs": {
+          "abc": "X:1\nT:茉莉花\nM:2/4\nL:1/8\nK:C\nE2 E2|G2 A2|G E G2|E4|\nw:好 一 朵 美 丽 的 茉 莉 花",
+          "display": true
+        }
+      }
+    }
+  ]
+}
