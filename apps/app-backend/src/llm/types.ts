@@ -2,6 +2,11 @@
  * LLM Gateway Type Definitions
  */
 
+import type { TraceContext } from "../observability/index.js";
+
+// Re-export TraceContext for convenience
+export type { TraceContext };
+
 /**
  * Supported LLM provider identifiers
  */
@@ -93,6 +98,8 @@ export type ChatOptions = {
   apiKey?: string;
   // Abort signal for cancellation
   abortSignal?: AbortSignal;
+  // Observability trace context
+  traceContext?: TraceContext;
 };
 
 /**
@@ -151,6 +158,8 @@ export type EmbeddingOptions = {
   // OpenAI-compatible provider config
   baseUrl?: string;
   apiKey?: string;
+  // Observability trace context
+  traceContext?: TraceContext;
 };
 
 /**

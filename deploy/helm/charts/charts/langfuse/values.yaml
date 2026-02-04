@@ -1,0 +1,51 @@
+image:
+  repository: langfuse/langfuse
+  tag: "2"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 3000
+  nodePort: null
+
+# Database configuration
+# Uses Zeus postgres instance with separate database
+database:
+  host: "postgres"
+  port: 5432
+  name: "langfuse"
+  user: "langfuse"
+  password: "langfuse"
+
+# Authentication configuration
+auth:
+  # Required: Used for session encryption (generate with: openssl rand -base64 32)
+  nextAuthSecret: "your-nextauth-secret-change-me"
+  # Required: Used for API key hashing (generate with: openssl rand -base64 32)
+  salt: "your-salt-change-me"
+
+# Ingress configuration
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: langfuse.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Resource limits
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 200m
+    memory: 512Mi
+
+# Additional environment variables
+extraEnv: []

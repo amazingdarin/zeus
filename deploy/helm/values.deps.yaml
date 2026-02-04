@@ -3,3 +3,6 @@ backend:
 
 frontend:
   enabled: false
+
+langfuse:
+  enabled: false

@@ -18,6 +18,7 @@ import {
   type RiskLevel,
 } from "../llm/skills/index.js";
 import { executeDeepSearch, type DeepSearchChunk, type DeepSearchConfig } from "./deep-search.js";
+import { traceManager, type TraceContext } from "../observability/index.js";
 
 export type ChatMessage = {
   role: "user" | "assistant" | "system";
@@ -380,14 +381,28 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
   run.status = "running";
   run.updatedAt = Date.now();
 
-  try {
-    // Extract user's latest message
-    const userQuery = run.messages[run.messages.length - 1]?.content || "";
+  // Extract user's latest message
+  const userQuery = run.messages[run.messages.length - 1]?.content || "";
 
+  // Create trace for observability
+  const traceContext = traceManager.startTrace(runId, {
+    sessionId: run.sessionId,
+    projectKey: run.projectKey,
+    tags: ["chat"],
+    metadata: {
+      docIds: run.docIds,
+      deepSearch: run.deepSearch,
+    },
+  });
+
+  // Update trace with input
+  traceManager.updateTrace(traceContext, { input: userQuery });
+
+  try {
     // Check for deep search mode first
     if (run.deepSearch) {
       console.log("[chat] Deep search mode enabled");
-      yield* handleDeepSearchMode(run, userQuery, abortSignal);
+      yield* handleDeepSearchMode(run, userQuery, abortSignal, traceContext);
       return;
     }
 
@@ -398,24 +413,25 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
     // Dispatch based on mode
     switch (trigger.mode) {
       case "command":
-        yield* handleCommandMode(run, trigger, abortSignal);
+        yield* handleCommandMode(run, trigger, abortSignal, traceContext);
         return;
 
       case "anthropic":
-        yield* handleAnthropicMode(run, trigger, abortSignal);
+        yield* handleAnthropicMode(run, trigger, abortSignal, traceContext);
         return;
 
       case "natural":
-        yield* handleNaturalMode(run, trigger, userQuery, abortSignal);
+        yield* handleNaturalMode(run, trigger, userQuery, abortSignal, traceContext);
         return;
 
       case "chat":
       default:
-        yield* handleChatMode(run, userQuery, abortSignal);
+        yield* handleChatMode(run, userQuery, abortSignal, traceContext);
         return;
     }
   } finally {
-    // Cleanup abort controller when done
+    // End trace and cleanup
+    traceManager.endTrace(runId);
     cleanupAbortController(runId);
   }
 }
@@ -427,6 +443,7 @@ async function* handleCommandMode(
   run: ChatRun,
   trigger: TriggerResult,
   abortSignal: AbortSignal,
+  traceContext: TraceContext,
 ): AsyncGenerator<ChatStreamChunk> {
   if (!trigger.intent) {
     yield { type: "error", error: "No skill intent detected" };
@@ -435,8 +452,14 @@ async function* handleCommandMode(
 
   console.log("[chat] Command mode, executing skill:", trigger.intent.skill);
 
+  // Create span for skill execution
+  const skillSpan = traceManager.startSpan(traceContext, `skill:${trigger.intent.skill}`, {
+    command: trigger.intent.command,
+    args: trigger.intent.args,
+  });
+
   try {
-    for await (const chunk of executeSkillWithStream(run.projectKey, trigger.intent)) {
+    for await (const chunk of executeSkillWithStream(run.projectKey, trigger.intent, traceContext)) {
       // Check if aborted
       if (abortSignal.aborted) {
         console.log("[chat] Command mode aborted");
@@ -454,11 +477,15 @@ async function* handleCommandMode(
       }
     }
 
+    // End skill span
+    traceManager.endSpan(skillSpan, { status: "completed" });
+
     run.status = "completed";
     run.updatedAt = Date.now();
   } catch (err) {
     // Check if it's an abort error
     if (abortSignal.aborted) {
+      traceManager.endSpan(skillSpan, { status: "cancelled" }, "WARNING");
       run.status = "cancelled";
       run.updatedAt = Date.now();
       return;
@@ -466,6 +493,9 @@ async function* handleCommandMode(
 
     const errorMessage = err instanceof Error ? err.message : "Skill execution failed";
     console.error("[chat] Command mode error:", errorMessage);
+
+    // End skill span with error
+    traceManager.endSpan(skillSpan, { error: errorMessage }, "ERROR");
 
     run.status = "failed";
     run.updatedAt = Date.now();
@@ -481,6 +511,7 @@ async function* handleAnthropicMode(
   run: ChatRun,
   trigger: TriggerResult,
   abortSignal: AbortSignal,
+  traceContext: TraceContext,
 ): AsyncGenerator<ChatStreamChunk> {
   if (!trigger.anthropicSkill || !trigger.userRequest) {
     yield { type: "error", error: "No Anthropic skill matched" };
@@ -489,6 +520,11 @@ async function* handleAnthropicMode(
 
   const skill = trigger.anthropicSkill;
   console.log("[chat] Anthropic mode, executing skill:", skill.name);
+
+  // Create span for anthropic skill
+  const skillSpan = traceManager.startSpan(traceContext, `anthropic:${skill.name}`, {
+    userRequest: trigger.userRequest,
+  });
 
   try {
     // Build context from referenced documents
@@ -513,10 +549,12 @@ async function* handleAnthropicMode(
       skill,
       trigger.userRequest,
       context,
+      traceContext,
     )) {
       // Check if aborted
       if (abortSignal.aborted) {
         console.log("[chat] Anthropic mode aborted");
+        traceManager.endSpan(skillSpan, { status: "cancelled" }, "WARNING");
         run.status = "cancelled";
         run.updatedAt = Date.now();
         return;
@@ -526,11 +564,13 @@ async function* handleAnthropicMode(
       yield mappedChunk;
     }
 
+    traceManager.endSpan(skillSpan, { status: "completed" });
     run.status = "completed";
     run.updatedAt = Date.now();
   } catch (err) {
     // Check if it's an abort error
     if (abortSignal.aborted) {
+      traceManager.endSpan(skillSpan, { status: "cancelled" }, "WARNING");
       run.status = "cancelled";
       run.updatedAt = Date.now();
       return;
@@ -539,6 +579,7 @@ async function* handleAnthropicMode(
     const errorMessage = err instanceof Error ? err.message : "Anthropic skill execution failed";
     console.error("[chat] Anthropic mode error:", errorMessage);
 
+    traceManager.endSpan(skillSpan, { error: errorMessage }, "ERROR");
     run.status = "failed";
     run.updatedAt = Date.now();
 
@@ -554,19 +595,20 @@ async function* handleNaturalMode(
   trigger: TriggerResult,
   userQuery: string,
   abortSignal: AbortSignal,
+  traceContext: TraceContext,
 ): AsyncGenerator<ChatStreamChunk> {
   const config = await getLLMConfig();
   if (!config?.enabled || !config.defaultModel) {
     // Fallback to chat mode if no LLM configured
     console.log("[chat] No LLM configured, falling back to chat mode");
-    yield* handleChatMode(run, userQuery, abortSignal);
+    yield* handleChatMode(run, userQuery, abortSignal, traceContext);
     return;
   }
 
   if (!trigger.tools || trigger.tools.length === 0) {
     // No tools available, fallback to chat mode
     console.log("[chat] No tools available, falling back to chat mode");
-    yield* handleChatMode(run, userQuery, abortSignal);
+    yield* handleChatMode(run, userQuery, abortSignal, traceContext);
     return;
   }
 
@@ -581,6 +623,11 @@ async function* handleNaturalMode(
     "[chat] Natural mode with tools:",
     trigger.tools.map((t) => t.function.name),
   );
+
+  // Create span for tool selection
+  const toolSelectionSpan = traceManager.startSpan(traceContext, "tool-selection", {
+    availableTools: trigger.tools.map((t) => t.function.name),
+  });
 
   try {
     // Build messages with tool-aware system prompt
@@ -613,6 +660,7 @@ async function* handleNaturalMode(
       apiKey: config.apiKey,
       tools: trigger.tools,
       tool_choice: "auto",
+      traceContext,
     });
 
     // Check if aborted after LLM call
@@ -681,8 +729,11 @@ async function* handleNaturalMode(
 
       yield { type: "thinking", content: `正在执行 ${toolCall.function.name}...` };
 
+      // End tool selection span before skill execution
+      traceManager.endSpan(toolSelectionSpan, { selectedTool: toolCall.function.name });
+
       // Execute the selected skill
-      for await (const chunk of executeSkillWithStream(run.projectKey, intent)) {
+      for await (const chunk of executeSkillWithStream(run.projectKey, intent, traceContext)) {
         // Check if aborted
         if (abortSignal.aborted) {
           console.log("[chat] Natural mode aborted during skill execution");
@@ -702,6 +753,9 @@ async function* handleNaturalMode(
       // LLM decided not to use any tool, return its text response
       console.log("[chat] LLM did not select any tool, returning text response");
       
+      // End tool selection span
+      traceManager.endSpan(toolSelectionSpan, { selectedTool: null });
+      
       if (response.content) {
         yield { type: "delta", content: response.content };
         
@@ -720,6 +774,7 @@ async function* handleNaturalMode(
   } catch (err) {
     // Check if it's an abort error
     if (abortSignal.aborted) {
+      traceManager.endSpan(toolSelectionSpan, { status: "cancelled" }, "WARNING");
       run.status = "cancelled";
       run.updatedAt = Date.now();
       return;
@@ -728,9 +783,11 @@ async function* handleNaturalMode(
     const errorMessage = err instanceof Error ? err.message : "Natural mode failed";
     console.error("[chat] Natural mode error:", errorMessage);
 
+    traceManager.endSpan(toolSelectionSpan, { error: errorMessage }, "ERROR");
+
     // Fallback to chat mode on error
     console.log("[chat] Falling back to chat mode due to error");
-    yield* handleChatMode(run, userQuery, abortSignal);
+    yield* handleChatMode(run, userQuery, abortSignal, traceContext);
   }
 }
 
@@ -741,6 +798,7 @@ async function* handleChatMode(
   run: ChatRun,
   userQuery: string,
   abortSignal: AbortSignal,
+  traceContext: TraceContext,
 ): AsyncGenerator<ChatStreamChunk> {
   const config = await getLLMConfig();
   if (!config || !config.enabled) {
@@ -767,12 +825,22 @@ async function* handleChatMode(
     return;
   }
 
+  // Create span for chat mode
+  const chatSpan = traceManager.startSpan(traceContext, "chat-rag", {
+    query: userQuery,
+    docIds: run.docIds,
+  });
+
   // Track sources for RAG
   let sources: SourceReference[] = [];
 
   try {
     // Search knowledge base for relevant context
     let ragContext = "";
+    const searchSpan = traceManager.startSpan(traceContext, "knowledge-search", {
+      query: userQuery,
+      mode: "hybrid",
+    });
     try {
       const searchResults = await knowledgeSearch.search(
         run.projectKey,
@@ -790,12 +858,15 @@ async function* handleChatMode(
         ragContext = contextData.text;
         sources = contextData.sources;
       }
+      traceManager.endSpan(searchSpan, { resultCount: searchResults.length });
     } catch (searchErr) {
       console.warn("[chat] Knowledge search failed:", searchErr);
+      traceManager.endSpan(searchSpan, { error: String(searchErr) }, "WARNING");
     }
 
     // Check if aborted after search
     if (abortSignal.aborted) {
+      traceManager.endSpan(chatSpan, { status: "cancelled" }, "WARNING");
       run.status = "cancelled";
       run.updatedAt = Date.now();
       return;
@@ -822,6 +893,7 @@ async function* handleChatMode(
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
       abortSignal,
+      traceContext,
     });
 
     let fullResponse = "";
@@ -831,6 +903,7 @@ async function* handleChatMode(
       // Check if aborted during streaming
       if (abortSignal.aborted) {
         console.log("[chat] Chat mode aborted during streaming");
+        traceManager.endSpan(chatSpan, { status: "cancelled", partialResponse: fullResponse.length }, "WARNING");
         run.status = "cancelled";
         run.updatedAt = Date.now();
         
@@ -854,6 +927,10 @@ async function* handleChatMode(
       history.push({ role: "assistant", content: fullResponse });
     }
 
+    // Update trace with output
+    traceManager.updateTrace(traceContext, { output: fullResponse });
+    traceManager.endSpan(chatSpan, { responseLength: fullResponse.length, sourceCount: sources.length });
+
     run.status = "completed";
     run.updatedAt = Date.now();
 
@@ -862,6 +939,7 @@ async function* handleChatMode(
     // Check if it's an abort error
     if (abortSignal.aborted || (err instanceof Error && err.name === "AbortError")) {
       console.log("[chat] Chat mode aborted");
+      traceManager.endSpan(chatSpan, { status: "cancelled" }, "WARNING");
       run.status = "cancelled";
       run.updatedAt = Date.now();
       return;
@@ -870,6 +948,7 @@ async function* handleChatMode(
     const errorMessage = err instanceof Error ? err.message : "Chat failed";
     console.error("[chat] Chat mode error:", errorMessage);
 
+    traceManager.endSpan(chatSpan, { error: errorMessage }, "ERROR");
     run.status = "failed";
     run.updatedAt = Date.now();
 
@@ -884,7 +963,14 @@ async function* handleDeepSearchMode(
   run: ChatRun,
   userQuery: string,
   abortSignal: AbortSignal,
+  traceContext: TraceContext,
 ): AsyncGenerator<ChatStreamChunk> {
+  // Create span for deep search
+  const deepSearchSpan = traceManager.startSpan(traceContext, "deep-search", {
+    query: userQuery,
+    docIds: run.docIds,
+  });
+
   try {
     for await (const chunk of executeDeepSearch(
       run.projectKey,
@@ -896,6 +982,7 @@ async function* handleDeepSearchMode(
       // Check if aborted
       if (abortSignal.aborted) {
         console.log("[chat] Deep search mode aborted");
+        traceManager.endSpan(deepSearchSpan, { status: "cancelled" }, "WARNING");
         run.status = "cancelled";
         run.updatedAt = Date.now();
         return;
@@ -907,6 +994,8 @@ async function* handleDeepSearchMode(
 
       // Update status when done
       if (chunk.type === "done") {
+        traceManager.endSpan(deepSearchSpan, { status: "completed" });
+        traceManager.updateTrace(traceContext, { output: chunk.message });
         run.status = "completed";
         run.updatedAt = Date.now();
 
@@ -922,6 +1011,7 @@ async function* handleDeepSearchMode(
   } catch (err) {
     // Check if it's an abort error
     if (abortSignal.aborted) {
+      traceManager.endSpan(deepSearchSpan, { status: "cancelled" }, "WARNING");
       run.status = "cancelled";
       run.updatedAt = Date.now();
       return;
@@ -930,6 +1020,7 @@ async function* handleDeepSearchMode(
     const errorMessage = err instanceof Error ? err.message : "Deep search failed";
     console.error("[chat] Deep search mode error:", errorMessage);
 
+    traceManager.endSpan(deepSearchSpan, { error: errorMessage }, "ERROR");
     run.status = "failed";
     run.updatedAt = Date.now();
 

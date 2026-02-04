@@ -8,6 +8,7 @@
 import { generateText, streamText, embed, embedMany, tool, zodSchema } from "ai";
 import { z } from "zod";
 import { providerRegistry } from "./providers.js";
+import { traceManager } from "../observability/index.js";
 import type {
   ChatOptions,
   ChatResponse,
@@ -42,6 +43,23 @@ export async function chat(options: ChatOptions): Promise<ChatResponse> {
 
   console.log(`[LLM Gateway] Got model instance, calling generateText...`);
 
+  // Start generation tracking if trace context is provided
+  const startTime = new Date();
+  const generation = options.traceContext
+    ? traceManager.startGeneration(options.traceContext, {
+        name: "chat",
+        model: options.model,
+        provider: options.provider,
+        input: options.messages,
+        startTime,
+        metadata: {
+          temperature: options.temperature,
+          maxTokens: options.maxTokens,
+          topP: options.topP,
+        },
+      })
+    : null;
+
   try {
     const result = await generateText({
       model,
@@ -56,19 +74,34 @@ export async function chat(options: ChatOptions): Promise<ChatResponse> {
 
     console.log(`[LLM Gateway] generateText succeeded`);
 
+    const usage = {
+      promptTokens: result.usage?.inputTokens || 0,      // AI SDK 6.x renamed promptTokens to inputTokens
+      completionTokens: result.usage?.outputTokens || 0, // AI SDK 6.x renamed completionTokens to outputTokens
+      totalTokens: result.usage?.totalTokens || 0,
+    };
+
+    // End generation tracking
+    traceManager.endGeneration(generation, result.text, usage);
+
     return {
       id: result.response?.id || crypto.randomUUID(),
       model: options.model,
       content: result.text,
       finishReason: result.finishReason || "stop",
-      usage: {
-        promptTokens: result.usage?.inputTokens || 0,      // AI SDK 6.x renamed promptTokens to inputTokens
-        completionTokens: result.usage?.outputTokens || 0, // AI SDK 6.x renamed completionTokens to outputTokens
-        totalTokens: result.usage?.totalTokens || 0,
-      },
+      usage,
     };
   } catch (err) {
     console.error(`[LLM Gateway] generateText failed:`, err);
+
+    // Log error to trace
+    traceManager.endGeneration(
+      generation,
+      "",
+      undefined,
+      "ERROR",
+      err instanceof Error ? err.message : String(err),
+    );
+
     // Try to extract more details from the error
     if (err && typeof err === "object") {
       const anyErr = err as Record<string, unknown>;
@@ -141,6 +174,25 @@ export async function chatWithTools(
     ? (convertToVercelTools(options.tools) as Record<string, ReturnType<typeof tool>>)
     : undefined;
 
+  // Start generation tracking if trace context is provided
+  const startTime = new Date();
+  const generation = options.traceContext
+    ? traceManager.startGeneration(options.traceContext, {
+        name: "chatWithTools",
+        model: options.model,
+        provider: options.provider,
+        input: options.messages,
+        startTime,
+        metadata: {
+          temperature: options.temperature,
+          maxTokens: options.maxTokens,
+          topP: options.topP,
+          tools: options.tools?.map((t) => t.function.name),
+          toolChoice: options.tool_choice,
+        },
+      })
+    : null;
+
   try {
     const result = await generateText({
       model,
@@ -167,20 +219,39 @@ export async function chatWithTools(
       },
     }));
 
+    const usage = {
+      promptTokens: result.usage?.inputTokens || 0,      // AI SDK 6.x renamed promptTokens to inputTokens
+      completionTokens: result.usage?.outputTokens || 0, // AI SDK 6.x renamed completionTokens to outputTokens
+      totalTokens: result.usage?.totalTokens || 0,
+    };
+
+    // End generation tracking with tool calls info
+    traceManager.endGeneration(
+      generation,
+      JSON.stringify({ text: result.text, toolCalls }),
+      usage,
+    );
+
     return {
       id: result.response?.id || crypto.randomUUID(),
       model: options.model,
       content: result.text,
       finishReason: result.finishReason || "stop",
       toolCalls,
-      usage: {
-        promptTokens: result.usage?.inputTokens || 0,      // AI SDK 6.x renamed promptTokens to inputTokens
-        completionTokens: result.usage?.outputTokens || 0, // AI SDK 6.x renamed completionTokens to outputTokens
-        totalTokens: result.usage?.totalTokens || 0,
-      },
+      usage,
     };
   } catch (err) {
     console.error(`[LLM Gateway] chatWithTools failed:`, err);
+
+    // Log error to trace
+    traceManager.endGeneration(
+      generation,
+      "",
+      undefined,
+      "ERROR",
+      err instanceof Error ? err.message : String(err),
+    );
+
     throw err;
   }
 }
@@ -301,37 +372,79 @@ export async function generateEmbeddings(
     apiKey: options.apiKey,
   });
 
-  if (options.inputs.length === 1) {
-    // Single input
-    const result = await embed({
+  // Start generation tracking if trace context is provided
+  const startTime = new Date();
+  const generation = options.traceContext
+    ? traceManager.startGeneration(options.traceContext, {
+        name: "embedding",
+        model: options.model,
+        provider: options.provider,
+        input: { inputCount: options.inputs.length, totalChars: options.inputs.reduce((sum, t) => sum + t.length, 0) },
+        startTime,
+      })
+    : null;
+
+  try {
+    if (options.inputs.length === 1) {
+      // Single input
+      const result = await embed({
+        model,
+        value: options.inputs[0],
+      });
+
+      const usage = {
+        promptTokens: result.usage?.tokens || 0,
+        totalTokens: result.usage?.tokens || 0,
+      };
+
+      // End generation tracking
+      traceManager.endGeneration(
+        generation,
+        JSON.stringify({ embeddingDimensions: result.embedding.length }),
+        { promptTokens: usage.promptTokens, totalTokens: usage.totalTokens },
+      );
+
+      return {
+        model: options.model,
+        embeddings: [result.embedding],
+        usage,
+      };
+    }
+
+    // Multiple inputs
+    const result = await embedMany({
       model,
-      value: options.inputs[0],
+      values: options.inputs,
     });
+
+    const usage = {
+      promptTokens: result.usage?.tokens || 0,
+      totalTokens: result.usage?.tokens || 0,
+    };
+
+    // End generation tracking
+    traceManager.endGeneration(
+      generation,
+      JSON.stringify({ embeddingCount: result.embeddings.length, dimensions: result.embeddings[0]?.length }),
+      { promptTokens: usage.promptTokens, totalTokens: usage.totalTokens },
+    );
 
     return {
       model: options.model,
-      embeddings: [result.embedding],
-      usage: {
-        promptTokens: result.usage?.tokens || 0,
-        totalTokens: result.usage?.tokens || 0,
-      },
+      embeddings: result.embeddings,
+      usage,
     };
+  } catch (err) {
+    // Log error to trace
+    traceManager.endGeneration(
+      generation,
+      "",
+      undefined,
+      "ERROR",
+      err instanceof Error ? err.message : String(err),
+    );
+    throw err;
   }
-
-  // Multiple inputs
-  const result = await embedMany({
-    model,
-    values: options.inputs,
-  });
-
-  return {
-    model: options.model,
-    embeddings: result.embeddings,
-    usage: {
-      promptTokens: result.usage?.tokens || 0,
-      totalTokens: result.usage?.tokens || 0,
-    },
-  };
 }
 
 /**

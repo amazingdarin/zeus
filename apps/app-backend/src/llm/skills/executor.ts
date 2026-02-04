@@ -25,6 +25,7 @@ import { tiptapJsonToMarkdown, markdownToTiptapJson } from "../../utils/markdown
 import { skillConfigStore } from "./skill-config-store.js";
 import { FORMAT_PROMPT, CONTENT_PROMPT } from "../../services/optimize.js";
 import { ensureBlockIds } from "../../utils/block-id.js";
+import { traceManager, type TraceContext } from "../../observability/index.js";
 
 // Maximum retries for LLM content generation
 const MAX_RETRIES = 2;
@@ -159,28 +160,50 @@ function extractTitle(message: string): string {
 export async function* executeSkillWithStream(
   projectKey: string,
   intent: SkillIntent,
+  traceContext?: TraceContext,
 ): AsyncGenerator<SkillStreamChunk> {
-  switch (intent.skill) {
-    case "doc-read":
-      yield* executeDocRead(projectKey, intent);
-      break;
-    case "doc-create":
-      yield* executeDocCreate(projectKey, intent);
-      break;
-    case "doc-edit":
-      yield* executeDocEdit(projectKey, intent);
-      break;
-    case "doc-optimize-format":
-      yield* executeDocOptimizeFormat(projectKey, intent);
-      break;
-    case "doc-optimize-content":
-      yield* executeDocOptimizeContent(projectKey, intent);
-      break;
-    case "doc-summary":
-      yield* executeDocSummary(projectKey, intent);
-      break;
-    default:
-      yield { type: "error", error: `Unknown skill: ${intent.skill}` };
+  // Create span for skill execution
+  const skillSpan = traceContext
+    ? traceManager.startSpan(traceContext, `skill:${intent.skill}`, {
+        args: intent.args,
+        docIds: intent.docIds,
+      })
+    : null;
+
+  try {
+    switch (intent.skill) {
+      case "doc-read":
+        yield* executeDocRead(projectKey, intent);
+        break;
+      case "doc-create":
+        yield* executeDocCreate(projectKey, intent, traceContext);
+        break;
+      case "doc-edit":
+        yield* executeDocEdit(projectKey, intent, traceContext);
+        break;
+      case "doc-optimize-format":
+        yield* executeDocOptimizeFormat(projectKey, intent, traceContext);
+        break;
+      case "doc-optimize-content":
+        yield* executeDocOptimizeContent(projectKey, intent, traceContext);
+        break;
+      case "doc-summary":
+        yield* executeDocSummary(projectKey, intent, traceContext);
+        break;
+      default:
+        yield { type: "error", error: `Unknown skill: ${intent.skill}` };
+    }
+    
+    // End skill span successfully
+    if (skillSpan) {
+      traceManager.endSpan(skillSpan, { status: "completed" });
+    }
+  } catch (err) {
+    // End skill span with error
+    if (skillSpan) {
+      traceManager.endSpan(skillSpan, { error: err instanceof Error ? err.message : String(err) }, "ERROR");
+    }
+    throw err;
   }
 }
 
@@ -222,6 +245,7 @@ async function* executeDocRead(
 async function* executeDocCreate(
   projectKey: string,
   intent: SkillIntent,
+  traceContext?: TraceContext,
 ): AsyncGenerator<SkillStreamChunk> {
   const description = String(intent.args.description || intent.args.title || "");
   const parentId = intent.args.parent_id as string | undefined;
@@ -271,6 +295,7 @@ ${description || "创建一个新文档"}
         { role: "user", content: userPrompt },
       ],
       temperature: 0.7,
+      traceContext,
     });
 
     for await (const chunk of stream.textStream) {
@@ -368,6 +393,7 @@ function extractTitleAndBody(content: string): {
 async function* executeDocEdit(
   projectKey: string,
   intent: SkillIntent,
+  traceContext?: TraceContext,
 ): AsyncGenerator<SkillStreamChunk> {
   if (!intent.docIds || intent.docIds.length === 0) {
     yield { type: "error", error: "请使用 @ 指定要编辑的文档" };
@@ -418,6 +444,7 @@ ${originalMarkdown}
         { role: "user", content: userPrompt },
       ],
       temperature: 0.7,
+      traceContext,
     });
 
     for await (const chunk of stream.textStream) {
@@ -470,6 +497,7 @@ ${originalMarkdown}
 async function* executeDocOptimizeFormat(
   projectKey: string,
   intent: SkillIntent,
+  traceContext?: TraceContext,
 ): AsyncGenerator<SkillStreamChunk> {
   if (!intent.docIds || intent.docIds.length === 0) {
     yield { type: "error", error: "请使用 @ 指定要优化的文档" };
@@ -507,6 +535,7 @@ async function* executeDocOptimizeFormat(
       baseUrl: llmConfig.baseUrl,
       messages: [{ role: "user", content: prompt }],
       temperature: 0.3, // Lower temperature for more consistent formatting
+      traceContext,
     });
 
     for await (const chunk of stream.textStream) {
@@ -553,6 +582,7 @@ async function* executeDocOptimizeFormat(
 async function* executeDocOptimizeContent(
   projectKey: string,
   intent: SkillIntent,
+  traceContext?: TraceContext,
 ): AsyncGenerator<SkillStreamChunk> {
   if (!intent.docIds || intent.docIds.length === 0) {
     yield { type: "error", error: "请使用 @ 指定要优化的文档" };
@@ -590,6 +620,7 @@ async function* executeDocOptimizeContent(
       baseUrl: llmConfig.baseUrl,
       messages: [{ role: "user", content: prompt }],
       temperature: 0.5, // Slightly higher for content optimization
+      traceContext,
     });
 
     for await (const chunk of stream.textStream) {
@@ -658,6 +689,7 @@ const SUMMARY_MAX_CONTENT_LEN = 500; // Maximum content length per document
 async function* executeDocSummary(
   projectKey: string,
   intent: SkillIntent,
+  traceContext?: TraceContext,
 ): AsyncGenerator<SkillStreamChunk> {
   // 1. Validate document ID
   if (!intent.docIds || intent.docIds.length === 0) {
@@ -1265,6 +1297,7 @@ export async function* executeAnthropicSkillWithStream(
   skill: UnifiedSkillDefinition,
   userRequest: string,
   context?: string,
+  traceContext?: TraceContext,
 ): AsyncGenerator<SkillStreamChunk> {
   yield { type: "thinking", content: `正在执行技能: ${skill.name}...` };
 
@@ -1294,6 +1327,7 @@ export async function* executeAnthropicSkillWithStream(
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
+      traceContext,
     });
 
     let fullContent = "";

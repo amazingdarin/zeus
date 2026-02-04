@@ -3,3 +3,18 @@ backend:
 
 frontend:
   enabled: true
+
+langfuse:
+  enabled: true
+  database:
+    host: "postgres"
+    port: 5432
+    name: "langfuse"
+    user: "langfuse"
+    password: "langfuse"
+  auth:
+    nextAuthSecret: "change-me-in-production-nextauth-secret"
+    salt: "change-me-in-production-salt"
+  service:
+    type: ClusterIP
+    port: 3000
