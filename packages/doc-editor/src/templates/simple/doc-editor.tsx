@@ -58,6 +58,7 @@ import "../../ui/chart-button/chart-button.scss"
 import { HeadingDropdownMenu } from "../../ui/heading-dropdown-menu"
 import { ImageUploadButton } from "../../ui/image-upload-button"
 import { FileBlockButton } from "../../ui/file-block-button"
+import { HorizontalRuleButton } from "../../ui/horizontal-rule-button"
 import { LinkPreviewButton } from "../../ui/link-preview-button"
 import { ListDropdownMenu } from "../../ui/list-dropdown-menu"
 import { BlockquoteButton } from "../../ui/blockquote-button"
@@ -145,6 +146,7 @@ const MainToolbarContent = ({
           portal={isMobile}
         />
         <BlockquoteButton />
+        <HorizontalRuleButton />
         <CodeBlockButton />
         <MathButton />
         <MusicButton />

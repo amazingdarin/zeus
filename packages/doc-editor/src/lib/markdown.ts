@@ -399,7 +399,10 @@ const createMarkdownSerializer = (_schema: ReturnType<typeof createMarkdownSchem
       bulletList: baseNodes.bullet_list,
       orderedList: baseNodes.ordered_list,
       listItem: baseNodes.list_item,
-      horizontalRule: baseNodes.horizontal_rule,
+      horizontalRule: (state: any, node: any) => {
+        state.write("---")
+        state.closeBlock(node)
+      },
       hardBreak: baseNodes.hard_break,
       image: baseNodes.image,
       text: baseNodes.text ?? ((state: any, node: any) => state.text(node.text)),
