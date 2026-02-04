@@ -175,11 +175,37 @@ function mergeIntoGroups(entries: BlockDiffEntry[]): DiffGroup[] {
 
 /**
  * Get raw blocks from entries (either original or edited based on status)
+ * 
+ * @param entries - The diff entries to process
+ * @param useEdited - Whether to prefer edited version (true) or original (false)
+ * @param respectEntryStatus - If true, use entry's individual status to decide which version to use
  */
-function getRawBlocksFromEntries(entries: BlockDiffEntry[], useEdited: boolean): RawBlock[] {
+function getRawBlocksFromEntries(
+  entries: BlockDiffEntry[], 
+  useEdited: boolean,
+  respectEntryStatus = false
+): RawBlock[] {
   return entries
     .map((entry) => {
-      const normalized = useEdited ? entry.edited : entry.original;
+      let normalized;
+      
+      if (respectEntryStatus) {
+        // For merged "modified" groups, respect each entry's actual status
+        if (entry.status === "added") {
+          // Added entries only have edited, use it if accepting
+          normalized = useEdited ? entry.edited : null;
+        } else if (entry.status === "removed") {
+          // Removed entries only have original, use it if rejecting
+          normalized = useEdited ? null : entry.original;
+        } else {
+          // For actual "modified" or "unchanged" entries, use the requested version
+          normalized = useEdited ? entry.edited : entry.original;
+        }
+      } else {
+        // Simple mode: just use the requested version
+        normalized = useEdited ? entry.edited : entry.original;
+      }
+      
       // NormalizedBlock has a 'raw' property that contains the original RawBlock
       return normalized?.raw ?? null;
     })
@@ -283,13 +309,35 @@ export default function DocumentDiffViewer({
           finalBlocks.push(...blocks);
         }
       } else if (group.status === "modified") {
-        // Use edited if accepted, original if rejected
-        if (resolution === "reject") {
-          const blocks = getRawBlocksFromEntries(group.entries, false);
-          finalBlocks.push(...blocks);
-        } else {
-          const blocks = getRawBlocksFromEntries(group.entries, true);
-          finalBlocks.push(...blocks);
+        // For merged "modified" groups that may contain mixed entry types,
+        // we need to handle each entry based on its actual status
+        const useEdited = resolution !== "reject";
+        
+        // Process each entry individually based on its status
+        for (const entry of group.entries) {
+          let block: RawBlock | null = null;
+          
+          if (entry.status === "added") {
+            // Added entries: include if accepted, skip if rejected
+            if (useEdited && entry.edited?.raw) {
+              block = entry.edited.raw;
+            }
+          } else if (entry.status === "removed") {
+            // Removed entries: skip if accepted, include if rejected
+            if (!useEdited && entry.original?.raw) {
+              block = entry.original.raw;
+            }
+          } else {
+            // Actual "modified" entries: use edited if accepted, original if rejected
+            const source = useEdited ? entry.edited : entry.original;
+            if (source?.raw) {
+              block = source.raw;
+            }
+          }
+          
+          if (block) {
+            finalBlocks.push(block);
+          }
         }
       }
     }
@@ -567,12 +615,34 @@ export function getFinalContentFromDiff(
           finalBlocks.push(...blocks);
         }
       } else if (group.status === "modified") {
-        if (resolution === "reject") {
-          const blocks = getRawBlocksFromEntries(group.entries, false);
-          finalBlocks.push(...blocks);
-        } else {
-          const blocks = getRawBlocksFromEntries(group.entries, true);
-          finalBlocks.push(...blocks);
+        // For merged "modified" groups that may contain mixed entry types,
+        // we need to handle each entry based on its actual status
+        const useEdited = resolution !== "reject";
+        
+        for (const entry of group.entries) {
+          let block: RawBlock | null = null;
+          
+          if (entry.status === "added") {
+            // Added entries: include if accepted, skip if rejected
+            if (useEdited && entry.edited?.raw) {
+              block = entry.edited.raw;
+            }
+          } else if (entry.status === "removed") {
+            // Removed entries: skip if accepted, include if rejected
+            if (!useEdited && entry.original?.raw) {
+              block = entry.original.raw;
+            }
+          } else {
+            // Actual "modified" entries: use edited if accepted, original if rejected
+            const source = useEdited ? entry.edited : entry.original;
+            if (source?.raw) {
+              block = source.raw;
+            }
+          }
+          
+          if (block) {
+            finalBlocks.push(block);
+          }
         }
       }
     }

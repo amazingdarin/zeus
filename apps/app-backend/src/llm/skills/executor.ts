@@ -749,30 +749,43 @@ async function* executeDocSummary(
  * Handles both { type: "doc", content: [...] } and { type: "tiptap", content: { type: "doc", content: [...] } }
  */
 function extractDocContent(body: JSONContent): JSONContent {
+  console.log("[extractDocContent] body.type:", body?.type);
+  
   // If already a doc type, return as is
   if (body.type === "doc" && Array.isArray(body.content)) {
+    console.log("[extractDocContent] Already doc type, content length:", body.content.length);
     return body;
   }
   
   // Handle tiptap wrapper: { type: "tiptap", content: { type: "doc", content: [...] } }
   if (body.type === "tiptap" && body.content) {
     const inner = body.content as JSONContent;
+    console.log("[extractDocContent] Tiptap wrapper, inner.type:", inner?.type);
+    
     if (inner.type === "doc" && Array.isArray(inner.content)) {
+      console.log("[extractDocContent] Extracted doc from tiptap, content length:", inner.content.length);
       return inner;
     }
-    // If content is an array, wrap it
+    // If content is an array (directly blocks), wrap it
     if (Array.isArray(inner)) {
+      console.log("[extractDocContent] Content is array, wrapping as doc, length:", inner.length);
       return { type: "doc", content: inner };
+    }
+    // If content is a single block object, wrap it in array
+    if (inner && typeof inner === "object" && inner.type) {
+      console.log("[extractDocContent] Content is single block, wrapping:", inner.type);
+      return { type: "doc", content: [inner] };
     }
   }
   
   // Fallback: if body has content array, wrap it as doc
   if (Array.isArray(body.content)) {
+    console.log("[extractDocContent] Fallback: body.content is array, length:", body.content.length);
     return { type: "doc", content: body.content as JSONContent[] };
   }
   
   // Last resort: return empty doc
-  console.warn("[extractDocContent] Unable to extract content from body:", body);
+  console.warn("[extractDocContent] Unable to extract content from body:", JSON.stringify(body).slice(0, 200));
   return { type: "doc", content: [] };
 }
 
@@ -1037,11 +1050,35 @@ function buildDirectorySummaryBlock(jsonResponse: string): JSONContent {
  * Insert summary block at the top of document content
  */
 function insertSummaryAtTop(originalContent: JSONContent, summaryBlock: JSONContent): JSONContent {
+  // Log input for debugging
+  console.log("[insertSummaryAtTop] originalContent.type:", originalContent?.type);
+  console.log("[insertSummaryAtTop] originalContent.content length:", Array.isArray(originalContent?.content) ? originalContent.content.length : "not array");
+  
   // Ensure the content is in the correct format
   if (originalContent.type !== "doc" || !Array.isArray(originalContent.content)) {
+    console.warn("[insertSummaryAtTop] Invalid originalContent structure, attempting to extract content");
+    
+    // Try to extract content if it's wrapped in unexpected structure
+    let extractedContent: JSONContent[] = [];
+    if (Array.isArray(originalContent?.content)) {
+      extractedContent = originalContent.content as JSONContent[];
+    } else if (originalContent?.content && typeof originalContent.content === "object") {
+      // Maybe content is a single block, wrap it in array
+      extractedContent = [originalContent.content as JSONContent];
+    }
+    
+    if (extractedContent.length === 0) {
+      console.warn("[insertSummaryAtTop] Could not extract original content, returning summary only");
+      return {
+        type: "doc",
+        content: [summaryBlock],
+      };
+    }
+    
+    // Return summary + extracted content
     return {
       type: "doc",
-      content: [summaryBlock],
+      content: [summaryBlock, ...extractedContent],
     };
   }
 
@@ -1059,13 +1096,16 @@ function insertSummaryAtTop(originalContent: JSONContent, summaryBlock: JSONCont
   let newContent: JSONContent[];
   if (existingSummaryIdx !== -1) {
     // Replace existing summary
+    console.log("[insertSummaryAtTop] Replacing existing summary at index:", existingSummaryIdx);
     newContent = [...originalContent.content];
     newContent[existingSummaryIdx] = summaryBlock;
   } else {
     // Insert at top
+    console.log("[insertSummaryAtTop] Inserting summary at top, preserving", originalContent.content.length, "original blocks");
     newContent = [summaryBlock, ...originalContent.content];
   }
 
+  console.log("[insertSummaryAtTop] Result content length:", newContent.length);
   return {
     type: "doc",
     content: newContent,
