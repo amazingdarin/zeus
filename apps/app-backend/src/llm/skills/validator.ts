@@ -30,12 +30,19 @@ const BLOCK_TYPES = new Set([
   "tableCell",
   "tableHeader",
   "toc",
+  "chart",      // ECharts 图表
 ]);
 
 /**
  * Valid inline node types
+ * Note: math and music can display as block but are inline nodes by default
  */
-const INLINE_TYPES = new Set(["text", "hardBreak"]);
+const INLINE_TYPES = new Set([
+  "text",
+  "hardBreak",
+  "math",       // 数学公式 (KaTeX)
+  "music",      // 乐谱 (ABC Notation)
+]);
 
 /**
  * Valid mark types
@@ -179,6 +186,40 @@ function validateBlock(
     const attrs = node.attrs as { level?: number } | undefined;
     if (attrs?.level && (attrs.level < 1 || attrs.level > 6)) {
       errors.push(`${path}: Heading level must be 1-6, got ${attrs.level}`);
+    }
+  }
+
+  // Validate math node
+  if (node.type === "math") {
+    const attrs = node.attrs as { latex?: string; display?: boolean } | undefined;
+    if (typeof attrs?.latex !== "string") {
+      warnings.push(`${path}: math node should have a "latex" attribute`);
+    }
+  }
+
+  // Validate music node
+  if (node.type === "music") {
+    const attrs = node.attrs as { abc?: string; display?: boolean } | undefined;
+    if (typeof attrs?.abc !== "string") {
+      warnings.push(`${path}: music node should have an "abc" attribute`);
+    }
+  }
+
+  // Validate chart node
+  if (node.type === "chart") {
+    const attrs = node.attrs as { 
+      chartType?: string; 
+      mode?: string;
+      simpleData?: string;
+      options?: string;
+    } | undefined;
+    const validChartTypes = ["bar", "line", "pie", "scatter", "radar", "funnel"];
+    if (attrs?.chartType && !validChartTypes.includes(attrs.chartType)) {
+      warnings.push(`${path}: chart node has invalid chartType "${attrs.chartType}", expected one of: ${validChartTypes.join(", ")}`);
+    }
+    const validModes = ["simple", "advanced"];
+    if (attrs?.mode && !validModes.includes(attrs.mode)) {
+      warnings.push(`${path}: chart node has invalid mode "${attrs.mode}", expected "simple" or "advanced"`);
     }
   }
 
