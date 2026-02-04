@@ -2390,6 +2390,7 @@ body {
 
 .btn.primary {
   background: var(--accent);
+  border: 1px solid var(--border);
   color: #ffffff;
   box-shadow: none;
 }
@@ -2431,6 +2432,11 @@ body {
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
+}
+
+.new-doc-header .btn.primary {
+  border: 1px solid var(--accent);
+  padding: 6px 12px;
 }
 
 .new-doc-metadata {

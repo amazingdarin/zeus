@@ -21,8 +21,17 @@ import { useProjectContext } from "../context/ProjectContext";
 import { getConfigByType, type ProviderConfig } from "../api/llm-config";
 import type { MentionItem } from "../components/MentionDropdown";
 import type { DocumentDraft } from "../api/drafts";
-import { filterCommands, setEnabledCommands, type SlashCommand } from "../constants/slash-commands";
-import { getEnabledCommands } from "../api/skills";
+import {
+  filterCommands,
+  setCommandCatalog,
+  setEnabledCommands,
+  type SlashCommand,
+} from "../constants/slash-commands";
+import {
+  getEnabledCommands,
+  getProjectEnabledCommands,
+  type ProjectEnabledCommand,
+} from "../api/skills";
 import { useChatAttachments, isValidUrl } from "./useChatAttachments";
 import type { ChatAttachment } from "../types/chat-attachment";
 
@@ -377,16 +386,37 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   // Load enabled skills and update command filtering
   useEffect(() => {
     const loadEnabledSkills = async () => {
+      if (!projectKey) {
+        setCommandCatalog(undefined);
+        setEnabledCommands([]);
+        return;
+      }
+
       try {
-        const data = await getEnabledCommands();
-        setEnabledCommands(data.commands);
+        const projectData = await getProjectEnabledCommands(projectKey);
+        const commandCatalog = projectData.commands.map((cmd: ProjectEnabledCommand) => ({
+          command: cmd.command,
+          name: cmd.name || cmd.command.replace(/^\//, ""),
+          description: cmd.description || cmd.command,
+          category: cmd.category || "system",
+          requiresDocScope: cmd.requiresDocScope,
+        }));
+        setCommandCatalog(commandCatalog);
+        setEnabledCommands(commandCatalog.map((cmd) => cmd.command));
       } catch {
-        // Default to all commands enabled if fetch fails
-        console.warn("Failed to load enabled commands, defaulting to all enabled");
+        try {
+          const legacyData = await getEnabledCommands();
+          setCommandCatalog(undefined);
+          setEnabledCommands(legacyData.commands);
+        } catch {
+          // Default to local command catalog if both endpoints fail
+          console.warn("Failed to load enabled commands, defaulting to local command catalog");
+          setCommandCatalog(undefined);
+        }
       }
     };
     loadEnabledSkills();
-  }, []);
+  }, [projectKey]);
 
   // Load command history from localStorage
   const MAX_HISTORY = 50;

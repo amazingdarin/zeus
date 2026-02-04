@@ -294,6 +294,9 @@ export const projectSkillConfigStore = {
         requireConfirmation: skill.risk.requireConfirmation,
         isConfigurable: true,
         command: skill.command,
+        requiresDocScope:
+          (skill.metadata && skill.metadata.requiresDocScope === true) ||
+          skill.inputSchema.required.includes("doc_id"),
       });
     }
 

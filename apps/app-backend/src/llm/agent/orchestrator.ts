@@ -55,10 +55,21 @@ function buildCommandArgs(
     case "doc-edit":
       return { instructions: trimmed };
     case "doc-read":
-    case "doc-optimize-format":
-    case "doc-optimize-content":
     case "doc-summary":
       return {};
+    case "doc-optimize-format":
+    case "doc-optimize-content":
+    case "doc-optimize-full":
+      return trimmed ? { instructions: trimmed } : {};
+    case "doc-optimize-style": {
+      const [style, ...instructionParts] = trimmed.split(/\s+/).filter(Boolean);
+      return {
+        style: style || "professional",
+        ...(instructionParts.length > 0
+          ? { instructions: instructionParts.join(" ") }
+          : {}),
+      };
+    }
     case "doc-delete":
       return {
         doc_id: firstDocId,
@@ -104,7 +115,14 @@ export class AgentOrchestrator {
       const [, commandName, rest = ""] = commandMatch;
       const command = `/${commandName}`;
       const skill = agentSkillCatalog.getByCommand(command);
-      if (skill && enabledSkillIds.has(skill.id)) {
+      if (skill && !enabledSkillIds.has(skill.id)) {
+        return {
+          mode: "blocked",
+          reason: `技能 ${command} 已被禁用，请在项目技能设置中启用后再试。`,
+          command,
+        };
+      }
+      if (skill) {
         return {
           mode: "execute",
           skill,

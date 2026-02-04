@@ -191,8 +191,6 @@ function buildIntent(
       };
 
     case "doc-read":
-    case "doc-optimize-format":
-    case "doc-optimize-content":
     case "doc-summary":
       return {
         skill: skillName,
@@ -201,6 +199,33 @@ function buildIntent(
         rawMessage,
         docIds,
       };
+
+    case "doc-optimize-format":
+    case "doc-optimize-content":
+    case "doc-optimize-full":
+      return {
+        skill: skillName,
+        command,
+        args: trimmedRest ? { instructions: trimmedRest } : {},
+        rawMessage,
+        docIds,
+      };
+
+    case "doc-optimize-style": {
+      const [style, ...instructionParts] = trimmedRest.split(/\s+/).filter(Boolean);
+      return {
+        skill: skillName,
+        command,
+        args: {
+          style: style || "professional",
+          ...(instructionParts.length > 0
+            ? { instructions: instructionParts.join(" ") }
+            : {}),
+        },
+        rawMessage,
+        docIds,
+      };
+    }
 
     case "doc-move":
       return {

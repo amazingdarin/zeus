@@ -346,6 +346,20 @@ function NewDocumentPage() {
     }
   };
 
+  const handleCancel = useCallback(() => {
+    const targetId = (documentIdParam || documentId).trim();
+    if (targetId) {
+      navigate(`/documents/${encodeURIComponent(targetId)}`);
+      return;
+    }
+    const targetParent = (parentID || parentIdParam).trim();
+    if (targetParent && targetParent !== "root") {
+      navigate(`/documents/${encodeURIComponent(targetParent)}`);
+      return;
+    }
+    navigate("/documents");
+  }, [documentId, documentIdParam, navigate, parentID, parentIdParam]);
+
   const handleToggleJsonMode = () => {
     if (!jsonMode) {
       setJsonMode(true);
@@ -482,8 +496,11 @@ function NewDocumentPage() {
   }, [diffResult, diffMode, documentId]);
 
   return (
-    <div className="new-doc-page">
+      <div className="new-doc-page">
       <div className="new-doc-header">
+        <button className="btn ghost" type="button" onClick={handleCancel}>
+          取消
+        </button>
         <button className="btn primary" type="button" onClick={handleSave} disabled={saving}>
           {saving ? "保存中..." : "保存"}
         </button>

@@ -8,13 +8,13 @@ export type SlashCommand = {
   command: string;
   name: string;
   description: string;
-  category: "doc" | "kb" | "system";
+  category: string;
   icon?: string;
   requiresDocScope?: boolean; // Whether the command requires @ document reference
 };
 
 /**
- * Document-related commands
+ * Document-related built-in commands
  */
 export const documentCommands: SlashCommand[] = [
   {
@@ -44,7 +44,7 @@ export const documentCommands: SlashCommand[] = [
   {
     command: "/doc-optimize-format",
     name: "格式优化",
-    description: "优化文档格式：规范标题层级、列表格式、代码块标记。需要先用 @ 指定文档",
+    description: "优化文档格式。可附加额外要求，需先用 @ 指定文档",
     category: "doc",
     icon: "📐",
     requiresDocScope: true,
@@ -52,15 +52,32 @@ export const documentCommands: SlashCommand[] = [
   {
     command: "/doc-optimize-content",
     name: "内容优化",
-    description: "优化文档内容：改善语言表达、增强逻辑连贯性。需要先用 @ 指定文档",
+    description: "优化文档内容。可附加额外要求，需先用 @ 指定文档",
     category: "doc",
     icon: "✨",
     requiresDocScope: true,
   },
   {
+    command: "/doc-optimize-style",
+    name: "风格优化",
+    description:
+      "按风格优化文档（professional/concise/friendly/academic/technical/marketing），需先用 @ 指定文档",
+    category: "doc",
+    icon: "🎨",
+    requiresDocScope: true,
+  },
+  {
+    command: "/doc-optimize-full",
+    name: "综合优化",
+    description: "同时优化文档格式和内容，可附加额外要求，需先用 @ 指定文档",
+    category: "doc",
+    icon: "🧠",
+    requiresDocScope: true,
+  },
+  {
     command: "/doc-summary",
     name: "生成摘要",
-    description: "为文档或目录生成摘要。单文档：提取摘要插入顶部；目录：递归汇总所有子文档。需要先用 @ 指定文档",
+    description: "为文档或目录生成摘要。需要先用 @ 指定文档",
     category: "doc",
     icon: "📋",
     requiresDocScope: true,
@@ -68,19 +85,58 @@ export const documentCommands: SlashCommand[] = [
 ];
 
 /**
- * All available commands
+ * All built-in commands
  */
-export const allCommands: SlashCommand[] = [
-  ...documentCommands,
-];
+export const allCommands: SlashCommand[] = [...documentCommands];
+
+function iconForCategory(category: string): string {
+  switch (category) {
+    case "doc":
+      return "📄";
+    case "kb":
+      return "🔍";
+    case "mcp":
+      return "🧩";
+    default:
+      return "⚙️";
+  }
+}
+
+function normalizeCommand(command: SlashCommand): SlashCommand {
+  return {
+    command: command.command,
+    name: command.name || command.command.replace(/^\//, ""),
+    description: command.description || command.command,
+    category: command.category || "system",
+    icon: command.icon || iconForCategory(command.category || "system"),
+    requiresDocScope: command.requiresDocScope ?? false,
+  };
+}
+
+function buildCatalog(commands?: SlashCommand[]): Map<string, SlashCommand> {
+  const map = new Map<string, SlashCommand>();
+  for (const cmd of allCommands) {
+    map.set(cmd.command, normalizeCommand(cmd));
+  }
+  for (const cmd of commands || []) {
+    map.set(cmd.command, normalizeCommand(cmd));
+  }
+  return map;
+}
+
+let commandCatalog = buildCatalog();
+let enabledCommandsSet: Set<string> = new Set(Array.from(commandCatalog.keys()));
 
 /**
- * Enabled commands set (dynamically updated)
+ * Merge server command metadata into local catalog.
+ * Passing null/undefined resets catalog to built-ins.
  */
-let enabledCommandsSet: Set<string> = new Set(allCommands.map((c) => c.command));
+export function setCommandCatalog(commands?: SlashCommand[] | null): void {
+  commandCatalog = buildCatalog(commands || undefined);
+}
 
 /**
- * Set enabled commands (called from useChatLogic on init)
+ * Set enabled commands (called from useChatLogic on init/project change)
  */
 export function setEnabledCommands(commands: string[]): void {
   enabledCommandsSet = new Set(commands);
@@ -104,7 +160,7 @@ export function isCommandEnabled(command: string): boolean {
  * Get command by name
  */
 export function getCommand(command: string): SlashCommand | undefined {
-  return allCommands.find((c) => c.command === command);
+  return commandCatalog.get(command);
 }
 
 /**
@@ -112,7 +168,7 @@ export function getCommand(command: string): SlashCommand | undefined {
  */
 export function filterCommands(query: string): SlashCommand[] {
   const lowerQuery = query.toLowerCase();
-  return allCommands.filter(
+  return Array.from(commandCatalog.values()).filter(
     (c) =>
       enabledCommandsSet.has(c.command) &&
       (c.command.toLowerCase().includes(lowerQuery) ||
@@ -125,7 +181,7 @@ export function filterCommands(query: string): SlashCommand[] {
  */
 export function filterAllCommands(query: string): SlashCommand[] {
   const lowerQuery = query.toLowerCase();
-  return allCommands.filter(
+  return Array.from(commandCatalog.values()).filter(
     (c) =>
       c.command.toLowerCase().includes(lowerQuery) ||
       c.name.toLowerCase().includes(lowerQuery),

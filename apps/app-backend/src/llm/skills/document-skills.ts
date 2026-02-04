@@ -98,59 +98,106 @@ export const docEditSkill: SkillDefinition = {
   },
 };
 
+const OPTIMIZE_STYLE_VALUES = [
+  "professional",
+  "concise",
+  "friendly",
+  "academic",
+  "technical",
+  "marketing",
+] as const;
+
+function createDocOptimizeSkill(input: {
+  name: "doc-optimize-format" | "doc-optimize-content" | "doc-optimize-style" | "doc-optimize-full";
+  command: string;
+  description: string;
+  warningMessage: string;
+  includeStyle?: boolean;
+}): SkillDefinition {
+  const properties: SkillDefinition["parameters"]["properties"] = {
+    doc_id: {
+      type: "string",
+      description: "要优化的文档 ID（从 @ 提及中解析）",
+    },
+    instructions: {
+      type: "string",
+      description: "可选：额外优化要求",
+      optional: true,
+    },
+  };
+
+  if (input.includeStyle) {
+    properties.style = {
+      type: "string",
+      description: "风格类型（professional/concise/friendly/academic/technical/marketing）",
+      enum: [...OPTIMIZE_STYLE_VALUES],
+    };
+  }
+
+  return {
+    name: input.name,
+    category: "doc",
+    command: input.command,
+    description: input.description,
+    required: false,
+    confirmation: {
+      required: true,
+      riskLevel: "medium",
+      warningMessage: input.warningMessage,
+    },
+    parameters: {
+      type: "object",
+      properties,
+      required: input.includeStyle ? ["doc_id", "style"] : ["doc_id"],
+    },
+  };
+}
+
 /**
  * Optimize document format skill
  * Medium risk - modifies document structure
  */
-export const docOptimizeFormatSkill: SkillDefinition = {
+export const docOptimizeFormatSkill = createDocOptimizeSkill({
   name: "doc-optimize-format",
-  category: "doc",
   command: "/doc-optimize-format",
   description: "优化文档格式：规范标题层级、列表格式、代码块标记。需要通过 @ 指定文档。",
-  required: false,
-  confirmation: {
-    required: true,
-    riskLevel: "medium",
-    warningMessage: "此操作将优化文档格式结构，请确认后执行。",
-  },
-  parameters: {
-    type: "object",
-    properties: {
-      doc_id: {
-        type: "string",
-        description: "要优化的文档 ID（从 @ 提及中解析）",
-      },
-    },
-    required: ["doc_id"],
-  },
-};
+  warningMessage: "此操作将优化文档格式结构，请确认后执行。",
+});
 
 /**
  * Optimize document content skill
  * Medium risk - modifies document content
  */
-export const docOptimizeContentSkill: SkillDefinition = {
+export const docOptimizeContentSkill = createDocOptimizeSkill({
   name: "doc-optimize-content",
-  category: "doc",
   command: "/doc-optimize-content",
   description: "优化文档内容：改善语言表达、增强逻辑连贯性。需要通过 @ 指定文档。",
-  required: false,
-  confirmation: {
-    required: true,
-    riskLevel: "medium",
-    warningMessage: "此操作将优化文档内容表达，请确认后执行。",
-  },
-  parameters: {
-    type: "object",
-    properties: {
-      doc_id: {
-        type: "string",
-        description: "要优化的文档 ID（从 @ 提及中解析）",
-      },
-    },
-    required: ["doc_id"],
-  },
-};
+  warningMessage: "此操作将优化文档内容表达，请确认后执行。",
+});
+
+/**
+ * Optimize document style skill
+ * Medium risk - rewrites content in target style
+ */
+export const docOptimizeStyleSkill = createDocOptimizeSkill({
+  name: "doc-optimize-style",
+  command: "/doc-optimize-style",
+  description:
+    "按目标风格优化文档内容（professional/concise/friendly/academic/technical/marketing）。需要通过 @ 指定文档。",
+  warningMessage: "此操作将按指定风格改写文档内容，请确认后执行。",
+  includeStyle: true,
+});
+
+/**
+ * Optimize document full skill
+ * Medium risk - modifies both structure and content
+ */
+export const docOptimizeFullSkill = createDocOptimizeSkill({
+  name: "doc-optimize-full",
+  command: "/doc-optimize-full",
+  description: "综合优化文档格式与内容。需要通过 @ 指定文档。",
+  warningMessage: "此操作将同时优化文档格式与内容，请确认后执行。",
+});
 
 /**
  * Document summary skill
@@ -390,6 +437,8 @@ export const documentSkills: SkillDefinition[] = [
   docEditSkill,
   docOptimizeFormatSkill,
   docOptimizeContentSkill,
+  docOptimizeStyleSkill,
+  docOptimizeFullSkill,
   docSummarySkill,
   docMoveSkill,
   docDeleteSkill,

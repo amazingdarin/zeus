@@ -89,12 +89,14 @@ export type ProjectSkillCategory = {
     requireConfirmation: boolean;
     isConfigurable: boolean;
     command?: string;
+    requiresDocScope?: boolean;
   }>;
 };
 
 export type AgentPlan =
   | { mode: "chat" }
   | { mode: "llm_text"; text: string }
+  | { mode: "blocked"; reason: string; command?: string }
   | {
       mode: "execute";
       skill: AgentSkillDefinition;

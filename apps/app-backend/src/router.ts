@@ -2236,6 +2236,43 @@ export const buildRouter = () => {
   });
 
   /**
+   * Get enabled slash commands for a project
+   * GET /projects/:projectKey/skills/enabled-commands
+   */
+  router.get("/projects/:projectKey/skills/enabled-commands", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      await agentSkillCatalog.initialize();
+      const allSkills = agentSkillCatalog.getAllSkills();
+      const enabledIds = new Set(
+        await projectSkillConfigStore.getEnabledSkillIds(projectKey, allSkills),
+      );
+
+      const commands = allSkills
+        .filter((skill) => enabledIds.has(skill.id) && typeof skill.command === "string")
+        .map((skill) => {
+          const fromMetadata = Boolean(skill.metadata && skill.metadata.requiresDocScope === true);
+          const fromSchema = skill.inputSchema.required.includes("doc_id");
+          return {
+            skill_id: skill.id,
+            command: skill.command as string,
+            name: skill.displayName,
+            description: skill.description,
+            category: skill.category,
+            source: skill.source,
+            requires_doc_scope: fromMetadata || fromSchema,
+          };
+        })
+        .sort((a, b) => a.command.localeCompare(b.command));
+
+      success(res, { commands });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list enabled commands";
+      error(res, "LIST_PROJECT_ENABLED_COMMANDS_FAILED", msg, 500);
+    }
+  });
+
+  /**
    * Get enabled tool names for a project
    * GET /projects/:projectKey/skills/enabled-tools
    */

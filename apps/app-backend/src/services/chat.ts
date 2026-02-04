@@ -446,6 +446,20 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
       case "execute":
         yield* handleAgentExecuteMode(run, plan, userQuery, abortSignal, traceContext);
         return;
+      case "blocked": {
+        const message = plan.reason || "该技能已被禁用";
+        if (message.trim()) {
+          yield { type: "delta", content: message };
+        }
+        const history = sessionMessages.get(run.sessionId);
+        if (history) {
+          history.push({ role: "assistant", content: message });
+        }
+        run.status = "completed";
+        run.updatedAt = Date.now();
+        yield { type: "done", message };
+        return;
+      }
       case "llm_text": {
         if (plan.text.trim()) {
           yield { type: "delta", content: plan.text };

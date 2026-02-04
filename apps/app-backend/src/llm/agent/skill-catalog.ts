@@ -46,6 +46,7 @@ function nativeToAgentSkill(skill: SkillDefinition): AgentSkillDefinition {
       legacySkillName: skill.name,
       legacyCommand: skill.command,
       legacySource: "native",
+      requiresDocScope: skill.parameters.required.includes("doc_id"),
     },
   };
 }
