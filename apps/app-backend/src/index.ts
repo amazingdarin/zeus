@@ -4,6 +4,7 @@ import cors from "cors";
 import { initPool } from "./db/postgres.js";
 import { buildRouter } from "./router.js";
 import { skillRegistry, syncAnthropicSkillConfigs } from "./llm/skills/index.js";
+import { agentSkillCatalog } from "./llm/agent/index.js";
 
 const app = express();
 const port = Number(process.env.APP_BACKEND_PORT ?? 4870);
@@ -53,6 +54,13 @@ const start = async () => {
 
     // Sync Anthropic Skills enabled state from database
     await syncAnthropicSkillConfigs();
+
+    // Initialize system-agent skill catalog (native + anthropic + mcp)
+    await agentSkillCatalog.initialize();
+    const agentCounts = agentSkillCatalog.getCounts();
+    console.log(
+      `[app-backend] Agent skill catalog initialized: ${agentCounts.native} native, ${agentCounts.anthropic} anthropic, ${agentCounts.mcp} mcp`,
+    );
   } catch (err) {
     console.warn("[app-backend] Skill registry initialization failed:", err);
   }

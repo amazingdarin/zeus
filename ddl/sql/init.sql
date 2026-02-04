@@ -161,8 +161,39 @@ INSERT INTO skill_config (id, skill_name, category, enabled, priority) VALUES
     (gen_random_uuid(), 'doc-create', 'doc', true, 20),
     (gen_random_uuid(), 'doc-edit', 'doc', true, 30),
     (gen_random_uuid(), 'doc-optimize-format', 'doc', true, 40),
-    (gen_random_uuid(), 'doc-optimize-content', 'doc', true, 50)
+    (gen_random_uuid(), 'doc-optimize-content', 'doc', true, 50),
+    (gen_random_uuid(), 'doc-summary', 'doc', true, 60),
+    (gen_random_uuid(), 'doc-move', 'doc', true, 70),
+    (gen_random_uuid(), 'doc-delete', 'doc', true, 80),
+    (gen_random_uuid(), 'kb-search', 'kb', true, 90),
+    (gen_random_uuid(), 'doc-fetch-url', 'doc', true, 100),
+    (gen_random_uuid(), 'doc-import-git', 'doc', true, 110),
+    (gen_random_uuid(), 'doc-convert', 'doc', true, 120)
 ON CONFLICT (skill_name) DO NOTHING;
+
+-- Project-scoped skill configuration for System Agent
+CREATE TABLE IF NOT EXISTS project_skill_config
+(
+    id            TEXT PRIMARY KEY,
+    project_key   TEXT NOT NULL,
+    skill_id      TEXT NOT NULL,
+    source        TEXT NOT NULL, -- native | anthropic | mcp
+    enabled       BOOLEAN NOT NULL DEFAULT true,
+    priority      INTEGER NOT NULL DEFAULT 0,
+    risk_override TEXT,
+    created_at    TIMESTAMPTZ DEFAULT now(),
+    updated_at    TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (project_key, skill_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_skill_config_project
+ON project_skill_config (project_key);
+
+CREATE INDEX IF NOT EXISTS idx_project_skill_config_source
+ON project_skill_config (source);
+
+CREATE INDEX IF NOT EXISTS idx_project_skill_config_enabled
+ON project_skill_config (enabled);
 
 -- Web Search Configuration
 CREATE TABLE web_search_config

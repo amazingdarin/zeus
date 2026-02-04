@@ -160,17 +160,28 @@ export const skillConfigStore = {
 
   /**
    * Get names of enabled skills
-   * Returns all skill names if database is not available (default to all enabled)
+   * Returns all enabled identifiers across native + Anthropic skills.
    */
   async getEnabledSkillNames(): Promise<string[]> {
     try {
-      // Get all skill info which includes both definitions and configs
-      const skillInfos = await this.listSkillInfo();
-      // Filter to enabled skills and return their names
-      return skillInfos.filter((s) => s.config.enabled).map((s) => s.name);
+      const [nativeInfos, anthropicInfos] = await Promise.all([
+        this.listSkillInfo(),
+        this.listAnthropicSkillInfo(),
+      ]);
+
+      const nativeEnabled = nativeInfos
+        .filter((s) => s.config.enabled)
+        .map((s) => s.name);
+      const anthropicEnabled = anthropicInfos
+        .filter((s) => s.config.enabled)
+        .map((s) => s.skill.id);
+
+      return [...new Set([...nativeEnabled, ...anthropicEnabled])];
     } catch {
-      // If error, return all skill names (default to all enabled)
-      return allSkillDefinitions.map((d) => d.name);
+      return [
+        ...allSkillDefinitions.map((d) => d.name),
+        ...skillRegistry.getAllAnthropic().map((s) => s.id),
+      ];
     }
   },
 
@@ -179,7 +190,9 @@ export const skillConfigStore = {
    */
   async listSkillInfo(): Promise<SkillInfo[]> {
     const configs = await this.list();
-    const configMap = new Map(configs.map((c) => [c.skillName, c]));
+    const configMap = new Map<string, SkillConfig>(
+      configs.map((c): [string, SkillConfig] => [c.skillName, c]),
+    );
 
     return allSkillDefinitions.map((def) => {
       const config = configMap.get(def.name) || createDefaultConfig(def);
@@ -288,7 +301,9 @@ export const skillConfigStore = {
    */
   async getEnabledSkillDefinitions(): Promise<SkillDefinition[]> {
     const configs = await this.list();
-    const configMap = new Map(configs.map((c) => [c.skillName, c]));
+    const configMap = new Map<string, SkillConfig>(
+      configs.map((c): [string, SkillConfig] => [c.skillName, c]),
+    );
 
     // If no configs in database, all skills are enabled by default
     if (configs.length === 0) {
@@ -389,7 +404,9 @@ export const skillConfigStore = {
     isConfigurable: boolean;
   }>> {
     const configs = await this.list();
-    const configMap = new Map(configs.map((c) => [c.skillName, c]));
+    const configMap = new Map<string, SkillConfig>(
+      configs.map((c): [string, SkillConfig] => [c.skillName, c]),
+    );
     
     const anthropicSkills = skillRegistry.getAllAnthropic();
     
@@ -583,7 +600,9 @@ function createDefaultAnthropicConfig(skill: UnifiedSkillDefinition): SkillConfi
 export async function syncAnthropicSkillConfigs(): Promise<void> {
   try {
     const configs = await skillConfigStore.list();
-    const configMap = new Map(configs.map((c) => [c.skillName, c]));
+    const configMap = new Map<string, SkillConfig>(
+      configs.map((c): [string, SkillConfig] => [c.skillName, c]),
+    );
 
     for (const skill of skillRegistry.getAllAnthropic()) {
       const config = configMap.get(skill.id);

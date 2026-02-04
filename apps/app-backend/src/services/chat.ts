@@ -17,6 +17,13 @@ import {
   type SkillDefinition,
   type RiskLevel,
 } from "../llm/skills/index.js";
+import {
+  agentOrchestrator,
+  agentPolicyEngine,
+  mcpClientManager,
+  type AgentPlan,
+  type AgentSkillDefinition,
+} from "../llm/agent/index.js";
 import { executeDeepSearch, type DeepSearchChunk, type DeepSearchConfig } from "./deep-search.js";
 import { traceManager, type TraceContext } from "../observability/index.js";
 
@@ -291,6 +298,23 @@ function createPendingToolCall(
   };
 }
 
+function createPendingToolCallForAgent(
+  skill: AgentSkillDefinition,
+  args: Record<string, unknown>,
+): PendingToolCall {
+  const now = Date.now();
+  return {
+    id: uuidv4(),
+    skillName: skill.displayName,
+    skillDescription: skill.description,
+    args,
+    riskLevel: skill.risk.level as RiskLevel,
+    warningMessage: skill.risk.warningMessage,
+    createdAt: now,
+    expiresAt: now + PENDING_TOOL_TTL,
+  };
+}
+
 /**
  * Wait for user confirmation on a pending tool
  * Returns true if confirmed, false if rejected or timeout
@@ -406,24 +430,35 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
       return;
     }
 
-    // Analyze trigger mode
-    const trigger = await analyzeTrigger(userQuery, run.docIds);
-    console.log(`[chat] Trigger mode: ${trigger.mode}`);
+    // Unified system-agent planning
+    const llmConfig = await getLLMConfig();
+    const plan = await agentOrchestrator.plan({
+      projectKey: run.projectKey,
+      userMessage: userQuery,
+      messages: run.messages,
+      docIds: run.docIds,
+      llmConfig,
+      traceContext,
+    });
+    console.log(`[chat] Agent plan mode: ${plan.mode}`);
 
-    // Dispatch based on mode
-    switch (trigger.mode) {
-      case "command":
-        yield* handleCommandMode(run, trigger, abortSignal, traceContext);
+    switch (plan.mode) {
+      case "execute":
+        yield* handleAgentExecuteMode(run, plan, userQuery, abortSignal, traceContext);
         return;
-
-      case "anthropic":
-        yield* handleAnthropicMode(run, trigger, abortSignal, traceContext);
+      case "llm_text": {
+        if (plan.text.trim()) {
+          yield { type: "delta", content: plan.text };
+        }
+        const history = sessionMessages.get(run.sessionId);
+        if (history) {
+          history.push({ role: "assistant", content: plan.text });
+        }
+        run.status = "completed";
+        run.updatedAt = Date.now();
+        yield { type: "done", message: plan.text };
         return;
-
-      case "natural":
-        yield* handleNaturalMode(run, trigger, userQuery, abortSignal, traceContext);
-        return;
-
+      }
       case "chat":
       default:
         yield* handleChatMode(run, userQuery, abortSignal, traceContext);
@@ -433,6 +468,170 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
     // End trace and cleanup
     traceManager.endTrace(runId);
     cleanupAbortController(runId);
+  }
+}
+
+function buildIntentFromAgentPlan(
+  skill: AgentSkillDefinition,
+  args: Record<string, unknown>,
+  rawMessage: string,
+  docIds?: string[],
+): SkillIntent | null {
+  const legacySkillName = typeof skill.metadata?.legacySkillName === "string"
+    ? skill.metadata.legacySkillName
+    : null;
+  if (!legacySkillName) {
+    return null;
+  }
+
+  return {
+    skill: legacySkillName,
+    command: skill.command || `/${legacySkillName}`,
+    args,
+    rawMessage,
+    docIds,
+  };
+}
+
+async function* handleAgentExecuteMode(
+  run: ChatRun,
+  plan: Extract<AgentPlan, { mode: "execute" }>,
+  userQuery: string,
+  abortSignal: AbortSignal,
+  traceContext: TraceContext,
+): AsyncGenerator<ChatStreamChunk> {
+  const skill = plan.skill;
+  const policyCheck = agentPolicyEngine.canUseSkill(skill);
+  if (!policyCheck.allowed) {
+    run.status = "failed";
+    run.updatedAt = Date.now();
+    yield { type: "error", error: policyCheck.reason || "Skill blocked by policy" };
+    return;
+  }
+
+  // Confirmation for medium/high risk skills
+  if (agentPolicyEngine.shouldRequireConfirmation(skill)) {
+    const pendingTool = createPendingToolCallForAgent(skill, plan.args);
+    run.status = "awaiting_confirmation";
+    run.pendingTool = pendingTool;
+    run.updatedAt = Date.now();
+    yield { type: "tool_pending", pendingTool };
+
+    const confirmed = await waitForConfirmation(run.id);
+    if (!confirmed) {
+      run.pendingTool = undefined;
+      run.status = "completed";
+      run.updatedAt = Date.now();
+      yield { type: "tool_rejected", message: "操作已取消" };
+      return;
+    }
+
+    run.pendingTool = undefined;
+    run.status = "running";
+    run.updatedAt = Date.now();
+  }
+
+  const skillSpan = traceManager.startSpan(traceContext, `agent:${skill.id}`, {
+    source: skill.source,
+    toolName: skill.toolName,
+    args: plan.args,
+    sourceIntent: plan.sourceIntent,
+  });
+
+  try {
+    if (skill.source === "native") {
+      const intent = buildIntentFromAgentPlan(skill, plan.args, userQuery, plan.docIds);
+      if (!intent) {
+        throw new Error(`Missing legacy skill mapping for native skill: ${skill.id}`);
+      }
+
+      for await (const chunk of executeSkillWithStream(run.projectKey, intent, traceContext)) {
+        if (abortSignal.aborted) {
+          run.status = "cancelled";
+          run.updatedAt = Date.now();
+          traceManager.endSpan(skillSpan, { status: "cancelled" }, "WARNING");
+          return;
+        }
+        const mappedChunk = mapSkillChunkToChatChunk(chunk);
+        yield mappedChunk;
+        if (chunk.type === "draft") {
+          addDraftToHistory(run.sessionId, chunk.draft);
+        }
+      }
+    } else if (skill.source === "anthropic") {
+      let context: string | undefined;
+      if (plan.docIds && plan.docIds.length > 0) {
+        try {
+          const docs = await Promise.all(
+            plan.docIds.slice(0, 3).map(async (docId) => {
+              const doc = await documentStore.get(run.projectKey, docId);
+              return `## ${doc.meta.title}\n${JSON.stringify(doc.body)}`;
+            }),
+          );
+          context = docs.join("\n\n---\n\n");
+        } catch {
+          // Ignore context loading failures
+        }
+      }
+
+      const userRequest = typeof plan.args.request === "string" && plan.args.request.trim()
+        ? plan.args.request
+        : userQuery;
+
+      const anthropicSkill = skillRegistry.getAnthropicById(skill.id);
+      if (!anthropicSkill) {
+        throw new Error(`Anthropic skill not found in registry: ${skill.id}`);
+      }
+
+      for await (const chunk of executeAnthropicSkillWithStream(
+        run.projectKey,
+        { ...anthropicSkill, enabled: true },
+        userRequest,
+        context,
+        traceContext,
+      )) {
+        if (abortSignal.aborted) {
+          run.status = "cancelled";
+          run.updatedAt = Date.now();
+          traceManager.endSpan(skillSpan, { status: "cancelled" }, "WARNING");
+          return;
+        }
+        yield mapSkillChunkToChatChunk(chunk);
+      }
+    } else {
+      const mcpToolId = typeof skill.metadata?.mcpToolId === "string"
+        ? skill.metadata.mcpToolId
+        : null;
+      if (!mcpToolId) {
+        throw new Error(`MCP skill metadata missing tool id for ${skill.id}`);
+      }
+
+      yield { type: "thinking", content: `正在执行 MCP 工具: ${skill.displayName}...` };
+      const result = await mcpClientManager.executeTool(mcpToolId, plan.args);
+      if (!result.success) {
+        throw new Error(result.error || "MCP tool execution failed");
+      }
+      if (result.output) {
+        yield { type: "delta", content: result.output };
+      }
+      yield { type: "done", message: `${skill.displayName} 执行完成` };
+    }
+
+    run.status = "completed";
+    run.updatedAt = Date.now();
+    traceManager.endSpan(skillSpan, { status: "completed" });
+  } catch (err) {
+    if (abortSignal.aborted) {
+      run.status = "cancelled";
+      run.updatedAt = Date.now();
+      traceManager.endSpan(skillSpan, { status: "cancelled" }, "WARNING");
+      return;
+    }
+    const errorMessage = err instanceof Error ? err.message : "Agent execution failed";
+    run.status = "failed";
+    run.updatedAt = Date.now();
+    traceManager.endSpan(skillSpan, { error: errorMessage }, "ERROR");
+    yield { type: "error", error: errorMessage };
   }
 }
 

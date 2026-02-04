@@ -37,6 +37,7 @@ import {
   type OptimizeMode,
 } from "./services/optimize.js";
 import { skillConfigStore } from "./llm/skills/skill-config-store.js";
+import { agentSkillCatalog, projectSkillConfigStore } from "./llm/agent/index.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -2154,6 +2155,117 @@ export const buildRouter = () => {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to update Anthropic skill";
       error(res, "UPDATE_ANTHROPIC_SKILL_FAILED", msg, 500);
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Project-Scoped Skills API (System Agent)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get all project skills grouped by category
+   * GET /projects/:projectKey/skills
+   */
+  router.get("/projects/:projectKey/skills", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      await agentSkillCatalog.initialize();
+      const skills = agentSkillCatalog.getAllSkills();
+      const categories = await projectSkillConfigStore.listByCategory(projectKey, skills);
+      success(res, { categories });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list project skills";
+      error(res, "LIST_PROJECT_SKILLS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Update project skill enabled status
+   * PATCH /projects/:projectKey/skills/:skillId
+   */
+  router.patch("/projects/:projectKey/skills/:skillId", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const skillId = decodeURIComponent(req.params.skillId);
+      const { enabled } = req.body as { enabled?: boolean };
+
+      if (typeof enabled !== "boolean") {
+        error(res, "INVALID_REQUEST", "enabled must be a boolean");
+        return;
+      }
+
+      await agentSkillCatalog.initialize();
+      const skill = agentSkillCatalog.getById(skillId);
+      if (!skill) {
+        error(res, "NOT_FOUND", `Skill not found: ${skillId}`, 404);
+        return;
+      }
+
+      const config = await projectSkillConfigStore.updateEnabled(projectKey, skill, enabled);
+      success(res, config);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update project skill";
+      error(res, "UPDATE_PROJECT_SKILL_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Batch update project skill enabled status
+   * PATCH /projects/:projectKey/skills
+   */
+  router.patch("/projects/:projectKey/skills", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const { updates } = req.body as {
+        updates?: Array<{ skillId: string; enabled: boolean }>;
+      };
+
+      if (!Array.isArray(updates)) {
+        error(res, "INVALID_REQUEST", "updates must be an array");
+        return;
+      }
+
+      await agentSkillCatalog.initialize();
+      const allSkills = agentSkillCatalog.getAllSkills();
+      await projectSkillConfigStore.batchUpdateEnabled(projectKey, allSkills, updates);
+      success(res, { success: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to batch update project skills";
+      error(res, "BATCH_UPDATE_PROJECT_SKILLS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Get enabled tool names for a project
+   * GET /projects/:projectKey/skills/enabled-tools
+   */
+  router.get("/projects/:projectKey/skills/enabled-tools", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      await agentSkillCatalog.initialize();
+      const allSkills = agentSkillCatalog.getAllSkills();
+      const toolNames = await projectSkillConfigStore.getEnabledToolNames(projectKey, allSkills);
+      success(res, { tool_names: toolNames });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list enabled tools";
+      error(res, "LIST_ENABLED_TOOLS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Get skill source summary for a project
+   * GET /projects/:projectKey/skills/sources
+   */
+  router.get("/projects/:projectKey/skills/sources", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      await agentSkillCatalog.initialize();
+      const allSkills = agentSkillCatalog.getAllSkills();
+      const sources = await projectSkillConfigStore.listSources(projectKey, allSkills);
+      success(res, { sources });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list skill sources";
+      error(res, "LIST_SKILL_SOURCES_FAILED", msg, 500);
     }
   });
 

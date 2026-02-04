@@ -13,6 +13,7 @@ import type { SkillDefinition, SkillCategory } from "./types.js";
 import type { UnifiedSkillDefinition } from "./adapters/types.js";
 import { documentSkills } from "./document-skills.js";
 import { skillScanner } from "./discovery/filesystem-scanner.js";
+import { resourceLoader } from "./resources/resource-loader.js";
 
 /**
  * OpenAI Function Calling tool format
@@ -87,12 +88,22 @@ class SkillRegistry {
     });
 
     skillScanner.on("removed", (ids: string[]) => {
-      ids.forEach((id) => this.anthropicSkills.delete(id));
+      ids.forEach((id) => {
+        const removed = this.anthropicSkills.get(id);
+        if (removed?.triggers.command) {
+          this.commandToSkill.delete(removed.triggers.command);
+        }
+        this.anthropicSkills.delete(id);
+        resourceLoader.invalidateSkillCache(id);
+      });
       console.log(`[SkillRegistry] Removed ${ids.length} Anthropic skills`);
     });
 
     skillScanner.on("updated", (skills: UnifiedSkillDefinition[]) => {
-      skills.forEach((s) => this.registerAnthropicSkill(s));
+      skills.forEach((s) => {
+        resourceLoader.invalidateSkillCache(s.id);
+        this.registerAnthropicSkill(s);
+      });
       console.log(`[SkillRegistry] Updated ${skills.length} Anthropic skills`);
     });
 
@@ -154,6 +165,11 @@ class SkillRegistry {
    * Register an Anthropic skill
    */
   registerAnthropicSkill(skill: UnifiedSkillDefinition): void {
+    const existing = this.anthropicSkills.get(skill.id);
+    if (existing?.triggers.command && existing.triggers.command !== skill.triggers.command) {
+      this.commandToSkill.delete(existing.triggers.command);
+    }
+
     this.anthropicSkills.set(skill.id, skill);
 
     // 如果有 command 触发器，也注册到命令映射
@@ -184,9 +200,8 @@ class SkillRegistry {
    * Get skill by command (searches both native and Anthropic)
    * @deprecated Use getNativeByCommand or getByCommand for clarity
    */
-  getByCommand(command: string): SkillDefinition | undefined {
-    const name = this.commandToSkill.get(command);
-    return name ? this.nativeSkills.get(name) : undefined;
+  getByCommand(command: string): AnySkill | undefined {
+    return this.getAnyByCommand(command);
   }
 
   /**
@@ -337,8 +352,10 @@ class SkillRegistry {
     // Anthropic skills
     if (includeAnthropic) {
       for (const [id, skill] of this.anthropicSkills) {
-        if (!skill.enabled) continue;
-        if (enabledSkills && !enabledSkills.includes(id)) {
+        const hasExplicitEnabledFilter = Array.isArray(enabledSkills);
+        if (hasExplicitEnabledFilter) {
+          if (!enabledSkills.includes(id)) continue;
+        } else if (!skill.enabled) {
           continue;
         }
         tools.push(this.anthropicSkillToOpenAITool(skill));

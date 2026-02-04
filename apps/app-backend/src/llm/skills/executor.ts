@@ -26,6 +26,10 @@ import { skillConfigStore } from "./skill-config-store.js";
 import { FORMAT_PROMPT, CONTENT_PROMPT } from "../../services/optimize.js";
 import { ensureBlockIds } from "../../utils/block-id.js";
 import { traceManager, type TraceContext } from "../../observability/index.js";
+import { fetchUrl } from "../../services/fetch-url.js";
+import { importGit } from "../../services/import-git.js";
+import { convertDocument } from "../../services/convert.js";
+import { knowledgeSearch } from "../../knowledge/search.js";
 
 // Maximum retries for LLM content generation
 const MAX_RETRIES = 2;
@@ -103,6 +107,76 @@ export function detectSkillIntent(
       skill: "doc-summary",
       command: "/doc-summary",
       args: {},
+      rawMessage: message,
+      docIds,
+    };
+  }
+
+  if (trimmed.startsWith("/doc-move")) {
+    const rest = trimmed.slice("/doc-move".length).trim();
+    return {
+      skill: "doc-move",
+      command: "/doc-move",
+      args: { target_parent_id: rest || "root" },
+      rawMessage: message,
+      docIds,
+    };
+  }
+
+  if (trimmed.startsWith("/doc-delete")) {
+    const rest = trimmed.slice("/doc-delete".length).trim();
+    return {
+      skill: "doc-delete",
+      command: "/doc-delete",
+      args: { recursive: /\brecursive\b|\b递归\b/.test(rest) },
+      rawMessage: message,
+      docIds,
+    };
+  }
+
+  if (trimmed.startsWith("/kb-search")) {
+    const rest = trimmed.slice("/kb-search".length).trim();
+    return {
+      skill: "kb-search",
+      command: "/kb-search",
+      args: { query: rest },
+      rawMessage: message,
+      docIds,
+    };
+  }
+
+  if (trimmed.startsWith("/doc-fetch-url")) {
+    const rest = trimmed.slice("/doc-fetch-url".length).trim();
+    return {
+      skill: "doc-fetch-url",
+      command: "/doc-fetch-url",
+      args: { url: rest },
+      rawMessage: message,
+      docIds,
+    };
+  }
+
+  if (trimmed.startsWith("/doc-import-git")) {
+    const rest = trimmed.slice("/doc-import-git".length).trim();
+    return {
+      skill: "doc-import-git",
+      command: "/doc-import-git",
+      args: { repo_url: rest },
+      rawMessage: message,
+      docIds,
+    };
+  }
+
+  if (trimmed.startsWith("/doc-convert")) {
+    const rest = trimmed.slice("/doc-convert".length).trim();
+    return {
+      skill: "doc-convert",
+      command: "/doc-convert",
+      args: {
+        from: "txt",
+        to: "markdown",
+        content: rest,
+      },
       rawMessage: message,
       docIds,
     };
@@ -189,6 +263,24 @@ export async function* executeSkillWithStream(
         break;
       case "doc-summary":
         yield* executeDocSummary(projectKey, intent, traceContext);
+        break;
+      case "doc-move":
+        yield* executeDocMove(projectKey, intent);
+        break;
+      case "doc-delete":
+        yield* executeDocDelete(projectKey, intent);
+        break;
+      case "kb-search":
+        yield* executeKbSearch(projectKey, intent);
+        break;
+      case "doc-fetch-url":
+        yield* executeDocFetchUrl(projectKey, intent);
+        break;
+      case "doc-import-git":
+        yield* executeDocImportGit(projectKey, intent);
+        break;
+      case "doc-convert":
+        yield* executeDocConvert(projectKey, intent);
         break;
       default:
         yield { type: "error", error: `Unknown skill: ${intent.skill}` };
@@ -1145,6 +1237,237 @@ function insertSummaryAtTop(originalContent: JSONContent, summaryBlock: JSONCont
 }
 
 /**
+ * Execute doc-move skill
+ */
+async function* executeDocMove(
+  projectKey: string,
+  intent: SkillIntent,
+): AsyncGenerator<SkillStreamChunk> {
+  const docId = typeof intent.args.doc_id === "string"
+    ? intent.args.doc_id
+    : intent.docIds?.[0];
+  const targetParentId = String(intent.args.target_parent_id || "").trim() || "root";
+  const beforeDocId = typeof intent.args.before_doc_id === "string"
+    ? intent.args.before_doc_id
+    : undefined;
+  const afterDocId = typeof intent.args.after_doc_id === "string"
+    ? intent.args.after_doc_id
+    : undefined;
+
+  if (!docId) {
+    yield { type: "error", error: "请通过 @ 指定要移动的文档，或提供 doc_id 参数" };
+    return;
+  }
+
+  try {
+    await documentStore.move(projectKey, docId, targetParentId, beforeDocId, afterDocId);
+    yield {
+      type: "done",
+      message: `文档已移动到 ${targetParentId === "root" ? "根目录" : targetParentId}`,
+    };
+  } catch (err) {
+    yield {
+      type: "error",
+      error: `移动文档失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Execute doc-delete skill
+ */
+async function* executeDocDelete(
+  projectKey: string,
+  intent: SkillIntent,
+): AsyncGenerator<SkillStreamChunk> {
+  const docId = typeof intent.args.doc_id === "string"
+    ? intent.args.doc_id
+    : intent.docIds?.[0];
+  const recursive = intent.args.recursive === true;
+
+  if (!docId) {
+    yield { type: "error", error: "请通过 @ 指定要删除的文档，或提供 doc_id 参数" };
+    return;
+  }
+
+  try {
+    const deletedIds = await documentStore.delete(projectKey, docId, recursive);
+    await Promise.all(
+      deletedIds.map((id) =>
+        knowledgeSearch.removeDocument(projectKey, id).catch(() => {
+          // Ignore index cleanup errors for delete flow
+        }),
+      ),
+    );
+    yield {
+      type: "done",
+      message: `已删除 ${deletedIds.length} 个文档`,
+    };
+  } catch (err) {
+    yield {
+      type: "error",
+      error: `删除文档失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Execute kb-search skill
+ */
+async function* executeKbSearch(
+  projectKey: string,
+  intent: SkillIntent,
+): AsyncGenerator<SkillStreamChunk> {
+  const queryText = String(intent.args.query || intent.rawMessage || "").trim();
+  const limitInput = Number(intent.args.limit || 5);
+  const limit = Number.isFinite(limitInput)
+    ? Math.max(1, Math.min(20, Math.floor(limitInput)))
+    : 5;
+
+  if (!queryText) {
+    yield { type: "error", error: "请输入搜索关键词（query）" };
+    return;
+  }
+
+  try {
+    const results = await knowledgeSearch.search(projectKey, projectKey, {
+      text: queryText,
+      mode: "hybrid",
+      limit,
+      doc_ids: intent.docIds,
+    });
+
+    if (results.length === 0) {
+      yield { type: "done", message: "未检索到相关内容" };
+      return;
+    }
+
+    const lines = results.map((r, index) => {
+      const title = r.metadata?.title || r.doc_id;
+      return `${index + 1}. ${title}\n${r.snippet}`;
+    });
+
+    yield {
+      type: "delta",
+      content: `检索到 ${results.length} 条结果：\n\n${lines.join("\n\n---\n\n")}`,
+    };
+    yield { type: "done", message: "知识库检索完成" };
+  } catch (err) {
+    yield {
+      type: "error",
+      error: `知识库检索失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Execute doc-fetch-url skill
+ */
+async function* executeDocFetchUrl(
+  projectKey: string,
+  intent: SkillIntent,
+): AsyncGenerator<SkillStreamChunk> {
+  const targetUrl = String(intent.args.url || "").trim();
+  if (!targetUrl) {
+    yield { type: "error", error: "url 参数不能为空" };
+    return;
+  }
+
+  try {
+    const result = await fetchUrl(projectKey, targetUrl);
+    const snippet = result.html.slice(0, 2000);
+    yield {
+      type: "delta",
+      content: `已抓取 ${result.url}\n\nHTML 片段（前 2000 字符）：\n\`\`\`html\n${snippet}\n\`\`\``,
+    };
+    yield { type: "done", message: "URL 抓取完成" };
+  } catch (err) {
+    yield {
+      type: "error",
+      error: `URL 抓取失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Execute doc-import-git skill
+ */
+async function* executeDocImportGit(
+  projectKey: string,
+  intent: SkillIntent,
+): AsyncGenerator<SkillStreamChunk> {
+  const repoUrl = String(intent.args.repo_url || "").trim();
+  const branch = String(intent.args.branch || "main").trim() || "main";
+  const parentId = String(intent.args.parent_id || intent.docIds?.[0] || "root");
+
+  if (!repoUrl) {
+    yield { type: "error", error: "repo_url 参数不能为空" };
+    return;
+  }
+
+  yield { type: "thinking", content: "正在导入 Git 仓库..." };
+  try {
+    const result = await importGit(projectKey, {
+      repo_url: repoUrl,
+      branch,
+      parent_id: parentId,
+    });
+    yield {
+      type: "done",
+      message:
+        `导入完成：目录 ${result.directories}，文件 ${result.files}，` +
+        `跳过 ${result.skipped}，转换 ${result.converted}，兜底 ${result.fallback}`,
+    };
+  } catch (err) {
+    yield {
+      type: "error",
+      error: `Git 导入失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Execute doc-convert skill
+ */
+async function* executeDocConvert(
+  projectKey: string,
+  intent: SkillIntent,
+): AsyncGenerator<SkillStreamChunk> {
+  const from = String(intent.args.from || "").trim().toLowerCase();
+  const to = String(intent.args.to || "markdown").trim().toLowerCase();
+  const content = String(intent.args.content || "").trim();
+
+  if (!from || !content) {
+    yield { type: "error", error: "from 与 content 参数不能为空" };
+    return;
+  }
+
+  try {
+    const fakeFile = {
+      fieldname: "file",
+      originalname: `input.${from}`,
+      encoding: "7bit",
+      mimetype: "text/plain",
+      size: Buffer.byteLength(content),
+      destination: "",
+      filename: "",
+      path: "",
+      buffer: Buffer.from(content, "utf-8"),
+      stream: undefined as unknown as NodeJS.ReadableStream,
+    } as Express.Multer.File;
+
+    const converted = await convertDocument(projectKey, fakeFile, from, to);
+    yield { type: "delta", content: converted.content };
+    yield { type: "done", message: `内容已转换为 ${to}` };
+  } catch (err) {
+    yield {
+      type: "error",
+      error: `内容转换失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
  * Parse and validate LLM output content
  */
 async function parseAndValidateContent(
@@ -1341,14 +1664,22 @@ export async function* executeAnthropicSkillWithStream(
     // 5. 检查是否需要执行脚本
     const scriptCommands = extractScriptCommands(fullContent, skill);
     if (scriptCommands.length > 0) {
-      yield { type: "thinking", content: "正在执行脚本..." };
-
-      for (const cmd of scriptCommands) {
-        const result = await scriptExecutor.executeCommand(skill, cmd);
-        if (result.success) {
-          yield { type: "delta", content: `\n\n**脚本输出:**\n\`\`\`\n${result.stdout}\n\`\`\`` };
-        } else {
-          yield { type: "delta", content: `\n\n**脚本错误:**\n\`\`\`\n${result.stderr}\n\`\`\`` };
+      const shellEnabled = process.env.AGENT_ALLOW_SHELL === "true";
+      if (!shellEnabled) {
+        yield {
+          type: "delta",
+          content:
+            "\n\n> 检测到技能请求执行脚本，但系统策略默认禁用 shell 执行（AGENT_ALLOW_SHELL != true）。已跳过命令执行。",
+        };
+      } else {
+        yield { type: "thinking", content: "正在执行脚本..." };
+        for (const cmd of scriptCommands) {
+          const result = await scriptExecutor.executeCommand(skill, cmd);
+          if (result.success) {
+            yield { type: "delta", content: `\n\n**脚本输出:**\n\`\`\`\n${result.stdout}\n\`\`\`` };
+          } else {
+            yield { type: "delta", content: `\n\n**脚本错误:**\n\`\`\`\n${result.stderr}\n\`\`\`` };
+          }
         }
       }
     }

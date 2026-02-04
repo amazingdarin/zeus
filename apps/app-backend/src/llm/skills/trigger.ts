@@ -12,6 +12,7 @@ import { skillRegistry, type OpenAITool } from "./registry.js";
 import { skillConfigStore } from "./skill-config-store.js";
 import type { SkillIntent } from "./types.js";
 import type { UnifiedSkillDefinition } from "./adapters/types.js";
+import type { SkillDefinition } from "./types.js";
 
 /**
  * Trigger modes
@@ -52,30 +53,44 @@ export async function analyzeTrigger(
 ): Promise<TriggerResult> {
   const trimmed = message.trim();
 
+  const anthropicSkillInfos = await skillConfigStore.listAnthropicSkillInfo();
+  const enabledAnthropicIds = new Set(
+    anthropicSkillInfos.filter((s) => s.config.enabled).map((s) => s.skill.id),
+  );
+
   // Path 1: Check for explicit slash command (strong determinism)
   const commandMatch = trimmed.match(COMMAND_REGEX);
   if (commandMatch) {
     const [, skillName, rest] = commandMatch;
     const command = `/${skillName}`;
-    const skill = skillRegistry.getByCommand(command);
+    const skill = skillRegistry.getAnyByCommand(command);
 
     if (skill) {
       // Check if the skill is enabled
-      const enabled = await skillConfigStore.isEnabled(skill.name);
+      const isNative = (skill as SkillDefinition).command !== undefined;
+      const skillKey = isNative ? (skill as SkillDefinition).name : (skill as UnifiedSkillDefinition).id;
+      const enabled = await skillConfigStore.isEnabled(skillKey);
       if (enabled) {
         console.log(`[Trigger] Command mode: ${command}`);
+        if (isNative) {
+          return {
+            mode: "command",
+            intent: buildIntent((skill as SkillDefinition).name, command, rest || "", message, docIds),
+          };
+        }
         return {
-          mode: "command",
-          intent: buildIntent(skill.name, command, rest || "", message, docIds),
+          mode: "anthropic",
+          anthropicSkill: skill as UnifiedSkillDefinition,
+          userRequest: rest || trimmed,
         };
       } else {
-        console.log(`[Trigger] Skill ${skill.name} is disabled, falling through to natural mode`);
+        console.log(`[Trigger] Skill ${skillKey} is disabled, falling through to natural mode`);
       }
     }
   }
 
   // Path 2: Check for Anthropic Skill keyword match (medium determinism)
-  const anthropicSkill = matchAnthropicSkillByKeywords(trimmed);
+  const anthropicSkill = matchAnthropicSkillByKeywords(trimmed, enabledAnthropicIds);
   if (anthropicSkill) {
     console.log(`[Trigger] Anthropic mode: matched skill "${anthropicSkill.name}"`);
     return {
@@ -86,8 +101,9 @@ export async function analyzeTrigger(
   }
 
   // Path 3: Natural language mode - prepare tools for LLM
-  const enabledSkillNames = await skillConfigStore.getEnabledSkillNames();
-  const tools = skillRegistry.toOpenAITools(enabledSkillNames, true); // Include Anthropic Skills
+  const enabledNativeSkillNames = await skillConfigStore.getEnabledSkillNames();
+  const enabledSkills = [...new Set([...enabledNativeSkillNames, ...Array.from(enabledAnthropicIds)])];
+  const tools = skillRegistry.toOpenAITools(enabledSkills, true); // Include Anthropic Skills
 
   if (tools.length > 0) {
     console.log(`[Trigger] Natural mode with ${tools.length} tools available`);
@@ -110,6 +126,7 @@ export async function analyzeTrigger(
  */
 function matchAnthropicSkillByKeywords(
   message: string,
+  enabledIds: Set<string>,
 ): UnifiedSkillDefinition | undefined {
   const MIN_KEYWORD_MATCH = 2;
   const lowerMessage = message.toLowerCase();
@@ -118,7 +135,7 @@ function matchAnthropicSkillByKeywords(
   let bestScore = 0;
 
   for (const skill of skillRegistry.getAllAnthropic()) {
-    if (!skill.enabled) continue;
+    if (!enabledIds.has(skill.id)) continue;
 
     const keywords = skill.triggers.keywords || [];
     const matchCount = keywords.filter((kw) =>
@@ -176,10 +193,79 @@ function buildIntent(
     case "doc-read":
     case "doc-optimize-format":
     case "doc-optimize-content":
+    case "doc-summary":
       return {
         skill: skillName,
         command,
         args: {},
+        rawMessage,
+        docIds,
+      };
+
+    case "doc-move":
+      return {
+        skill: skillName,
+        command,
+        args: {
+          target_parent_id: trimmedRest || "root",
+        },
+        rawMessage,
+        docIds,
+      };
+
+    case "doc-delete":
+      return {
+        skill: skillName,
+        command,
+        args: {
+          recursive: /\brecursive\b|\b递归\b/.test(trimmedRest),
+        },
+        rawMessage,
+        docIds,
+      };
+
+    case "kb-search":
+      return {
+        skill: skillName,
+        command,
+        args: {
+          query: trimmedRest,
+        },
+        rawMessage,
+        docIds,
+      };
+
+    case "doc-fetch-url":
+      return {
+        skill: skillName,
+        command,
+        args: {
+          url: trimmedRest,
+        },
+        rawMessage,
+        docIds,
+      };
+
+    case "doc-import-git":
+      return {
+        skill: skillName,
+        command,
+        args: {
+          repo_url: trimmedRest,
+        },
+        rawMessage,
+        docIds,
+      };
+
+    case "doc-convert":
+      return {
+        skill: skillName,
+        command,
+        args: {
+          from: "txt",
+          to: "markdown",
+          content: trimmedRest,
+        },
         rawMessage,
         docIds,
       };

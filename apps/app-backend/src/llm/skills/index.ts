@@ -31,6 +31,12 @@ export {
   docReadSkill,
   docCreateSkill,
   docEditSkill,
+  docMoveSkill,
+  docDeleteSkill,
+  kbSearchSkill,
+  docFetchUrlSkill,
+  docImportGitSkill,
+  docConvertSkill,
 } from "./document-skills.js";
 
 // Spec loader
