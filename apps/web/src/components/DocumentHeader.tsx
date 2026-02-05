@@ -39,6 +39,7 @@ type DocumentHeaderProps = {
   onImport: () => void;
   onDelete?: () => void;
   onExport?: () => void;
+  onExportPPT?: () => void;
   onOptimize?: () => void;
   onRefresh?: () => void;
 };
@@ -60,6 +61,7 @@ function DocumentHeader({
   onImport,
   onDelete,
   onExport,
+  onExportPPT,
   onOptimize,
   onRefresh,
 }: DocumentHeaderProps) {
@@ -112,6 +114,14 @@ function DocumentHeader({
     }
     handleCloseMenu();
     onExport();
+  };
+
+  const handleExportPPT = () => {
+    if (!onExportPPT) {
+      return;
+    }
+    handleCloseMenu();
+    onExportPPT();
   };
 
   const handleOptimize = () => {
@@ -205,7 +215,12 @@ function DocumentHeader({
                 ) : null}
                 {onExport ? (
                   <button className="kb-menu-item" type="button" onClick={handleExport}>
-                    导出
+                    导出 Markdown
+                  </button>
+                ) : null}
+                {onExportPPT ? (
+                  <button className="kb-menu-item" type="button" onClick={handleExportPPT}>
+                    导出 PPT
                   </button>
                 ) : null}
                 {allowOptimize && onOptimize ? (

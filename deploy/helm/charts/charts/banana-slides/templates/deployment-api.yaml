@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "banana-slides.fullname" . }}-api
+  labels:
+    {{- include "banana-slides.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      {{- include "banana-slides.apiLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "banana-slides.apiLabels" . | nindent 8 }}
+    spec:
+      {{- if .Values.global.hostNetwork }}
+      hostNetwork: true
+      {{- end }}
+      containers:
+        - name: api
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: NANO_BANANA_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "banana-slides.fullname" . }}
+                  key: nano-banana-api-url
+            - name: NANO_BANANA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "banana-slides.fullname" . }}
+                  key: nano-banana-api-key
+            - name: OUTPUT_DIR
+              value: {{ .Values.storage.mountPath | quote }}
+            {{- if .Values.redis.enabled }}
+            - name: REDIS_HOST
+              value: {{ .Values.redis.host | quote }}
+            - name: REDIS_PORT
+              value: {{ .Values.redis.port | quote }}
+            {{- if .Values.redis.password }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "banana-slides.fullname" . }}
+                  key: redis-password
+            {{- end }}
+            {{- end }}
+          volumeMounts:
+            {{- if .Values.storage.enabled }}
+            - name: output
+              mountPath: {{ .Values.storage.mountPath }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        {{- if .Values.storage.enabled }}
+        - name: output
+          persistentVolumeClaim:
+            claimName: {{ include "banana-slides.fullname" . }}
+        {{- end }}

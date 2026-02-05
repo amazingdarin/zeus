@@ -18,3 +18,22 @@ langfuse:
   service:
     type: ClusterIP
     port: 3000
+
+# Banana Slides PPT Generation Service
+banana-slides:
+  enabled: true
+  api:
+    replicas: 1
+  worker:
+    replicas: 1
+    gpu:
+      enabled: false
+  nanoBanana:
+    apiUrl: "https://api.nanobanana.ai/v1"
+    apiKey: "change-me-in-production"
+  storage:
+    enabled: true
+    size: "10Gi"
+  service:
+    type: ClusterIP
+    port: 8080

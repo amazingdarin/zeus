@@ -15,3 +15,7 @@ dependencies:
     version: 0.1.0
     repository: "file://charts/langfuse"
     condition: langfuse.enabled
+  - name: banana-slides
+    version: 0.1.0
+    repository: "file://charts/banana-slides"
+    condition: banana-slides.enabled

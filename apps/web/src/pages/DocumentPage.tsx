@@ -16,6 +16,7 @@ import KnowledgeBaseSideNav, {
 } from "../components/KnowledgeBaseSideNav";
 import RichTextViewer from "../components/RichTextViewer";
 import DocumentOptimizeModal from "../components/DocumentOptimizeModal";
+import ExportPPTModal from "../components/ExportPPTModal";
 import {
   fetchDocument,
   fetchDocumentHierarchy,
@@ -254,6 +255,7 @@ function DocumentPage() {
   >([]);
   const [rebuildModalOpen, setRebuildModalOpen] = useState(false);
   const [optimizeModalOpen, setOptimizeModalOpen] = useState(false);
+  const [exportPPTModalOpen, setExportPPTModalOpen] = useState(false);
 
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importMode, setImportMode] = useState<"file" | "folder" | "url" | "git">("file");
@@ -1116,6 +1118,13 @@ function DocumentPage() {
     setOptimizeModalOpen(true);
   }, [activeDocument]);
 
+  const handleOpenExportPPT = useCallback(() => {
+    if (!activeDocument) {
+      return;
+    }
+    setExportPPTModalOpen(true);
+  }, [activeDocument]);
+
   const handleOptimizeApply = useCallback(
     async (optimizedContent: JSONContent) => {
       if (!resolvedProjectKey || !activeDocument) {
@@ -1917,6 +1926,7 @@ function DocumentPage() {
           onImport={() => handleOpenImportWithMode("file")}
           onDelete={handleDelete}
           onExport={activeDocument ? handleExport : undefined}
+          onExportPPT={activeDocument ? handleOpenExportPPT : undefined}
           onOptimize={activeDocument ? handleOpenOptimize : undefined}
           onRefresh={activeDocument ? handleRefreshDocument : undefined}
         />
@@ -2366,6 +2376,13 @@ function DocumentPage() {
           docTitle={activeDocument?.title || ""}
           onClose={() => setOptimizeModalOpen(false)}
           onApply={handleOptimizeApply}
+        />
+        <ExportPPTModal
+          open={exportPPTModalOpen}
+          projectKey={resolvedProjectKey}
+          docId={activeDocument?.id || ""}
+          docTitle={activeDocument?.title}
+          onClose={() => setExportPPTModalOpen(false)}
         />
         <input
           ref={fileInputRef}

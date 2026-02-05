@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "banana-slides.fullname" . }}-worker
+  labels:
+    {{- include "banana-slides.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      {{- include "banana-slides.workerLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "banana-slides.workerLabels" . | nindent 8 }}
+    spec:
+      {{- if .Values.global.hostNetwork }}
+      hostNetwork: true
+      {{- end }}
+      containers:
+        - name: worker
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          env:
+            - name: NANO_BANANA_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "banana-slides.fullname" . }}
+                  key: nano-banana-api-url
+            - name: NANO_BANANA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "banana-slides.fullname" . }}
+                  key: nano-banana-api-key
+            - name: OUTPUT_DIR
+              value: {{ .Values.storage.mountPath | quote }}
+            {{- if .Values.redis.enabled }}
+            - name: REDIS_HOST
+              value: {{ .Values.redis.host | quote }}
+            - name: REDIS_PORT
+              value: {{ .Values.redis.port | quote }}
+            {{- if .Values.redis.password }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "banana-slides.fullname" . }}
+                  key: redis-password
+            {{- end }}
+            {{- end }}
+          volumeMounts:
+            {{- if .Values.storage.enabled }}
+            - name: output
+              mountPath: {{ .Values.storage.mountPath }}
+            {{- end }}
+          resources:
+            {{- if .Values.worker.gpu.enabled }}
+            limits:
+              {{ .Values.worker.gpu.type }}: {{ .Values.worker.gpu.count }}
+              {{- with .Values.worker.resources.limits }}
+              memory: {{ .memory }}
+              cpu: {{ .cpu }}
+              {{- end }}
+            requests:
+              {{- with .Values.worker.resources.requests }}
+              memory: {{ .memory }}
+              cpu: {{ .cpu }}
+              {{- end }}
+            {{- else }}
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+            {{- end }}
+      volumes:
+        {{- if .Values.storage.enabled }}
+        - name: output
+          persistentVolumeClaim:
+            claimName: {{ include "banana-slides.fullname" . }}
+        {{- end }}

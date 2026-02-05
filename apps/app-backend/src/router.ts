@@ -2489,6 +2489,349 @@ export const buildRouter = () => {
     }
   );
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // PPT Generation API
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Export document to PPT
+   * POST /projects/:projectKey/documents/:docId/export-ppt
+   */
+  router.post(
+    "/projects/:projectKey/documents/:docId/export-ppt",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const { style, options } = req.body as {
+          style?: {
+            description?: string;
+            templateId?: string;
+            templateImages?: string[];
+          };
+          options?: {
+            aspectRatio?: "16:9" | "4:3";
+            language?: string;
+          };
+        };
+
+        // Get the document
+        const doc = await documentStore.get(projectKey, docId);
+        const body = doc.body?.content as JSONContent | undefined;
+
+        if (!body || body.type !== "doc") {
+          error(res, "INVALID_DOCUMENT", "Document has no valid Tiptap content");
+          return;
+        }
+
+        // Dynamic import to avoid loading if not used
+        const { pptService } = await import("./services/ppt/index.js");
+
+        // Check if service is available
+        const available = await pptService.isAvailable();
+        if (!available) {
+          error(res, "SERVICE_UNAVAILABLE", "PPT generation service is not available", 503);
+          return;
+        }
+
+        // Generate PPT
+        const result = await pptService.generateFromDocument(body, style, options);
+
+        success(res, {
+          task_id: result.taskId,
+          status: result.status,
+        }, 202);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          error(res, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        const msg = err instanceof Error ? err.message : "Failed to export PPT";
+        error(res, "EXPORT_PPT_FAILED", msg, 500);
+      }
+    }
+  );
+
+  /**
+   * Get PPT generation task status
+   * GET /projects/:projectKey/ppt-tasks/:taskId
+   */
+  router.get(
+    "/projects/:projectKey/ppt-tasks/:taskId",
+    async (req: Request, res: Response) => {
+      try {
+        const { taskId } = req.params;
+
+        const { pptService } = await import("./services/ppt/index.js");
+        const status = await pptService.getTaskStatus(taskId);
+
+        success(res, {
+          task_id: status.taskId,
+          status: status.status,
+          progress: status.progress,
+          current_slide: status.currentSlide,
+          total_slides: status.totalSlides,
+          error: status.error,
+          created_at: status.createdAt,
+          updated_at: status.updatedAt,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to get task status";
+        error(res, "GET_TASK_STATUS_FAILED", msg, 500);
+      }
+    }
+  );
+
+  /**
+   * Download generated PPTX file
+   * GET /projects/:projectKey/ppt-tasks/:taskId/download
+   */
+  router.get(
+    "/projects/:projectKey/ppt-tasks/:taskId/download",
+    async (req: Request, res: Response) => {
+      try {
+        const { taskId } = req.params;
+
+        const { pptService } = await import("./services/ppt/index.js");
+        const buffer = await pptService.downloadPPTX(taskId);
+
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+        res.setHeader("Content-Disposition", `attachment; filename="presentation-${taskId}.pptx"`);
+        res.send(buffer);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to download PPTX";
+        error(res, "DOWNLOAD_PPTX_FAILED", msg, 500);
+      }
+    }
+  );
+
+  /**
+   * Get slide previews for a task
+   * GET /projects/:projectKey/ppt-tasks/:taskId/previews
+   */
+  router.get(
+    "/projects/:projectKey/ppt-tasks/:taskId/previews",
+    async (req: Request, res: Response) => {
+      try {
+        const { taskId } = req.params;
+
+        const { pptService } = await import("./services/ppt/index.js");
+        const previews = await pptService.getPreviews(taskId);
+
+        success(res, { previews });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to get previews";
+        error(res, "GET_PREVIEWS_FAILED", msg, 500);
+      }
+    }
+  );
+
+  /**
+   * Modify a slide using natural language
+   * POST /projects/:projectKey/ppt-tasks/:taskId/modify
+   */
+  router.post(
+    "/projects/:projectKey/ppt-tasks/:taskId/modify",
+    async (req: Request, res: Response) => {
+      try {
+        const { taskId } = req.params;
+        const { slide_index, instruction } = req.body as {
+          slide_index: number;
+          instruction: string;
+        };
+
+        if (typeof slide_index !== "number" || !instruction) {
+          error(res, "INVALID_REQUEST", "slide_index and instruction are required");
+          return;
+        }
+
+        const { pptService } = await import("./services/ppt/index.js");
+        const result = await pptService.modifySlide(taskId, slide_index, instruction);
+
+        success(res, {
+          task_id: result.taskId,
+          status: result.status,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to modify slide";
+        error(res, "MODIFY_SLIDE_FAILED", msg, 500);
+      }
+    }
+  );
+
+  /**
+   * List available PPT templates (presets only)
+   * GET /ppt-templates
+   */
+  router.get("/ppt-templates", async (_req: Request, res: Response) => {
+    try {
+      const { pptService } = await import("./services/ppt/index.js");
+      const templates = pptService.getPresetTemplates();
+      success(res, { templates });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list templates";
+      error(res, "LIST_TEMPLATES_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * List all PPT templates for a project (presets + custom)
+   * GET /projects/:projectKey/ppt-templates
+   */
+  router.get("/projects/:projectKey/ppt-templates", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const { templateStore } = await import("./services/ppt/template-store.js");
+      const templates = await templateStore.getAllTemplates(projectKey);
+      success(res, templates);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list templates";
+      error(res, "LIST_TEMPLATES_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Create a custom PPT template
+   * POST /projects/:projectKey/ppt-templates
+   */
+  router.post("/projects/:projectKey/ppt-templates", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const { name, description, preview_url, template_images, color_scheme } = req.body as {
+        name?: string;
+        description?: string;
+        preview_url?: string;
+        template_images?: string[];
+        color_scheme?: {
+          primary?: string;
+          secondary?: string;
+          background?: string;
+          text?: string;
+          accent?: string;
+        };
+      };
+
+      if (!name || typeof name !== "string" || !name.trim()) {
+        error(res, "INVALID_REQUEST", "name is required");
+        return;
+      }
+
+      const { templateStore } = await import("./services/ppt/template-store.js");
+      const template = await templateStore.create(projectKey, {
+        name: name.trim(),
+        description,
+        previewUrl: preview_url,
+        templateImages: template_images,
+        colorScheme: color_scheme,
+      });
+
+      success(res, template, 201);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to create template";
+      error(res, "CREATE_TEMPLATE_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Get a custom PPT template
+   * GET /projects/:projectKey/ppt-templates/:templateId
+   */
+  router.get("/projects/:projectKey/ppt-templates/:templateId", async (req: Request, res: Response) => {
+    try {
+      const { projectKey, templateId } = req.params;
+      const { templateStore } = await import("./services/ppt/template-store.js");
+      const template = await templateStore.resolve(projectKey, templateId);
+
+      if (!template) {
+        error(res, "NOT_FOUND", "Template not found", 404);
+        return;
+      }
+
+      success(res, template);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to get template";
+      error(res, "GET_TEMPLATE_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Update a custom PPT template
+   * PUT /projects/:projectKey/ppt-templates/:templateId
+   */
+  router.put("/projects/:projectKey/ppt-templates/:templateId", async (req: Request, res: Response) => {
+    try {
+      const { projectKey, templateId } = req.params;
+      const { name, description, preview_url, template_images, color_scheme } = req.body as {
+        name?: string;
+        description?: string;
+        preview_url?: string;
+        template_images?: string[];
+        color_scheme?: {
+          primary?: string;
+          secondary?: string;
+          background?: string;
+          text?: string;
+          accent?: string;
+        };
+      };
+
+      const { templateStore } = await import("./services/ppt/template-store.js");
+      const template = await templateStore.update(projectKey, templateId, {
+        name,
+        description,
+        previewUrl: preview_url,
+        templateImages: template_images,
+        colorScheme: color_scheme,
+      });
+
+      if (!template) {
+        error(res, "NOT_FOUND", "Template not found", 404);
+        return;
+      }
+
+      success(res, template);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update template";
+      error(res, "UPDATE_TEMPLATE_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Delete a custom PPT template
+   * DELETE /projects/:projectKey/ppt-templates/:templateId
+   */
+  router.delete("/projects/:projectKey/ppt-templates/:templateId", async (req: Request, res: Response) => {
+    try {
+      const { projectKey, templateId } = req.params;
+      const { templateStore } = await import("./services/ppt/template-store.js");
+      const deleted = await templateStore.delete(projectKey, templateId);
+
+      if (!deleted) {
+        error(res, "NOT_FOUND", "Template not found", 404);
+        return;
+      }
+
+      success(res, { deleted: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to delete template";
+      error(res, "DELETE_TEMPLATE_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Check PPT service availability
+   * GET /ppt-service/status
+   */
+  router.get("/ppt-service/status", async (_req: Request, res: Response) => {
+    try {
+      const { pptService } = await import("./services/ppt/index.js");
+      const available = await pptService.isAvailable();
+      success(res, { available });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to check status";
+      error(res, "CHECK_STATUS_FAILED", msg, 500);
+    }
+  });
+
   return router;
 };
 
