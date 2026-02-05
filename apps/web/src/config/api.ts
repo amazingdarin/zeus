@@ -28,7 +28,20 @@ const isAppBackendPath = (path: string): boolean => {
   if (path.match(/^\/api\/projects\/[^/]+\/knowledge/)) return true;
   // Asset operations
   if (path.match(/^\/api\/projects\/[^/]+\/assets/)) return true;
-  // Settings (web-search, skills, etc.)
+  // Skills configuration (project-scoped)
+  if (path.match(/^\/api\/projects\/[^/]+\/skills/)) return true;
+  // Chat and runs
+  if (path.match(/^\/api\/projects\/[^/]+\/chat/)) return true;
+  if (path.match(/^\/api\/projects\/[^/]+\/runs/)) return true;
+  // Convert, fetch-url, import-git
+  if (path.match(/^\/api\/projects\/[^/]+\/convert/)) return true;
+  // PPT export
+  if (path.match(/^\/api\/projects\/[^/]+\/ppt/)) return true;
+  // Global skills configuration
+  if (path.startsWith("/api/skills")) return true;
+  // LLM configuration
+  if (path.startsWith("/api/llm/")) return true;
+  // Settings (web-search, etc.)
   if (path.startsWith("/api/settings/")) return true;
   return false;
 };

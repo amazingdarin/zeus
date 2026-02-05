@@ -17,6 +17,9 @@ const isAppBackendRoute = (url: string): boolean => {
     /^\/api\/projects\/[^/]+\/rag/.test(url) ||
     /^\/api\/projects\/[^/]+\/chat/.test(url) ||
     /^\/api\/projects\/[^/]+\/drafts/.test(url) ||
+    /^\/api\/projects\/[^/]+\/skills/.test(url) ||
+    /^\/api\/projects\/[^/]+\/runs/.test(url) ||
+    /^\/api\/projects\/[^/]+\/ppt/.test(url) ||
     url.startsWith("/api/llm") ||
     url.startsWith("/api/ocr") ||
     url.startsWith("/api/skills") ||

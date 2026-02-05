@@ -12,3 +12,12 @@ export {
   type GenerationParams,
   type TraceMetadata,
 } from "./trace-manager.js";
+export {
+  ragTraceManager,
+  withRAGTrace,
+  traceSpan,
+  type RAGTraceMetadata,
+  type RetrievalSpanData,
+  type RerankSpanData,
+  type EvaluationData,
+} from "./rag-trace.js";

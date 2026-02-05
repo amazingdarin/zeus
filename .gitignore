@@ -44,3 +44,5 @@ pnpm-debug.log*
 .sysphus
 *.local
 *.env.local
+
+deploy/k3s.yaml
