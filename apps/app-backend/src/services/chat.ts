@@ -49,6 +49,7 @@ export type DocumentScope = {
 
 export type ChatRun = {
   id: string;
+  userId: string;
   projectKey: string;
   sessionId: string;
   messages: ChatMessage[];
@@ -128,6 +129,7 @@ export function clearLLMConfigCache(): void {
  * Resolve document scopes to a list of document IDs
  */
 async function resolveDocumentScopes(
+  userId: string,
   projectKey: string,
   scopes: DocumentScope[],
 ): Promise<string[]> {
@@ -140,7 +142,7 @@ async function resolveDocumentScopes(
 
     if (scope.includeChildren) {
       try {
-        const descendantIds = await documentStore.collectAllDescendantIds(projectKey, scope.docId);
+        const descendantIds = await documentStore.collectAllDescendantIds(userId, projectKey, scope.docId);
         for (const id of descendantIds) {
           docIds.add(id);
         }
@@ -161,6 +163,7 @@ export type CreateRunOptions = {
  * Create a new chat run
  */
 export async function createRun(
+  userId: string,
   projectKey: string,
   sessionId: string,
   message: string,
@@ -183,7 +186,7 @@ export async function createRun(
   // Resolve document scopes to IDs
   let docIds: string[] | undefined;
   if (documentScope && documentScope.length > 0) {
-    docIds = await resolveDocumentScopes(projectKey, documentScope);
+    docIds = await resolveDocumentScopes(userId, projectKey, documentScope);
     if (docIds.length === 0) {
       docIds = undefined; // No valid docs, search all
     }
@@ -191,6 +194,7 @@ export async function createRun(
 
   const run: ChatRun = {
     id: runId,
+    userId,
     projectKey,
     sessionId,
     messages: [...history],
@@ -559,7 +563,7 @@ async function* handleAgentExecuteMode(
         throw new Error(`Missing legacy skill mapping for native skill: ${skill.id}`);
       }
 
-      for await (const chunk of executeSkillWithStream(run.projectKey, intent, traceContext)) {
+      for await (const chunk of executeSkillWithStream(run.userId, run.projectKey, intent, traceContext)) {
         if (abortSignal.aborted) {
           run.status = "cancelled";
           run.updatedAt = Date.now();
@@ -578,7 +582,7 @@ async function* handleAgentExecuteMode(
         try {
           const docs = await Promise.all(
             plan.docIds.slice(0, 3).map(async (docId) => {
-              const doc = await documentStore.get(run.projectKey, docId);
+              const doc = await documentStore.get(run.userId, run.projectKey, docId);
               return `## ${doc.meta.title}\n${JSON.stringify(doc.body)}`;
             }),
           );
@@ -598,6 +602,7 @@ async function* handleAgentExecuteMode(
       }
 
       for await (const chunk of executeAnthropicSkillWithStream(
+        run.userId,
         run.projectKey,
         { ...anthropicSkill, enabled: true },
         userRequest,
@@ -672,7 +677,7 @@ async function* handleCommandMode(
   });
 
   try {
-    for await (const chunk of executeSkillWithStream(run.projectKey, trigger.intent, traceContext)) {
+    for await (const chunk of executeSkillWithStream(run.userId, run.projectKey, trigger.intent, traceContext)) {
       // Check if aborted
       if (abortSignal.aborted) {
         console.log("[chat] Command mode aborted");
@@ -746,7 +751,7 @@ async function* handleAnthropicMode(
       try {
         const docs = await Promise.all(
           run.docIds.slice(0, 3).map(async (docId) => {
-            const doc = await documentStore.get(run.projectKey, docId);
+            const doc = await documentStore.get(run.userId, run.projectKey, docId);
             return `## ${doc.meta.title}\n${JSON.stringify(doc.body)}`;
           }),
         );
@@ -758,6 +763,7 @@ async function* handleAnthropicMode(
 
     // Execute Anthropic Skill
     for await (const chunk of executeAnthropicSkillWithStream(
+      run.userId,
       run.projectKey,
       skill,
       trigger.userRequest,
@@ -946,7 +952,7 @@ async function* handleNaturalMode(
       traceManager.endSpan(toolSelectionSpan, { selectedTool: toolCall.function.name });
 
       // Execute the selected skill
-      for await (const chunk of executeSkillWithStream(run.projectKey, intent, traceContext)) {
+      for await (const chunk of executeSkillWithStream(run.userId, run.projectKey, intent, traceContext)) {
         // Check if aborted
         if (abortSignal.aborted) {
           console.log("[chat] Natural mode aborted during skill execution");
@@ -1056,7 +1062,7 @@ async function* handleChatMode(
     });
     try {
       const searchResults = await knowledgeSearch.search(
-        run.projectKey,
+        run.userId,
         run.projectKey,
         {
           text: userQuery,
@@ -1067,7 +1073,7 @@ async function* handleChatMode(
       );
 
       if (searchResults.length > 0) {
-        const contextData = await buildContextFromResults(run.projectKey, searchResults);
+        const contextData = await buildContextFromResults(run.userId, run.projectKey, searchResults);
         ragContext = contextData.text;
         sources = contextData.sources;
       }
@@ -1186,6 +1192,7 @@ async function* handleDeepSearchMode(
 
   try {
     for await (const chunk of executeDeepSearch(
+      run.userId,
       run.projectKey,
       userQuery,
       run.docIds,
@@ -1332,6 +1339,7 @@ function buildDefaultToolPrompt(): string {
  * Build context from search results
  */
 async function buildContextFromResults(
+  userId: string,
   projectKey: string,
   results: SearchResult[],
 ): Promise<{ text: string; sources: SourceReference[] }> {
@@ -1342,7 +1350,7 @@ async function buildContextFromResults(
     let title = result.metadata?.title || "";
     if (!title) {
       try {
-        const doc = await documentStore.get(projectKey, result.doc_id);
+        const doc = await documentStore.get(userId, projectKey, result.doc_id);
         title = doc.meta.title || result.doc_id;
       } catch {
         title = result.doc_id;

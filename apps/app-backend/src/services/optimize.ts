@@ -176,12 +176,13 @@ function getPromptTemplate(mode: OptimizeMode): string {
  * Create a new optimization task
  */
 export async function createTask(
+  userId: string,
   projectKey: string,
   docId: string,
   options: OptimizeOptions,
 ): Promise<string> {
   // Get document
-  const doc = await documentStore.get(projectKey, docId);
+  const doc = await documentStore.get(userId, projectKey, docId);
 
   // Convert to markdown based on document type
   let originalMarkdown: string;

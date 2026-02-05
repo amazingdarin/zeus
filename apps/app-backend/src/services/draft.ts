@@ -56,6 +56,7 @@ export const draftService = {
     const now = Date.now();
     const draft: DocumentDraft = {
       id: uuidv4(),
+      userId: input.userId,
       projectKey: input.projectKey,
       docId: input.docId ?? null,
       parentId: input.parentId ?? null,
@@ -127,8 +128,8 @@ export const draftService = {
 
       if (draft.docId && !saveAsNew) {
         // Update existing document (normal edit mode)
-        const existingDoc = await documentStore.get(projectKey, draft.docId);
-        await documentStore.save(projectKey, {
+        const existingDoc = await documentStore.get(draft.userId, projectKey, draft.docId);
+        await documentStore.save(draft.userId, projectKey, {
           meta: {
             ...existingDoc.meta,
             title: draft.title,
@@ -144,7 +145,7 @@ export const draftService = {
             ? `${draft.title} (副本)` 
             : draft.title;
         
-        const newDoc = await documentStore.save(projectKey, {
+        const newDoc = await documentStore.save(draft.userId, projectKey, {
           meta: {
             id: uuidv4(),
             schema_version: "v1",

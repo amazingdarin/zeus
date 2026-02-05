@@ -94,6 +94,7 @@ async function getLLMConfig(): Promise<ProviderConfigInternal | null> {
  * Execute deep search with multi-round search and synthesis
  */
 export async function* executeDeepSearch(
+  userId: string,
   projectKey: string,
   query: string,
   docIds?: string[],
@@ -148,7 +149,7 @@ export async function* executeDeepSearch(
     // Search knowledge base
     let kbResults: SearchResult[] = [];
     try {
-      kbResults = await knowledgeSearch.search(projectKey, projectKey, {
+      kbResults = await knowledgeSearch.search(userId, projectKey, {
         text: subQuery,
         mode: "hybrid",
         limit: 5,

@@ -54,9 +54,9 @@ function cleanMarkdownOutput(markdown: string): string {
 export async function* runDocOptimize(
   input: DocOptimizeRunInput,
 ): AsyncGenerator<DocOptimizeRunChunk> {
-  const { projectKey, capabilityId, args, traceContext } = input;
+  const { userId, projectKey, capabilityId, args, traceContext } = input;
   const capability = getOptimizeCapability(capabilityId);
-  const doc = await documentStore.get(projectKey, args.docId);
+  const doc = await documentStore.get(userId, projectKey, args.docId);
   const originalContent = extractDocContent(doc.body);
   const originalMarkdown = tiptapJsonToMarkdown(originalContent);
 

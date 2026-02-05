@@ -266,6 +266,7 @@ function extractTitle(message: string): string {
  * Execute a skill with streaming output
  */
 export async function* executeSkillWithStream(
+  userId: string,
   projectKey: string,
   intent: SkillIntent,
   traceContext?: TraceContext,
@@ -281,46 +282,46 @@ export async function* executeSkillWithStream(
   try {
     switch (intent.skill) {
       case "doc-read":
-        yield* executeDocRead(projectKey, intent);
+        yield* executeDocRead(userId, projectKey, intent);
         break;
       case "doc-create":
-        yield* executeDocCreate(projectKey, intent, traceContext);
+        yield* executeDocCreate(userId, projectKey, intent, traceContext);
         break;
       case "doc-edit":
-        yield* executeDocEdit(projectKey, intent, traceContext);
+        yield* executeDocEdit(userId, projectKey, intent, traceContext);
         break;
       case "doc-optimize-format":
-        yield* executeDocOptimizeFormat(projectKey, intent, traceContext);
+        yield* executeDocOptimizeFormat(userId, projectKey, intent, traceContext);
         break;
       case "doc-optimize-content":
-        yield* executeDocOptimizeContent(projectKey, intent, traceContext);
+        yield* executeDocOptimizeContent(userId, projectKey, intent, traceContext);
         break;
       case "doc-optimize-style":
-        yield* executeDocOptimizeStyle(projectKey, intent, traceContext);
+        yield* executeDocOptimizeStyle(userId, projectKey, intent, traceContext);
         break;
       case "doc-optimize-full":
-        yield* executeDocOptimizeFull(projectKey, intent, traceContext);
+        yield* executeDocOptimizeFull(userId, projectKey, intent, traceContext);
         break;
       case "doc-summary":
-        yield* executeDocSummary(projectKey, intent, traceContext);
+        yield* executeDocSummary(userId, projectKey, intent, traceContext);
         break;
       case "doc-move":
-        yield* executeDocMove(projectKey, intent);
+        yield* executeDocMove(userId, projectKey, intent);
         break;
       case "doc-delete":
-        yield* executeDocDelete(projectKey, intent);
+        yield* executeDocDelete(userId, projectKey, intent);
         break;
       case "kb-search":
-        yield* executeKbSearch(projectKey, intent);
+        yield* executeKbSearch(userId, projectKey, intent);
         break;
       case "doc-fetch-url":
-        yield* executeDocFetchUrl(projectKey, intent);
+        yield* executeDocFetchUrl(userId, projectKey, intent);
         break;
       case "doc-import-git":
-        yield* executeDocImportGit(projectKey, intent);
+        yield* executeDocImportGit(userId, projectKey, intent);
         break;
       case "doc-convert":
-        yield* executeDocConvert(projectKey, intent);
+        yield* executeDocConvert(userId, projectKey, intent);
         break;
       default:
         yield { type: "error", error: `Unknown skill: ${intent.skill}` };
@@ -343,6 +344,7 @@ export async function* executeSkillWithStream(
  * Execute doc-read skill
  */
 async function* executeDocRead(
+  userId: string,
   projectKey: string,
   intent: SkillIntent,
 ): AsyncGenerator<SkillStreamChunk> {
@@ -353,7 +355,7 @@ async function* executeDocRead(
 
   try {
     const docId = intent.docIds[0];
-    const doc = await documentStore.get(projectKey, docId);
+    const doc = await documentStore.get(userId, projectKey, docId);
     
     // Convert to markdown for display
     const markdown = tiptapJsonToMarkdown(doc.body as JSONContent);
@@ -375,6 +377,7 @@ async function* executeDocRead(
  * Execute doc-create skill
  */
 async function* executeDocCreate(
+  userId: string,
   projectKey: string,
   intent: SkillIntent,
   traceContext?: TraceContext,
@@ -457,6 +460,7 @@ ${description || "创建一个新文档"}
 
     // Create draft with AI-generated title
     const draft = draftService.create({
+      userId,
       projectKey,
       docId: null,
       parentId: parentId || null,
@@ -523,6 +527,7 @@ function extractTitleAndBody(content: string): {
  * Execute doc-edit skill
  */
 async function* executeDocEdit(
+  userId: string,
   projectKey: string,
   intent: SkillIntent,
   traceContext?: TraceContext,
@@ -539,7 +544,7 @@ async function* executeDocEdit(
 
   try {
     // Get original document
-    const doc = await documentStore.get(projectKey, docId);
+    const doc = await documentStore.get(userId, projectKey, docId);
     const originalContent = doc.body as JSONContent;
     const originalMarkdown = tiptapJsonToMarkdown(originalContent);
 
@@ -605,6 +610,7 @@ ${originalMarkdown}
 
     // Create draft
     const draft = draftService.create({
+      userId,
       projectKey,
       docId,
       parentId: doc.meta.parent_id || null,
@@ -627,6 +633,7 @@ ${originalMarkdown}
  * Execute doc optimization capability
  */
 async function* executeDocOptimize(
+  userId: string,
   projectKey: string,
   intent: SkillIntent,
   capabilityId: OptimizeCapabilityId,
@@ -650,6 +657,7 @@ async function* executeDocOptimize(
     };
 
     for await (const chunk of runDocOptimize({
+      userId,
       projectKey,
       capabilityId,
       args,
@@ -662,6 +670,7 @@ async function* executeDocOptimize(
 
       if (chunk.type === "result") {
         const draft = draftService.create({
+          userId,
           projectKey,
           docId: chunk.result.docId,
           parentId: chunk.result.parentId,
@@ -687,44 +696,48 @@ async function* executeDocOptimize(
  * Execute doc-optimize-format skill
  */
 async function* executeDocOptimizeFormat(
+  userId: string,
   projectKey: string,
   intent: SkillIntent,
   traceContext?: TraceContext,
 ): AsyncGenerator<SkillStreamChunk> {
-  yield* executeDocOptimize(projectKey, intent, "doc-optimize-format", traceContext);
+  yield* executeDocOptimize(userId, projectKey, intent, "doc-optimize-format", traceContext);
 }
 
 /**
  * Execute doc-optimize-content skill
  */
 async function* executeDocOptimizeContent(
+  userId: string,
   projectKey: string,
   intent: SkillIntent,
   traceContext?: TraceContext,
 ): AsyncGenerator<SkillStreamChunk> {
-  yield* executeDocOptimize(projectKey, intent, "doc-optimize-content", traceContext);
+  yield* executeDocOptimize(userId, projectKey, intent, "doc-optimize-content", traceContext);
 }
 
 /**
  * Execute doc-optimize-style skill
  */
 async function* executeDocOptimizeStyle(
+  userId: string,
   projectKey: string,
   intent: SkillIntent,
   traceContext?: TraceContext,
 ): AsyncGenerator<SkillStreamChunk> {
-  yield* executeDocOptimize(projectKey, intent, "doc-optimize-style", traceContext);
+  yield* executeDocOptimize(userId, projectKey, intent, "doc-optimize-style", traceContext);
 }
 
 /**
  * Execute doc-optimize-full skill
  */
 async function* executeDocOptimizeFull(
+  userId: string,
   projectKey: string,
   intent: SkillIntent,
   traceContext?: TraceContext,
 ): AsyncGenerator<SkillStreamChunk> {
-  yield* executeDocOptimize(projectKey, intent, "doc-optimize-full", traceContext);
+  yield* executeDocOptimize(userId, projectKey, intent, "doc-optimize-full", traceContext);
 }
 
 // ============================================================================
@@ -744,6 +757,7 @@ const SUMMARY_MAX_CONTENT_LEN = 500; // Maximum content length per document
  * 2. Directory: Recursively summarize all child documents
  */
 async function* executeDocSummary(
+  userId: string,
   projectKey: string,
   intent: SkillIntent,
   traceContext?: TraceContext,
@@ -760,7 +774,7 @@ async function* executeDocSummary(
 
   try {
     // 2. Read target document
-    const doc = await documentStore.get(projectKey, docId);
+    const doc = await documentStore.get(userId, projectKey, docId);
     
     // Extract the actual document content (handle nested structure)
     const originalContent = extractDocContent(doc.body as JSONContent);
@@ -772,7 +786,7 @@ async function* executeDocSummary(
     }
 
     // 4. Check if has children (determine if directory or single document)
-    const children = await documentStore.getChildren(projectKey, docId);
+    const children = await documentStore.getChildren(userId, projectKey, docId);
     const isDirectory = children.length > 0;
 
     let summaryBlock: JSONContent;
@@ -793,6 +807,7 @@ async function* executeDocSummary(
       };
       
       summaryBlock = await generateDirectorySummaryWithProgress(
+        userId,
         projectKey, 
         docId, 
         typedDoc, 
@@ -810,6 +825,7 @@ async function* executeDocSummary(
 
     // 6. Create draft
     const draft = draftService.create({
+      userId,
       projectKey,
       docId,
       parentId: doc.meta.parent_id || null,
@@ -945,6 +961,7 @@ ${markdown}
  * Recursively collect descendant IDs with depth limit
  */
 async function collectDescendantsWithLimit(
+  userId: string,
   projectKey: string,
   parentId: string,
   maxDepth: number,
@@ -954,13 +971,14 @@ async function collectDescendantsWithLimit(
     return [];
   }
   
-  const children = await documentStore.getChildren(projectKey, parentId);
+  const children = await documentStore.getChildren(userId, projectKey, parentId);
   const ids: string[] = [];
   
   for (const child of children) {
     ids.push(child.id);
     // Recursively collect descendants with depth tracking
     const descendants = await collectDescendantsWithLimit(
+      userId,
       projectKey, 
       child.id, 
       maxDepth, 
@@ -977,6 +995,7 @@ async function collectDescendantsWithLimit(
  * With progress feedback support
  */
 async function generateDirectorySummaryWithProgress(
+  userId: string,
   projectKey: string,
   dirId: string,
   dirDoc: { meta: { title: string }; body: JSONContent },
@@ -985,6 +1004,7 @@ async function generateDirectorySummaryWithProgress(
 ): Promise<JSONContent> {
   // Recursively collect descendant IDs with depth limit
   const allDescendantIds = await collectDescendantsWithLimit(
+    userId,
     projectKey, 
     dirId, 
     SUMMARY_MAX_DEPTH
@@ -997,7 +1017,7 @@ async function generateDirectorySummaryWithProgress(
   for (let i = 0; i < totalToProcess; i++) {
     const id = allDescendantIds[i];
     try {
-      const childDoc = await documentStore.get(projectKey, id);
+      const childDoc = await documentStore.get(userId, projectKey, id);
       // Extract content properly
       const extractedContent = extractDocContent(childDoc.body as JSONContent);
       const markdown = tiptapJsonToMarkdown(extractedContent);
@@ -1205,6 +1225,7 @@ function insertSummaryAtTop(originalContent: JSONContent, summaryBlock: JSONCont
  * Execute doc-move skill
  */
 async function* executeDocMove(
+  userId: string,
   projectKey: string,
   intent: SkillIntent,
 ): AsyncGenerator<SkillStreamChunk> {
@@ -1225,7 +1246,7 @@ async function* executeDocMove(
   }
 
   try {
-    await documentStore.move(projectKey, docId, targetParentId, beforeDocId, afterDocId);
+    await documentStore.move(userId, projectKey, docId, targetParentId, beforeDocId, afterDocId);
     yield {
       type: "done",
       message: `文档已移动到 ${targetParentId === "root" ? "根目录" : targetParentId}`,
@@ -1242,6 +1263,7 @@ async function* executeDocMove(
  * Execute doc-delete skill
  */
 async function* executeDocDelete(
+  userId: string,
   projectKey: string,
   intent: SkillIntent,
 ): AsyncGenerator<SkillStreamChunk> {
@@ -1256,10 +1278,10 @@ async function* executeDocDelete(
   }
 
   try {
-    const deletedIds = await documentStore.delete(projectKey, docId, recursive);
+    const deletedIds = await documentStore.delete(userId, projectKey, docId, recursive);
     await Promise.all(
       deletedIds.map((id) =>
-        knowledgeSearch.removeDocument(projectKey, id).catch(() => {
+        knowledgeSearch.removeDocument(userId, projectKey, id).catch(() => {
           // Ignore index cleanup errors for delete flow
         }),
       ),
@@ -1280,6 +1302,7 @@ async function* executeDocDelete(
  * Execute kb-search skill
  */
 async function* executeKbSearch(
+  userId: string,
   projectKey: string,
   intent: SkillIntent,
 ): AsyncGenerator<SkillStreamChunk> {
@@ -1295,7 +1318,7 @@ async function* executeKbSearch(
   }
 
   try {
-    const results = await knowledgeSearch.search(projectKey, projectKey, {
+    const results = await knowledgeSearch.search(userId, projectKey, {
       text: queryText,
       mode: "hybrid",
       limit,
@@ -1329,6 +1352,7 @@ async function* executeKbSearch(
  * Execute doc-fetch-url skill
  */
 async function* executeDocFetchUrl(
+  userId: string,
   projectKey: string,
   intent: SkillIntent,
 ): AsyncGenerator<SkillStreamChunk> {
@@ -1339,7 +1363,7 @@ async function* executeDocFetchUrl(
   }
 
   try {
-    const result = await fetchUrl(projectKey, targetUrl);
+    const result = await fetchUrl(userId, projectKey, targetUrl);
     const snippet = result.html.slice(0, 2000);
     yield {
       type: "delta",
@@ -1358,6 +1382,7 @@ async function* executeDocFetchUrl(
  * Execute doc-import-git skill
  */
 async function* executeDocImportGit(
+  userId: string,
   projectKey: string,
   intent: SkillIntent,
 ): AsyncGenerator<SkillStreamChunk> {
@@ -1372,7 +1397,7 @@ async function* executeDocImportGit(
 
   yield { type: "thinking", content: "正在导入 Git 仓库..." };
   try {
-    const result = await importGit(projectKey, {
+    const result = await importGit(userId, projectKey, {
       repo_url: repoUrl,
       branch,
       parent_id: parentId,
@@ -1395,6 +1420,7 @@ async function* executeDocImportGit(
  * Execute doc-convert skill
  */
 async function* executeDocConvert(
+  userId: string,
   projectKey: string,
   intent: SkillIntent,
 ): AsyncGenerator<SkillStreamChunk> {
@@ -1421,7 +1447,7 @@ async function* executeDocConvert(
       stream: undefined as unknown as NodeJS.ReadableStream,
     } as Express.Multer.File;
 
-    const converted = await convertDocument(projectKey, fakeFile, from, to);
+    const converted = await convertDocument(userId, projectKey, fakeFile, from, to);
     yield { type: "delta", content: converted.content };
     yield { type: "done", message: `内容已转换为 ${to}` };
   } catch (err) {
@@ -1581,6 +1607,7 @@ import { scriptExecutor } from "./resources/script-executor.js";
  * 3. LLM 根据指令生成响应或调用脚本
  */
 export async function* executeAnthropicSkillWithStream(
+  userId: string,
   projectKey: string,
   skill: UnifiedSkillDefinition,
   userRequest: string,

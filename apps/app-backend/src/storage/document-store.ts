@@ -3,9 +3,8 @@ import path from "node:path";
 import { v4 as uuidv4 } from "uuid";
 
 import { indexManager } from "./index-manager.js";
+import { getDocsRoot, buildCacheKey } from "./paths.js";
 import type { Document, DocumentMeta, TreeItem, CachedDoc } from "./types.js";
-
-const REPO_ROOT = process.env.REPO_ROOT || "./data/repos";
 
 export class DocumentNotFoundError extends Error {
   constructor(docId: string) {
@@ -22,10 +21,10 @@ export class BlockNotFoundError extends Error {
 }
 
 /**
- * Get the root path for a project
+ * Get the docs root path for a user's project
  */
-function projectRoot(projectKey: string): string {
-  return path.join(REPO_ROOT, projectKey);
+function docsRoot(userId: string, projectKey: string): string {
+  return getDocsRoot(userId, "personal", projectKey);
 }
 
 /**
@@ -104,11 +103,12 @@ export const documentStore = {
   /**
    * Get a document by ID
    */
-  async get(projectKey: string, docId: string): Promise<Document> {
-    const root = projectRoot(projectKey);
-    await indexManager.ensure(projectKey, root);
+  async get(userId: string, projectKey: string, docId: string): Promise<Document> {
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    await indexManager.ensure(cacheKey, root);
 
-    const cached = indexManager.get(projectKey, docId);
+    const cached = indexManager.get(cacheKey, docId);
     if (!cached) {
       throw new DocumentNotFoundError(docId);
     }
@@ -119,7 +119,7 @@ export const documentStore = {
       return JSON.parse(content) as Document;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        indexManager.remove(projectKey, docId);
+        indexManager.remove(cacheKey, docId);
         throw new DocumentNotFoundError(docId);
       }
       throw err;
@@ -129,16 +129,17 @@ export const documentStore = {
   /**
    * Save a document (create or update)
    */
-  async save(projectKey: string, doc: Document): Promise<Document> {
-    const root = projectRoot(projectKey);
-    await indexManager.ensure(projectKey, root);
+  async save(userId: string, projectKey: string, doc: Document): Promise<Document> {
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    await indexManager.ensure(cacheKey, root);
 
     // Ensure ID
     if (!doc.meta.id) {
       doc.meta.id = uuidv4();
     }
 
-    const cached = indexManager.get(projectKey, doc.meta.id);
+    const cached = indexManager.get(cacheKey, doc.meta.id);
     const exists = !!cached;
 
     // Determine target directory
@@ -149,7 +150,7 @@ export const documentStore = {
     } else {
       const parentId = doc.meta.parent_id;
       if (parentId && parentId !== "root") {
-        const parentCache = indexManager.get(projectKey, parentId);
+        const parentCache = indexManager.get(cacheKey, parentId);
         if (!parentCache) {
           throw new Error("Parent document not found");
         }
@@ -157,7 +158,7 @@ export const documentStore = {
         const ext = path.extname(parentPath);
         targetDir = parentPath.slice(0, -ext.length);
       } else {
-        targetDir = path.join(root, "docs");
+        targetDir = root;
       }
     }
 
@@ -199,7 +200,7 @@ export const documentStore = {
     }
 
     // Add to index file
-    await indexManager.addToIndexFile(projectKey, targetDir, doc.meta.id);
+    await indexManager.addToIndexFile(cacheKey, targetDir, doc.meta.id);
 
     // Update metadata
     const relPath = path.relative(root, fullPath);
@@ -216,7 +217,7 @@ export const documentStore = {
     await writeFile(fullPath, JSON.stringify(doc, null, 2), "utf-8");
 
     // Update in-memory index
-    indexManager.update(projectKey, doc.meta.id, {
+    indexManager.update(cacheKey, doc.meta.id, {
       path: relPath,
       title: doc.meta.title,
       parentId: doc.meta.parent_id || "",
@@ -229,11 +230,12 @@ export const documentStore = {
    * Delete a document (optionally recursive)
    * Returns the list of deleted document IDs
    */
-  async delete(projectKey: string, docId: string, recursive = false): Promise<string[]> {
-    const root = projectRoot(projectKey);
-    await indexManager.ensure(projectKey, root);
+  async delete(userId: string, projectKey: string, docId: string, recursive = false): Promise<string[]> {
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    await indexManager.ensure(cacheKey, root);
 
-    const cached = indexManager.get(projectKey, docId);
+    const cached = indexManager.get(cacheKey, docId);
     if (!cached) {
       throw new DocumentNotFoundError(docId);
     }
@@ -242,16 +244,16 @@ export const documentStore = {
 
     // If recursive, delete children first
     if (recursive) {
-      const childIds = await this.collectAllDescendantIds(projectKey, docId);
+      const childIds = await this.collectAllDescendantIds(userId, projectKey, docId);
       // Delete from bottom-up (children first)
       for (const childId of childIds.reverse()) {
-        await this.deleteSingle(projectKey, childId);
+        await this.deleteSingle(userId, projectKey, childId);
         deletedIds.push(childId);
       }
     }
 
     // Delete the document itself
-    await this.deleteSingle(projectKey, docId);
+    await this.deleteSingle(userId, projectKey, docId);
     deletedIds.push(docId);
 
     return deletedIds;
@@ -260,14 +262,14 @@ export const documentStore = {
   /**
    * Collect all descendant document IDs (for recursive deletion)
    */
-  async collectAllDescendantIds(projectKey: string, parentId: string): Promise<string[]> {
-    const children = await this.getChildren(projectKey, parentId);
+  async collectAllDescendantIds(userId: string, projectKey: string, parentId: string): Promise<string[]> {
+    const children = await this.getChildren(userId, projectKey, parentId);
     const ids: string[] = [];
 
     for (const child of children) {
       ids.push(child.id);
       // Recursively collect descendants
-      const descendants = await this.collectAllDescendantIds(projectKey, child.id);
+      const descendants = await this.collectAllDescendantIds(userId, projectKey, child.id);
       ids.push(...descendants);
     }
 
@@ -277,9 +279,10 @@ export const documentStore = {
   /**
    * Delete a single document (no recursion)
    */
-  async deleteSingle(projectKey: string, docId: string): Promise<void> {
-    const root = projectRoot(projectKey);
-    const cached = indexManager.get(projectKey, docId);
+  async deleteSingle(userId: string, projectKey: string, docId: string): Promise<void> {
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    const cached = indexManager.get(cacheKey, docId);
     if (!cached) {
       return; // Already deleted or doesn't exist
     }
@@ -305,7 +308,7 @@ export const documentStore = {
     await indexManager.removeFromIndexFile(parentDir, docId);
 
     // Remove from in-memory index
-    indexManager.remove(projectKey, docId);
+    indexManager.remove(cacheKey, docId);
 
     // If parent directory is now empty (except for .index), remove it
     // This converts the parent document from "dir" back to "file"
@@ -317,8 +320,7 @@ export const documentStore = {
    */
   async cleanupEmptyParentDir(dir: string, root: string): Promise<void> {
     // Don't remove the root docs directory
-    const docsDir = path.join(root, "docs");
-    if (dir === docsDir || !dir.startsWith(docsDir)) {
+    if (dir === root || !dir.startsWith(root)) {
       return;
     }
 
@@ -339,16 +341,18 @@ export const documentStore = {
    * Move a document to a new parent
    */
   async move(
+    userId: string,
     projectKey: string,
     docId: string,
     targetParentId: string,
     beforeDocId?: string,
     afterDocId?: string,
   ): Promise<void> {
-    const root = projectRoot(projectKey);
-    await indexManager.ensure(projectKey, root);
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    await indexManager.ensure(cacheKey, root);
 
-    const cached = indexManager.get(projectKey, docId);
+    const cached = indexManager.get(cacheKey, docId);
     if (!cached) {
       throw new DocumentNotFoundError(docId);
     }
@@ -359,9 +363,9 @@ export const documentStore = {
     // Determine target directory
     let targetDir: string;
     if (!targetParentId || targetParentId === "root") {
-      targetDir = path.join(root, "docs");
+      targetDir = root;
     } else {
-      const parentCache = indexManager.get(projectKey, targetParentId);
+      const parentCache = indexManager.get(cacheKey, targetParentId);
       if (!parentCache) {
         throw new Error("Target parent not found");
       }
@@ -394,7 +398,7 @@ export const documentStore = {
       await writeFile(newPath, JSON.stringify(doc, null, 2), "utf-8");
 
       // Update in-memory index
-      indexManager.update(projectKey, docId, {
+      indexManager.update(cacheKey, docId, {
         path: relPath,
         title: cached.title,
         parentId: targetParentId,
@@ -411,15 +415,16 @@ export const documentStore = {
   /**
    * Get children of a parent document
    */
-  async getChildren(projectKey: string, parentId: string): Promise<TreeItem[]> {
-    const root = projectRoot(projectKey);
-    await indexManager.ensure(projectKey, root);
+  async getChildren(userId: string, projectKey: string, parentId: string): Promise<TreeItem[]> {
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    await indexManager.ensure(cacheKey, root);
 
     let targetDir: string;
     if (!parentId || parentId === "root") {
-      targetDir = path.join(root, "docs");
+      targetDir = root;
     } else {
-      const cached = indexManager.get(projectKey, parentId);
+      const cached = indexManager.get(cacheKey, parentId);
       if (!cached) {
         return [];
       }
@@ -428,11 +433,11 @@ export const documentStore = {
       targetDir = parentPath.slice(0, -ext.length);
     }
 
-    const order = await indexManager.getOrderedChildren(projectKey, targetDir);
+    const order = await indexManager.getOrderedChildren(cacheKey, targetDir);
 
     const items: TreeItem[] = [];
     for (const docId of order) {
-      const cached = indexManager.get(projectKey, docId);
+      const cached = indexManager.get(cacheKey, docId);
       if (!cached) continue;
 
       const slug = path.basename(cached.path, ".json");
@@ -463,12 +468,13 @@ export const documentStore = {
   /**
    * Get the full document tree recursively
    */
-  async getFullTree(projectKey: string): Promise<TreeItem[]> {
-    const root = projectRoot(projectKey);
-    await indexManager.ensure(projectKey, root);
+  async getFullTree(userId: string, projectKey: string): Promise<TreeItem[]> {
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    await indexManager.ensure(cacheKey, root);
 
     const buildTree = async (parentId: string): Promise<TreeItem[]> => {
-      const children = await this.getChildren(projectKey, parentId);
+      const children = await this.getChildren(userId, projectKey, parentId);
       const result: TreeItem[] = [];
 
       for (const child of children) {
@@ -499,15 +505,16 @@ export const documentStore = {
   /**
    * Get the hierarchy chain from root to document
    */
-  async getHierarchy(projectKey: string, docId: string): Promise<DocumentMeta[]> {
-    const root = projectRoot(projectKey);
-    await indexManager.ensure(projectKey, root);
+  async getHierarchy(userId: string, projectKey: string, docId: string): Promise<DocumentMeta[]> {
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    await indexManager.ensure(cacheKey, root);
 
     if (!docId.trim()) {
       throw new DocumentNotFoundError(docId);
     }
 
-    if (!indexManager.get(projectKey, docId)) {
+    if (!indexManager.get(cacheKey, docId)) {
       throw new DocumentNotFoundError(docId);
     }
 
@@ -519,7 +526,7 @@ export const documentStore = {
       if (visited.has(currentId)) break;
       visited.add(currentId);
 
-      const cached = indexManager.get(projectKey, currentId);
+      const cached = indexManager.get(cacheKey, currentId);
       if (!cached) break;
 
       chain.push({
@@ -547,11 +554,12 @@ export const documentStore = {
    * Get a specific block from a document
    */
   async getBlockById(
+    userId: string,
     projectKey: string,
     docId: string,
     blockId: string,
   ): Promise<Document> {
-    const doc = await this.get(projectKey, docId);
+    const doc = await this.get(userId, projectKey, docId);
 
     // Find block in content
     const block = findBlockById(doc.body.content, blockId);
@@ -575,22 +583,23 @@ export const documentStore = {
   /**
    * Get all document IDs for a project
    */
-  async getAllDocumentIds(projectKey: string): Promise<string[]> {
-    const root = projectRoot(projectKey);
-    await indexManager.ensure(projectKey, root);
-    return indexManager.getAllIds(projectKey);
+  async getAllDocumentIds(userId: string, projectKey: string): Promise<string[]> {
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    await indexManager.ensure(cacheKey, root);
+    return indexManager.getAllIds(cacheKey);
   },
 
   /**
    * Get all documents for a project (for indexing purposes)
    */
-  async getAllDocuments(projectKey: string): Promise<Document[]> {
-    const ids = await this.getAllDocumentIds(projectKey);
+  async getAllDocuments(userId: string, projectKey: string): Promise<Document[]> {
+    const ids = await this.getAllDocumentIds(userId, projectKey);
     const documents: Document[] = [];
     
     for (const docId of ids) {
       try {
-        const doc = await this.get(projectKey, docId);
+        const doc = await this.get(userId, projectKey, docId);
         documents.push(doc);
       } catch (err) {
         // Skip documents that fail to load
@@ -607,6 +616,7 @@ export const documentStore = {
    * @param parentId - Optional: Only search children of this parent (empty string or "root" = root level)
    */
   async suggest(
+    userId: string,
     projectKey: string,
     query: string,
     limit = 10,
@@ -617,22 +627,23 @@ export const documentStore = {
     titlePath: string;
     hasChildren: boolean;
   }>> {
-    const root = projectRoot(projectKey);
-    await indexManager.ensure(projectKey, root);
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    await indexManager.ensure(cacheKey, root);
 
     // If parentId is provided, only get children of that parent
     let docsToSearch: Array<[string, CachedDoc]>;
     if (parentId !== undefined) {
       const normalizedParentId = parentId === "" || parentId === "root" ? "root" : parentId;
-      const children = await this.getChildren(projectKey, normalizedParentId);
+      const children = await this.getChildren(userId, projectKey, normalizedParentId);
       docsToSearch = children
         .map((child) => {
-          const cached = indexManager.get(projectKey, child.id);
+          const cached = indexManager.get(cacheKey, child.id);
           return cached ? [child.id, cached] as [string, CachedDoc] : null;
         })
         .filter((item): item is [string, CachedDoc] => item !== null);
     } else {
-      docsToSearch = Array.from(indexManager.getAll(projectKey));
+      docsToSearch = Array.from(indexManager.getAll(cacheKey));
     }
 
     const results: Array<{
@@ -647,7 +658,7 @@ export const documentStore = {
     const queryParts = queryLower.split("/").filter(Boolean);
 
     for (const [docId, cached] of docsToSearch) {
-      const titlePath = indexManager.buildTitlePath(projectKey, docId);
+      const titlePath = indexManager.buildTitlePath(cacheKey, docId);
       const titlePathLower = titlePath.toLowerCase();
       const titleLower = cached.title.toLowerCase();
 
@@ -701,7 +712,7 @@ export const documentStore = {
         // Check if has children
         let hasChildren = false;
         try {
-          const children = await this.getChildren(projectKey, docId);
+          const children = await this.getChildren(userId, projectKey, docId);
           hasChildren = children.length > 0;
         } catch {
           // Ignore errors

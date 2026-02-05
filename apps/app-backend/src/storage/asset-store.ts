@@ -1,8 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { v4 as uuidv4 } from "uuid";
-
-const REPO_ROOT = process.env.REPO_ROOT ?? path.join(process.cwd(), "data", "repos");
+import { getAssetsRoot } from "./paths.js";
 
 export type AssetMeta = {
   id: string;
@@ -13,31 +12,32 @@ export type AssetMeta = {
 };
 
 export class AssetStore {
-  private getAssetDir(projectKey: string): string {
-    return path.join(REPO_ROOT, projectKey, "assets");
+  private getAssetDir(userId: string, projectKey: string): string {
+    return getAssetsRoot(userId, "personal", projectKey);
   }
 
-  private getAssetPath(projectKey: string, assetId: string, ext: string): string {
-    return path.join(this.getAssetDir(projectKey), `${assetId}${ext}`);
+  private getAssetPath(userId: string, projectKey: string, assetId: string, ext: string): string {
+    return path.join(this.getAssetDir(userId, projectKey), `${assetId}${ext}`);
   }
 
-  private getMetaPath(projectKey: string, assetId: string): string {
-    return path.join(this.getAssetDir(projectKey), `${assetId}.meta.json`);
+  private getMetaPath(userId: string, projectKey: string, assetId: string): string {
+    return path.join(this.getAssetDir(userId, projectKey), `${assetId}.meta.json`);
   }
 
   public async save(
+    userId: string,
     projectKey: string,
     filename: string,
     mime: string,
     buffer: Buffer
   ): Promise<AssetMeta> {
-    const assetDir = this.getAssetDir(projectKey);
+    const assetDir = this.getAssetDir(userId, projectKey);
     await fs.mkdir(assetDir, { recursive: true });
 
     const assetId = uuidv4();
     const ext = path.extname(filename) || "";
-    const assetPath = this.getAssetPath(projectKey, assetId, ext);
-    const metaPath = this.getMetaPath(projectKey, assetId);
+    const assetPath = this.getAssetPath(userId, projectKey, assetId, ext);
+    const metaPath = this.getMetaPath(userId, projectKey, assetId);
 
     const meta: AssetMeta = {
       id: assetId,
@@ -53,8 +53,8 @@ export class AssetStore {
     return meta;
   }
 
-  public async getMeta(projectKey: string, assetId: string): Promise<AssetMeta | null> {
-    const metaPath = this.getMetaPath(projectKey, assetId);
+  public async getMeta(userId: string, projectKey: string, assetId: string): Promise<AssetMeta | null> {
+    const metaPath = this.getMetaPath(userId, projectKey, assetId);
     try {
       const content = await fs.readFile(metaPath, "utf-8");
       return JSON.parse(content) as AssetMeta;
@@ -63,12 +63,12 @@ export class AssetStore {
     }
   }
 
-  public async getContent(projectKey: string, assetId: string): Promise<{ buffer: Buffer; meta: AssetMeta } | null> {
-    const meta = await this.getMeta(projectKey, assetId);
+  public async getContent(userId: string, projectKey: string, assetId: string): Promise<{ buffer: Buffer; meta: AssetMeta } | null> {
+    const meta = await this.getMeta(userId, projectKey, assetId);
     if (!meta) return null;
 
     const ext = path.extname(meta.filename) || "";
-    const assetPath = this.getAssetPath(projectKey, assetId, ext);
+    const assetPath = this.getAssetPath(userId, projectKey, assetId, ext);
     
     try {
       const buffer = await fs.readFile(assetPath);
@@ -78,13 +78,13 @@ export class AssetStore {
     }
   }
 
-  public async delete(projectKey: string, assetId: string): Promise<boolean> {
-    const meta = await this.getMeta(projectKey, assetId);
+  public async delete(userId: string, projectKey: string, assetId: string): Promise<boolean> {
+    const meta = await this.getMeta(userId, projectKey, assetId);
     if (!meta) return false;
 
     const ext = path.extname(meta.filename) || "";
-    const assetPath = this.getAssetPath(projectKey, assetId, ext);
-    const metaPath = this.getMetaPath(projectKey, assetId);
+    const assetPath = this.getAssetPath(userId, projectKey, assetId, ext);
+    const metaPath = this.getMetaPath(userId, projectKey, assetId);
 
     try {
       await fs.unlink(assetPath);

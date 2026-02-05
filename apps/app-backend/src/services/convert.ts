@@ -17,6 +17,7 @@ export type ConvertResult = {
 };
 
 export const convertDocument = async (
+  _userId: string,
   _projectKey: string,
   file: Express.Multer.File,
   from: string,

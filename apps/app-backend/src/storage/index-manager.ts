@@ -7,6 +7,9 @@ import type { CachedDoc, Document } from "./types.js";
  * In-memory index manager for document metadata.
  * Maintains a cache of document IDs to their paths, titles, and parent IDs.
  * Also manages .index files for document ordering within directories.
+ * 
+ * Cache keys are in the format "{userId}:{projectKey}" to support
+ * user-isolated project storage.
  */
 export class IndexManager {
   private indexes: Map<string, Map<string, CachedDoc>> = new Map();
@@ -14,62 +17,75 @@ export class IndexManager {
 
   /**
    * Ensure the index is built for a project
+   * @param cacheKey - The cache key (format: "{userId}:{projectKey}")
+   * @param docsRoot - The docs root path for the project
    */
-  async ensure(projectKey: string, projectRoot: string): Promise<void> {
-    if (this.initialized.has(projectKey)) {
+  async ensure(cacheKey: string, docsRoot: string): Promise<void> {
+    if (this.initialized.has(cacheKey)) {
       return;
     }
-    await this.buildIndex(projectKey, projectRoot);
-    this.initialized.add(projectKey);
+    await this.buildIndex(cacheKey, docsRoot);
+    this.initialized.add(cacheKey);
   }
 
   /**
    * Get a cached document by ID
+   * @param cacheKey - The cache key (format: "{userId}:{projectKey}")
+   * @param docId - The document ID
    */
-  get(projectKey: string, docId: string): CachedDoc | undefined {
-    return this.indexes.get(projectKey)?.get(docId);
+  get(cacheKey: string, docId: string): CachedDoc | undefined {
+    return this.indexes.get(cacheKey)?.get(docId);
   }
 
   /**
    * Update or add a document to the index
+   * @param cacheKey - The cache key (format: "{userId}:{projectKey}")
+   * @param docId - The document ID
+   * @param doc - The cached document data
    */
-  update(projectKey: string, docId: string, doc: CachedDoc): void {
-    let projectIndex = this.indexes.get(projectKey);
+  update(cacheKey: string, docId: string, doc: CachedDoc): void {
+    let projectIndex = this.indexes.get(cacheKey);
     if (!projectIndex) {
       projectIndex = new Map();
-      this.indexes.set(projectKey, projectIndex);
+      this.indexes.set(cacheKey, projectIndex);
     }
     projectIndex.set(docId, doc);
   }
 
   /**
    * Remove a document from the index
+   * @param cacheKey - The cache key (format: "{userId}:{projectKey}")
+   * @param docId - The document ID
    */
-  remove(projectKey: string, docId: string): void {
-    this.indexes.get(projectKey)?.delete(docId);
+  remove(cacheKey: string, docId: string): void {
+    this.indexes.get(cacheKey)?.delete(docId);
   }
 
   /**
    * Get all document IDs for a project
+   * @param cacheKey - The cache key (format: "{userId}:{projectKey}")
    */
-  getAllIds(projectKey: string): string[] {
-    const projectIndex = this.indexes.get(projectKey);
+  getAllIds(cacheKey: string): string[] {
+    const projectIndex = this.indexes.get(cacheKey);
     if (!projectIndex) return [];
     return Array.from(projectIndex.keys());
   }
 
   /**
    * Get all cached documents for a project
+   * @param cacheKey - The cache key (format: "{userId}:{projectKey}")
    */
-  getAll(projectKey: string): Map<string, CachedDoc> {
-    return this.indexes.get(projectKey) || new Map();
+  getAll(cacheKey: string): Map<string, CachedDoc> {
+    return this.indexes.get(cacheKey) || new Map();
   }
 
   /**
    * Build title path for a document (e.g., "父文档/子文档/当前文档")
+   * @param cacheKey - The cache key (format: "{userId}:{projectKey}")
+   * @param docId - The document ID
    */
-  buildTitlePath(projectKey: string, docId: string): string {
-    const projectIndex = this.indexes.get(projectKey);
+  buildTitlePath(cacheKey: string, docId: string): string {
+    const projectIndex = this.indexes.get(cacheKey);
     if (!projectIndex) return "";
 
     const parts: string[] = [];
@@ -93,9 +109,11 @@ export class IndexManager {
 
   /**
    * Find document ID by its path
+   * @param cacheKey - The cache key (format: "{userId}:{projectKey}")
+   * @param docPath - The document path
    */
-  findIdByPath(projectKey: string, docPath: string): string | undefined {
-    const projectIndex = this.indexes.get(projectKey);
+  findIdByPath(cacheKey: string, docPath: string): string | undefined {
+    const projectIndex = this.indexes.get(cacheKey);
     if (!projectIndex) return undefined;
     for (const [id, cached] of projectIndex) {
       if (cached.path === docPath) {
@@ -108,12 +126,12 @@ export class IndexManager {
   /**
    * Build the index by scanning the project directory
    */
-  private async buildIndex(projectKey: string, projectRoot: string): Promise<void> {
+  private async buildIndex(cacheKey: string, docsRoot: string): Promise<void> {
     const projectIndex = new Map<string, CachedDoc>();
-    this.indexes.set(projectKey, projectIndex);
+    this.indexes.set(cacheKey, projectIndex);
 
     try {
-      await this.scanDirectory(projectRoot, projectIndex);
+      await this.scanDirectory(docsRoot, projectIndex);
     } catch (err) {
       // Directory might not exist yet
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
@@ -190,8 +208,11 @@ export class IndexManager {
 
   /**
    * Add a document ID to a directory's index file
+   * @param cacheKey - The cache key (not used but kept for API consistency)
+   * @param dir - The directory path
+   * @param docId - The document ID to add
    */
-  async addToIndexFile(projectKey: string, dir: string, docId: string): Promise<void> {
+  async addToIndexFile(cacheKey: string, dir: string, docId: string): Promise<void> {
     const ids = await this.readIndexFile(dir);
     if (ids.includes(docId)) return;
     ids.push(docId);
@@ -240,9 +261,12 @@ export class IndexManager {
 
   /**
    * Collect IDs from JSON files in a directory that aren't in the seen set
+   * @param cacheKey - The cache key (format: "{userId}:{projectKey}")
+   * @param dir - The directory to scan
+   * @param seen - Set of already seen IDs
    */
   async collectIdsFromDir(
-    projectKey: string,
+    cacheKey: string,
     dir: string,
     seen: Set<string>,
   ): Promise<string[]> {
@@ -256,7 +280,7 @@ export class IndexManager {
           const content = await readFile(fullPath, "utf-8");
           const doc = JSON.parse(content) as Document;
           const id = doc.meta?.id?.trim();
-          if (id && !seen.has(id) && this.get(projectKey, id)) {
+          if (id && !seen.has(id) && this.get(cacheKey, id)) {
             ids.push(id);
             seen.add(id);
           }
@@ -272,10 +296,12 @@ export class IndexManager {
 
   /**
    * Get ordered children from a directory, repairing index if needed
+   * @param cacheKey - The cache key (format: "{userId}:{projectKey}")
+   * @param dir - The directory to get children from
    */
-  async getOrderedChildren(projectKey: string, dir: string): Promise<string[]> {
+  async getOrderedChildren(cacheKey: string, dir: string): Promise<string[]> {
     let order = await this.readIndexFile(dir);
-    const projectIndex = this.indexes.get(projectKey);
+    const projectIndex = this.indexes.get(cacheKey);
 
     // Validate and filter entries
     const seen = new Set<string>();
@@ -297,7 +323,7 @@ export class IndexManager {
     }
 
     // Add any missing documents from directory
-    const repaired = await this.collectIdsFromDir(projectKey, dir, seen);
+    const repaired = await this.collectIdsFromDir(cacheKey, dir, seen);
     if (repaired.length > 0) {
       resolved.push(...repaired);
       changed = true;

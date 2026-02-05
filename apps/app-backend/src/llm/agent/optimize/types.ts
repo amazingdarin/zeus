@@ -25,6 +25,7 @@ export type DocOptimizeArgs = {
 };
 
 export type DocOptimizeRunInput = {
+  userId: string;
   projectKey: string;
   capabilityId: OptimizeCapabilityId;
   args: DocOptimizeArgs;

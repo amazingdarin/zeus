@@ -16,6 +16,7 @@ import type { Document, CreateDocumentRequest, MoveDocumentRequest, SearchQuery 
 import { knowledgeSearch } from "./knowledge/search.js";
 import { rebuildTaskManager } from "./knowledge/rebuild-task.js";
 import { assetStore } from "./storage/asset-store.js";
+import { getUserId } from "./middleware/auth.js";
 import {
   llmGateway,
   configStore,
@@ -153,8 +154,9 @@ export const buildRouter = () => {
   router.get("/projects/:projectKey/documents", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
       const parentId = String(req.query.parent_id ?? "");
-      const items = await documentStore.getChildren(projectKey, parentId);
+      const items = await documentStore.getChildren(userId, projectKey, parentId);
       success(res, items);
     } catch (err) {
       const message = err instanceof Error ? err.message : "List failed";
@@ -169,7 +171,8 @@ export const buildRouter = () => {
   router.get("/projects/:projectKey/documents/tree", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
-      const tree = await documentStore.getFullTree(projectKey);
+      const userId = getUserId(req);
+      const tree = await documentStore.getFullTree(userId, projectKey);
       success(res, tree);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Get tree failed";
@@ -185,12 +188,13 @@ export const buildRouter = () => {
   router.get("/projects/:projectKey/documents/suggest", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
       const query = String(req.query.q || "");
       const limit = Math.min(Math.max(1, Number(req.query.limit) || 10), 50);
       // parentId: undefined = search all, "root" or "" = root level only, other = children of that doc
       const parentId = req.query.parentId !== undefined ? String(req.query.parentId) : undefined;
 
-      const suggestions = await documentStore.suggest(projectKey, query, limit, parentId);
+      const suggestions = await documentStore.suggest(userId, projectKey, query, limit, parentId);
       success(res, suggestions);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Suggest failed";
@@ -205,7 +209,8 @@ export const buildRouter = () => {
   router.get("/projects/:projectKey/documents/:docId", async (req: Request, res: Response) => {
     try {
       const { projectKey, docId } = req.params;
-      const doc = await documentStore.get(projectKey, docId);
+      const userId = getUserId(req);
+      const doc = await documentStore.get(userId, projectKey, docId);
       success(res, { meta: doc.meta, body: doc.body });
     } catch (err) {
       if (err instanceof DocumentNotFoundError) {
@@ -226,7 +231,8 @@ export const buildRouter = () => {
     async (req: Request, res: Response) => {
       try {
         const { projectKey, docId } = req.params;
-        const chain = await documentStore.getHierarchy(projectKey, docId);
+        const userId = getUserId(req);
+        const chain = await documentStore.getHierarchy(userId, projectKey, docId);
         const items = chain.map((m) => ({
           id: m.id,
           title: m.title,
@@ -253,7 +259,8 @@ export const buildRouter = () => {
     async (req: Request, res: Response) => {
       try {
         const { projectKey, docId, blockId } = req.params;
-        const doc = await documentStore.getBlockById(projectKey, docId, blockId);
+        const userId = getUserId(req);
+        const doc = await documentStore.getBlockById(userId, projectKey, docId, blockId);
         success(res, { meta: doc.meta, body: doc.body });
       } catch (err) {
         if (err instanceof DocumentNotFoundError) {
@@ -277,6 +284,7 @@ export const buildRouter = () => {
   router.post("/projects/:projectKey/documents", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
       const body = req.body as CreateDocumentRequest;
 
       if (!body.meta?.title) {
@@ -302,10 +310,10 @@ export const buildRouter = () => {
         },
       };
 
-      const saved = await documentStore.save(projectKey, doc);
+      const saved = await documentStore.save(userId, projectKey, doc);
 
       // Index the document asynchronously
-      knowledgeSearch.indexDocument(projectKey, saved).catch((err) => {
+      knowledgeSearch.indexDocument(userId, projectKey, saved).catch((err) => {
         console.error("Index error:", err);
       });
 
@@ -323,10 +331,11 @@ export const buildRouter = () => {
   router.put("/projects/:projectKey/documents/:docId", async (req: Request, res: Response) => {
     try {
       const { projectKey, docId } = req.params;
+      const userId = getUserId(req);
       const body = req.body as CreateDocumentRequest;
 
       // Get existing document
-      const existing = await documentStore.get(projectKey, docId);
+      const existing = await documentStore.get(userId, projectKey, docId);
 
       // Merge updates
       const updatedBody = body.body || existing.body;
@@ -342,10 +351,10 @@ export const buildRouter = () => {
         },
       };
 
-      const saved = await documentStore.save(projectKey, doc);
+      const saved = await documentStore.save(userId, projectKey, doc);
 
       // Re-index the document asynchronously
-      knowledgeSearch.indexDocument(projectKey, saved).catch((err) => {
+      knowledgeSearch.indexDocument(userId, projectKey, saved).catch((err) => {
         console.error("Index error:", err);
       });
 
@@ -367,13 +376,14 @@ export const buildRouter = () => {
   router.delete("/projects/:projectKey/documents/:docId", async (req: Request, res: Response) => {
     try {
       const { projectKey, docId } = req.params;
+      const userId = getUserId(req);
       const recursive = req.query.recursive === "true";
       
-      const deletedIds = await documentStore.delete(projectKey, docId, recursive);
+      const deletedIds = await documentStore.delete(userId, projectKey, docId, recursive);
 
       // Remove all deleted documents from index asynchronously
       for (const deletedId of deletedIds) {
-        knowledgeSearch.removeDocument(projectKey, deletedId).catch((err) => {
+        knowledgeSearch.removeDocument(userId, projectKey, deletedId).catch((err) => {
           console.error("Remove index error:", err);
         });
       }
@@ -398,6 +408,7 @@ export const buildRouter = () => {
     async (req: Request, res: Response) => {
       try {
         const { projectKey, docId, blockId } = req.params;
+        const userId = getUserId(req);
         const { attrs } = req.body as { attrs: Record<string, unknown> };
 
         if (!attrs || typeof attrs !== "object") {
@@ -406,7 +417,7 @@ export const buildRouter = () => {
         }
 
         // Get existing document
-        const doc = await documentStore.get(projectKey, docId);
+        const doc = await documentStore.get(userId, projectKey, docId);
 
         // Update block attrs in content
         // Document structure: body.content = { meta: {...}, content: { type: "doc", content: [...] } }
@@ -441,10 +452,10 @@ export const buildRouter = () => {
           meta: doc.meta,
           body: doc.body,
         };
-        await documentStore.save(projectKey, savedDoc);
+        await documentStore.save(userId, projectKey, savedDoc);
 
         // Re-index asynchronously
-        knowledgeSearch.indexDocument(projectKey, savedDoc).catch((err) => {
+        knowledgeSearch.indexDocument(userId, projectKey, savedDoc).catch((err) => {
           console.error("Index error:", err);
         });
 
@@ -469,9 +480,11 @@ export const buildRouter = () => {
     async (req: Request, res: Response) => {
       try {
         const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
         const body = req.body as MoveDocumentRequest;
 
         await documentStore.move(
+          userId,
           projectKey,
           docId,
           body.target_parent_id,
@@ -504,6 +517,7 @@ export const buildRouter = () => {
     async (req: Request, res: Response) => {
       try {
         const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
         const body = req.body as { mode?: OptimizeMode; preserveStructure?: boolean; language?: string };
 
         const mode: OptimizeMode = body.mode || "full";
@@ -512,7 +526,7 @@ export const buildRouter = () => {
           return;
         }
 
-        const taskId = await createOptimizeTask(projectKey, docId, {
+        const taskId = await createOptimizeTask(userId, projectKey, docId, {
           mode,
           preserveStructure: body.preserveStructure,
           language: body.language,
@@ -618,13 +632,14 @@ export const buildRouter = () => {
     async (req: Request, res: Response) => {
       try {
         const { projectKey } = req.params;
+        const userId = getUserId(req);
         const from = String(req.query.from ?? "");
         const to = String(req.query.to ?? "");
         if (!req.file) {
           error(res, "INVALID_REQUEST", "file is required");
           return;
         }
-        const result = await convertDocument(projectKey, req.file, from, to);
+        const result = await convertDocument(userId, projectKey, req.file, from, to);
         success(res, result);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Convert failed";
@@ -640,8 +655,9 @@ export const buildRouter = () => {
   router.post("/projects/:projectKey/documents/fetch-url", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
       const url = String(req.body?.url ?? "");
-      const result = await fetchUrl(projectKey, url);
+      const result = await fetchUrl(userId, projectKey, url);
       success(res, result);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Fetch failed";
@@ -658,7 +674,8 @@ export const buildRouter = () => {
     async (req: Request, res: Response) => {
       try {
         const { projectKey } = req.params;
-        const result = await importGit(projectKey, req.body ?? {});
+        const userId = getUserId(req);
+        const result = await importGit(userId, projectKey, req.body ?? {});
         success(res, result);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Import failed";
@@ -677,6 +694,7 @@ export const buildRouter = () => {
     async (req: Request, res: Response) => {
       try {
         const { projectKey } = req.params;
+        const userId = getUserId(req);
         const file = req.file;
         if (!file) {
           error(res, "INVALID_REQUEST", "file is required");
@@ -688,7 +706,7 @@ export const buildRouter = () => {
         const from = sourceType || filename.split(".").pop() || "";
         
         // Convert the file to markdown
-        const converted = await convertDocument(projectKey, file, from, "markdown");
+        const converted = await convertDocument(userId, projectKey, file, from, "markdown");
         
         // Create a document with the converted content
         const title = filename.replace(/\.[^/.]+$/, "") || "Untitled";
@@ -709,10 +727,10 @@ export const buildRouter = () => {
           },
         };
         
-        const saved = await documentStore.save(projectKey, doc);
+        const saved = await documentStore.save(userId, projectKey, doc);
         
         // Index the document asynchronously
-        knowledgeSearch.indexDocument(projectKey, saved).catch((err) => {
+        knowledgeSearch.indexDocument(userId, projectKey, saved).catch((err) => {
           console.error("Index error:", err);
         });
         
@@ -739,10 +757,11 @@ export const buildRouter = () => {
           error(res, "INVALID_REQUEST", "file is required");
           return;
         }
+        const userId = getUserId(req);
         const filename = fixFilename(file.originalname);
         const sourceType = String(req.body?.source_type ?? "").trim().toLowerCase();
         const from = sourceType || filename.split(".").pop() || "";
-        const converted = await convertDocument(projectKey, file, from, "markdown");
+        const converted = await convertDocument(userId, projectKey, file, from, "markdown");
         success(res, converted);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Import failed";
@@ -795,6 +814,7 @@ export const buildRouter = () => {
     async (req: Request, res: Response) => {
       try {
         const { projectKey } = req.params;
+        const userId = getUserId(req);
         const file = req.file;
         if (!file) {
           error(res, "INVALID_REQUEST", "file is required");
@@ -803,6 +823,7 @@ export const buildRouter = () => {
         
         const filename = fixFilename(file.originalname);
         const meta = await assetStore.save(
+          userId,
           projectKey,
           filename,
           file.mimetype,
@@ -831,7 +852,8 @@ export const buildRouter = () => {
     async (req: Request, res: Response) => {
       try {
         const { projectKey, assetId } = req.params;
-        const result = await assetStore.getContent(projectKey, assetId);
+        const userId = getUserId(req);
+        const result = await assetStore.getContent(userId, projectKey, assetId);
         
         if (!result) {
           error(res, "NOT_FOUND", "Asset not found", 404);
@@ -863,7 +885,8 @@ export const buildRouter = () => {
     async (req: Request, res: Response) => {
       try {
         const { projectKey, assetId } = req.params;
-        const meta = await assetStore.getMeta(projectKey, assetId);
+        const userId = getUserId(req);
+        const meta = await assetStore.getMeta(userId, projectKey, assetId);
         
         if (!meta) {
           error(res, "NOT_FOUND", "Asset not found", 404);
@@ -895,8 +918,9 @@ export const buildRouter = () => {
   router.post("/projects/:projectKey/knowledge/search", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
       const query = req.body as SearchQuery;
-      const results = await knowledgeSearch.search(projectKey, projectKey, query);
+      const results = await knowledgeSearch.search(userId, projectKey, query);
       success(res, results);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Search failed";
@@ -916,6 +940,7 @@ export const buildRouter = () => {
   router.post("/projects/:projectKey/rag/rebuild", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
       
       // Check if rebuild is already running
       if (rebuildTaskManager.isRunning(projectKey)) {
@@ -929,7 +954,7 @@ export const buildRouter = () => {
       }
 
       // Get all documents for the project
-      const documents = await documentStore.getAllDocuments(projectKey);
+      const documents = await documentStore.getAllDocuments(userId, projectKey);
       
       if (documents.length === 0) {
         success(res, {
@@ -948,7 +973,7 @@ export const buildRouter = () => {
       // Start rebuild in background (don't await)
       void (async () => {
         try {
-          await knowledgeSearch.rebuildAll(projectKey, documents, (progress) => {
+          await knowledgeSearch.rebuildAll(userId, projectKey, documents, (progress) => {
             rebuildTaskManager.updateProgress(task.id, {
               processed: progress.processed,
               succeeded: progress.succeeded,
@@ -1015,12 +1040,13 @@ export const buildRouter = () => {
   router.post("/projects/:projectKey/rag/rebuild/documents/:docId", async (req: Request, res: Response) => {
     try {
       const { projectKey, docId } = req.params;
+      const userId = getUserId(req);
       
       // Get the document
-      const doc = await documentStore.get(projectKey, docId);
+      const doc = await documentStore.get(userId, projectKey, docId);
       
       // Rebuild its index
-      await knowledgeSearch.rebuildDocument(projectKey, doc);
+      await knowledgeSearch.rebuildDocument(userId, projectKey, doc);
       
       success(res, {
         status: "completed",
@@ -1711,6 +1737,7 @@ export const buildRouter = () => {
   router.post("/projects/:projectKey/chat/runs", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
       const { session_id, message, document_scope, deep_search } = req.body as { 
         session_id?: string; 
         message?: string;
@@ -1736,7 +1763,7 @@ export const buildRouter = () => {
             }))
         : undefined;
 
-      const runId = await createRun(projectKey, sessionId, message.trim(), docScope, {
+      const runId = await createRun(userId, projectKey, sessionId, message.trim(), docScope, {
         deepSearch: deep_search === true,
       });
 
@@ -2425,7 +2452,8 @@ export const buildRouter = () => {
           }
 
           try {
-            const result = await fetchUrl(projectKey, trimmedUrl);
+            const userId = getUserId(req);
+            const result = await fetchUrl(userId, projectKey, trimmedUrl);
             // Extract text content from HTML (simple extraction)
             const textContent = extractTextFromHtml(result.html);
             const truncatedContent = textContent.slice(0, 10000); // Limit content size
@@ -2502,6 +2530,7 @@ export const buildRouter = () => {
     async (req: Request, res: Response) => {
       try {
         const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
         const { style, options } = req.body as {
           style?: {
             description?: string;
@@ -2515,7 +2544,7 @@ export const buildRouter = () => {
         };
 
         // Get the document
-        const doc = await documentStore.get(projectKey, docId);
+        const doc = await documentStore.get(userId, projectKey, docId);
         const body = doc.body?.content as JSONContent | undefined;
 
         if (!body || body.type !== "doc") {

@@ -167,6 +167,7 @@ const extractRepoName = (repoUrl: string): string => {
 };
 
 export const importGit = async (
+  userId: string,
   projectKey: string,
   req: ImportGitRequest,
 ): Promise<ImportGitResult> => {
@@ -232,7 +233,7 @@ export const importGit = async (
     
     if (filteredFiles.length > 0) {
       // Create the Git project root folder
-      const repoFolderId = await createFolder(projectKey, repoName, parentId);
+      const repoFolderId = await createFolder(userId, projectKey, repoName, parentId);
       directoryMap.set(".", repoFolderId);
       rootParentId = repoFolderId;
       result.directories += 1;
@@ -242,7 +243,7 @@ export const importGit = async (
       const parentKey = dir.parent ?? ".";
       const resolvedParent =
         parentKey === "." ? rootParentId : (directoryMap.get(parentKey) ?? rootParentId);
-      const folderId = await createFolder(projectKey, dir.name, resolvedParent);
+      const folderId = await createFolder(userId, projectKey, dir.name, resolvedParent);
       directoryMap.set(dir.path, folderId);
       result.directories += 1;
     }
@@ -271,27 +272,27 @@ export const importGit = async (
       if (smartResult.enabled) {
         // Smart import: convert to tiptap document with file block + content
         try {
-          const markdown = await convertFileToMarkdown(file.ext, content);
+          const markdown = await convertFileToMarkdown(userId, projectKey, file.ext, content);
           if (markdown) {
             // Upload as asset first
-            const assetMeta = await uploadAsset(projectKey, file, content);
+            const assetMeta = await uploadAsset(userId, projectKey, file, content);
             // Create document with file block + converted content
-            await createSmartDocument(projectKey, file.name, resolvedParent, markdown, assetMeta, enableFormatOptimize);
+            await createSmartDocument(userId, projectKey, file.name, resolvedParent, markdown, assetMeta, enableFormatOptimize);
             result.converted += 1;
           } else {
             // Conversion failed, fallback to regular file import
-            await createDocumentWithAsset(projectKey, file, content, resolvedParent);
+            await createDocumentWithAsset(userId, projectKey, file, content, resolvedParent);
             result.fallback += 1;
           }
         } catch (err) {
           console.error("Smart import error:", err);
           // Fallback to regular file import
-          await createDocumentWithAsset(projectKey, file, content, resolvedParent);
+          await createDocumentWithAsset(userId, projectKey, file, content, resolvedParent);
           result.fallback += 1;
         }
       } else {
         // Regular import: upload as asset and create document with file block only
-        await createDocumentWithAsset(projectKey, file, content, resolvedParent);
+        await createDocumentWithAsset(userId, projectKey, file, content, resolvedParent);
         result.fallback += 1;
       }
       result.files += 1;
@@ -342,7 +343,7 @@ const scanEntries = async (
   return { directories, files };
 };
 
-const convertFileToMarkdown = async (ext: string, content: Buffer): Promise<string> => {
+const convertFileToMarkdown = async (userId: string, _projectKey: string, ext: string, content: Buffer): Promise<string> => {
   const lowerExt = ext.toLowerCase();
   if (["md", "markdown"].includes(lowerExt)) {
     return content.toString("utf-8");
@@ -350,6 +351,7 @@ const convertFileToMarkdown = async (ext: string, content: Buffer): Promise<stri
   if (["docx", "pdf"].includes(lowerExt)) {
     try {
       const result = await convertDocument(
+        userId,
         "",
         {
           buffer: content,
@@ -376,13 +378,14 @@ const convertFileToMarkdown = async (ext: string, content: Buffer): Promise<stri
 };
 
 const uploadAsset = async (
+  userId: string,
   projectKey: string,
   file: FileEntry,
   content: Buffer,
 ): Promise<{ id: string; filename: string; mime: string; size: number }> => {
   const filename = `${file.name}.${file.ext}`;
   const mime = EXT_TO_MIME[file.ext.toLowerCase()] ?? "application/octet-stream";
-  const meta = await assetStore.save(projectKey, filename, mime, content);
+  const meta = await assetStore.save(userId, projectKey, filename, mime, content);
   return {
     id: meta.id,
     filename: meta.filename,
@@ -392,6 +395,7 @@ const uploadAsset = async (
 };
 
 const createFolder = async (
+  userId: string,
   projectKey: string,
   title: string,
   parentId: string,
@@ -418,10 +422,10 @@ const createFolder = async (
     },
   };
 
-  const saved = await documentStore.save(projectKey, doc);
+  const saved = await documentStore.save(userId, projectKey, doc);
 
   // Index asynchronously
-  knowledgeSearch.indexDocument(projectKey, saved).catch((err) => {
+  knowledgeSearch.indexDocument(userId, projectKey, saved).catch((err) => {
     console.error("Index error:", err);
   });
 
@@ -429,13 +433,14 @@ const createFolder = async (
 };
 
 const createDocumentWithAsset = async (
+  userId: string,
   projectKey: string,
   file: FileEntry,
   content: Buffer,
   parentId: string,
 ): Promise<void> => {
   // Upload as asset
-  const assetMeta = await uploadAsset(projectKey, file, content);
+  const assetMeta = await uploadAsset(userId, projectKey, file, content);
 
   // Create document with file block only
   const doc: Document = {
@@ -459,15 +464,16 @@ const createDocumentWithAsset = async (
     },
   };
 
-  const saved = await documentStore.save(projectKey, doc);
+  const saved = await documentStore.save(userId, projectKey, doc);
 
   // Index asynchronously
-  knowledgeSearch.indexDocument(projectKey, saved).catch((err) => {
+  knowledgeSearch.indexDocument(userId, projectKey, saved).catch((err) => {
     console.error("Index error:", err);
   });
 };
 
 const createSmartDocument = async (
+  userId: string,
   projectKey: string,
   title: string,
   parentId: string,
@@ -518,10 +524,10 @@ const createSmartDocument = async (
     },
   };
 
-  const saved = await documentStore.save(projectKey, doc);
+  const saved = await documentStore.save(userId, projectKey, doc);
 
   // Index asynchronously
-  knowledgeSearch.indexDocument(projectKey, saved).catch((err) => {
+  knowledgeSearch.indexDocument(userId, projectKey, saved).catch((err) => {
     console.error("Index error:", err);
   });
 };

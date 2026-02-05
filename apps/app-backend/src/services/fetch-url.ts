@@ -8,7 +8,7 @@ export type FetchUrlResult = {
   fetched_at: string;
 };
 
-export const fetchUrl = async (_projectKey: string, url: string): Promise<FetchUrlResult> => {
+export const fetchUrl = async (_userId: string, _projectKey: string, url: string): Promise<FetchUrlResult> => {
   const target = url.trim();
   if (!target) {
     throw new Error("url is required");

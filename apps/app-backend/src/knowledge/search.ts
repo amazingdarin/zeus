@@ -1,4 +1,5 @@
 import type { Document, SearchQuery, SearchResult } from "../storage/types.js";
+import { buildCacheKey } from "../storage/paths.js";
 import { fulltextIndex } from "./fulltext-index.js";
 import { embeddingIndex, clearEmbeddingConfigCache } from "./embedding-index.js";
 
@@ -20,10 +21,11 @@ export const knowledgeSearch = {
    * Search knowledge base with specified mode
    */
   async search(
+    userId: string,
     projectKey: string,
-    indexName: string,
     query: SearchQuery,
   ): Promise<SearchResult[]> {
+    const cacheKey = buildCacheKey(userId, projectKey);
     const mode = query.mode || "hybrid";
     const text = query.text?.trim() || "";
     const limit = query.limit || 20;
@@ -37,13 +39,13 @@ export const knowledgeSearch = {
     switch (mode) {
       case "fulltext":
         if (query.fuzzy) {
-          return fulltextIndex.fuzzySearch(projectKey, indexName, text, {
+          return fulltextIndex.fuzzySearch(cacheKey, cacheKey, text, {
             minSimilarity: query.min_similarity,
             limit,
             offset,
           });
         }
-        return fulltextIndex.search(projectKey, indexName, text, {
+        return fulltextIndex.search(cacheKey, cacheKey, text, {
           limit,
           offset,
           highlight: query.highlight,
@@ -53,7 +55,7 @@ export const knowledgeSearch = {
         });
 
       case "embedding":
-        return embeddingIndex.search(projectKey, indexName, text, {
+        return embeddingIndex.search(cacheKey, cacheKey, text, {
           limit,
           offset,
           vector: query.vector,
@@ -62,19 +64,19 @@ export const knowledgeSearch = {
 
       case "hybrid":
       default:
-        return hybridSearch(projectKey, indexName, text, { limit, offset, docIds });
+        return hybridSearch(cacheKey, cacheKey, text, { limit, offset, docIds });
     }
   },
 
   /**
    * Index a document (both fulltext and embedding)
    */
-  async indexDocument(projectKey: string, doc: Document): Promise<void> {
-    const indexName = projectKey; // Use project key as index name
+  async indexDocument(userId: string, projectKey: string, doc: Document): Promise<void> {
+    const cacheKey = buildCacheKey(userId, projectKey);
 
     await Promise.all([
-      fulltextIndex.upsert(projectKey, indexName, doc),
-      embeddingIndex.upsert(projectKey, indexName, doc).catch((err) => {
+      fulltextIndex.upsert(cacheKey, cacheKey, doc),
+      embeddingIndex.upsert(cacheKey, cacheKey, doc).catch((err) => {
         // Embedding might fail if API is not available, log but don't throw
         console.error("Embedding index error:", err);
       }),
@@ -84,12 +86,12 @@ export const knowledgeSearch = {
   /**
    * Remove a document from indexes
    */
-  async removeDocument(projectKey: string, docId: string): Promise<void> {
-    const indexName = projectKey;
+  async removeDocument(userId: string, projectKey: string, docId: string): Promise<void> {
+    const cacheKey = buildCacheKey(userId, projectKey);
 
     await Promise.all([
-      fulltextIndex.remove(projectKey, indexName, docId),
-      embeddingIndex.remove(projectKey, indexName, docId),
+      fulltextIndex.remove(cacheKey, cacheKey, docId),
+      embeddingIndex.remove(cacheKey, cacheKey, docId),
     ]);
   },
 
@@ -97,11 +99,12 @@ export const knowledgeSearch = {
    * Rebuild indexes for all documents in a project
    */
   async rebuildAll(
+    userId: string,
     projectKey: string,
     documents: Document[],
     onProgress?: (progress: RebuildProgress) => void,
   ): Promise<RebuildProgress> {
-    const indexName = projectKey;
+    const cacheKey = buildCacheKey(userId, projectKey);
     const progress: RebuildProgress = {
       total: documents.length,
       processed: 0,
@@ -115,14 +118,14 @@ export const knowledgeSearch = {
 
     // First, clear all existing indexes for this project
     await Promise.all([
-      fulltextIndex.removeByIndex(projectKey, indexName),
-      embeddingIndex.removeByIndex?.(projectKey, indexName).catch(() => {}),
+      fulltextIndex.removeByIndex(cacheKey, cacheKey),
+      embeddingIndex.removeByIndex?.(cacheKey, cacheKey).catch(() => {}),
     ]);
 
     // Index each document
     for (const doc of documents) {
       try {
-        await this.indexDocument(projectKey, doc);
+        await this.indexDocument(userId, projectKey, doc);
         progress.succeeded++;
       } catch (err) {
         progress.failed++;
@@ -141,15 +144,15 @@ export const knowledgeSearch = {
   /**
    * Rebuild index for a single document
    */
-  async rebuildDocument(projectKey: string, doc: Document): Promise<void> {
+  async rebuildDocument(userId: string, projectKey: string, doc: Document): Promise<void> {
     // Clear embedding config cache to get fresh settings
     clearEmbeddingConfigCache();
     
     // Remove existing index entries first
-    await this.removeDocument(projectKey, doc.meta.id);
+    await this.removeDocument(userId, projectKey, doc.meta.id);
     
     // Re-index
-    await this.indexDocument(projectKey, doc);
+    await this.indexDocument(userId, projectKey, doc);
   },
 };
 

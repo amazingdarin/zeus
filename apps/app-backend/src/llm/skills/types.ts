@@ -88,6 +88,7 @@ export type SkillResult =
  */
 export type DocumentDraft = {
   id: string;
+  userId: string;
   projectKey: string;
   docId: string | null; // null = new document
   parentId: string | null; // Parent document ID for new docs
@@ -103,6 +104,7 @@ export type DocumentDraft = {
  * Input for creating a draft
  */
 export type CreateDraftInput = {
+  userId: string;
   projectKey: string;
   docId?: string | null;
   parentId?: string | null;
