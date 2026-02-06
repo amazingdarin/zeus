@@ -42,3 +42,74 @@ Run all automation in background:
 ```bash
 ./scripts/dev-skill.sh start
 ```
+
+## 5. Langfuse Observability (Optional)
+
+Langfuse provides LLM observability for RAG operations including traces, metrics, and evaluations.
+
+### Option A: Self-Hosted via Helm
+
+1. Enable Langfuse in the Helm deployment:
+
+```bash
+# In values.deps-dev.yaml, set:
+langfuse:
+  enabled: true
+
+# Local k3s storage class (recommended)
+postgres:
+  persistence:
+    storageClassName: local-path
+rustfs:
+  persistence:
+    storageClassName: local-path
+
+# Then deploy
+NAMESPACE=dev make start-deps-dev
+```
+
+> Langfuse chart now includes a DB bootstrap Job that idempotently creates/updates the `langfuse` DB user and database on install/upgrade.
+
+2. Access Langfuse UI at `http://localhost:30300`
+
+3. Create a project and get API keys from Settings > API Keys
+
+4. Set environment variables for app-backend:
+
+```bash
+export LANGFUSE_ENABLED=true
+export LANGFUSE_PUBLIC_KEY=pk-xxx
+export LANGFUSE_SECRET_KEY=sk-xxx
+export LANGFUSE_HOST=http://localhost:30300
+```
+
+### Option B: Langfuse Cloud
+
+1. Sign up at https://cloud.langfuse.com
+2. Create a project and get API keys
+3. Set environment variables:
+
+```bash
+export LANGFUSE_ENABLED=true
+export LANGFUSE_PUBLIC_KEY=pk-xxx
+export LANGFUSE_SECRET_KEY=sk-xxx
+# LANGFUSE_HOST defaults to https://cloud.langfuse.com
+```
+
+### App-Backend Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `LANGFUSE_ENABLED` | Enable/disable observability | `true` if keys provided |
+| `LANGFUSE_PUBLIC_KEY` | Langfuse public key | Required |
+| `LANGFUSE_SECRET_KEY` | Langfuse secret key | Required |
+| `LANGFUSE_HOST` | Langfuse server URL | `https://cloud.langfuse.com` |
+
+### What Gets Traced
+
+- RAG query classification
+- Retrieval operations (basic, HyDE, multi, RAPTOR)
+- Reranking operations
+- Hierarchy context loading
+- LLM generations
+- Evaluation scores (precision, recall, faithfulness, relevancy)

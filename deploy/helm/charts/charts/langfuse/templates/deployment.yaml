@@ -1,3 +1,4 @@
+{{- if .Values.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,57 +12,71 @@ spec:
       {{- include "langfuse.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        checksum/configmap: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       labels:
         {{- include "langfuse.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
-      {{- if .Values.global.hostNetwork }}
-      hostNetwork: true
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- range .Values.image.pullSecrets }}
+        - name: {{ . | quote }}
+        {{- end }}
       {{- end }}
       containers:
-        - name: langfuse
+        - name: {{ .Chart.Name }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
               containerPort: 3000
               protocol: TCP
-          env:
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "langfuse.fullname" . }}
-                  key: database-url
-            - name: NEXTAUTH_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "langfuse.fullname" . }}
-                  key: nextauth-secret
-            - name: SALT
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "langfuse.fullname" . }}
-                  key: salt
-            - name: NEXTAUTH_URL
-              value: "http://{{ include "langfuse.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}"
-            - name: TELEMETRY_ENABLED
-              value: "false"
-            - name: LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES
-              value: "false"
-            {{- range .Values.extraEnv }}
-            - name: {{ .name }}
-              value: {{ .value | quote }}
-            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "langfuse.fullname" . }}-config
+            - secretRef:
+                name: {{ include "langfuse.fullname" . }}-secret
+          {{- if .Values.healthCheck.enabled }}
           livenessProbe:
             httpGet:
-              path: /api/public/health
+              path: {{ .Values.healthCheck.path }}
               port: http
-            initialDelaySeconds: 30
-            periodSeconds: 10
+            initialDelaySeconds: {{ .Values.healthCheck.initialDelaySeconds }}
+            periodSeconds: {{ .Values.healthCheck.periodSeconds }}
           readinessProbe:
             httpGet:
-              path: /api/public/health
+              path: {{ .Values.healthCheck.path }}
               port: http
             initialDelaySeconds: 10
             periodSeconds: 5
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

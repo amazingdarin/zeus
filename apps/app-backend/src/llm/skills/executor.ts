@@ -29,6 +29,7 @@ import { fetchUrl } from "../../services/fetch-url.js";
 import { importGit } from "../../services/import-git.js";
 import { convertDocument } from "../../services/convert.js";
 import { knowledgeSearch } from "../../knowledge/search.js";
+import { notifyDocumentMoved } from "../../knowledge/tree-sync.js";
 import {
   getOptimizeCapability,
   runDocOptimize,
@@ -1246,7 +1247,23 @@ async function* executeDocMove(
   }
 
   try {
+    const normalizeParentId = (id: string | null | undefined): string | null => {
+      const value = (id ?? "").trim();
+      if (!value || value === "root") return null;
+      return value;
+    };
+    const before = await documentStore.get(userId, projectKey, docId);
+    const oldParentId = normalizeParentId(before.meta.parent_id);
+    const newParentId = normalizeParentId(targetParentId);
+
     await documentStore.move(userId, projectKey, docId, targetParentId, beforeDocId, afterDocId);
+
+    if (oldParentId !== newParentId) {
+      notifyDocumentMoved(userId, projectKey, docId, oldParentId, newParentId).catch((err) => {
+        console.warn("[TreeSync] notifyDocumentMoved failed:", err);
+      });
+    }
+
     yield {
       type: "done",
       message: `文档已移动到 ${targetParentId === "root" ? "根目录" : targetParentId}`,

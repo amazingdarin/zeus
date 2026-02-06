@@ -15,6 +15,7 @@ import {
 import type { Document, CreateDocumentRequest, MoveDocumentRequest, SearchQuery } from "./storage/types.js";
 import { knowledgeSearch } from "./knowledge/search.js";
 import { rebuildTaskManager } from "./knowledge/rebuild-task.js";
+import { notifyDocumentMoved } from "./knowledge/tree-sync.js";
 import { assetStore } from "./storage/asset-store.js";
 import { getUserId } from "./middleware/auth.js";
 import {
@@ -483,6 +484,16 @@ export const buildRouter = () => {
         const userId = getUserId(req);
         const body = req.body as MoveDocumentRequest;
 
+        // Capture old/new parent ids so we can sync knowledge_index paths after move.
+        const normalizeParentId = (id: string | null | undefined): string | null => {
+          const value = (id ?? "").trim();
+          if (!value || value === "root") return null;
+          return value;
+        };
+        const before = await documentStore.get(userId, projectKey, docId);
+        const oldParentId = normalizeParentId(before.meta.parent_id);
+        const newParentId = normalizeParentId(body.target_parent_id);
+
         await documentStore.move(
           userId,
           projectKey,
@@ -491,6 +502,12 @@ export const buildRouter = () => {
           body.before_doc_id,
           body.after_doc_id,
         );
+
+        if (oldParentId !== newParentId) {
+          notifyDocumentMoved(userId, projectKey, docId, oldParentId, newParentId).catch((err) => {
+            console.warn("[TreeSync] notifyDocumentMoved failed:", err);
+          });
+        }
 
         success(res, null);
       } catch (err) {

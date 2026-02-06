@@ -11,8 +11,11 @@ run-server:
 	cd server && go run ./cmd/zeus
 
 run-app-backend:
-	@if [ -f apps/app-backend/.env ]; then \
-		export $$(cat apps/app-backend/.env | grep -v '^#' | xargs) && cd apps/app-backend && npm run dev; \
+	@# Load env vars from apps/app-backend/.env and override with apps/app-backend/.env.local (gitignored).
+	@if [ -f apps/app-backend/.env ] || [ -f apps/app-backend/.env.local ]; then \
+		[ -f apps/app-backend/.env ] && export $$(cat apps/app-backend/.env | grep -v '^#' | xargs); \
+		[ -f apps/app-backend/.env.local ] && export $$(cat apps/app-backend/.env.local | grep -v '^#' | xargs); \
+		cd apps/app-backend && npm run dev; \
 	else \
 		cd apps/app-backend && npm run dev; \
 	fi

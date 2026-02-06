@@ -106,3 +106,121 @@ ON knowledge_embedding_index (project_key);
 
 CREATE INDEX IF NOT EXISTS idx_kei_embedding
 ON knowledge_embedding_index USING ivfflat (embedding vector_cosine_ops);
+
+-- ============================================================
+-- Multi-granularity knowledge index (knowledge_index)
+-- ============================================================
+-- NOTE: Vector dimension is set to 1536 to match the existing default embedding
+-- model fallback in the app (`text-embedding-3-small`).
+
+CREATE TABLE IF NOT EXISTS knowledge_index (
+    id          TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    project_key TEXT NOT NULL,
+    doc_id      TEXT NOT NULL,
+
+    granularity TEXT NOT NULL CHECK (granularity IN ('document', 'section', 'block', 'code')),
+
+    content     TEXT NOT NULL,
+    embedding   vector(1536),
+
+    metadata    JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+    tsv_en      tsvector GENERATED ALWAYS AS (
+                    to_tsvector('english', coalesce(metadata->>'title', '') || ' ' || content)
+                ) STORED,
+    tsv_zh      tsvector,
+
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ki_user_project
+ON knowledge_index (user_id, project_key);
+
+CREATE INDEX IF NOT EXISTS idx_ki_doc
+ON knowledge_index (doc_id);
+
+CREATE INDEX IF NOT EXISTS idx_ki_granularity
+ON knowledge_index (granularity);
+
+CREATE INDEX IF NOT EXISTS idx_ki_embedding
+ON knowledge_index USING ivfflat (embedding vector_cosine_ops);
+
+CREATE INDEX IF NOT EXISTS idx_ki_tsv_en
+ON knowledge_index USING GIN (tsv_en);
+
+CREATE INDEX IF NOT EXISTS idx_ki_tsv_zh
+ON knowledge_index USING GIN (tsv_zh);
+
+CREATE INDEX IF NOT EXISTS idx_ki_metadata
+ON knowledge_index USING GIN (metadata jsonb_path_ops);
+
+CREATE OR REPLACE FUNCTION update_knowledge_index_tsv_zh()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.tsv_zh := to_tsvector('zhparser',
+        coalesce(NEW.metadata->>'title', '') || ' ' || NEW.content
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_knowledge_index_tsv_zh ON knowledge_index;
+CREATE TRIGGER trg_knowledge_index_tsv_zh
+    BEFORE INSERT OR UPDATE OF content, metadata
+    ON knowledge_index
+    FOR EACH ROW
+    EXECUTE FUNCTION update_knowledge_index_tsv_zh();
+
+-- ============================================================
+-- RAPTOR tree (raptor_tree)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS raptor_tree (
+    id          TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    project_key TEXT NOT NULL,
+    doc_id      TEXT NOT NULL,
+
+    level       INTEGER NOT NULL,
+    parent_id   TEXT,
+    children    TEXT[] DEFAULT '{}'::text[],
+
+    content     TEXT NOT NULL,
+    embedding   vector(1536),
+
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_raptor_user_project
+ON raptor_tree (user_id, project_key);
+
+CREATE INDEX IF NOT EXISTS idx_raptor_doc
+ON raptor_tree (doc_id);
+
+CREATE INDEX IF NOT EXISTS idx_raptor_level
+ON raptor_tree (level);
+
+CREATE INDEX IF NOT EXISTS idx_raptor_parent
+ON raptor_tree (parent_id);
+
+CREATE INDEX IF NOT EXISTS idx_raptor_embedding
+ON raptor_tree USING ivfflat (embedding vector_cosine_ops);
+
+-- ============================================================
+-- Document summary cache (document_summary_cache)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS document_summary_cache (
+    doc_id      TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    project_key TEXT NOT NULL,
+    summary     TEXT NOT NULL,
+    model       TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at  TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_summary_user_project
+ON document_summary_cache (user_id, project_key);

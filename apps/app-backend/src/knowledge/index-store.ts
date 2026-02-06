@@ -60,7 +60,8 @@ async function generateEmbeddings(inputs: string[]): Promise<number[][]> {
 
   const config = await getEmbeddingConfig();
   if (!config || !config.enabled) {
-    throw new Error("No embedding provider configured. Please configure in AI settings.");
+    // Let callers decide how to degrade if embeddings are unavailable.
+    throw new Error("No embedding provider configured");
   }
 
   const provider = config.providerId as LLMProviderId;
@@ -241,11 +242,17 @@ export const indexStore = {
       if (!queryText.trim()) {
         return [];
       }
-      const embeddings = await generateEmbeddings([queryText]);
-      if (embeddings.length === 0) {
+      try {
+        const embeddings = await generateEmbeddings([queryText]);
+        if (embeddings.length === 0) {
+          return [];
+        }
+        queryVector = embeddings[0];
+      } catch (err) {
+        // No embedding provider configured (or provider error). Treat as "no vector search".
+        console.warn("[IndexStore] Vector search unavailable:", err);
         return [];
       }
-      queryVector = embeddings[0];
     }
 
     // Build WHERE clause
@@ -418,6 +425,16 @@ export const indexStore = {
         limit: limit * 2,
       }),
     ]);
+
+    // If vector search isn't available, just return full-text results.
+    if (vectorResults.length === 0) {
+      return fulltextResults.slice(0, limit);
+    }
+
+    // If full-text doesn't return anything, return vector results.
+    if (fulltextResults.length === 0) {
+      return vectorResults.slice(0, limit);
+    }
 
     // Reciprocal Rank Fusion
     return this.reciprocalRankFusion(

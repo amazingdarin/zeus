@@ -12,7 +12,7 @@ dependencies:
     version: 0.1.0
     repository: "file://charts/rustfs"
   - name: langfuse
-    version: 0.1.0
+    version: 1.0.0
     repository: "file://charts/langfuse"
     condition: langfuse.enabled
   - name: banana-slides

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { getConfig, isProjectIsolationEnabled, isStandaloneMode } from '../config';
-import { getUserId } from './auth';
+import { getConfig, isProjectIsolationEnabled, isStandaloneMode } from '../config.js';
+import { getUserId } from './auth.js';
 
 /**
  * Project access control middleware

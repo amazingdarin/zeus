@@ -3078,14 +3078,27 @@ body {
 }
 
 @media (max-width: 960px) {
-  .app-body {
+  /* Non-compact sidebar: becomes horizontal on small screens */
+  .app-body:not(.compact) {
     grid-template-columns: 1fr;
   }
 
-  .sidebar {
+  .sidebar:not(.compact) {
     width: 100%;
     flex-direction: row;
     flex-wrap: wrap;
+  }
+
+  /* Compact sidebar: keep vertical layout, adjust grid */
+  .app-body.compact {
+    grid-template-columns: 56px 1fr;
+  }
+
+  .sidebar.compact {
+    width: 56px;
+    min-width: 56px;
+    flex-direction: column;
+    flex-wrap: nowrap;
   }
 
   .content {
@@ -3109,6 +3122,29 @@ body {
 @media (max-width: 640px) {
   .topbar {
     padding: 0 16px;
+  }
+
+  /* Ensure compact sidebar doesn't shrink on very small screens */
+  .app-body.compact {
+    grid-template-columns: 48px 1fr;
+  }
+
+  .sidebar.compact {
+    width: 48px;
+    min-width: 48px;
+    padding: 12px 6px;
+  }
+
+  .sidebar.compact .sidebar-menu-item {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+  }
+
+  .sidebar.compact .sidebar-user .ant-avatar {
+    width: 28px !important;
+    height: 28px !important;
+    font-size: 12px !important;
   }
 }
 

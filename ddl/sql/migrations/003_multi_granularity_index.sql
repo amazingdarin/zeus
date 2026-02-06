@@ -12,7 +12,7 @@
 --   - Ollama mxbai-embed-large:      1024
 --   - Cohere embed-multilingual-v3:  1024
 --
--- Default: 768 (for Ollama nomic-embed-text)
+-- Default: 1536 (for OpenAI text-embedding-3-small)
 -- To change: ALTER TABLE knowledge_index ALTER COLUMN embedding TYPE vector(NEW_DIM);
 -- ============================================================
 
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS knowledge_index (
 
     -- Content
     content         TEXT NOT NULL,
-    embedding       vector(768),        -- Default: Ollama nomic-embed-text (768 dim)
+    embedding       vector(1536),       -- Default: OpenAI text-embedding-3-small (1536 dim)
 
     -- Structured metadata (JSONB for flexibility)
     metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS raptor_tree (
 
     -- Content
     content         TEXT NOT NULL,
-    embedding       vector(768),          -- Must match knowledge_index dimension
+    embedding       vector(1536),         -- Must match knowledge_index dimension
 
     -- Timestamps
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()

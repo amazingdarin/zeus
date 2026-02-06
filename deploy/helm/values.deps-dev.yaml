@@ -1,16 +1,46 @@
 postgres:
+  image:
+    repository: 43.139.120.149:30002/zeus/postgres
+    tag: "pg15-zhparser"
+    pullPolicy: IfNotPresent
+    pullSecrets:
+      - harbor-regcred
   service:
     type: NodePort
     nodePort: 30432
+  persistence:
+    storageClassName: local-path
 
 rustfs:
   service:
     type: NodePort
     nodePort: 30900
     consoleNodePort: 30901
+  persistence:
+    storageClassName: local-path
+
+# Langfuse LLM Observability (optional for local dev)
+langfuse:
+  enabled: false  # Set to true to enable Langfuse locally
+  service:
+    type: NodePort
+    nodePort: 30300
+  database:
+    host: "postgres"
+    port: 5432
+    name: "langfuse"
+    user: "langfuse"
+    password: "langfuse"
+  auth:
+    nextAuthUrl: "http://localhost:30300"
+    nextAuthSecret: "dev-secret-change-in-production"
+    salt: "dev-salt-change-in-production"
 
 backend:
   enabled: false
 
 frontend:
+  enabled: false
+
+banana-slides:
   enabled: false

@@ -235,13 +235,13 @@ class TreeSyncManager {
     const batchSize = 50;
     for (let i = 0; i < docIdList.length; i += batchSize) {
       const batch = docIdList.slice(i, i + batchSize);
-      await Promise.all(
-        batch.map((docId) =>
-          this.updateDocumentPath(userId, projectKey, docId).catch((err) => {
-            console.warn(`[TreeSync] Failed to update path for ${docId}:`, err);
-          }),
-        ),
-      );
+      for (const docId of batch) {
+        try {
+          await this.updateDocumentPath(userId, projectKey, docId);
+        } catch (err) {
+          console.warn(`[TreeSync] Failed to update path for ${docId}:`, err);
+        }
+      }
     }
 
     console.log(`[TreeSync] Sync completed for ${key}`);
@@ -256,17 +256,46 @@ class TreeSyncManager {
       // Get the current document hierarchy
       const hierarchy = await documentStore.getHierarchy(userId, projectKey, docId);
 
-      // Build path array from hierarchy (excluding current doc)
-      const path = hierarchy.slice(0, -1).map((h) => h.title);
+      const ancestorPath = hierarchy.slice(0, -1).map((h) => h.title);
+      const docTitle = hierarchy[hierarchy.length - 1]?.title || "";
 
-      // Update the metadata in the index
-      await query(
-        `UPDATE knowledge_index
-         SET metadata = jsonb_set(metadata, '{path}', $1::jsonb),
-             updated_at = NOW()
-         WHERE doc_id = $2 AND user_id = $3 AND project_key = $4`,
-        [JSON.stringify(path), docId, userId, projectKey],
+      // Preserve any in-document suffix (doc title + headings) if present.
+      const rows = await query<{
+        id: string;
+        metadata: Record<string, unknown>;
+      }>(
+        `SELECT id, metadata
+         FROM knowledge_index
+         WHERE doc_id = $1 AND user_id = $2 AND project_key = $3`,
+        [docId, userId, projectKey],
       );
+
+      for (const row of rows.rows) {
+        const metadata = (row.metadata || {}) as Record<string, unknown>;
+        const existingPathRaw = metadata.path;
+        const existingPath = Array.isArray(existingPathRaw)
+          ? existingPathRaw.filter((v): v is string => typeof v === "string")
+          : [];
+
+        let suffix: string[] = [];
+        if (docTitle) {
+          const idx = existingPath.indexOf(docTitle);
+          if (idx !== -1) {
+            suffix = existingPath.slice(idx);
+          }
+        }
+
+        const nextPath = [...ancestorPath, ...suffix];
+        const nextMetadata = { ...metadata, path: nextPath };
+
+        await query(
+          `UPDATE knowledge_index
+           SET metadata = $1::jsonb,
+               updated_at = NOW()
+           WHERE id = $2 AND user_id = $3 AND project_key = $4`,
+          [JSON.stringify(nextMetadata), row.id, userId, projectKey],
+        );
+      }
 
       // Clear summary cache as content context may have changed
       await clearSummaryCache(docId);

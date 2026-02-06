@@ -12,6 +12,8 @@
     "@ai-sdk/anthropic": "^3.0.31",
     "@ai-sdk/google": "^3.0.18",
     "@ai-sdk/openai": "^3.0.23",
+    "@langchain/core": "^0.3.0",
+    "@langchain/langgraph": "^0.2.0",
     "@mozilla/readability": "^0.6.0",
     "@tiptap/core": "^2.12.0",
     "@tiptap/extension-image": "^2.12.0",

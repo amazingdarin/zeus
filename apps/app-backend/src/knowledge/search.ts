@@ -1,7 +1,9 @@
 import type { Document, SearchQuery, SearchResult } from "../storage/types.js";
-import { buildCacheKey } from "../storage/paths.js";
-import { fulltextIndex } from "./fulltext-index.js";
-import { embeddingIndex, clearEmbeddingConfigCache } from "./embedding-index.js";
+import { documentStore } from "../storage/document-store.js";
+import { indexStore, clearEmbeddingConfigCache } from "./index-store.js";
+import type { IndexSearchResult } from "./types.js";
+import { clearProjectSummaryCache, clearSummaryCache } from "./hierarchy.js";
+import { clearProjectRaptorTrees, clearRaptorTree } from "./raptor.js";
 
 export type SearchMode = "fulltext" | "embedding" | "hybrid";
 
@@ -25,7 +27,6 @@ export const knowledgeSearch = {
     projectKey: string,
     query: SearchQuery,
   ): Promise<SearchResult[]> {
-    const cacheKey = buildCacheKey(userId, projectKey);
     const mode = query.mode || "hybrid";
     const text = query.text?.trim() || "";
     const limit = query.limit || 20;
@@ -38,60 +39,47 @@ export const knowledgeSearch = {
 
     switch (mode) {
       case "fulltext":
-        if (query.fuzzy) {
-          return fulltextIndex.fuzzySearch(cacheKey, cacheKey, text, {
-            minSimilarity: query.min_similarity,
+        return mapSearchResults(
+          await indexStore.searchByFulltext(userId, projectKey, text, {
+            docIds,
             limit,
             offset,
-          });
-        }
-        return fulltextIndex.search(cacheKey, cacheKey, text, {
-          limit,
-          offset,
-          highlight: query.highlight,
-          sortBy: query.sort_by,
-          filters: query.filters,
-          docIds,
-        });
+          }),
+        );
 
       case "embedding":
-        return embeddingIndex.search(cacheKey, cacheKey, text, {
-          limit,
-          offset,
-          vector: query.vector,
-          docIds,
-        });
+        return mapSearchResults(
+          await indexStore.searchByVector(userId, projectKey, text, {
+            docIds,
+            limit,
+            offset,
+            vector: query.vector,
+          }),
+        );
 
       case "hybrid":
       default:
-        return hybridSearch(cacheKey, cacheKey, text, { limit, offset, docIds });
+        return hybridSearch(userId, projectKey, text, { limit, offset, docIds });
     }
   },
 
   /**
-   * Index a document (both fulltext and embedding)
+   * Index a document into the unified multi-granularity index.
    */
   async indexDocument(userId: string, projectKey: string, doc: Document): Promise<void> {
-    const cacheKey = buildCacheKey(userId, projectKey);
-
-    await Promise.all([
-      fulltextIndex.upsert(cacheKey, cacheKey, doc),
-      embeddingIndex.upsert(cacheKey, cacheKey, doc).catch((err) => {
-        // Embedding might fail if API is not available, log but don't throw
-        console.error("Embedding index error:", err);
-      }),
-    ]);
+    const parentPath = await getParentPathTitles(userId, projectKey, doc.meta.id);
+    await indexStore.indexDocument(userId, projectKey, doc, parentPath);
+    await clearSummaryCache(doc.meta.id);
   },
 
   /**
    * Remove a document from indexes
    */
   async removeDocument(userId: string, projectKey: string, docId: string): Promise<void> {
-    const cacheKey = buildCacheKey(userId, projectKey);
-
     await Promise.all([
-      fulltextIndex.remove(cacheKey, cacheKey, docId),
-      embeddingIndex.remove(cacheKey, cacheKey, docId),
+      indexStore.removeDocument(userId, projectKey, docId),
+      clearSummaryCache(docId),
+      clearRaptorTree(userId, projectKey, docId),
     ]);
   },
 
@@ -104,7 +92,6 @@ export const knowledgeSearch = {
     documents: Document[],
     onProgress?: (progress: RebuildProgress) => void,
   ): Promise<RebuildProgress> {
-    const cacheKey = buildCacheKey(userId, projectKey);
     const progress: RebuildProgress = {
       total: documents.length,
       processed: 0,
@@ -116,16 +103,24 @@ export const knowledgeSearch = {
     // Clear embedding config cache to get fresh settings
     clearEmbeddingConfigCache();
 
-    // First, clear all existing indexes for this project
+    // First, clear all existing index data for this project
     await Promise.all([
-      fulltextIndex.removeByIndex(cacheKey, cacheKey),
-      embeddingIndex.removeByIndex?.(cacheKey, cacheKey).catch(() => {}),
+      indexStore.removeProject(userId, projectKey),
+      clearProjectSummaryCache(userId, projectKey),
+      clearProjectRaptorTrees(userId, projectKey),
     ]);
+
+    // Precompute parent paths from the document list to avoid N calls to getHierarchy.
+    const metaById = new Map(
+      documents.map((d) => [d.meta.id, { title: d.meta.title, parentId: d.meta.parent_id }] as const),
+    );
 
     // Index each document
     for (const doc of documents) {
       try {
-        await this.indexDocument(userId, projectKey, doc);
+        const parentPath = computeParentPathFromList(metaById, doc.meta.id);
+        await indexStore.indexDocument(userId, projectKey, doc, parentPath);
+        await clearSummaryCache(doc.meta.id);
         progress.succeeded++;
       } catch (err) {
         progress.failed++;
@@ -156,95 +151,129 @@ export const knowledgeSearch = {
   },
 };
 
-// Maximum blocks per document in search results
-const MAX_BLOCKS_PER_DOC = 3;
-
-/**
- * Create a unique key for doc+block combination
- */
-function makeBlockKey(docId: string, blockId?: string): string {
-  return blockId ? `${docId}::${blockId}` : docId;
-}
+// Maximum entries per document in search results (avoid one document dominating).
+const MAX_ENTRIES_PER_DOC = 3;
 
 /**
  * Hybrid search combining fulltext and embedding results
  */
 async function hybridSearch(
+  userId: string,
   projectKey: string,
-  indexName: string,
   text: string,
   options: { limit: number; offset: number; docIds?: string[] },
 ): Promise<SearchResult[]> {
   const { limit, offset, docIds } = options;
 
-  // Get more results than needed for merging
-  const fetchLimit = Math.max(limit * 3, 60);
+  // Fetch more than needed to allow fusion + per-doc limiting + pagination.
+  const fetchLimit = Math.max(limit * 8, 80);
 
-  // Run both searches in parallel
-  const [fulltextResults, embeddingResults] = await Promise.all([
-    fulltextIndex.search(projectKey, indexName, text, {
+  const [fulltextResults, vectorResults] = await Promise.all([
+    indexStore.searchByFulltext(userId, projectKey, text, {
+      docIds,
       limit: fetchLimit,
       offset: 0,
-      highlight: true,
+    }).catch(() => [] as IndexSearchResult[]),
+    indexStore.searchByVector(userId, projectKey, text, {
       docIds,
-    }),
-    embeddingIndex.search(projectKey, indexName, text, {
       limit: fetchLimit,
       offset: 0,
-      docIds,
-    }).catch(() => [] as SearchResult[]), // Fallback if embedding fails
+    }).catch(() => [] as IndexSearchResult[]),
   ]);
 
-  // Merge and deduplicate results using RRF (Reciprocal Rank Fusion)
-  // Use doc_id + block_id as key to preserve block-level granularity
-  const scores = new Map<string, { score: number; result: SearchResult }>();
-  const k = 60; // RRF constant
+  // Fuse results using RRF. Prefer a wide top-N then apply per-doc limiting + pagination.
+  const fused = indexStore.reciprocalRankFusion([vectorResults, fulltextResults], fetchLimit);
+  const fusedLimited = limitResultsPerDoc(fused, MAX_ENTRIES_PER_DOC).slice(offset, offset + limit);
+  return mapSearchResults(fusedLimited);
+}
 
-  // Process fulltext results (fulltext doesn't have block_id, so use doc_id only)
-  for (let i = 0; i < fulltextResults.length; i++) {
-    const r = fulltextResults[i];
-    const key = makeBlockKey(r.doc_id, r.block_id);
-    const rrfScore = 1 / (k + i + 1);
-    const existing = scores.get(key);
-    if (existing) {
-      existing.score += rrfScore;
-    } else {
-      scores.set(key, { score: rrfScore, result: r });
-    }
+async function getParentPathTitles(
+  userId: string,
+  projectKey: string,
+  docId: string,
+): Promise<string[]> {
+  try {
+    const chain = await documentStore.getHierarchy(userId, projectKey, docId);
+    // Chain is [root, ..., parent, current]; we store only ancestor titles.
+    return chain.slice(0, -1).map((h) => h.title).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function computeParentPathFromList(
+  metaById: Map<string, { title: string; parentId: string }>,
+  docId: string,
+): string[] {
+  const visited = new Set<string>();
+  const path: string[] = [];
+  let currentId = docId;
+
+  while (currentId) {
+    if (visited.has(currentId)) break;
+    visited.add(currentId);
+
+    const meta = metaById.get(currentId);
+    if (!meta) break;
+
+    const parentId = meta.parentId?.trim();
+    if (!parentId || parentId === "root") break;
+
+    const parentMeta = metaById.get(parentId);
+    if (!parentMeta) break;
+
+    path.push(parentMeta.title);
+    currentId = parentId;
   }
 
-  // Process embedding results (has block_id)
-  for (let i = 0; i < embeddingResults.length; i++) {
-    const r = embeddingResults[i];
-    const key = makeBlockKey(r.doc_id, r.block_id);
-    const rrfScore = 1 / (k + i + 1);
-    const existing = scores.get(key);
-    if (existing) {
-      existing.score += rrfScore;
-    } else {
-      scores.set(key, { score: rrfScore, result: r });
-    }
-  }
+  return path.reverse().filter(Boolean);
+}
 
-  // Sort by combined score
-  const sorted = [...scores.values()].sort((a, b) => b.score - a.score);
-
-  // Limit blocks per document to avoid one document dominating results
-  const docBlockCounts = new Map<string, number>();
-  const filtered: Array<{ score: number; result: SearchResult }> = [];
-
-  for (const entry of sorted) {
-    const docId = entry.result.doc_id;
-    const currentCount = docBlockCounts.get(docId) || 0;
-    if (currentCount < MAX_BLOCKS_PER_DOC) {
-      filtered.push(entry);
-      docBlockCounts.set(docId, currentCount + 1);
-    }
-  }
-
-  // Apply pagination and return
-  return filtered.slice(offset, offset + limit).map(({ score, result }) => ({
-    ...result,
-    score,
+function mapSearchResults(results: IndexSearchResult[]): SearchResult[] {
+  return results.map((r) => ({
+    doc_id: r.doc_id,
+    block_id: r.block_id || (r.metadata?.block_id as string | undefined),
+    chunk_index: typeof (r.metadata as Record<string, unknown> | undefined)?.chunk_index === "number"
+      ? ((r.metadata as Record<string, unknown>).chunk_index as number)
+      : undefined,
+    score: r.score,
+    snippet: r.content,
+    metadata: stringifyMetadata({
+      ...((r.metadata as Record<string, unknown>) || {}),
+      granularity: r.granularity,
+    }),
   }));
+}
+
+function stringifyMetadata(
+  input: Record<string, unknown> | null | undefined,
+): Record<string, string> | undefined {
+  if (!input) return undefined;
+
+  const output: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (!key || value === null || value === undefined) continue;
+
+    if (Array.isArray(value)) {
+      output[key] = value.map((v) => (typeof v === "string" ? v : String(v))).join(", ");
+      continue;
+    }
+
+    output[key] = typeof value === "string" ? value : String(value);
+  }
+  return output;
+}
+
+function limitResultsPerDoc(results: IndexSearchResult[], maxPerDoc: number): IndexSearchResult[] {
+  const counts = new Map<string, number>();
+  const filtered: IndexSearchResult[] = [];
+
+  for (const r of results) {
+    const count = counts.get(r.doc_id) || 0;
+    if (count >= maxPerDoc) continue;
+    counts.set(r.doc_id, count + 1);
+    filtered.push(r);
+  }
+
+  return filtered;
 }

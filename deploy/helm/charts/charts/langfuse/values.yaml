@@ -1,42 +1,43 @@
+# Langfuse Configuration
+# https://langfuse.com/docs/deployment/self-host
+
+# Enable/disable Langfuse
+enabled: false
+
+# Langfuse image configuration
 image:
   repository: langfuse/langfuse
   tag: "2"
   pullPolicy: IfNotPresent
+  # Optional: imagePullSecrets for private registries.
+  # Example: ["harbor-regcred"]
+  pullSecrets: []
 
+# Replica count
 replicaCount: 1
 
+# Service configuration
 service:
   type: ClusterIP
   port: 3000
   nodePort: null
-
-# Database configuration
-# Uses Zeus postgres instance with separate database
-database:
-  host: "postgres"
-  port: 5432
-  name: "langfuse"
-  user: "langfuse"
-  password: "langfuse"
-
-# Authentication configuration
-auth:
-  # Required: Used for session encryption (generate with: openssl rand -base64 32)
-  nextAuthSecret: "your-nextauth-secret-change-me"
-  # Required: Used for API key hashing (generate with: openssl rand -base64 32)
-  salt: "your-salt-change-me"
 
 # Ingress configuration
 ingress:
   enabled: false
   className: ""
   annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # cert-manager.io/cluster-issuer: letsencrypt
   hosts:
     - host: langfuse.local
       paths:
         - path: /
           pathType: Prefix
   tls: []
+    # - secretName: langfuse-tls
+    #   hosts:
+    #     - langfuse.local
 
 # Resource limits
 resources:
@@ -47,5 +48,131 @@ resources:
     cpu: 200m
     memory: 512Mi
 
-# Additional environment variables
-extraEnv: []
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
+
+# =============================================================================
+# Langfuse Configuration
+# =============================================================================
+
+# Authentication
+auth:
+  # NextAuth secret (generate with: openssl rand -base64 32)
+  nextAuthSecret: ""
+  # Salt for hashing (generate with: openssl rand -base64 32)
+  salt: ""
+  # NextAuth URL (should match your ingress/service URL)
+  nextAuthUrl: "http://localhost:3000"
+
+# Database configuration
+database:
+  # Use external database (e.g., shared Zeus PostgreSQL)
+  external: true
+  # Connection URL (if external)
+  # Format: postgresql://user:password@host:port/database
+  url: ""
+  # Or use individual components
+  host: "postgres"
+  port: 5432
+  name: "langfuse"
+  user: "langfuse"
+  password: "langfuse"
+  # SSL mode
+  sslMode: "disable"
+  # Bootstrap database/user on install/upgrade (for shared Zeus PostgreSQL)
+  bootstrap:
+    enabled: true
+    adminUser: "zeus"
+    adminDatabase: "postgres"
+    # Use postgres chart secret by default
+    adminPasswordSecret:
+      name: "postgres"
+      key: "postgres-password"
+    # Fallback when not using a secret
+    adminPassword: ""
+    image:
+      repository: "zeus/postgres"
+      tag: "pg15-zhparser"
+      pullPolicy: IfNotPresent
+      # Optional: override if the bootstrap image lives in a private registry.
+      pullSecrets: []
+    backoffLimit: 6
+
+# Redis configuration (optional, for caching)
+redis:
+  enabled: false
+  external: false
+  url: ""
+  host: "redis"
+  port: 6379
+  password: ""
+
+# S3/Object Storage (optional, for large traces)
+objectStorage:
+  enabled: false
+  endpoint: ""
+  bucket: "langfuse"
+  accessKeyId: ""
+  secretAccessKey: ""
+  region: "us-east-1"
+
+# =============================================================================
+# Feature Flags
+# =============================================================================
+
+features:
+  # Enable email/password sign up
+  authDisableSignup: false
+  # Enable SSO providers
+  authGoogle:
+    enabled: false
+    clientId: ""
+    clientSecret: ""
+  authGithub:
+    enabled: false
+    clientId: ""
+    clientSecret: ""
+
+# =============================================================================
+# Telemetry
+# =============================================================================
+
+telemetry:
+  # Disable telemetry (anonymous usage stats)
+  enabled: true
+
+# =============================================================================
+# Init container for database migration
+# =============================================================================
+
+migration:
+  enabled: true
+  # Run migrations on startup
+  runOnStartup: true
+
+# =============================================================================
+# Health checks
+# =============================================================================
+
+healthCheck:
+  enabled: true
+  path: /api/public/health
+  initialDelaySeconds: 30
+  periodSeconds: 10
+
+# =============================================================================
+# Pod annotations and labels
+# =============================================================================
+
+podAnnotations: {}
+podLabels: {}
+
+# Security context
+podSecurityContext: {}
+securityContext: {}

@@ -1,25 +1,21 @@
 /**
- * RAG State Machine for Multi-Strategy Retrieval
+ * RAG Graph (LangGraph) for Multi-Strategy Retrieval
  *
- * This module implements a flexible RAG pipeline using a state machine pattern
- * that supports multiple retrieval strategies:
+ * This module implements a flexible RAG pipeline using LangGraph (JS) that supports:
  * - Basic: Direct vector/fulltext search
  * - HyDE: Hypothetical Document Embeddings
  * - Multi: Parallel multi-route retrieval with RRF fusion
  * - RAPTOR: Hierarchical tree-based retrieval
  * - Adaptive: Query-type based strategy selection
- *
- * The implementation follows LangGraph patterns but uses a lightweight
- * custom state machine to avoid heavy dependencies.
  */
 
+import { Annotation, Command, END, START, StateGraph } from "@langchain/langgraph";
 import type {
   RAGState,
   QueryType,
   RAGStrategy,
   IndexSearchResult,
   IndexSearchOptions,
-  HierarchyContext,
 } from "./types.js";
 import { indexStore } from "./index-store.js";
 import { llmGateway, configStore } from "../llm/index.js";
@@ -32,6 +28,55 @@ const DEFAULT_LIMIT = 10;
 const RERANKER_TOP_N = 10;
 const MAX_SELF_RAG_ITERATIONS = 3;
 
+export type GraphConfig = {
+  maxIterations: number;
+  enableSelfRAG: boolean;
+  enableReranking: boolean;
+};
+
+const DEFAULT_CONFIG: GraphConfig = {
+  maxIterations: MAX_SELF_RAG_ITERATIONS,
+  enableSelfRAG: true,
+  enableReranking: true,
+};
+
+// LangGraph-managed state. We keep this superset internal and strip `graphConfig` from results.
+const RAGGraphState = Annotation.Root({
+  query: Annotation<string>,
+  userId: Annotation<string>,
+  projectKey: Annotation<string>,
+  docIds: Annotation<string[] | undefined>({
+    default: () => undefined,
+  }),
+  queryType: Annotation<QueryType>({
+    default: () => "general",
+  }),
+  strategy: Annotation<RAGStrategy>({
+    default: () => "adaptive",
+  }),
+  transformedQuery: Annotation<string | undefined>({
+    default: () => undefined,
+  }),
+  retrievedDocs: Annotation<IndexSearchResult[]>({
+    default: () => [],
+  }),
+  rerankedDocs: Annotation<IndexSearchResult[]>({
+    default: () => [],
+  }),
+  sufficiency: Annotation<{ sufficient: boolean; missing?: string } | undefined>({
+    default: () => undefined,
+  }),
+  iteration: Annotation<number>({
+    reducer: (current: number, update: number) => current + update,
+    default: () => 0,
+  }),
+  graphConfig: Annotation<GraphConfig>({
+    default: () => DEFAULT_CONFIG,
+  }),
+});
+
+type RAGGraphRuntimeState = typeof RAGGraphState.State;
+
 // ============================================================
 // Node Functions (State Transformers)
 // ============================================================
@@ -39,7 +84,9 @@ const MAX_SELF_RAG_ITERATIONS = 3;
 /**
  * Classify the query type to determine the best retrieval strategy
  */
-async function classifyQuery(state: RAGState): Promise<Partial<RAGState>> {
+async function classifyQuery(
+  state: RAGGraphRuntimeState,
+): Promise<Partial<RAGGraphRuntimeState>> {
   const config = await configStore.getInternalByType("llm");
   if (!config || !config.enabled) {
     // Default to general if no LLM configured
@@ -101,7 +148,9 @@ Output only the type name, nothing else.`,
 /**
  * HyDE: Generate a hypothetical document that would answer the query
  */
-async function hydeTransform(state: RAGState): Promise<Partial<RAGState>> {
+async function hydeTransform(
+  state: RAGGraphRuntimeState,
+): Promise<Partial<RAGGraphRuntimeState>> {
   const config = await configStore.getInternalByType("llm");
   if (!config || !config.enabled) {
     return { transformedQuery: state.query };
@@ -135,7 +184,9 @@ async function hydeTransform(state: RAGState): Promise<Partial<RAGState>> {
 /**
  * Basic vector retrieval
  */
-async function basicRetrieve(state: RAGState): Promise<Partial<RAGState>> {
+async function basicRetrieve(
+  state: RAGGraphRuntimeState,
+): Promise<Partial<RAGGraphRuntimeState>> {
   const searchQuery = state.transformedQuery || state.query;
   const options: IndexSearchOptions = {
     limit: DEFAULT_LIMIT * 2,
@@ -167,7 +218,9 @@ async function basicRetrieve(state: RAGState): Promise<Partial<RAGState>> {
 /**
  * Multi-route retrieval with RRF fusion
  */
-async function multiRetrieve(state: RAGState): Promise<Partial<RAGState>> {
+async function multiRetrieve(
+  state: RAGGraphRuntimeState,
+): Promise<Partial<RAGGraphRuntimeState>> {
   const options: IndexSearchOptions = {
     limit: DEFAULT_LIMIT * 2,
     docIds: state.docIds,
@@ -206,7 +259,9 @@ async function multiRetrieve(state: RAGState): Promise<Partial<RAGState>> {
  * RAPTOR tree-based retrieval
  * TODO: Implement actual RAPTOR tree search
  */
-async function raptorRetrieve(state: RAGState): Promise<Partial<RAGState>> {
+async function raptorRetrieve(
+  state: RAGGraphRuntimeState,
+): Promise<Partial<RAGGraphRuntimeState>> {
   // For now, use document + section level search as a simplified version
   const results = await indexStore.searchByVector(
     state.userId,
@@ -225,7 +280,9 @@ async function raptorRetrieve(state: RAGState): Promise<Partial<RAGState>> {
 /**
  * Rerank results using Cohere or LLM-based reranking
  */
-async function rerank(state: RAGState): Promise<Partial<RAGState>> {
+async function rerank(
+  state: RAGGraphRuntimeState,
+): Promise<Partial<RAGGraphRuntimeState>> {
   const docs = state.retrievedDocs;
 
   if (docs.length <= 3) {
@@ -246,7 +303,7 @@ async function rerank(state: RAGState): Promise<Partial<RAGState>> {
         body: JSON.stringify({
           model: "rerank-multilingual-v3.0",
           query: state.query,
-          documents: docs.map((d) => d.content),
+          documents: docs.map((d: IndexSearchResult) => d.content),
           top_n: RERANKER_TOP_N,
         }),
       });
@@ -277,7 +334,9 @@ async function rerank(state: RAGState): Promise<Partial<RAGState>> {
 /**
  * Self-RAG: Evaluate if retrieved content is sufficient
  */
-async function evaluateSufficiency(state: RAGState): Promise<Partial<RAGState>> {
+async function evaluateSufficiency(
+  state: RAGGraphRuntimeState,
+): Promise<Partial<RAGGraphRuntimeState>> {
   const config = await configStore.getInternalByType("llm");
   if (!config || !config.enabled) {
     return { sufficiency: { sufficient: true } };
@@ -285,7 +344,7 @@ async function evaluateSufficiency(state: RAGState): Promise<Partial<RAGState>> 
 
   const context = state.rerankedDocs
     .slice(0, 5)
-    .map((d) => d.content)
+    .map((d: IndexSearchResult) => d.content)
     .join("\n---\n");
 
   try {
@@ -322,7 +381,9 @@ Output JSON: {"sufficient": true/false, "missing": "description of missing info 
 /**
  * Expand retrieval with additional queries
  */
-async function expandRetrieve(state: RAGState): Promise<Partial<RAGState>> {
+async function expandRetrieve(
+  state: RAGGraphRuntimeState,
+): Promise<Partial<RAGGraphRuntimeState>> {
   const missing = state.sufficiency?.missing || "";
   const expandedQuery = `${state.query} ${missing}`.trim();
 
@@ -337,7 +398,7 @@ async function expandRetrieve(state: RAGState): Promise<Partial<RAGState>> {
   );
 
   // Merge with existing results
-  const existingIds = new Set(state.retrievedDocs.map((d) => d.id));
+  const existingIds = new Set(state.retrievedDocs.map((d: IndexSearchResult) => d.id));
   const newResults = additionalResults.filter((r) => !existingIds.has(r.id));
 
   return {
@@ -345,94 +406,143 @@ async function expandRetrieve(state: RAGState): Promise<Partial<RAGState>> {
   };
 }
 
-// ============================================================
-// Graph Execution Engine
-// ============================================================
-
-type NodeFunction = (state: RAGState) => Promise<Partial<RAGState>>;
-
-interface GraphConfig {
-  maxIterations: number;
-  enableSelfRAG: boolean;
-  enableReranking: boolean;
+function strategyToEntryNode(strategy: RAGStrategy): string {
+  switch (strategy) {
+    case "hyde":
+      return "hyde_transform";
+    case "multi":
+      return "retrieve_multi";
+    case "raptor":
+      return "retrieve_raptor";
+    case "basic":
+    default:
+      return "retrieve_basic";
+  }
 }
 
-const DEFAULT_CONFIG: GraphConfig = {
-  maxIterations: MAX_SELF_RAG_ITERATIONS,
-  enableSelfRAG: true,
-  enableReranking: true,
-};
+async function routeStrategy(
+  state: RAGGraphRuntimeState,
+): Promise<Command> {
+  // If caller explicitly selected a strategy, route directly.
+  if (state.strategy !== "adaptive") {
+    return new Command({
+      goto: strategyToEntryNode(state.strategy),
+    });
+  }
 
-/**
- * Execute the RAG graph with the given initial state
- */
+  const classified = await classifyQuery(state);
+  const nextStrategy = (classified.strategy || "basic") as RAGStrategy;
+
+  return new Command({
+    goto: strategyToEntryNode(nextStrategy),
+    update: classified,
+  });
+}
+
+async function maybeRerank(
+  state: RAGGraphRuntimeState,
+): Promise<Partial<RAGGraphRuntimeState>> {
+  if (!state.graphConfig?.enableReranking || state.retrievedDocs.length === 0) {
+    return { rerankedDocs: state.retrievedDocs };
+  }
+  return rerank(state);
+}
+
+async function maybeEvaluateSufficiency(
+  state: RAGGraphRuntimeState,
+): Promise<Partial<RAGGraphRuntimeState>> {
+  if (!state.graphConfig?.enableSelfRAG) {
+    return { sufficiency: { sufficient: true } };
+  }
+  return evaluateSufficiency(state);
+}
+
+function decideAfterEvaluation(state: RAGGraphRuntimeState): "expand" | "end" {
+  if (!state.graphConfig?.enableSelfRAG) {
+    return "end";
+  }
+
+  if (state.sufficiency?.sufficient) {
+    return "end";
+  }
+
+  if (state.iteration >= state.graphConfig.maxIterations) {
+    return "end";
+  }
+
+  return "expand";
+}
+
+async function expandAndIncrement(
+  state: RAGGraphRuntimeState,
+): Promise<Partial<RAGGraphRuntimeState>> {
+  const update = await expandRetrieve(state);
+  return { ...update, iteration: 1 };
+}
+
+const ragGraph = new StateGraph(RAGGraphState)
+  // Routing / transform
+  .addNode("route_strategy", routeStrategy)
+  .addNode("hyde_transform", hydeTransform)
+
+  // Retrieval
+  .addNode("retrieve_basic", basicRetrieve)
+  .addNode("retrieve_multi", multiRetrieve)
+  .addNode("retrieve_raptor", raptorRetrieve)
+
+  // Post-processing + Self-RAG loop
+  .addNode("maybe_rerank", maybeRerank)
+  .addNode("maybe_evaluate", maybeEvaluateSufficiency)
+  .addNode("expand_retrieve", expandAndIncrement)
+
+  // Graph wiring
+  .addEdge(START, "route_strategy")
+  // route_strategy uses Command.goto, so no static edges out of it.
+
+  .addEdge("hyde_transform", "retrieve_basic")
+
+  .addEdge("retrieve_basic", "maybe_rerank")
+  .addEdge("retrieve_multi", "maybe_rerank")
+  .addEdge("retrieve_raptor", "maybe_rerank")
+
+  .addEdge("maybe_rerank", "maybe_evaluate")
+  .addConditionalEdges("maybe_evaluate", decideAfterEvaluation, {
+    expand: "expand_retrieve",
+    end: END,
+  })
+  .addEdge("expand_retrieve", "maybe_rerank")
+  .compile();
+
 export async function executeRAGGraph(
   initialState: Omit<RAGState, "queryType" | "retrievedDocs" | "rerankedDocs">,
   config: Partial<GraphConfig> = {},
 ): Promise<RAGState> {
-  const { maxIterations, enableSelfRAG, enableReranking } = {
+  const mergedConfig: GraphConfig = {
     ...DEFAULT_CONFIG,
     ...config,
   };
 
-  let state: RAGState = {
-    ...initialState,
+  const graphInput: RAGGraphRuntimeState = {
+    query: initialState.query,
+    userId: initialState.userId,
+    projectKey: initialState.projectKey,
+    docIds: initialState.docIds,
+    strategy: initialState.strategy,
     queryType: "general",
+    transformedQuery: undefined,
     retrievedDocs: [],
     rerankedDocs: [],
+    sufficiency: undefined,
     iteration: 0,
+    graphConfig: mergedConfig,
   };
 
-  // Step 1: Classify query and select strategy (if adaptive)
-  if (state.strategy === "adaptive") {
-    state = { ...state, ...(await classifyQuery(state)) };
-  }
-
-  // Step 2: Execute retrieval based on strategy
-  const retrievalNode = selectRetrievalNode(state.strategy);
-  state = { ...state, ...(await retrievalNode(state)) };
-
-  // Step 3: Reranking (optional)
-  if (enableReranking && state.retrievedDocs.length > 0) {
-    state = { ...state, ...(await rerank(state)) };
-  } else {
-    state.rerankedDocs = state.retrievedDocs;
-  }
-
-  // Step 4: Self-RAG loop (optional)
-  if (enableSelfRAG) {
-    while (state.iteration! < maxIterations) {
-      state = { ...state, ...(await evaluateSufficiency(state)) };
-
-      if (state.sufficiency?.sufficient) {
-        break;
-      }
-
-      // Expand retrieval
-      state = { ...state, ...(await expandRetrieve(state)) };
-      state = { ...state, ...(await rerank(state)) };
-      state.iteration = (state.iteration || 0) + 1;
-    }
-  }
-
-  return state;
-}
-
-function selectRetrievalNode(strategy: RAGStrategy): NodeFunction {
-  switch (strategy) {
-    case "hyde":
-      return async (state) => {
-        const hydeState = await hydeTransform(state);
-        return basicRetrieve({ ...state, ...hydeState });
-      };
-    case "multi":
-      return multiRetrieve;
-    case "raptor":
-      return raptorRetrieve;
-    case "basic":
-    default:
-      return basicRetrieve;
-  }
+  const final = await ragGraph.invoke(graphInput);
+  // Strip internal config field so callers keep the original RAGState shape.
+  const { graphConfig: _graphConfig, ...rest } = final as RAGGraphRuntimeState & {
+    graphConfig?: GraphConfig;
+  };
+  return rest as unknown as RAGState;
 }
 
 // ============================================================

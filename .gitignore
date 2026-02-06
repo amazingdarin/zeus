@@ -46,3 +46,6 @@ pnpm-debug.log*
 *.env.local
 
 deploy/k3s.yaml
+deploy/SecretKey.csv
+deploy/dev.yaml
+deploy/harbor/values.s3.yaml

@@ -1,0 +1,92 @@
+{{- if and .Values.enabled (not .Values.database.url) .Values.database.bootstrap.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "langfuse.fullname" . }}-db-init
+  labels:
+    {{- include "langfuse.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.database.bootstrap.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "langfuse.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      {{- if .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- range .Values.image.pullSecrets }}
+        - name: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: db-init
+          image: "{{ .Values.database.bootstrap.image.repository }}:{{ .Values.database.bootstrap.image.tag }}"
+          imagePullPolicy: {{ .Values.database.bootstrap.image.pullPolicy }}
+          env:
+            - name: PGHOST
+              value: {{ .Values.database.host | quote }}
+            - name: PGPORT
+              value: {{ .Values.database.port | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.database.bootstrap.adminDatabase | quote }}
+            - name: PGUSER
+              value: {{ .Values.database.bootstrap.adminUser | quote }}
+            - name: LF_DB_NAME
+              value: {{ .Values.database.name | quote }}
+            - name: LF_DB_USER
+              value: {{ .Values.database.user | quote }}
+            - name: LF_DB_PASSWORD
+              value: {{ .Values.database.password | quote }}
+            {{- if .Values.database.bootstrap.adminPasswordSecret.name }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.bootstrap.adminPasswordSecret.name | quote }}
+                  key: {{ .Values.database.bootstrap.adminPasswordSecret.key | quote }}
+            {{- else if .Values.database.bootstrap.adminPassword }}
+            - name: PGPASSWORD
+              value: {{ .Values.database.bootstrap.adminPassword | quote }}
+            {{- else }}
+            {{- fail "langfuse.database.bootstrap.adminPasswordSecret.name or langfuse.database.bootstrap.adminPassword is required when bootstrap is enabled" }}
+            {{- end }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              echo "Waiting for PostgreSQL at ${PGHOST}:${PGPORT}..."
+              until psql -v ON_ERROR_STOP=1 -c "SELECT 1" >/dev/null 2>&1; do
+                sleep 2
+              done
+
+              psql -v ON_ERROR_STOP=1 \
+                -v lf_db_name="${LF_DB_NAME}" \
+                -v lf_db_user="${LF_DB_USER}" \
+                -v lf_db_password="${LF_DB_PASSWORD}" <<'SQL'
+              SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'lf_db_user', :'lf_db_password')
+              WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'lf_db_user') \gexec
+
+              SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', :'lf_db_user', :'lf_db_password')
+              WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = :'lf_db_user') \gexec
+
+              SELECT format('CREATE DATABASE %I OWNER %I', :'lf_db_name', :'lf_db_user')
+              WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = :'lf_db_name') \gexec
+
+              SELECT format('GRANT ALL PRIVILEGES ON DATABASE %I TO %I', :'lf_db_name', :'lf_db_user') \gexec
+              SQL
+{{- end }}

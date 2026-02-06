@@ -1,0 +1,49 @@
+# Values for the standalone `langfuse` Helm chart on the k3s dev cluster.
+#
+# Prereqs:
+# - `dev` namespace exists
+# - Postgres is running in `dev` as Service `postgres:5432`
+# - Harbor registry is reachable at `43.139.120.149:30002` (HTTP)
+# - `dev/harbor-regcred` exists (docker-registry secret)
+
+enabled: true
+
+image:
+  repository: 43.139.120.149:30002/zeus/langfuse
+  tag: "2"
+  pullPolicy: IfNotPresent
+  pullSecrets:
+    - harbor-regcred
+
+service:
+  type: NodePort
+  port: 3000
+  nodePort: 30300
+
+auth:
+  nextAuthUrl: "http://43.139.120.149:30300"
+  nextAuthSecret: "dev-secret-change-in-production"
+  salt: "dev-salt-change-in-production"
+
+database:
+  host: "postgres"
+  port: 5432
+  name: "langfuse"
+  user: "langfuse"
+  password: "langfuse"
+  sslMode: "disable"
+  bootstrap:
+    enabled: true
+    adminUser: "zeus"
+    adminDatabase: "postgres"
+    adminPasswordSecret:
+      name: "postgres"
+      key: "postgres-password"
+    image:
+      repository: 43.139.120.149:30002/zeus/postgres
+      tag: "pg15-zhparser"
+      pullPolicy: IfNotPresent
+
+# k3s worker node cannot pull the pause image from Docker Hub; keep Langfuse on control-plane for now.
+nodeSelector:
+  node-role.kubernetes.io/control-plane: "true"

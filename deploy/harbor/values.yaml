@@ -1,0 +1,93 @@
+expose:
+  type: nodePort
+  tls:
+    enabled: false
+  nodePort:
+    name: harbor
+    ports:
+      http:
+        port: 80
+        nodePort: 30002
+      https:
+        port: 443
+        nodePort: 30003
+
+externalURL: http://127.0.0.1:30002
+
+existingSecretAdminPassword: harbor-admin-password
+existingSecretAdminPasswordKey: HARBOR_ADMIN_PASSWORD
+
+persistence:
+  enabled: true
+  resourcePolicy: keep
+  persistentVolumeClaim:
+    registry:
+      storageClass: local-path
+      accessMode: ReadWriteOnce
+      size: 20Gi
+    jobservice:
+      jobLog:
+        storageClass: local-path
+        accessMode: ReadWriteOnce
+        size: 2Gi
+    database:
+      storageClass: local-path
+      accessMode: ReadWriteOnce
+      size: 5Gi
+    redis:
+      storageClass: local-path
+      accessMode: ReadWriteOnce
+      size: 2Gi
+    trivy:
+      storageClass: local-path
+      accessMode: ReadWriteOnce
+      size: 5Gi
+  imageChartStorage:
+    type: filesystem
+    filesystem:
+      rootdirectory: /storage
+
+trivy:
+  enabled: false
+
+nginx:
+  replicas: 1
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: "true"
+
+portal:
+  replicas: 1
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: "true"
+
+core:
+  replicas: 1
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: "true"
+
+jobservice:
+  replicas: 1
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: "true"
+
+registry:
+  replicas: 1
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: "true"
+
+database:
+  type: internal
+  internal:
+    nodeSelector:
+      node-role.kubernetes.io/control-plane: "true"
+
+redis:
+  type: internal
+  internal:
+    nodeSelector:
+      node-role.kubernetes.io/control-plane: "true"
+
+exporter:
+  replicas: 1
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: "true"

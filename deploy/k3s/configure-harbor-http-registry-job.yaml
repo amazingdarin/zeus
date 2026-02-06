@@ -1,0 +1,53 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k3s-configure-harbor-http-registry
+  namespace: kube-system
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: k3s-configure-harbor-http-registry
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: "true"
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: configure
+          image: rancher/local-path-provisioner:v0.0.30
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eux
+
+              # k3s containerd reads per-registry hosts config from:
+              # /var/lib/rancher/k3s/agent/etc/containerd/certs.d/<registry>/hosts.toml
+              REGISTRY_HOST="43.139.120.149:30002"
+              BASE="/host-containerd/certs.d/${REGISTRY_HOST}"
+              mkdir -p "${BASE}"
+
+              cat > "${BASE}/hosts.toml" <<'EOF'
+              server = "http://43.139.120.149:30002"
+
+              [host."http://43.139.120.149:30002"]
+                capabilities = ["pull", "resolve", "push"]
+              EOF
+
+              echo "Wrote ${BASE}/hosts.toml"
+          volumeMounts:
+            - name: host-containerd
+              mountPath: /host-containerd
+      volumes:
+        - name: host-containerd
+          hostPath:
+            path: /var/lib/rancher/k3s/agent/etc/containerd
+            type: DirectoryOrCreate
+

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { getConfig, isAuthEnabled, isStandaloneMode } from '../config';
+import { getConfig, isAuthEnabled, isStandaloneMode } from '../config.js';
 
 export interface AuthUser {
   id: string;

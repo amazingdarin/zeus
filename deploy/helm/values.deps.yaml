@@ -6,3 +6,6 @@ frontend:
 
 langfuse:
   enabled: false
+
+banana-slides:
+  enabled: false
