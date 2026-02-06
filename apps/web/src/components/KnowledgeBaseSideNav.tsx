@@ -1,6 +1,7 @@
 import { useMemo, useState, memo, type DragEvent } from "react";
-import { DownOutlined, RightOutlined, ReloadOutlined, DatabaseOutlined } from "@ant-design/icons";
+import { DownOutlined, RightOutlined, ReloadOutlined, DatabaseOutlined, MenuFoldOutlined } from "@ant-design/icons";
 import { Tooltip } from "antd";
+import { useToggleTree } from "./KnowledgeBaseLayout";
 
 export type KnowledgeBaseDocument = {
   id: string;
@@ -302,6 +303,8 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
     </div>
   );
 
+  const { toggleTree } = useToggleTree();
+
   return (
     <aside
       className="kb-sidebar"
@@ -345,6 +348,15 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
             </button>
           </Tooltip>
         )}
+        <Tooltip title="隐藏文档树">
+          <button
+            className="kb-sidebar-toolbar-btn"
+            type="button"
+            onClick={toggleTree}
+          >
+            <MenuFoldOutlined />
+          </button>
+        </Tooltip>
       </div>
       <div
         className="kb-sidebar-content"
