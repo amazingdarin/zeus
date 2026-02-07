@@ -210,3 +210,47 @@ CREATE TABLE web_search_config
 -- Only allow one web search config (singleton pattern)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_web_search_config_singleton
 ON web_search_config ((true));
+
+-- Chat Settings (singleton)
+CREATE TABLE chat_settings
+(
+    id            TEXT PRIMARY KEY DEFAULT gen_random_uuid(),
+    full_access   BOOLEAN NOT NULL DEFAULT false,
+    created_at    TIMESTAMPTZ DEFAULT now(),
+    updated_at    TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_settings_singleton
+ON chat_settings ((true));
+
+-- Seed default row
+INSERT INTO chat_settings (full_access) VALUES (false) ON CONFLICT DO NOTHING;
+
+-- Chat Sessions
+CREATE TABLE chat_sessions
+(
+    id            TEXT PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       TEXT NOT NULL,
+    project_key   TEXT NOT NULL,
+    title         TEXT NOT NULL DEFAULT '新对话',
+    created_at    TIMESTAMPTZ DEFAULT now(),
+    updated_at    TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_project
+ON chat_sessions (project_key, updated_at DESC);
+
+-- Chat Messages
+CREATE TABLE chat_messages
+(
+    id            TEXT PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id    TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    role          TEXT NOT NULL,
+    content       TEXT NOT NULL,
+    sources       JSONB,
+    artifacts     JSONB,
+    created_at    TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_session
+ON chat_messages (session_id, created_at);

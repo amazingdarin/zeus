@@ -6,7 +6,9 @@ import type { JSONContent } from "@tiptap/core";
 import { convertDocument } from "./services/convert.js";
 import { fetchUrl } from "./services/fetch-url.js";
 import { importGit } from "./services/import-git.js";
+import { importFileAsDocument } from "./services/smart-import.js";
 import { ensureBlockIds } from "./utils/block-id.js";
+import { traceManager } from "./observability/index.js";
 import {
   documentStore,
   DocumentNotFoundError,
@@ -63,6 +65,51 @@ function fixFilename(filename: string): string {
     // Ignore decoding errors
   }
   return filename;
+}
+
+function parseBool(value: unknown, defaultValue = false): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "y", "on"].includes(normalized)) return true;
+    if (["false", "0", "no", "n", "off"].includes(normalized)) return false;
+  }
+  return defaultValue;
+}
+
+function parseStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((v) => String(v ?? "").trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed.map((v) => String(v ?? "").trim()).filter(Boolean);
+      }
+    } catch {
+      // Ignore
+    }
+    return trimmed.split(",").map((v) => v.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function sanitizeUrlForTrace(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  try {
+    const u = new URL(raw);
+    if (u.username || u.password) {
+      u.username = "";
+      u.password = "";
+    }
+    return u.toString();
+  } catch {
+    return raw.replace(/\/\/[^@]*@/, "//");
+  }
 }
 
 /**
@@ -689,14 +736,37 @@ export const buildRouter = () => {
   router.post(
     "/projects/:projectKey/documents/import-git",
     async (req: Request, res: Response) => {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const traceId = `import-git-${uuidv4()}`;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+
+      const traceContext = traceManager.startTrace(traceId, {
+        userId,
+        projectKey,
+        tags: ["import", "import-git"],
+        metadata: {
+          repo_url: sanitizeUrlForTrace(body.repo_url),
+          branch: body.branch,
+          subdir: body.subdir,
+          parent_id: body.parent_id,
+          smart_import: body.smart_import,
+          smart_import_types: body.smart_import_types,
+          file_types: body.file_types,
+          enable_format_optimize: body.enable_format_optimize,
+        },
+      });
+
       try {
-        const { projectKey } = req.params;
-        const userId = getUserId(req);
-        const result = await importGit(userId, projectKey, req.body ?? {});
+        const result = await importGit(userId, projectKey, body as any, traceContext);
+        traceManager.updateTrace(traceContext, { output: result });
         success(res, result);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Import failed";
+        traceManager.updateTrace(traceContext, { output: { error: message } });
         error(res, "IMPORT_FAILED", message);
+      } finally {
+        traceManager.endTrace(traceId);
       }
     },
   );
@@ -760,6 +830,86 @@ export const buildRouter = () => {
   );
 
   /**
+   * Import a file and create a document (smart import if enabled)
+   * POST /projects/:projectKey/documents/import-file
+   *
+   * FormData fields:
+   * - file: required
+   * - parent_id: optional (default: root)
+   * - title: optional (default: filename without extension)
+   * - smart_import: optional boolean
+   * - smart_import_types: optional JSON array or comma-separated string
+   * - enable_format_optimize: optional boolean
+   */
+  router.post(
+    "/projects/:projectKey/documents/import-file",
+    upload.single("file"),
+    async (req: Request, res: Response) => {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const file = req.file;
+      if (!file) {
+        error(res, "INVALID_REQUEST", "file is required");
+        return;
+      }
+
+      const parentId = String(req.body?.parent_id ?? "root");
+      const title = String(req.body?.title ?? "").trim() || undefined;
+      const smartImport = parseBool(req.body?.smart_import, false);
+      const smartImportTypes = parseStringArray(req.body?.smart_import_types).filter((t) =>
+        t === "markdown" || t === "word" || t === "pdf" || t === "image",
+      ) as Array<"markdown" | "word" | "pdf" | "image">;
+      const enableFormatOptimize = parseBool(req.body?.enable_format_optimize, false);
+
+      const filename = fixFilename(file.originalname);
+      const traceId = `import-file-${uuidv4()}`;
+      const traceContext = traceManager.startTrace(traceId, {
+        userId,
+        projectKey,
+        tags: ["import", "import-file"],
+        metadata: {
+          filename,
+          mime: file.mimetype,
+          size: file.size,
+          parentId,
+          title,
+          smartImport,
+          smartImportTypes,
+          enableFormatOptimize,
+        },
+      });
+
+      try {
+        const result = await importFileAsDocument(userId, projectKey, {
+          parentId,
+          title,
+          file: {
+            buffer: file.buffer,
+            originalname: filename,
+            mimetype: file.mimetype,
+            size: file.size,
+          },
+          smartImport,
+          smartImportTypes,
+          enableFormatOptimize,
+          traceContext,
+        });
+
+        traceManager.updateTrace(traceContext, {
+          output: { docId: result.docId, title: result.title, mode: result.mode },
+        });
+        success(res, { id: result.docId, title: result.title, mode: result.mode }, 201);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Import failed";
+        traceManager.updateTrace(traceContext, { output: { error: message } });
+        error(res, "IMPORT_FAILED", message, 500);
+      } finally {
+        traceManager.endTrace(traceId);
+      }
+    },
+  );
+
+  /**
    * Import file as document (returns converted content without saving)
    * POST /projects/:projectKey/documents/import
    */
@@ -797,22 +947,53 @@ export const buildRouter = () => {
   router.post(
     "/projects/:projectKey/documents/optimize-format",
     async (req: Request, res: Response) => {
-      try {
-        const markdown = String(req.body?.markdown ?? "");
-        if (!markdown.trim()) {
-          error(res, "INVALID_REQUEST", "markdown is required");
-          return;
-        }
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
 
-        const optimized = await optimizeFormatSync(markdown);
-        success(res, { 
+      const markdown = String(req.body?.markdown ?? "");
+      if (!markdown.trim()) {
+        error(res, "INVALID_REQUEST", "markdown is required");
+        return;
+      }
+
+      const traceId = `optimize-format-${uuidv4()}`;
+      const traceContext = traceManager.startTrace(traceId, {
+        userId,
+        projectKey,
+        tags: ["llm", "optimize-format"],
+        metadata: {
+          markdownChars: markdown.length,
+        },
+      });
+
+      try {
+        const optimized = await optimizeFormatSync(markdown, {
+          traceContext,
+          traceMetadata: {
+            source: "api",
+            endpoint: "documents/optimize-format",
+          },
+        });
+
+        traceManager.updateTrace(traceContext, {
+          output: {
+            optimized: optimized !== markdown,
+            markdownChars: markdown.length,
+            optimizedChars: optimized.length,
+          },
+        });
+
+        success(res, {
           markdown: optimized,
           optimized: optimized !== markdown,
         });
       } catch (err) {
         // This should not happen as optimizeFormatSync is fail-safe
         const message = err instanceof Error ? err.message : "Optimization failed";
+        traceManager.updateTrace(traceContext, { output: { error: message } });
         error(res, "OPTIMIZE_FAILED", message);
+      } finally {
+        traceManager.endTrace(traceId);
       }
     },
   );
@@ -1755,11 +1936,18 @@ export const buildRouter = () => {
     try {
       const { projectKey } = req.params;
       const userId = getUserId(req);
-      const { session_id, message, document_scope, deep_search } = req.body as { 
+      const { session_id, message, document_scope, deep_search, attachments } = req.body as { 
         session_id?: string; 
         message?: string;
         document_scope?: Array<{ doc_id: string; include_children: boolean }>;
         deep_search?: boolean;
+        attachments?: Array<{
+          asset_id?: string;
+          name?: string;
+          mime_type?: string;
+          size?: number;
+          type?: string;
+        }>;
       };
 
       if (!message || typeof message !== "string" || !message.trim()) {
@@ -1780,8 +1968,21 @@ export const buildRouter = () => {
             }))
         : undefined;
 
+      const normalizedAttachments = Array.isArray(attachments)
+        ? attachments
+            .map((a) => ({
+              assetId: typeof a?.asset_id === "string" ? a.asset_id.trim() : "",
+              name: typeof a?.name === "string" ? a.name : undefined,
+              mimeType: typeof a?.mime_type === "string" ? a.mime_type : undefined,
+              size: typeof a?.size === "number" ? a.size : undefined,
+              type: typeof a?.type === "string" ? a.type : undefined,
+            }))
+            .filter((a) => a.assetId)
+        : undefined;
+
       const runId = await createRun(userId, projectKey, sessionId, message.trim(), docScope, {
         deepSearch: deep_search === true,
+        attachments: normalizedAttachments,
       });
 
       success(res, { run_id: runId });
@@ -1933,17 +2134,107 @@ export const buildRouter = () => {
   });
 
   /**
-   * Clear chat session history
+   * List chat sessions
+   * GET /projects/:projectKey/chat/sessions
+   */
+  router.get("/projects/:projectKey/chat/sessions", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const limit = Math.min(Number(req.query.limit) || 50, 100);
+      const offset = Math.max(Number(req.query.offset) || 0, 0);
+
+      const { chatSessionStore } = await import("./services/chat-session-store.js");
+      const sessions = await chatSessionStore.listSessions(userId, projectKey, limit, offset);
+      success(res, { sessions });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list sessions";
+      error(res, "LIST_SESSIONS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Create a new chat session
+   * POST /projects/:projectKey/chat/sessions
+   */
+  router.post("/projects/:projectKey/chat/sessions", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const { title } = req.body as { title?: string };
+
+      const { chatSessionStore } = await import("./services/chat-session-store.js");
+      const session = await chatSessionStore.createSession(userId, projectKey, title || undefined);
+      success(res, session);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to create session";
+      error(res, "CREATE_SESSION_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Get messages for a chat session
+   * GET /projects/:projectKey/chat/sessions/:sessionId/messages
+   */
+  router.get("/projects/:projectKey/chat/sessions/:sessionId/messages", async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+
+      const { chatSessionStore } = await import("./services/chat-session-store.js");
+      const messages = await chatSessionStore.getMessages(sessionId);
+      success(res, { messages });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to get session messages";
+      error(res, "GET_SESSION_MESSAGES_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Rename a chat session
+   * PATCH /projects/:projectKey/chat/sessions/:sessionId
+   */
+  router.patch("/projects/:projectKey/chat/sessions/:sessionId", async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+      const { title } = req.body as { title?: string };
+
+      if (!title || typeof title !== "string" || !title.trim()) {
+        error(res, "INVALID_REQUEST", "title is required");
+        return;
+      }
+
+      const { chatSessionStore } = await import("./services/chat-session-store.js");
+      const session = await chatSessionStore.renameSession(sessionId, title.trim());
+      if (!session) {
+        error(res, "NOT_FOUND", "Session not found", 404);
+        return;
+      }
+      success(res, session);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to rename session";
+      error(res, "RENAME_SESSION_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Delete a chat session (replaces old clear-session endpoint)
    * DELETE /projects/:projectKey/chat/sessions/:sessionId
    */
   router.delete("/projects/:projectKey/chat/sessions/:sessionId", async (req: Request, res: Response) => {
     try {
       const { sessionId } = req.params;
+
+      // Clear in-memory cache
       clearSession(sessionId);
-      success(res, { cleared: true });
+
+      // Delete from DB (cascade deletes messages)
+      const { chatSessionStore } = await import("./services/chat-session-store.js");
+      await chatSessionStore.deleteSession(sessionId);
+
+      success(res, { deleted: true });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to clear session";
-      error(res, "CLEAR_SESSION_FAILED", msg, 500);
+      const msg = err instanceof Error ? err.message : "Failed to delete session";
+      error(res, "DELETE_SESSION_FAILED", msg, 500);
     }
   });
 
@@ -2351,6 +2642,45 @@ export const buildRouter = () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Chat Settings API
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get chat settings
+   * GET /settings/chat
+   */
+  router.get("/settings/chat", async (_req: Request, res: Response) => {
+    try {
+      const { chatSettingsStore } = await import("./services/chat-settings-store.js");
+      const settings = await chatSettingsStore.get();
+      success(res, settings);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to get chat settings";
+      error(res, "GET_CHAT_SETTINGS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Update chat settings
+   * PUT /settings/chat
+   */
+  router.put("/settings/chat", async (req: Request, res: Response) => {
+    try {
+      const { chatSettingsStore } = await import("./services/chat-settings-store.js");
+      const { full_access } = req.body as { full_access?: boolean };
+
+      const settings = await chatSettingsStore.update({
+        fullAccess: full_access === true,
+      });
+
+      success(res, settings);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update chat settings";
+      error(res, "UPDATE_CHAT_SETTINGS_FAILED", msg, 500);
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Web Search Configuration API
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -2503,6 +2833,10 @@ export const buildRouter = () => {
                        mimeType === "application/json" ||
                        mimeType === "application/xml";
 
+        // Persist as asset so chat skills can reference it later (e.g. doc-smart-import).
+        const userId = getUserId(req);
+        const assetMeta = await assetStore.save(userId, projectKey, fileName, mimeType, file.buffer);
+
         let content = "";
         let preview: string | undefined;
 
@@ -2522,6 +2856,7 @@ export const buildRouter = () => {
           id: uuidv4(),
           type: isImage ? "image" : "file",
           name: fileName,
+          asset_id: assetMeta.id,
           mimeType,
           size: file.size,
           content,

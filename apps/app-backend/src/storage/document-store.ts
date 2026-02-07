@@ -631,20 +631,103 @@ export const documentStore = {
     const cacheKey = buildCacheKey(userId, projectKey);
     await indexManager.ensure(cacheKey, root);
 
-    // If parentId is provided, only get children of that parent
-    let docsToSearch: Array<[string, CachedDoc]>;
+    const queryLower = query.toLowerCase().trim();
+    const queryParts = queryLower.split("/").filter(Boolean);
+
+    // When parentId is provided (including "root"), return children in that layer's .index order.
+    // We only filter by query; we do NOT re-sort by relevance.
     if (parentId !== undefined) {
       const normalizedParentId = parentId === "" || parentId === "root" ? "root" : parentId;
       const children = await this.getChildren(userId, projectKey, normalizedParentId);
-      docsToSearch = children
-        .map((child) => {
-          const cached = indexManager.get(cacheKey, child.id);
-          return cached ? [child.id, cached] as [string, CachedDoc] : null;
-        })
-        .filter((item): item is [string, CachedDoc] => item !== null);
-    } else {
-      docsToSearch = Array.from(indexManager.getAll(cacheKey));
+
+      const out: Array<{ id: string; title: string; titlePath: string; hasChildren: boolean }> = [];
+      for (const child of children) {
+        if (out.length >= limit) break;
+
+        const docId = child.id;
+        const cached = indexManager.get(cacheKey, docId);
+        if (!cached) continue;
+
+        const titlePath = indexManager.buildTitlePath(cacheKey, docId);
+        const titlePathLower = titlePath.toLowerCase();
+        const titleLower = cached.title.toLowerCase();
+
+        let score = 0;
+
+        // Match by title path (for hierarchical queries like "设计/用户")
+        if (queryParts.length > 0) {
+          const pathParts = titlePathLower.split("/");
+          let matchCount = 0;
+          let lastMatchIdx = -1;
+
+          for (const qPart of queryParts) {
+            for (let i = lastMatchIdx + 1; i < pathParts.length; i++) {
+              if (pathParts[i].includes(qPart)) {
+                matchCount++;
+                lastMatchIdx = i;
+                break;
+              }
+            }
+          }
+
+          if (matchCount === queryParts.length) {
+            // All query parts matched in order
+            score = 100 + matchCount * 10;
+            // Bonus for exact match at end
+            if (pathParts[pathParts.length - 1].startsWith(queryParts[queryParts.length - 1])) {
+              score += 20;
+            }
+          } else if (matchCount > 0) {
+            score = 50 + matchCount * 5;
+          }
+        }
+
+        // Simple title matching
+        if (score === 0 && queryLower) {
+          if (titleLower.startsWith(queryLower)) {
+            score = 80;
+          } else if (titleLower.includes(queryLower)) {
+            score = 60;
+          } else if (titlePathLower.includes(queryLower)) {
+            score = 40;
+          }
+        }
+
+        // If no query, include all documents with lower score
+        if (!queryLower) {
+          score = 10;
+        }
+
+        if (score <= 0) continue;
+
+        // Check if has children (non-empty companion directory).
+        let hasChildren = false;
+        if (child.kind === "dir") {
+          try {
+            const relPath = cached.path;
+            const slug = path.basename(relPath, ".json");
+            const parentDir = path.dirname(relPath);
+            const companionDir = path.join(root, parentDir, slug);
+            const ordered = await indexManager.getOrderedChildren(cacheKey, companionDir);
+            hasChildren = ordered.length > 0;
+          } catch {
+            // Ignore errors
+          }
+        }
+
+        out.push({
+          id: docId,
+          title: cached.title,
+          titlePath,
+          hasChildren,
+        });
+      }
+
+      return out;
     }
+
+    // Global search mode (legacy): search across all docs and sort by relevance.
+    const docsToSearch: Array<[string, CachedDoc]> = Array.from(indexManager.getAll(cacheKey));
 
     const results: Array<{
       id: string;
@@ -653,9 +736,6 @@ export const documentStore = {
       hasChildren: boolean;
       score: number;
     }> = [];
-
-    const queryLower = query.toLowerCase().trim();
-    const queryParts = queryLower.split("/").filter(Boolean);
 
     for (const [docId, cached] of docsToSearch) {
       const titlePath = indexManager.buildTitlePath(cacheKey, docId);

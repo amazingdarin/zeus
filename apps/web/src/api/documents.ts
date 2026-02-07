@@ -266,6 +266,68 @@ export const importDocument = async (
 export type SmartImportType = "markdown" | "word" | "pdf" | "image";
 export type FileTypeFilter = "all" | "images" | "office" | "text" | "markdown";
 
+export type ImportFileMode = "smart" | "fallback";
+
+export type ImportFileAsDocumentRequest = {
+  parent_id?: string;
+  title?: string;
+  smart_import?: boolean;
+  smart_import_types?: SmartImportType[];
+  enable_format_optimize?: boolean;
+};
+
+export type ImportFileAsDocumentResult = {
+  id: string;
+  title: string;
+  mode: ImportFileMode;
+};
+
+/**
+ * Import a single file and create a document.
+ * When smart import is enabled, the backend will parse the file content and
+ * insert it into the created document; otherwise it will fall back to an asset-only doc.
+ */
+export const importFileAsDocument = async (
+  projectKey: string,
+  file: File,
+  req: ImportFileAsDocumentRequest,
+): Promise<ImportFileAsDocumentResult> => {
+  const form = new FormData();
+  form.append("file", file);
+  if (req.parent_id) {
+    form.append("parent_id", req.parent_id);
+  }
+  if (req.title) {
+    form.append("title", req.title);
+  }
+  form.append("smart_import", req.smart_import ? "true" : "false");
+  if (req.smart_import_types) {
+    form.append("smart_import_types", JSON.stringify(req.smart_import_types));
+  }
+  form.append("enable_format_optimize", req.enable_format_optimize ? "true" : "false");
+
+  const response = await apiFetch(
+    `/api/projects/${encodeURIComponent(projectKey)}/documents/import-file`,
+    {
+      method: "POST",
+      body: form,
+    },
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.message || "Import failed");
+  }
+
+  const payload = await response.json().catch(() => null);
+  const data = payload?.data ?? payload ?? {};
+  const mode = String(data.mode ?? "");
+  return {
+    id: String(data.id ?? ""),
+    title: String(data.title ?? ""),
+    mode: mode === "smart" ? "smart" : "fallback",
+  };
+};
+
 export type ImportGitRequest = {
   repo_url: string;
   branch?: string;

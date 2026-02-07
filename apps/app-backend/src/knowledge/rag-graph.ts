@@ -41,38 +41,29 @@ const DEFAULT_CONFIG: GraphConfig = {
 };
 
 // LangGraph-managed state. We keep this superset internal and strip `graphConfig` from results.
+/** Helper: last-value reducer with a default. Required by @langchain/langgraph ^0.2 */
+function lv<T>(defaultFn: () => T) {
+  return { value: (_prev: T, next: T) => next, default: defaultFn };
+}
+
 const RAGGraphState = Annotation.Root({
   query: Annotation<string>,
   userId: Annotation<string>,
   projectKey: Annotation<string>,
-  docIds: Annotation<string[] | undefined>({
-    default: () => undefined,
-  }),
-  queryType: Annotation<QueryType>({
-    default: () => "general",
-  }),
-  strategy: Annotation<RAGStrategy>({
-    default: () => "adaptive",
-  }),
-  transformedQuery: Annotation<string | undefined>({
-    default: () => undefined,
-  }),
-  retrievedDocs: Annotation<IndexSearchResult[]>({
-    default: () => [],
-  }),
-  rerankedDocs: Annotation<IndexSearchResult[]>({
-    default: () => [],
-  }),
-  sufficiency: Annotation<{ sufficient: boolean; missing?: string } | undefined>({
-    default: () => undefined,
-  }),
+  docIds: Annotation<string[] | undefined>(lv<string[] | undefined>(() => undefined)),
+  queryType: Annotation<QueryType>(lv<QueryType>(() => "general")),
+  strategy: Annotation<RAGStrategy>(lv<RAGStrategy>(() => "adaptive")),
+  transformedQuery: Annotation<string | undefined>(lv<string | undefined>(() => undefined)),
+  retrievedDocs: Annotation<IndexSearchResult[]>(lv<IndexSearchResult[]>(() => [])),
+  rerankedDocs: Annotation<IndexSearchResult[]>(lv<IndexSearchResult[]>(() => [])),
+  sufficiency: Annotation<{ sufficient: boolean; missing?: string } | undefined>(
+    lv<{ sufficient: boolean; missing?: string } | undefined>(() => undefined),
+  ),
   iteration: Annotation<number>({
-    reducer: (current: number, update: number) => current + update,
+    value: (current: number, update: number) => current + update,
     default: () => 0,
   }),
-  graphConfig: Annotation<GraphConfig>({
-    default: () => DEFAULT_CONFIG,
-  }),
+  graphConfig: Annotation<GraphConfig>(lv<GraphConfig>(() => ({ ...DEFAULT_CONFIG }))),
 });
 
 type RAGGraphRuntimeState = typeof RAGGraphState.State;
@@ -100,6 +91,8 @@ async function classifyQuery(
     const response = await llmGateway.chat({
       provider: config.providerId as Parameters<typeof llmGateway.chat>[0]["provider"],
       model: config.defaultModel || "gpt-4o-mini",
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
       messages: [
         {
           role: "system",
@@ -160,6 +153,8 @@ async function hydeTransform(
     const response = await llmGateway.chat({
       provider: config.providerId as Parameters<typeof llmGateway.chat>[0]["provider"],
       model: config.defaultModel || "gpt-4o-mini",
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
       messages: [
         {
           role: "system",
@@ -351,6 +346,8 @@ async function evaluateSufficiency(
     const response = await llmGateway.chat({
       provider: config.providerId as Parameters<typeof llmGateway.chat>[0]["provider"],
       model: config.defaultModel || "gpt-4o-mini",
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
       messages: [
         {
           role: "system",
@@ -482,7 +479,10 @@ async function expandAndIncrement(
 
 const ragGraph = new StateGraph(RAGGraphState)
   // Routing / transform
-  .addNode("route_strategy", routeStrategy)
+  // route_strategy returns Command({ goto }), so we must declare reachable targets via `ends`
+  .addNode("route_strategy", routeStrategy, {
+    ends: ["hyde_transform", "retrieve_basic", "retrieve_multi", "retrieve_raptor"],
+  })
   .addNode("hyde_transform", hydeTransform)
 
   // Retrieval

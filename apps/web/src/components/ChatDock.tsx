@@ -709,8 +709,21 @@ function ChatDock() {
       const fullMessage = attachmentsContext
         ? `${outboundMessage}\n\n---\n附件内容:\n${attachmentsContext}`
         : outboundMessage;
+
+      const attachmentAssets = currentAttachments.flatMap((a) => {
+        if (a.status !== "ready" || !a.assetId) return [];
+        if (a.type !== "file" && a.type !== "image") return [];
+        return [{
+          assetId: a.assetId,
+          name: a.name,
+          mimeType: a.mimeType,
+          size: a.size,
+          type: a.type,
+        }];
+      });
       
       const runId = await createChatRun(projectKey, fullMessage, {
+        ...(attachmentAssets.length > 0 ? { attachments: attachmentAssets } : {}),
         deepSearch: deepSearchEnabled,
       });
       currentRunIdRef.current = runId;

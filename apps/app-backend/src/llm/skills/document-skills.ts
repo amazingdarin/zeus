@@ -396,6 +396,47 @@ export const docImportGitSkill: SkillDefinition = {
 };
 
 /**
+ * Smart import an uploaded asset into a document
+ */
+export const docSmartImportSkill: SkillDefinition = {
+  name: "doc-smart-import",
+  category: "doc",
+  command: "/doc-smart-import",
+  description: "将附件（asset_id）智能解析并导入为文档。",
+  required: false,
+  confirmation: {
+    required: true,
+    riskLevel: "medium",
+    warningMessage: "该操作会解析附件并创建文档，请确认后执行。",
+  },
+  parameters: {
+    type: "object",
+    properties: {
+      asset_id: {
+        type: "string",
+        description: "附件资产 ID（来自聊天附件上传返回的 asset_id）",
+      },
+      parent_id: {
+        type: "string",
+        description: "父文档 ID（默认 root）",
+        optional: true,
+      },
+      title: {
+        type: "string",
+        description: "文档标题（可选，默认使用文件名）",
+        optional: true,
+      },
+      enable_format_optimize: {
+        type: "boolean",
+        description: "是否启用格式优化（默认 false）",
+        optional: true,
+      },
+    },
+    required: ["asset_id"],
+  },
+};
+
+/**
  * Convert text content to markdown-like output
  */
 export const docConvertSkill: SkillDefinition = {
@@ -445,6 +486,7 @@ export const documentSkills: SkillDefinition[] = [
   kbSearchSkill,
   docFetchUrlSkill,
   docImportGitSkill,
+  docSmartImportSkill,
   docConvertSkill,
 ];
 

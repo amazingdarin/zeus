@@ -9,6 +9,13 @@ export type CreateChatRunOptions = {
   sessionId?: string;
   documentScope?: DocumentScope[];
   deepSearch?: boolean;
+  attachments?: Array<{
+    assetId: string;
+    name: string;
+    mimeType?: string;
+    size?: number;
+    type: "file" | "image";
+  }>;
 };
 
 export const createChatRun = async (
@@ -16,12 +23,20 @@ export const createChatRun = async (
   message: string,
   options?: CreateChatRunOptions,
 ): Promise<string> => {
-  const { sessionId, documentScope, deepSearch } = options || {};
+  const { sessionId, documentScope, deepSearch, attachments } = options || {};
 
   // Convert to API format
   const apiDocScope = documentScope?.map((s) => ({
     doc_id: s.docId,
     include_children: s.includeChildren,
+  }));
+
+  const apiAttachments = attachments?.map((a) => ({
+    asset_id: a.assetId,
+    name: a.name,
+    ...(a.mimeType ? { mime_type: a.mimeType } : {}),
+    ...(typeof a.size === "number" ? { size: a.size } : {}),
+    type: a.type,
   }));
 
   const response = await apiFetch(`/api/projects/${projectKey}/chat/runs`, {
@@ -33,6 +48,7 @@ export const createChatRun = async (
       ...(sessionId ? { session_id: sessionId } : {}),
       message,
       ...(apiDocScope && apiDocScope.length > 0 ? { document_scope: apiDocScope } : {}),
+      ...(apiAttachments && apiAttachments.length > 0 ? { attachments: apiAttachments } : {}),
       ...(deepSearch ? { deep_search: true } : {}),
     }),
   });

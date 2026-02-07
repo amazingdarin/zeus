@@ -5,11 +5,13 @@
  */
 
 import { v4 as uuidv4 } from "uuid";
+import { createHash } from "crypto";
 import type { JSONContent } from "@tiptap/core";
 import { configStore, llmGateway, type ProviderConfigInternal } from "../llm/index.js";
 import { documentStore } from "../storage/document-store.js";
 import { tiptapJsonToMarkdown, markdownToTiptapJson } from "../utils/markdown.js";
 import { ensureBlockIds } from "../utils/block-id.js";
+import { traceManager, type TraceContext } from "../observability/index.js";
 
 // ============================================================================
 // Types
@@ -353,6 +355,8 @@ const IMPORT_FORMAT_PROMPT = `你是一个专业的文档格式优化专家。�
 - 不要添加、删除或修改任何实际内容
 - 输出纯 Markdown 格式，不要添加任何解释
 
+{{EXTRA}}
+
 ## 原文档
 \`\`\`markdown
 {{CONTENT}}
@@ -368,7 +372,17 @@ export type OptimizeFormatOptions = {
   timeout?: number;
   /** Maximum content length to optimize (chars), default: 50000 */
   maxLength?: number;
+  /** Optional extra constraints for optimization (e.g. validation feedback) */
+  promptExtra?: string;
+  /** Optional Langfuse trace context for observability */
+  traceContext?: TraceContext;
+  /** Extra metadata to attach to trace events (no raw content) */
+  traceMetadata?: Record<string, unknown>;
 };
+
+function sha256(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}
 
 /**
  * Synchronously optimize markdown format using LLM
@@ -384,16 +398,45 @@ export async function optimizeFormatSync(
 ): Promise<string> {
   const timeout = options?.timeout ?? 30000;
   const maxLength = options?.maxLength ?? 50000;
+  const traceContext = options?.traceContext;
+  const promptExtra = String(options?.promptExtra ?? "").trim();
+  const traceMetadata = {
+    ...(options?.traceMetadata ?? {}),
+    ...(promptExtra
+      ? { hasFeedback: true, feedbackChars: promptExtra.length }
+      : {}),
+  };
+  const markdownChars = markdown.length;
+  const markdownSha = traceContext ? sha256(markdown) : undefined;
 
   // Skip optimization for very short content
   if (markdown.trim().length < 50) {
     console.log("[optimize-format] Content too short, skipping optimization");
+    if (traceContext) {
+      const span = traceManager.startSpan(traceContext, "optimize-format-skip", {
+        reason: "too_short",
+        markdownChars,
+        markdownSha256: markdownSha,
+        ...traceMetadata,
+      });
+      traceManager.endSpan(span, { skipped: true });
+    }
     return markdown;
   }
 
   // Skip optimization for very long content
   if (markdown.length > maxLength) {
     console.log(`[optimize-format] Content too long (${markdown.length} > ${maxLength}), skipping optimization`);
+    if (traceContext) {
+      const span = traceManager.startSpan(traceContext, "optimize-format-skip", {
+        reason: "too_long",
+        markdownChars,
+        markdownSha256: markdownSha,
+        maxLength,
+        ...traceMetadata,
+      });
+      traceManager.endSpan(span, { skipped: true });
+    }
     return markdown;
   }
 
@@ -402,15 +445,30 @@ export async function optimizeFormatSync(
     const config = await getLLMConfig();
     if (!config || !config.enabled || !config.defaultModel) {
       console.log("[optimize-format] No LLM config available, skipping optimization");
+      if (traceContext) {
+        const span = traceManager.startSpan(traceContext, "optimize-format-skip", {
+          reason: "no_llm_config",
+          markdownChars,
+          markdownSha256: markdownSha,
+          ...traceMetadata,
+        });
+        traceManager.endSpan(span, { skipped: true });
+      }
       return markdown;
     }
 
     console.log(`[optimize-format] Starting format optimization, content length: ${markdown.length}`);
 
-    // Build prompt
-    const prompt = IMPORT_FORMAT_PROMPT.replace("{{CONTENT}}", markdown);
+    // Build prompt (do not log raw content or feedback)
+    const extraSection = promptExtra
+      ? `\n\n## 额外约束（来自协议校验）\n${promptExtra}\n`
+      : "";
+    const prompt = IMPORT_FORMAT_PROMPT
+      .replace("{{EXTRA}}", extraSection)
+      .replace("{{CONTENT}}", markdown);
 
     // Call LLM with timeout
+    const startTime = new Date();
     const optimizePromise = llmGateway.chat({
       provider: config.providerId,
       model: config.defaultModel,
@@ -425,9 +483,29 @@ export async function optimizeFormatSync(
     });
 
     const result = await Promise.race([optimizePromise, timeoutPromise]);
+    const endTime = new Date();
 
     if (!result) {
       console.log("[optimize-format] Optimization timed out, using original content");
+      if (traceContext) {
+        traceManager.logGeneration(traceContext, {
+          name: "optimize-format",
+          model: config.defaultModel,
+          provider: config.providerId,
+          input: {
+            markdownChars,
+            markdownSha256: markdownSha,
+            timeoutMs: timeout,
+            maxLength,
+            ...traceMetadata,
+          },
+          output: JSON.stringify({ error: "timeout" }),
+          startTime,
+          endTime,
+          level: "ERROR",
+          statusMessage: "timeout",
+        });
+      }
       return markdown;
     }
 
@@ -437,14 +515,82 @@ export async function optimizeFormatSync(
     // Basic validation: ensure we got meaningful content back
     if (optimized.length < markdown.length * 0.3) {
       console.log("[optimize-format] Optimized content too short, using original content");
+      if (traceContext) {
+        const optimizedSha = sha256(optimized);
+        traceManager.logGeneration(traceContext, {
+          name: "optimize-format",
+          model: config.defaultModel,
+          provider: config.providerId,
+          input: {
+            markdownChars,
+            markdownSha256: markdownSha,
+            timeoutMs: timeout,
+            maxLength,
+            ...traceMetadata,
+          },
+          output: JSON.stringify({
+            optimizedChars: optimized.length,
+            optimizedSha256: optimizedSha,
+            usedOriginal: true,
+            reason: "optimized_too_short",
+          }),
+          usage: result.usage,
+          startTime,
+          endTime,
+          level: "WARNING",
+          statusMessage: "optimized_too_short",
+        });
+      }
       return markdown;
     }
 
     console.log(`[optimize-format] Optimization complete, result length: ${optimized.length}`);
+    if (traceContext) {
+      const optimizedSha = sha256(optimized);
+      traceManager.logGeneration(traceContext, {
+        name: "optimize-format",
+        model: config.defaultModel,
+        provider: config.providerId,
+        input: {
+          markdownChars,
+          markdownSha256: markdownSha,
+          timeoutMs: timeout,
+          maxLength,
+          ...traceMetadata,
+        },
+        output: JSON.stringify({
+          optimizedChars: optimized.length,
+          optimizedSha256: optimizedSha,
+          usedOriginal: false,
+        }),
+        usage: result.usage,
+        startTime,
+        endTime,
+      });
+    }
     return optimized;
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error(`[optimize-format] Optimization failed: ${message}`);
+    if (traceContext) {
+      traceManager.logGeneration(traceContext, {
+        name: "optimize-format",
+        model: "unknown",
+        provider: "unknown",
+        input: {
+          markdownChars,
+          markdownSha256: markdownSha,
+          timeoutMs: timeout,
+          maxLength,
+          ...traceMetadata,
+        },
+        output: JSON.stringify({ error: message }),
+        level: "ERROR",
+        statusMessage: message,
+        startTime: new Date(),
+        endTime: new Date(),
+      });
+    }
     return markdown;
   }
 }

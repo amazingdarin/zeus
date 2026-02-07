@@ -30,7 +30,16 @@ export async function uploadFileAttachment(
   }
 
   const result = await response.json();
-  return result.data as AttachmentUploadResponse;
+  const data = result.data as Record<string, unknown> | null;
+  if (!data) {
+    throw new Error("Missing attachment data");
+  }
+  return {
+    ...(data as AttachmentUploadResponse),
+    assetId: typeof (data as { asset_id?: unknown }).asset_id === "string"
+      ? String((data as { asset_id?: unknown }).asset_id)
+      : undefined,
+  };
 }
 
 /**
@@ -57,7 +66,16 @@ export async function fetchUrlAttachment(
   }
 
   const result = await response.json();
-  return result.data as AttachmentUploadResponse;
+  const data = result.data as Record<string, unknown> | null;
+  if (!data) {
+    throw new Error("Missing attachment data");
+  }
+  return {
+    ...(data as AttachmentUploadResponse),
+    assetId: typeof (data as { asset_id?: unknown }).asset_id === "string"
+      ? String((data as { asset_id?: unknown }).asset_id)
+      : undefined,
+  };
 }
 
 /**

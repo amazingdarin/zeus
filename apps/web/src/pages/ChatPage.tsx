@@ -4,15 +4,15 @@
  * Full-screen chat interface using the shared useChatLogic hook.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { message, Tooltip } from "antd";
 import {
-  DeleteOutlined,
+  MenuUnfoldOutlined,
   SendOutlined,
   StopOutlined,
   RobotOutlined,
   UserOutlined,
   LoadingOutlined,
-  SettingOutlined,
   UpOutlined,
   DownOutlined,
   CloseCircleOutlined,
@@ -32,9 +32,118 @@ import MentionDropdown from "../components/MentionDropdown";
 import DraftPreviewModal from "../components/DraftPreviewModal";
 import SettingsModal from "../components/SettingsModal";
 import ToolConfirmDialog from "../components/ToolConfirmDialog";
+import SessionSidebar from "../components/SessionSidebar";
+import { useProjectContext } from "../context/ProjectContext";
+import {
+  listSessions,
+  createSession,
+  deleteSession as apiDeleteSession,
+  renameSession as apiRenameSession,
+  type ChatSessionInfo,
+} from "../api/chat-sessions";
 
 function ChatPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sessions, setSessions] = useState<ChatSessionInfo[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const prevIsGeneratingRef = useRef(false);
+
+  const { currentProject } = useProjectContext();
+  const chatProjectKey = currentProject?.key ?? "";
+
+  // Load sessions on mount / project change
+  const loadSessions = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    if (!chatProjectKey) { setSessions([]); setSessionsLoading(false); return; }
+    try {
+      if (!silent) setSessionsLoading(true);
+      const list = await listSessions(chatProjectKey);
+      // Ensure stable ordering even if the API contract changes
+      const sorted = [...list].sort((a, b) => {
+        const at = Date.parse(a.updatedAt);
+        const bt = Date.parse(b.updatedAt);
+        const aTime = Number.isFinite(at) ? at : 0;
+        const bTime = Number.isFinite(bt) ? bt : 0;
+        return bTime - aTime;
+      });
+      setSessions(sorted);
+      // Auto-select the most recent session, or create one
+      if (sorted.length > 0) {
+        if (!activeSessionId || !sorted.find((s) => s.id === activeSessionId)) {
+          setActiveSessionId(sorted[0].id);
+        }
+      } else {
+        const session = await createSession(chatProjectKey);
+        setSessions([session]);
+        setActiveSessionId(session.id);
+      }
+    } catch {
+      setSessions([]);
+    } finally {
+      if (!silent) setSessionsLoading(false);
+    }
+  }, [chatProjectKey, activeSessionId]);
+
+  useEffect(() => { loadSessions(); }, [chatProjectKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSelectSession = useCallback((id: string) => {
+    setActiveSessionId(id);
+  }, []);
+
+  const handleNewSessionFromDrawer = useCallback(async () => {
+    if (!chatProjectKey) return;
+    try {
+      const session = await createSession(chatProjectKey);
+      setSessions((prev) => [session, ...prev]);
+      setActiveSessionId(session.id);
+    } catch {
+      message.error("创建对话失败");
+    }
+  }, [chatProjectKey]);
+
+  const handleDeleteSession = useCallback(async (id: string) => {
+    if (!chatProjectKey) return;
+    try {
+      await apiDeleteSession(chatProjectKey, id);
+      setSessions((prev) => prev.filter((s) => s.id !== id));
+      if (activeSessionId === id) {
+        // Switch to next available or create new
+        setSessions((prev) => {
+          const remaining = prev.filter((s) => s.id !== id);
+          if (remaining.length > 0) {
+            setActiveSessionId(remaining[0].id);
+          } else {
+            // Will be handled by creating a new one
+            setActiveSessionId(null);
+          }
+          return remaining;
+        });
+      }
+    } catch {
+      message.error("删除对话失败");
+    }
+  }, [chatProjectKey, activeSessionId]);
+
+  const handleRenameSession = useCallback(async (id: string, title: string) => {
+    if (!chatProjectKey) return;
+    try {
+      const updated = await apiRenameSession(chatProjectKey, id, title);
+      setSessions((prev) => {
+        const next = prev.map((s) => (s.id === id ? updated : s));
+        return next.sort((a, b) => {
+          const at = Date.parse(a.updatedAt);
+          const bt = Date.parse(b.updatedAt);
+          const aTime = Number.isFinite(at) ? at : 0;
+          const bTime = Number.isFinite(bt) ? bt : 0;
+          return bTime - aTime;
+        });
+      });
+    } catch {
+      message.error("重命名失败");
+    }
+  }, [chatProjectKey]);
 
   const {
     messages,
@@ -63,6 +172,7 @@ function ChatPage() {
     handleSend,
     handleStop,
     handleClearHistory,
+    handleNewSession,
     handleInputChange,
     handleKeyDown,
     handleMentionSelect,
@@ -77,7 +187,26 @@ function ChatPage() {
     handleRejectTool,
     pendingTool,
     toggleSourcesExpanded,
-  } = useChatLogic({ autoScrollEnabled: true });
+  } = useChatLogic({
+    autoScrollEnabled: true,
+    sessionId: activeSessionId || undefined,
+    onSessionChange: (id) => {
+      setActiveSessionId(id);
+      loadSessions({ silent: true });
+    },
+  });
+
+  const activeSessionTitle =
+    sessions.find((s) => s.id === activeSessionId)?.title ?? "";
+
+  // After a response finishes generating, refresh the session list so ordering/title stay in sync.
+  useEffect(() => {
+    const prev = prevIsGeneratingRef.current;
+    prevIsGeneratingRef.current = isGenerating;
+    if (prev && !isGenerating) {
+      loadSessions({ silent: true });
+    }
+  }, [isGenerating, loadSessions]);
 
   // Focus input on mount
   useEffect(() => {
@@ -280,7 +409,7 @@ function ChatPage() {
   };
 
   return (
-    <div className="chat-page">
+    <div className="content-inner chat-page">
       {/* Draft Preview Modal */}
       {pendingDraft && (
         <DraftPreviewModal
@@ -305,49 +434,79 @@ function ChatPage() {
         onClose={() => setSettingsOpen(false)}
       />
 
-      {/* Header */}
-      <header className="chat-page-header">
-        <div className="chat-page-header-left">
-          <div className="chat-page-avatar">
-            <RobotOutlined />
+      {/* Body: Sidebar + Main */}
+      <div className="chat-page-body">
+        {/* Session Sidebar */}
+        <div
+          className={`chat-page-sidebar${sidebarOpen ? " is-open" : " is-closed"}`}
+        >
+          <div className="chat-page-sidebar-open" aria-hidden={!sidebarOpen}>
+            <SessionSidebar
+              sessions={sessions}
+              activeId={activeSessionId}
+              loading={sessionsLoading}
+              open={sidebarOpen}
+              onToggleOpen={() => setSidebarOpen((v) => !v)}
+              onSelect={handleSelectSession}
+              onNew={handleNewSessionFromDrawer}
+              onDelete={handleDeleteSession}
+              onRename={handleRenameSession}
+            />
           </div>
-          <div className="chat-page-title-group">
-            <span className="chat-page-title">AI 助手</span>
-            {llmConfig ? (
-              <span className="chat-page-model">
-                {llmConfig.displayName} · {llmConfig.defaultModel}
-              </span>
-            ) : (
-              <span className="chat-page-model chat-page-model-warning">
-                未配置模型
-              </span>
-            )}
+
+          <div className="chat-page-sidebar-collapsed" aria-hidden={sidebarOpen}>
+            <div className="session-sidebar-collapsed">
+              <Tooltip title="显示对话记录" placement="right">
+                <button
+                  type="button"
+                  className="session-sidebar-toggle-btn"
+                  onClick={() => setSidebarOpen(true)}
+                  aria-label="显示对话记录"
+                >
+                  <MenuUnfoldOutlined />
+                </button>
+              </Tooltip>
+            </div>
           </div>
         </div>
-        <div className="chat-page-header-actions">
-          <button
-            type="button"
-            className="chat-page-header-btn"
-            onClick={() => setSettingsOpen(true)}
-            title="设置"
-          >
-            <SettingOutlined />
-          </button>
-          <button
-            type="button"
-            className="chat-page-header-btn"
-            onClick={handleClearHistory}
-            title="清空对话"
-          >
-            <DeleteOutlined />
-          </button>
-        </div>
-        {isGenerating && (
-          <span className="chat-page-status">
-            <LoadingOutlined spin /> 生成中...
-          </span>
-        )}
-      </header>
+
+        {/* Main Chat Area */}
+        <div className="chat-page-main">
+          {/* Header (match document page style) */}
+          <header className="chat-page-header kb-main-header">
+            <div className="chat-page-header-left">
+              <div className="chat-page-title">
+                <span className="chat-page-title-text">AI 助手</span>
+                {activeSessionTitle ? (
+                  <>
+                    <span className="chat-page-title-sep" aria-hidden="true">
+                      ·
+                    </span>
+                    <span className="chat-page-session-title" title={activeSessionTitle}>
+                      {activeSessionTitle}
+                    </span>
+                  </>
+                ) : null}
+              </div>
+              {llmConfig ? (
+                <span className="chat-page-model">
+                  {llmConfig.displayName} · {llmConfig.defaultModel}
+                </span>
+              ) : (
+                <span className="chat-page-model chat-page-model-warning">
+                  未配置模型
+                </span>
+              )}
+            </div>
+
+            <div className="kb-header-menu chat-page-header-actions">
+              {isGenerating ? (
+                <span className="chat-page-status">
+                  <LoadingOutlined spin /> 生成中...
+                </span>
+              ) : null}
+            </div>
+          </header>
 
       {/* Messages */}
       <div className="chat-page-messages" ref={messagesRef}>
@@ -567,6 +726,8 @@ function ChatPage() {
           )}
         </div>
       </div>
+        </div>{/* /chat-page-main */}
+      </div>{/* /chat-page-body */}
     </div>
   );
 }

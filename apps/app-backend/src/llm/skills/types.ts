@@ -83,6 +83,23 @@ export type SkillResult =
   | { type: "draft"; draft: DocumentDraft }
   | { type: "error"; message: string };
 
+export type DraftValidationPolicy = "protocol_only" | "additive_strict";
+
+export type DraftValidationIssue = {
+  severity: "error" | "warning";
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+};
+
+export type DraftValidation = {
+  passed: boolean;
+  attempt: number;
+  policy: DraftValidationPolicy;
+  issues: DraftValidationIssue[];
+  feedback?: string;
+};
+
 /**
  * Document draft for pending changes
  */
@@ -95,6 +112,7 @@ export type DocumentDraft = {
   title: string;
   originalContent: JSONContent | null; // null for new documents
   proposedContent: JSONContent;
+  validation?: DraftValidation;
   status: "pending" | "applied" | "rejected";
   createdAt: number;
   expiresAt: number;

@@ -218,6 +218,10 @@ type UseChatLogicOptions = {
   autoScrollEnabled?: boolean;
   deepSearchEnabled?: boolean;
   onDeepSearchChange?: (enabled: boolean) => void;
+  /** Externally managed session ID (takes priority over internal state) */
+  sessionId?: string;
+  /** Callback when a new session is created internally */
+  onSessionChange?: (id: string) => void;
 };
 
 export type UseChatLogicReturn = {
@@ -259,6 +263,8 @@ export type UseChatLogicReturn = {
   handleSend: () => Promise<void>;
   handleStop: () => void;
   handleClearHistory: () => Promise<void>;
+  handleNewSession: () => Promise<void>;
+  sessionId: string;
   handleInputChange: (e: ChangeEvent<HTMLTextAreaElement>) => void;
   handleKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   handleMentionSelect: (item: MentionItem) => void;
@@ -281,7 +287,13 @@ export type UseChatLogicReturn = {
 };
 
 export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicReturn {
-  const { autoScrollEnabled = true, deepSearchEnabled: externalDeepSearch, onDeepSearchChange } = options;
+  const {
+    autoScrollEnabled = true,
+    deepSearchEnabled: externalDeepSearch,
+    onDeepSearchChange,
+    sessionId: externalSessionId,
+    onSessionChange,
+  } = options;
   const { currentProject } = useProjectContext();
   const projectKey = currentProject?.key ?? "";
   const navigate = useNavigate();
@@ -315,7 +327,40 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   }, [onDeepSearchChange]);
   const [assistantBuffer, setAssistantBuffer] = useState("");
   const [llmConfig, setLlmConfig] = useState<ProviderConfig | null>(null);
-  const [sessionId, setSessionId] = useState<string>(() => `session-${createId()}`);
+  const [internalSessionId, setInternalSessionId] = useState<string>(() => `session-${createId()}`);
+
+  // Use external sessionId if provided, otherwise internal
+  const sessionId = externalSessionId || internalSessionId;
+  const setSessionId = useCallback((id: string) => {
+    setInternalSessionId(id);
+    onSessionChange?.(id);
+  }, [onSessionChange]);
+
+  // Load history when sessionId changes (from external switching)
+  useEffect(() => {
+    if (!projectKey || !externalSessionId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getSessionMessages } = await import("../api/chat-sessions");
+        const msgs = await getSessionMessages(projectKey, externalSessionId);
+        if (cancelled) return;
+        setMessages(
+          msgs.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            sources: m.sources,
+            artifacts: m.artifacts,
+            timestamp: new Date(m.createdAt).getTime(),
+          })),
+        );
+      } catch {
+        if (!cancelled) setMessages([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectKey, externalSessionId]);
 
   // @ Mention state
   const [mentions, setMentions] = useState<MentionItem[]>([]);
@@ -341,9 +386,14 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   const [selectedCommand, setSelectedCommand] = useState<SlashCommand | null>(null);
 
   // Command history (for arrow up/down navigation)
+  const MAX_HISTORY = 50;
+  const historyKey = projectKey && sessionId
+    ? `zeus-cmd-history-${projectKey}-${sessionId}`
+    : "";
   const [commandHistory, setCommandHistory] = useState<CommandHistoryEntry[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const currentInputRef = useRef<CommandHistoryEntry | null>(null);
+  const [loadedHistoryKey, setLoadedHistoryKey] = useState<string>("");
 
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -418,33 +468,101 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     loadEnabledSkills();
   }, [projectKey]);
 
-  // Load command history from localStorage
-  const MAX_HISTORY = 50;
+  // Load command history for the current session from localStorage
   useEffect(() => {
-    if (!projectKey) return;
-    const historyKey = `zeus-cmd-history-${projectKey}`;
+    setHistoryIndex(-1);
+    currentInputRef.current = null;
+    setLoadedHistoryKey("");
+
+    if (!historyKey) {
+      setCommandHistory([]);
+      return;
+    }
+
     try {
       const saved = localStorage.getItem(historyKey);
-      if (saved) {
-        const parsed = JSON.parse(saved) as CommandHistoryEntry[];
-        setCommandHistory(parsed);
+      if (!saved) {
+        setCommandHistory([]);
+        return;
       }
+
+      const parsed = JSON.parse(saved) as unknown;
+      if (!Array.isArray(parsed)) {
+        setCommandHistory([]);
+        return;
+      }
+
+      const normalized: CommandHistoryEntry[] = [];
+      for (const item of parsed) {
+        if (!item || typeof item !== "object") continue;
+        const record = item as Record<string, unknown>;
+        if (typeof record.input !== "string") continue;
+
+        const mentionsRaw = Array.isArray(record.mentions) ? record.mentions : [];
+        const safeMentions: MentionItem[] = [];
+        for (const m of mentionsRaw) {
+          if (!m || typeof m !== "object") continue;
+          const mr = m as Record<string, unknown>;
+          const docId = typeof mr.docId === "string" ? mr.docId : "";
+          if (!docId) continue;
+          const title = typeof mr.title === "string" ? mr.title : "";
+          const titlePath = typeof mr.titlePath === "string" ? mr.titlePath : title;
+          safeMentions.push({
+            docId,
+            title,
+            titlePath,
+            includeChildren: Boolean(mr.includeChildren),
+          });
+        }
+
+        let safeCommand: SlashCommand | null = null;
+        if (record.command && typeof record.command === "object") {
+          const cr = record.command as Record<string, unknown>;
+          const cmd = typeof cr.command === "string" ? cr.command : "";
+          if (cmd.startsWith("/")) {
+            safeCommand = {
+              command: cmd,
+              name: typeof cr.name === "string" ? cr.name : cmd.replace(/^\//, ""),
+              description: typeof cr.description === "string" ? cr.description : cmd,
+              category: typeof cr.category === "string" ? cr.category : "system",
+              icon: typeof cr.icon === "string" ? cr.icon : undefined,
+              requiresDocScope: Boolean(cr.requiresDocScope),
+            };
+          }
+        }
+
+        normalized.push({
+          input: record.input,
+          command: safeCommand,
+          mentions: safeMentions,
+          timestamp: typeof record.timestamp === "number" ? record.timestamp : Date.now(),
+        });
+      }
+
+      setCommandHistory(normalized.slice(-MAX_HISTORY));
     } catch {
       // Ignore parse errors
+      setCommandHistory([]);
+    } finally {
+      setLoadedHistoryKey(historyKey);
     }
-  }, [projectKey]);
+  }, [historyKey]);
 
-  // Save command history to localStorage
+  // Save command history for the current session to localStorage
   useEffect(() => {
-    if (!projectKey || commandHistory.length === 0) return;
-    const historyKey = `zeus-cmd-history-${projectKey}`;
+    if (!historyKey) return;
+    if (loadedHistoryKey !== historyKey) return;
     try {
       const toSave = commandHistory.slice(-MAX_HISTORY);
-      localStorage.setItem(historyKey, JSON.stringify(toSave));
+      if (toSave.length === 0) {
+        localStorage.removeItem(historyKey);
+      } else {
+        localStorage.setItem(historyKey, JSON.stringify(toSave));
+      }
     } catch {
       // Ignore storage errors
     }
-  }, [projectKey, commandHistory]);
+  }, [historyKey, loadedHistoryKey, commandHistory]);
 
   // Auto scroll to bottom
   useEffect(() => {
@@ -571,10 +689,10 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     const historyEntry: CommandHistoryEntry = {
       input: input,
       command: selectedCommand,
-      mentions: [...mentions],
+      mentions: [...currentMentions],
       timestamp: Date.now(),
     };
-    setCommandHistory((prev) => [...prev, historyEntry]);
+    setCommandHistory((prev) => [...prev, historyEntry].slice(-MAX_HISTORY));
     setHistoryIndex(-1);
     currentInputRef.current = null;
 
@@ -615,6 +733,18 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
           }))
         : undefined;
 
+      const attachmentAssets = currentAttachments.flatMap((a) => {
+        if (a.status !== "ready" || !a.assetId) return [];
+        if (a.type !== "file" && a.type !== "image") return [];
+        return [{
+          assetId: a.assetId,
+          name: a.name,
+          mimeType: a.mimeType,
+          size: a.size,
+          type: a.type,
+        }];
+      });
+
       // Combine message with attachments context
       const fullMessage = attachmentsContext
         ? `${message}\n\n---\n附件内容:\n${attachmentsContext}`
@@ -623,6 +753,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       const runId = await createChatRun(projectKey, fullMessage, {
         sessionId,
         documentScope,
+        ...(attachmentAssets.length > 0 ? { attachments: attachmentAssets } : {}),
         deepSearch: deepSearchEnabled,
       });
       currentRunIdRef.current = runId;
@@ -757,6 +888,20 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
 
   const handleClearHistory = useCallback(async () => {
     if (!projectKey || !sessionId) return;
+
+    // Clear per-session command history (both in-memory and persisted).
+    try {
+      if (historyKey) {
+        localStorage.removeItem(historyKey);
+      }
+    } catch {
+      // Ignore storage errors
+    }
+    setLoadedHistoryKey("");
+    setCommandHistory([]);
+    setHistoryIndex(-1);
+    currentInputRef.current = null;
+
     try {
       await clearChatSession(projectKey, sessionId);
       setMessages([]);
@@ -765,7 +910,29 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       setMessages([]);
       setSessionId(`session-${createId()}`);
     }
-  }, [projectKey, sessionId]);
+  }, [projectKey, sessionId, setSessionId, historyKey]);
+
+  const handleNewSession = useCallback(async () => {
+    if (!projectKey) return;
+
+    // Reset command history navigation state; do NOT delete persisted history for the old session.
+    // Setting loadedHistoryKey first prevents the save effect from removing the old key.
+    setLoadedHistoryKey("");
+    setCommandHistory([]);
+    setHistoryIndex(-1);
+    currentInputRef.current = null;
+
+    try {
+      const { createSession } = await import("../api/chat-sessions");
+      const session = await createSession(projectKey);
+      setMessages([]);
+      setSessionId(session.id);
+    } catch {
+      // Fallback to local-only new session
+      setMessages([]);
+      setSessionId(`session-${createId()}`);
+    }
+  }, [projectKey, setSessionId]);
 
   /**
    * Stop the current generation
@@ -1115,6 +1282,8 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     handleSend,
     handleStop,
     handleClearHistory,
+    handleNewSession,
+    sessionId,
     handleInputChange,
     handleKeyDown,
     handleMentionSelect,

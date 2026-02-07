@@ -86,6 +86,8 @@ function buildCommandArgs(
       return { url: trimmed };
     case "doc-import-git":
       return { repo_url: trimmed };
+    case "doc-smart-import":
+      return { asset_id: trimmed };
     case "doc-convert":
       return { content: trimmed, from: "txt", to: "markdown" };
     default:

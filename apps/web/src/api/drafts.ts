@@ -18,6 +18,18 @@ export type DocumentDraft = {
   title: string;
   originalContent: JSONContent | null;
   proposedContent: JSONContent;
+  validation?: {
+    passed: boolean;
+    attempt: number;
+    policy: "protocol_only" | "additive_strict";
+    issues: Array<{
+      severity: "error" | "warning";
+      code: string;
+      message: string;
+      details?: Record<string, unknown>;
+    }>;
+    feedback?: string;
+  };
   status: "pending" | "applied" | "rejected";
   createdAt: number;
   expiresAt: number;

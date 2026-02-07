@@ -6,13 +6,14 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Switch, Spin, message, Collapse, Tooltip } from "antd";
-import { QuestionCircleOutlined, LockOutlined } from "@ant-design/icons";
+import { QuestionCircleOutlined, LockOutlined, ThunderboltOutlined } from "@ant-design/icons";
 import {
   listProjectSkills,
   updateProjectSkillEnabled,
   batchUpdateProjectSkillEnabled,
   type ProjectSkillCategoryInfo,
 } from "../api/skills";
+import { getChatSettings, updateChatSettings } from "../api/chat-settings";
 import { useProjectContext } from "../context/ProjectContext";
 
 function SkillsPanel() {
@@ -23,6 +24,30 @@ function SkillsPanel() {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState<string | null>(null);
   const [updatingCategory, setUpdatingCategory] = useState<string | null>(null);
+
+  // FullAccess global toggle
+  const [fullAccess, setFullAccess] = useState(false);
+  const [fullAccessLoading, setFullAccessLoading] = useState(false);
+
+  // Load global chat settings
+  useEffect(() => {
+    getChatSettings()
+      .then((s) => setFullAccess(s.fullAccess))
+      .catch(() => { /* ignore, defaults to false */ });
+  }, []);
+
+  const handleFullAccessToggle = async (checked: boolean) => {
+    try {
+      setFullAccessLoading(true);
+      const updated = await updateChatSettings({ fullAccess: checked });
+      setFullAccess(updated.fullAccess);
+      message.success(checked ? "全权模式已开启" : "全权模式已关闭");
+    } catch {
+      message.error("更新全权模式失败");
+    } finally {
+      setFullAccessLoading(false);
+    }
+  };
 
   const loadSkills = useCallback(async () => {
     if (!projectKey) {
@@ -143,6 +168,22 @@ function SkillsPanel() {
         <p className="skills-panel-description">
           当前项目：{currentProject?.name || projectKey}。禁用的技能不会在对话中被触发，也不会出现在 / 命令列表。
         </p>
+      </div>
+
+      {/* FullAccess global toggle */}
+      <div className="skills-full-access">
+        <div className="skills-full-access-info">
+          <ThunderboltOutlined className="skills-full-access-icon" />
+          <div>
+            <div className="skills-full-access-title">全权模式 (Full Access)</div>
+            <div className="skills-full-access-desc">开启后 AI 执行文档操作无需人工确认</div>
+          </div>
+        </div>
+        <Switch
+          checked={fullAccess}
+          loading={fullAccessLoading}
+          onChange={handleFullAccessToggle}
+        />
       </div>
 
       {categories.length === 0 ? (

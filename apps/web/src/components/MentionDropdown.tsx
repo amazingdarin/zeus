@@ -48,16 +48,15 @@ function MentionDropdown({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
   const [loading, setLoading] = useState(false);
-  // Navigation path: empty = search all, ["root"] = root level, [parentId] = children of parent
+  // Navigation path: empty = root level, [parentId...] = children of that parent
   const [navPath, setNavPath] = useState<NavPathItem[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Get current parentId from navigation path
   const currentParentId = useMemo(() => {
-    if (navPath.length === 0) return undefined; // Search all documents
-    const lastItem = navPath[navPath.length - 1];
-    return lastItem.id; // "root" for root level, or doc id
+    if (navPath.length === 0) return "root";
+    return navPath[navPath.length - 1].id;
   }, [navPath]);
 
   // Reset navigation path when visibility changes
@@ -105,33 +104,26 @@ function MentionDropdown({
   }, [projectKey, query, visible, currentParentId]);
 
   // Build display items: for documents with children, show two options
-  // Sort: documents with children first, then documents without children
+  // Order: directories (hasChildren) first, then documents; each group preserves document order.
   const displayItems = useMemo<DisplayItem[]>(() => {
-    // Sort suggestions: hasChildren = true first
-    const sortedSuggestions = [...suggestions].sort((a, b) => {
-      if (a.hasChildren === b.hasChildren) return 0;
-      return a.hasChildren ? -1 : 1;
-    });
+    const dirs: DocumentSuggestion[] = [];
+    const files: DocumentSuggestion[] = [];
+    for (const item of suggestions) {
+      if (item.hasChildren) {
+        dirs.push(item);
+      } else {
+        files.push(item);
+      }
+    }
 
     const items: DisplayItem[] = [];
-    for (const item of sortedSuggestions) {
-      if (item.hasChildren) {
-        // Show two options for folders
-        items.push({
-          ...item,
-          includeChildren: false,  // Document only
-        });
-        items.push({
-          ...item,
-          includeChildren: true,   // Document + children
-        });
-      } else {
-        // Single option for files
-        items.push({
-          ...item,
-          includeChildren: false,
-        });
-      }
+    for (const item of dirs) {
+      // Show two options for directories; directory option first.
+      items.push({ ...item, includeChildren: true });  // Document + children
+      items.push({ ...item, includeChildren: false }); // Document only
+    }
+    for (const item of files) {
+      items.push({ ...item, includeChildren: false });
     }
     return items;
   }, [suggestions]);
@@ -166,15 +158,10 @@ function MentionDropdown({
 
   // Navigate to root level (show only root documents)
   const navigateToRoot = useCallback(() => {
-    if (navPath.length === 0) {
-      // Currently at "search all", go to root level
-      setNavPath([{ id: "root", title: "根目录" }]);
-    } else {
-      setNavPath([]);
-    }
+    setNavPath([]);
     setSelectedIndex(0);
     setCurrentPage(0);
-  }, [navPath.length]);
+  }, []);
 
   // Page navigation
   const goToNextPage = useCallback(() => {
@@ -334,7 +321,7 @@ function MentionDropdown({
           <button
             className="mention-dropdown-breadcrumb-item mention-dropdown-breadcrumb-home"
             onClick={navigateToRoot}
-            title="返回全局搜索"
+            title="返回根目录"
           >
             <HomeOutlined />
           </button>
@@ -352,7 +339,7 @@ function MentionDropdown({
                   setCurrentPage(0);
                 }}
               >
-                {item.id === "root" ? "根目录" : item.title}
+                {item.title}
               </button>
             </span>
           ))}
@@ -371,7 +358,7 @@ function MentionDropdown({
       )}
       {!loading && suggestions.length === 0 && (
         <div className="mention-dropdown-empty">
-          {query ? "无匹配文档" : navPath.length > 0 ? "无子文档" : "输入文档名称搜索"}
+          {query ? "无匹配文档" : navPath.length > 0 ? "无子文档" : "暂无文档"}
         </div>
       )}
       {!loading && visibleItems.length > 0 && (
@@ -393,7 +380,7 @@ function MentionDropdown({
                 {item.title}
                 {item.includeChildren && "/"}
               </span>
-              {/* Show path only when in global search mode */}
+              {/* Show path only at root level (breadcrumb already shows context in sub-levels). */}
               {navPath.length === 0 && item.titlePath !== item.title && (
                 <span className="mention-dropdown-path">
                   {item.titlePath}

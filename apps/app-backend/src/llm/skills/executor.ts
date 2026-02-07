@@ -24,10 +24,12 @@ import { validateTiptapContent, fixCommonIssues } from "./validator.js";
 import { tiptapJsonToMarkdown, markdownToTiptapJson } from "../../utils/markdown.js";
 import { skillConfigStore } from "./skill-config-store.js";
 import { ensureBlockIds } from "../../utils/block-id.js";
+import { extractTiptapDoc } from "../../utils/tiptap-content.js";
 import { traceManager, type TraceContext } from "../../observability/index.js";
 import { fetchUrl } from "../../services/fetch-url.js";
 import { importGit } from "../../services/import-git.js";
 import { convertDocument } from "../../services/convert.js";
+import { importAssetAsDocument } from "../../services/smart-import.js";
 import { knowledgeSearch } from "../../knowledge/search.js";
 import { notifyDocumentMoved } from "../../knowledge/tree-sync.js";
 import {
@@ -202,6 +204,17 @@ export function detectSkillIntent(
     };
   }
 
+  if (trimmed.startsWith("/doc-smart-import")) {
+    const rest = trimmed.slice("/doc-smart-import".length).trim();
+    return {
+      skill: "doc-smart-import",
+      command: "/doc-smart-import",
+      args: { asset_id: rest },
+      rawMessage: message,
+      docIds,
+    };
+  }
+
   if (trimmed.startsWith("/doc-convert")) {
     const rest = trimmed.slice("/doc-convert".length).trim();
     return {
@@ -319,7 +332,10 @@ export async function* executeSkillWithStream(
         yield* executeDocFetchUrl(userId, projectKey, intent);
         break;
       case "doc-import-git":
-        yield* executeDocImportGit(userId, projectKey, intent);
+        yield* executeDocImportGit(userId, projectKey, intent, traceContext);
+        break;
+      case "doc-smart-import":
+        yield* executeDocSmartImport(userId, projectKey, intent, traceContext);
         break;
       case "doc-convert":
         yield* executeDocConvert(userId, projectKey, intent);
@@ -359,7 +375,9 @@ async function* executeDocRead(
     const doc = await documentStore.get(userId, projectKey, docId);
     
     // Convert to markdown for display
-    const markdown = tiptapJsonToMarkdown(doc.body as JSONContent);
+    const markdown = doc.body.type === "markdown" && typeof doc.body.content === "string"
+      ? doc.body.content
+      : tiptapJsonToMarkdown(extractTiptapDoc(doc.body));
     
     yield {
       type: "delta",
@@ -546,7 +564,9 @@ async function* executeDocEdit(
   try {
     // Get original document
     const doc = await documentStore.get(userId, projectKey, docId);
-    const originalContent = doc.body as JSONContent;
+    const originalContent = doc.body.type === "markdown" && typeof doc.body.content === "string"
+      ? markdownToTiptapJson(doc.body.content)
+      : extractTiptapDoc(doc.body);
     const originalMarkdown = tiptapJsonToMarkdown(originalContent);
 
     yield { type: "thinking", content: "正在生成修改内容..." };
@@ -602,12 +622,6 @@ ${originalMarkdown}
       yield { type: "error", error: parseError };
       return;
     }
-
-    // Debug logging
-    console.log("[doc-edit] originalContent type:", originalContent?.type);
-    console.log("[doc-edit] originalContent has content:", Array.isArray(originalContent?.content));
-    console.log("[doc-edit] proposedContent type:", proposedContent?.type);
-    console.log("[doc-edit] proposedContent has content:", Array.isArray((proposedContent as Record<string, unknown>)?.content));
 
     // Create draft
     const draft = draftService.create({
@@ -778,7 +792,7 @@ async function* executeDocSummary(
     const doc = await documentStore.get(userId, projectKey, docId);
     
     // Extract the actual document content (handle nested structure)
-    const originalContent = extractDocContent(doc.body as JSONContent);
+    const originalContent = extractDocContent(doc.body);
 
     // 3. Check if already has a summary block at top
     const existingSummary = checkExistingSummary(originalContent);
@@ -854,45 +868,15 @@ async function* executeDocSummary(
  * Extract the actual document content from potentially nested body structure
  * Handles both { type: "doc", content: [...] } and { type: "tiptap", content: { type: "doc", content: [...] } }
  */
-function extractDocContent(body: JSONContent): JSONContent {
-  console.log("[extractDocContent] body.type:", body?.type);
-  
-  // If already a doc type, return as is
-  if (body.type === "doc" && Array.isArray(body.content)) {
-    console.log("[extractDocContent] Already doc type, content length:", body.content.length);
-    return body;
-  }
-  
-  // Handle tiptap wrapper: { type: "tiptap", content: { type: "doc", content: [...] } }
-  if (body.type === "tiptap" && body.content) {
-    const inner = body.content as JSONContent;
-    console.log("[extractDocContent] Tiptap wrapper, inner.type:", inner?.type);
-    
-    if (inner.type === "doc" && Array.isArray(inner.content)) {
-      console.log("[extractDocContent] Extracted doc from tiptap, content length:", inner.content.length);
-      return inner;
-    }
-    // If content is an array (directly blocks), wrap it
-    if (Array.isArray(inner)) {
-      console.log("[extractDocContent] Content is array, wrapping as doc, length:", inner.length);
-      return { type: "doc", content: inner };
-    }
-    // If content is a single block object, wrap it in array
-    if (inner && typeof inner === "object" && inner.type) {
-      console.log("[extractDocContent] Content is single block, wrapping:", inner.type);
-      return { type: "doc", content: [inner] };
+function extractDocContent(body: unknown): JSONContent {
+  if (body && typeof body === "object") {
+    const raw = body as { type?: unknown; content?: unknown };
+    if (raw.type === "markdown" && typeof raw.content === "string") {
+      return markdownToTiptapJson(raw.content);
     }
   }
-  
-  // Fallback: if body has content array, wrap it as doc
-  if (Array.isArray(body.content)) {
-    console.log("[extractDocContent] Fallback: body.content is array, length:", body.content.length);
-    return { type: "doc", content: body.content as JSONContent[] };
-  }
-  
-  // Last resort: return empty doc
-  console.warn("[extractDocContent] Unable to extract content from body:", JSON.stringify(body).slice(0, 200));
-  return { type: "doc", content: [] };
+
+  return extractTiptapDoc(body);
 }
 
 /**
@@ -1402,6 +1386,7 @@ async function* executeDocImportGit(
   userId: string,
   projectKey: string,
   intent: SkillIntent,
+  traceContext?: TraceContext,
 ): AsyncGenerator<SkillStreamChunk> {
   const repoUrl = String(intent.args.repo_url || "").trim();
   const branch = String(intent.args.branch || "main").trim() || "main";
@@ -1418,7 +1403,7 @@ async function* executeDocImportGit(
       repo_url: repoUrl,
       branch,
       parent_id: parentId,
-    });
+    }, traceContext);
     yield {
       type: "done",
       message:
@@ -1429,6 +1414,55 @@ async function* executeDocImportGit(
     yield {
       type: "error",
       error: `Git 导入失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Execute doc-smart-import skill
+ */
+async function* executeDocSmartImport(
+  userId: string,
+  projectKey: string,
+  intent: SkillIntent,
+  traceContext?: TraceContext,
+): AsyncGenerator<SkillStreamChunk> {
+  const assetId = String(intent.args.asset_id || "").trim();
+  const parentId = String(intent.args.parent_id || "root").trim() || "root";
+  const title = typeof intent.args.title === "string" && intent.args.title.trim()
+    ? intent.args.title.trim()
+    : undefined;
+  const enableFormatOptimize = intent.args.enable_format_optimize === true;
+
+  if (!assetId) {
+    yield { type: "error", error: "asset_id 参数不能为空" };
+    return;
+  }
+
+  yield { type: "thinking", content: "正在解析附件并导入为文档..." };
+  try {
+    const result = await importAssetAsDocument(userId, projectKey, {
+      assetId,
+      parentId,
+      title,
+      smartImport: true,
+      smartImportTypes: ["markdown", "word", "pdf", "image"],
+      enableFormatOptimize,
+      traceContext,
+      traceMetadata: {
+        source: "chat-skill",
+        skill: "doc-smart-import",
+      },
+    });
+
+    yield {
+      type: "done",
+      message: `附件已导入为文档「${result.title}」（id: ${result.docId}，mode: ${result.mode}）`,
+    };
+  } catch (err) {
+    yield {
+      type: "error",
+      error: `附件导入失败: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 }

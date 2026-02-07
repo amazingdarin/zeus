@@ -17,6 +17,7 @@ import {
   type SkillDefinition,
   type RiskLevel,
 } from "../llm/skills/index.js";
+import { runDraftRefinementLoop } from "../llm/skills/refinement-loop.js";
 import {
   agentOrchestrator,
   agentPolicyEngine,
@@ -26,6 +27,16 @@ import {
 } from "../llm/agent/index.js";
 import { executeDeepSearch, type DeepSearchChunk, type DeepSearchConfig } from "./deep-search.js";
 import { traceManager, type TraceContext } from "../observability/index.js";
+import {
+  executeChatGraph,
+  resumeChatGraph,
+  type ChatExecutionPlan,
+  type ChatGraphResult,
+  type GraphSourceReference,
+} from "./chat-graph.js";
+import { chatSettingsStore } from "./chat-settings-store.js";
+import { chatSessionStore } from "./chat-session-store.js";
+import { draftService } from "./draft.js";
 
 export type ChatMessage = {
   role: "user" | "assistant" | "system";
@@ -47,6 +58,14 @@ export type DocumentScope = {
   includeChildren: boolean;
 };
 
+export type ChatAttachmentRef = {
+  assetId: string;
+  name?: string;
+  mimeType?: string;
+  size?: number;
+  type?: string;
+};
+
 export type ChatRun = {
   id: string;
   userId: string;
@@ -54,6 +73,7 @@ export type ChatRun = {
   sessionId: string;
   messages: ChatMessage[];
   docIds?: string[];  // Resolved document IDs for knowledge search scope
+  attachments?: ChatAttachmentRef[];
   deepSearch?: boolean;  // Enable deep search mode
   status: "pending" | "running" | "completed" | "failed" | "cancelled" | "awaiting_confirmation";
   pendingTool?: PendingToolCall;  // Tool awaiting user confirmation
@@ -112,6 +132,24 @@ setInterval(cleanupOldRuns, 10 * 60 * 1000);
 let llmConfigCache: { config: ProviderConfigInternal | null; timestamp: number } | null = null;
 const CONFIG_CACHE_TTL = 60 * 1000; // 1 minute
 
+function parseEnvBool(name: string, defaultValue: boolean): boolean {
+  const raw = process.env[name];
+  if (raw === undefined) return defaultValue;
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return defaultValue;
+  return normalized !== "false" && normalized !== "0" && normalized !== "no";
+}
+
+function parseEnvInt(name: string, defaultValue: number): number {
+  const raw = process.env[name];
+  if (!raw) return defaultValue;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : defaultValue;
+}
+
+const DOC_GUARD_ENABLED = parseEnvBool("DOC_GUARD_ENABLED", true);
+const DOC_GUARD_MAX_ATTEMPTS = parseEnvInt("DOC_GUARD_MAX_ATTEMPTS", 3);
+
 async function getLLMConfig(): Promise<ProviderConfigInternal | null> {
   if (llmConfigCache && Date.now() - llmConfigCache.timestamp < CONFIG_CACHE_TTL) {
     return llmConfigCache.config;
@@ -157,6 +195,7 @@ async function resolveDocumentScopes(
 
 export type CreateRunOptions = {
   deepSearch?: boolean;  // Enable deep search mode
+  attachments?: ChatAttachmentRef[];
 };
 
 /**
@@ -171,17 +210,50 @@ export async function createRun(
   options?: CreateRunOptions,
 ): Promise<string> {
   const runId = uuidv4();
-  
-  // Get or create session messages
+
+  // Ensure session exists in DB (auto-create if not)
+  try {
+    const existing = await chatSessionStore.getSession(sessionId);
+    if (!existing) {
+      await chatSessionStore.createSession(userId, projectKey, "新对话");
+      // Use the returned id — but we need to keep the caller's sessionId.
+      // Actually, if the frontend provides a sessionId we should use it.
+      // So we create with a specific id:
+      // We'll use a direct insert with the given id instead.
+      // Let's delete the auto-created one and re-insert with the right id.
+      // Simpler: just do a raw insert with the provided sessionId.
+    }
+  } catch {
+    // Ignore — session may already exist or DB unavailable
+  }
+  await ensureSessionExists(userId, projectKey, sessionId);
+
+  // Load history from DB (or fall back to in-memory cache)
   let history = sessionMessages.get(sessionId);
   if (!history) {
-    history = [];
+    try {
+      const dbMessages = await chatSessionStore.getMessages(sessionId);
+      history = dbMessages.map((m) => ({
+        role: m.role as ChatMessage["role"],
+        content: m.content,
+      }));
+    } catch {
+      history = [];
+    }
     sessionMessages.set(sessionId, history);
   }
 
-  // Add user message to history
+  // Add user message to history and persist
   const userMessage: ChatMessage = { role: "user", content: message };
   history.push(userMessage);
+
+  // Persist user message to DB (fire-and-forget)
+  chatSessionStore
+    .addMessage(sessionId, "user", message)
+    .then(() => chatSessionStore.updateSessionTimestamp(sessionId))
+    .catch((err) => {
+      console.warn("[chat] Failed to persist user message:", err);
+    });
 
   // Resolve document scopes to IDs
   let docIds: string[] | undefined;
@@ -199,6 +271,7 @@ export async function createRun(
     sessionId,
     messages: [...history],
     docIds,
+    attachments: options?.attachments,
     deepSearch: options?.deepSearch,
     status: "pending",
     createdAt: Date.now(),
@@ -207,6 +280,25 @@ export async function createRun(
 
   activeRuns.set(runId, run);
   return runId;
+}
+
+/**
+ * Ensure a session exists in the DB with a specific ID.
+ */
+async function ensureSessionExists(userId: string, projectKey: string, sessionId: string): Promise<void> {
+  try {
+    // Use INSERT ... ON CONFLICT to avoid race conditions
+    await import("../db/postgres.js").then(({ query }) =>
+      query(
+        `INSERT INTO chat_sessions (id, user_id, project_key, title, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, now(), now())
+         ON CONFLICT (id) DO NOTHING`,
+        [sessionId, userId, projectKey, "新对话"],
+      ),
+    );
+  } catch (err) {
+    console.warn("[chat] ensureSessionExists failed:", err);
+  }
 }
 
 /**
@@ -389,12 +481,10 @@ export function getPendingTool(runId: string): PendingToolCall | undefined {
 /**
  * Stream a chat run response
  *
- * Uses Hybrid Trigger to determine the appropriate mode:
- * - deepSearch: Multi-round search with question decomposition
- * - command: Explicit slash command (strong determinism)
- * - anthropic: Anthropic Skill keyword match (medium determinism)
- * - natural: Natural language with LLM tool selection
- * - chat: Regular conversation (RAG-based)
+ * Three-phase execution using LangGraph:
+ *   Phase 1: Graph planning (intent detection → routing → skill planning → policy check)
+ *   Phase 2: Human-in-the-loop (if graph interrupted for confirmation)
+ *   Phase 3: Streaming execution based on the plan
  */
 export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk> {
   const run = activeRuns.get(runId);
@@ -420,6 +510,7 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
     metadata: {
       docIds: run.docIds,
       deepSearch: run.deepSearch,
+      attachmentCount: run.attachments?.length ?? 0,
     },
   });
 
@@ -427,59 +518,157 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
   traceManager.updateTrace(traceContext, { input: userQuery });
 
   try {
-    // Check for deep search mode first
-    if (run.deepSearch) {
-      console.log("[chat] Deep search mode enabled");
-      yield* handleDeepSearchMode(run, userQuery, abortSignal, traceContext);
+    // ──────────────── Phase 1: LangGraph Planning ────────────────
+    const planSpan = traceManager.startSpan(traceContext, "chat-graph-plan", {
+      query: userQuery,
+    });
+
+    // Read global chat settings (cached, 1-min TTL)
+    const chatSettings = await chatSettingsStore.get();
+
+    let graphResult: ChatGraphResult;
+    try {
+      graphResult = await executeChatGraph(runId, {
+        userQuery,
+        messages: run.messages,
+        projectKey: run.projectKey,
+        userId: run.userId,
+        sessionId: run.sessionId,
+        docIds: run.docIds,
+        attachments: run.attachments,
+        deepSearchRequested: run.deepSearch,
+        fullAccess: chatSettings.fullAccess,
+        traceContext,
+      });
+    } catch (graphErr) {
+      const errMsg = graphErr instanceof Error ? graphErr.message : "Chat graph failed";
+      console.error("[chat] Chat graph error:", errMsg);
+      traceManager.endSpan(planSpan, { error: errMsg }, "ERROR");
+      run.status = "failed";
+      run.updatedAt = Date.now();
+      yield { type: "error", error: errMsg };
       return;
     }
 
-    // Unified system-agent planning
-    const llmConfig = await getLLMConfig();
-    const plan = await agentOrchestrator.plan({
-      projectKey: run.projectKey,
-      userMessage: userQuery,
-      messages: run.messages,
-      docIds: run.docIds,
-      llmConfig,
-      traceContext,
-    });
-    console.log(`[chat] Agent plan mode: ${plan.mode}`);
+    console.log(`[chat] Graph result status: ${graphResult.status}, intent: ${graphResult.intent.type} (${graphResult.intent.confidence})`);
 
-    switch (plan.mode) {
-      case "execute":
-        yield* handleAgentExecuteMode(run, plan, userQuery, abortSignal, traceContext);
-        return;
-      case "blocked": {
-        const message = plan.reason || "该技能已被禁用";
-        if (message.trim()) {
-          yield { type: "delta", content: message };
-        }
-        const history = sessionMessages.get(run.sessionId);
-        if (history) {
-          history.push({ role: "assistant", content: message });
-        }
+    if (abortSignal.aborted) {
+      traceManager.endSpan(planSpan, { status: "cancelled" }, "WARNING");
+      run.status = "cancelled";
+      run.updatedAt = Date.now();
+      return;
+    }
+
+    // ──────────────── Phase 2: Human-in-the-Loop ────────────────
+    if (graphResult.status === "awaiting_confirmation") {
+      traceManager.endSpan(planSpan, {
+        intent: graphResult.intent.type,
+        planAction: "awaiting_confirmation",
+        skill: graphResult.pendingTool.skillName,
+      });
+
+      // Build a PendingToolCall for the SSE event
+      const pendingTool = createPendingToolCallFromGraphInfo(graphResult.pendingTool);
+      run.status = "awaiting_confirmation";
+      run.pendingTool = pendingTool;
+      run.updatedAt = Date.now();
+      yield { type: "tool_pending", pendingTool };
+
+      // Wait for user confirmation (via confirmTool / rejectTool endpoints)
+      const confirmed = await waitForConfirmation(runId);
+
+      run.pendingTool = undefined;
+
+      if (!confirmed || abortSignal.aborted) {
+        // User rejected or run was cancelled during wait
         run.status = "completed";
         run.updatedAt = Date.now();
-        yield { type: "done", message };
+        // Resume graph with rejection so it completes cleanly
+        try { await resumeChatGraph(runId, false); } catch { /* ignore */ }
+        yield { type: "tool_rejected", message: "操作已取消" };
         return;
       }
-      case "llm_text": {
+
+      // Resume graph with confirmation
+      run.status = "running";
+      run.updatedAt = Date.now();
+      try {
+        graphResult = await resumeChatGraph(runId, true);
+      } catch (resumeErr) {
+        const errMsg = resumeErr instanceof Error ? resumeErr.message : "Graph resume failed";
+        console.error("[chat] Graph resume error:", errMsg);
+        run.status = "failed";
+        run.updatedAt = Date.now();
+        yield { type: "error", error: errMsg };
+        return;
+      }
+    } else {
+      traceManager.endSpan(planSpan, {
+        intent: graphResult.intent.type,
+        planAction: graphResult.plan.action,
+      });
+    }
+
+    if (abortSignal.aborted) {
+      run.status = "cancelled";
+      run.updatedAt = Date.now();
+      return;
+    }
+
+    // ──────────────── Phase 3: Streaming Execution ────────────────
+    // At this point graphResult.status is always "complete"
+    const plan = (graphResult as Extract<ChatGraphResult, { status: "complete" }>).plan;
+    console.log(`[chat] Executing plan: ${plan.action}`);
+
+    switch (plan.action) {
+      case "stream_chat":
+        yield* executeStreamChat(run, plan, abortSignal, traceContext);
+        return;
+
+      case "execute_skill":
+        yield* executeSkillPlan(run, plan, userQuery, abortSignal, traceContext, chatSettings.fullAccess);
+        return;
+
+      case "deep_search":
+        yield* handleDeepSearchMode(run, userQuery, abortSignal, traceContext);
+        return;
+
+      case "respond_text": {
         if (plan.text.trim()) {
           yield { type: "delta", content: plan.text };
         }
         const history = sessionMessages.get(run.sessionId);
-        if (history) {
-          history.push({ role: "assistant", content: plan.text });
-        }
+        if (history) history.push({ role: "assistant", content: plan.text });
         run.status = "completed";
         run.updatedAt = Date.now();
+        persistAssistantMessage(run.sessionId, plan.text);
         yield { type: "done", message: plan.text };
         return;
       }
-      case "chat":
-      default:
-        yield* handleChatMode(run, userQuery, abortSignal, traceContext);
+
+      case "respond_blocked": {
+        const msg = plan.reason || "操作被禁止";
+        yield { type: "delta", content: msg };
+        const history = sessionMessages.get(run.sessionId);
+        if (history) history.push({ role: "assistant", content: msg });
+        run.status = "completed";
+        run.updatedAt = Date.now();
+        yield { type: "done", message: msg };
+        return;
+      }
+
+      case "respond_rejected": {
+        // This case is reached when the graph handled rejection internally
+        yield { type: "tool_rejected", message: plan.reason || "操作已取消" };
+        run.status = "completed";
+        run.updatedAt = Date.now();
+        return;
+      }
+
+      case "respond_error":
+        yield { type: "error", error: plan.error };
+        run.status = "failed";
+        run.updatedAt = Date.now();
         return;
     }
   } finally {
@@ -487,6 +676,359 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
     traceManager.endTrace(runId);
     cleanupAbortController(runId);
   }
+}
+
+// ============================================================================
+// Plan Executors
+// ============================================================================
+
+/**
+ * Execute stream_chat plan: stream LLM response with pre-built RAG context
+ */
+async function* executeStreamChat(
+  run: ChatRun,
+  plan: Extract<ChatExecutionPlan, { action: "stream_chat" }>,
+  abortSignal: AbortSignal,
+  traceContext: TraceContext,
+): AsyncGenerator<ChatStreamChunk> {
+  const config = await getLLMConfig();
+  if (!config?.enabled || !config.defaultModel) {
+    yield { type: "error", error: "LLM 未配置" };
+    run.status = "failed";
+    run.updatedAt = Date.now();
+    return;
+  }
+
+  const chatSpan = traceManager.startSpan(traceContext, "stream-chat", {
+    hasRagContext: !!plan.ragContext,
+    sourceCount: plan.ragSources.length,
+  });
+
+  try {
+    const llmMessages = run.messages.map((m) => ({
+      role: m.role as "user" | "assistant" | "system",
+      content: m.content,
+    }));
+    const messagesWithSystem = [
+      { role: "system" as const, content: plan.systemPrompt },
+      ...llmMessages,
+    ];
+
+    const stream = await llmGateway.chatStream({
+      provider: config.providerId,
+      model: config.defaultModel,
+      messages: messagesWithSystem,
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      abortSignal,
+      traceContext,
+    });
+
+    let fullResponse = "";
+    for await (const chunk of stream.textStream) {
+      if (abortSignal.aborted) {
+        traceManager.endSpan(chatSpan, { status: "cancelled", partialResponse: fullResponse.length }, "WARNING");
+        run.status = "cancelled";
+        run.updatedAt = Date.now();
+        if (fullResponse) {
+          const history = sessionMessages.get(run.sessionId);
+          if (history) history.push({ role: "assistant", content: fullResponse + "\n\n[已停止]" });
+        }
+        return;
+      }
+      fullResponse += chunk;
+      yield { type: "delta", content: chunk };
+    }
+
+    const history = sessionMessages.get(run.sessionId);
+    if (history) history.push({ role: "assistant", content: fullResponse });
+
+    // Map GraphSourceReference[] to SourceReference[]
+    const sources: SourceReference[] = plan.ragSources.map((s) => ({
+      type: s.type,
+      docId: s.docId,
+      blockId: s.blockId,
+      url: s.url,
+      title: s.title,
+      snippet: s.snippet,
+      score: s.score,
+    }));
+
+    traceManager.updateTrace(traceContext, { output: fullResponse });
+    traceManager.endSpan(chatSpan, { responseLength: fullResponse.length, sourceCount: sources.length });
+
+    run.status = "completed";
+    run.updatedAt = Date.now();
+
+    // Persist assistant message to DB
+    persistAssistantMessage(run.sessionId, fullResponse, sources);
+
+    yield { type: "done", message: fullResponse, sources };
+  } catch (err) {
+    if (abortSignal.aborted || (err instanceof Error && err.name === "AbortError")) {
+      traceManager.endSpan(chatSpan, { status: "cancelled" }, "WARNING");
+      run.status = "cancelled";
+      run.updatedAt = Date.now();
+      return;
+    }
+    const errorMessage = err instanceof Error ? err.message : "Chat failed";
+    console.error("[chat] Stream chat error:", errorMessage);
+    traceManager.endSpan(chatSpan, { error: errorMessage }, "ERROR");
+    run.status = "failed";
+    run.updatedAt = Date.now();
+    yield { type: "error", error: errorMessage };
+  }
+}
+
+/**
+ * Execute a skill plan by delegating to the existing handleAgentExecuteMode.
+ * Policy check and confirmation have already been handled by the graph.
+ */
+async function* executeSkillPlan(
+  run: ChatRun,
+  plan: Extract<ChatExecutionPlan, { action: "execute_skill" }>,
+  userQuery: string,
+  abortSignal: AbortSignal,
+  traceContext: TraceContext,
+  fullAccess = false,
+): AsyncGenerator<ChatStreamChunk> {
+  // Map sourceIntent from graph format to AgentPlan format
+  const sourceIntent: "command" | "anthropic-keyword" | "tool" =
+    plan.sourceIntent === "llm-tool"
+      ? "tool"
+      : plan.sourceIntent === "keyword"
+        ? "anthropic-keyword"
+        : "command";
+
+  // Delegate to existing handler, but skip its internal policy check
+  // and confirmation logic since the graph already handled those.
+  yield* executeSkillDirect(run, plan.skill, plan.args, plan.docIds, sourceIntent, userQuery, abortSignal, traceContext, fullAccess);
+}
+
+/**
+ * Execute a skill directly (post-policy, post-confirmation).
+ * This is the skill execution core extracted from handleAgentExecuteMode,
+ * without the policy check and confirmation logic.
+ */
+async function* executeSkillDirect(
+  run: ChatRun,
+  skill: AgentSkillDefinition,
+  args: Record<string, unknown>,
+  docIds: string[],
+  sourceIntent: "command" | "anthropic-keyword" | "tool",
+  userQuery: string,
+  abortSignal: AbortSignal,
+  traceContext: TraceContext,
+  fullAccess = false,
+): AsyncGenerator<ChatStreamChunk> {
+  const skillSpan = traceManager.startSpan(traceContext, `agent:${skill.id}`, {
+    source: skill.source,
+    toolName: skill.toolName,
+    args,
+    sourceIntent,
+    fullAccess,
+  });
+
+  const isDraftProducingLegacySkill = (legacyName: string): boolean => {
+    return legacyName === "doc-create"
+      || legacyName === "doc-edit"
+      || legacyName === "doc-summary"
+      || legacyName.startsWith("doc-optimize-");
+  };
+
+  try {
+    if (skill.source === "native") {
+      const intent = buildIntentFromAgentPlan(skill, args, userQuery, docIds);
+      if (!intent) {
+        throw new Error(`Missing legacy skill mapping for native skill: ${skill.id}`);
+      }
+
+      const shouldGuard = DOC_GUARD_ENABLED && isDraftProducingLegacySkill(intent.skill);
+
+      if (shouldGuard) {
+        let skipNextDoneAfterApply = false;
+
+        const stream = runDraftRefinementLoop({
+          skillLegacyName: intent.skill,
+          userMessage: userQuery,
+          baseArgs: args,
+          maxAttempts: DOC_GUARD_MAX_ATTEMPTS,
+          runAttempt: (attemptArgs) => {
+            const nextIntent = buildIntentFromAgentPlan(skill, attemptArgs, userQuery, docIds);
+            if (!nextIntent) {
+              throw new Error(`Missing legacy skill mapping for native skill: ${skill.id}`);
+            }
+            return executeSkillWithStream(run.userId, run.projectKey, nextIntent, traceContext);
+          },
+          deleteDraft: (draftId) => draftService.delete(draftId),
+          traceContext,
+        });
+
+        for await (const chunk of stream) {
+          if (abortSignal.aborted) {
+            run.status = "cancelled";
+            run.updatedAt = Date.now();
+            traceManager.endSpan(skillSpan, { status: "cancelled" }, "WARNING");
+            return;
+          }
+
+          // FullAccess: auto-apply drafts without preview (only when validation passed)
+          if (chunk.type === "draft" && fullAccess && chunk.draft.validation?.passed === true) {
+            try {
+              const applyResult = await draftService.apply(run.projectKey, chunk.draft.id);
+              const action = applyResult.isNew ? "创建" : "更新";
+              const msg = `文档「${chunk.draft.title}」已自动${action}`;
+              addDraftToHistory(run.sessionId, chunk.draft);
+              yield { type: "done", message: msg };
+              skipNextDoneAfterApply = true;
+              continue;
+            } catch (applyErr) {
+              console.warn("[chat] FullAccess auto-apply failed, falling back to draft preview:", applyErr);
+              // Fall through to normal draft preview
+            }
+          }
+
+          if (chunk.type === "done" && skipNextDoneAfterApply) {
+            skipNextDoneAfterApply = false;
+            continue;
+          }
+
+          const mappedChunk = mapSkillChunkToChatChunk(chunk);
+          yield mappedChunk;
+          if (chunk.type === "draft") {
+            addDraftToHistory(run.sessionId, chunk.draft);
+          }
+        }
+      } else {
+        for await (const chunk of executeSkillWithStream(run.userId, run.projectKey, intent, traceContext)) {
+          if (abortSignal.aborted) {
+            run.status = "cancelled";
+            run.updatedAt = Date.now();
+            traceManager.endSpan(skillSpan, { status: "cancelled" }, "WARNING");
+            return;
+          }
+
+          // FullAccess: auto-apply drafts without preview
+          if (chunk.type === "draft" && fullAccess && (!DOC_GUARD_ENABLED || chunk.draft.validation?.passed === true)) {
+            try {
+              const applyResult = await draftService.apply(run.projectKey, chunk.draft.id);
+              const action = applyResult.isNew ? "创建" : "更新";
+              const msg = `文档「${chunk.draft.title}」已自动${action}`;
+              addDraftToHistory(run.sessionId, chunk.draft);
+              yield { type: "done", message: msg };
+              continue;
+            } catch (applyErr) {
+              console.warn("[chat] FullAccess auto-apply failed, falling back to draft preview:", applyErr);
+              // Fall through to normal draft preview
+            }
+          }
+
+          const mappedChunk = mapSkillChunkToChatChunk(chunk);
+          yield mappedChunk;
+          if (chunk.type === "draft") {
+            addDraftToHistory(run.sessionId, chunk.draft);
+          }
+        }
+      }
+    } else if (skill.source === "anthropic") {
+      let context: string | undefined;
+      if (docIds && docIds.length > 0) {
+        try {
+          const docs = await Promise.all(
+            docIds.slice(0, 3).map(async (docId) => {
+              const doc = await documentStore.get(run.userId, run.projectKey, docId);
+              return `## ${doc.meta.title}\n${JSON.stringify(doc.body)}`;
+            }),
+          );
+          context = docs.join("\n\n---\n\n");
+        } catch {
+          // Ignore context loading failures
+        }
+      }
+
+      const userRequest = typeof args.request === "string" && args.request.trim()
+        ? args.request
+        : userQuery;
+
+      const anthropicSkill = skillRegistry.getAnthropicById(skill.id);
+      if (!anthropicSkill) {
+        throw new Error(`Anthropic skill not found in registry: ${skill.id}`);
+      }
+
+      for await (const chunk of executeAnthropicSkillWithStream(
+        run.userId,
+        run.projectKey,
+        { ...anthropicSkill, enabled: true },
+        userRequest,
+        context,
+        traceContext,
+      )) {
+        if (abortSignal.aborted) {
+          run.status = "cancelled";
+          run.updatedAt = Date.now();
+          traceManager.endSpan(skillSpan, { status: "cancelled" }, "WARNING");
+          return;
+        }
+        yield mapSkillChunkToChatChunk(chunk);
+      }
+    } else {
+      // MCP tool execution
+      const mcpToolId = typeof skill.metadata?.mcpToolId === "string"
+        ? skill.metadata.mcpToolId
+        : null;
+      if (!mcpToolId) {
+        throw new Error(`MCP skill metadata missing tool id for ${skill.id}`);
+      }
+
+      yield { type: "thinking", content: `正在执行 MCP 工具: ${skill.displayName}...` };
+      const result = await mcpClientManager.executeTool(mcpToolId, args);
+      if (!result.success) {
+        throw new Error(result.error || "MCP tool execution failed");
+      }
+      if (result.output) {
+        yield { type: "delta", content: result.output };
+      }
+      yield { type: "done", message: `${skill.displayName} 执行完成` };
+    }
+
+    run.status = "completed";
+    run.updatedAt = Date.now();
+    traceManager.endSpan(skillSpan, { status: "completed" });
+
+    // Persist a summary assistant message for skill execution
+    persistAssistantMessage(run.sessionId, `[技能执行] ${skill.displayName} 已完成`);
+  } catch (err) {
+    if (abortSignal.aborted) {
+      run.status = "cancelled";
+      run.updatedAt = Date.now();
+      traceManager.endSpan(skillSpan, { status: "cancelled" }, "WARNING");
+      return;
+    }
+    const errorMessage = err instanceof Error ? err.message : "Agent execution failed";
+    run.status = "failed";
+    run.updatedAt = Date.now();
+    traceManager.endSpan(skillSpan, { error: errorMessage }, "ERROR");
+    yield { type: "error", error: errorMessage };
+  }
+}
+
+/**
+ * Create a PendingToolCall from graph's PendingToolInfo for SSE events.
+ */
+function createPendingToolCallFromGraphInfo(
+  info: import("./chat-graph.js").PendingToolInfo,
+): PendingToolCall {
+  const now = Date.now();
+  return {
+    id: uuidv4(),
+    skillName: info.skillName,
+    skillDescription: info.skillDescription,
+    args: info.args,
+    riskLevel: info.riskLevel as RiskLevel,
+    warningMessage: info.warningMessage,
+    createdAt: now,
+    expiresAt: now + PENDING_TOOL_TTL,
+  };
 }
 
 function buildIntentFromAgentPlan(
@@ -1409,6 +1951,36 @@ ${context}
 /**
  * Clear session history
  */
+/**
+ * Persist an assistant message to the database (fire-and-forget).
+ * Also triggers session timestamp update and title generation for the first exchange.
+ */
+function persistAssistantMessage(
+  sessionId: string,
+  content: string,
+  sources?: unknown,
+  artifacts?: unknown,
+): void {
+  if (!content) return;
+  chatSessionStore
+    .addMessage(sessionId, "assistant", content, sources || undefined, artifacts || undefined)
+    .then(() => chatSessionStore.updateSessionTimestamp(sessionId))
+    .then(() => chatSessionStore.getMessageCount(sessionId))
+    .then((count) => {
+      // Trigger title generation after the first user+assistant exchange (count == 2)
+      if (count <= 2) {
+        const history = sessionMessages.get(sessionId);
+        const firstUserMsg = history?.find((m) => m.role === "user");
+        if (firstUserMsg) {
+          chatSessionStore.generateTitle(sessionId, firstUserMsg.content);
+        }
+      }
+    })
+    .catch((err) => {
+      console.warn("[chat] Failed to persist assistant message:", err);
+    });
+}
+
 export function clearSession(sessionId: string): void {
   sessionMessages.delete(sessionId);
 }

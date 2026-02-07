@@ -51,12 +51,14 @@ function KnowledgeBaseLayout({ sideNav, children }: KnowledgeBaseLayoutProps) {
   const startX = useRef(0);
   const startWidth = useRef(0);
   const layoutRef = useRef<HTMLDivElement>(null);
-  const animationTimer = useRef<ReturnType<typeof setTimeout>>();
+  const animationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const toggleTree = useCallback(() => {
     setIsAnimating(true);
     setTreeCollapsed((prev) => !prev);
-    clearTimeout(animationTimer.current);
+    if (animationTimer.current) {
+      clearTimeout(animationTimer.current);
+    }
     animationTimer.current = setTimeout(() => setIsAnimating(false), 320);
   }, []);
 
@@ -98,7 +100,7 @@ function KnowledgeBaseLayout({ sideNav, children }: KnowledgeBaseLayoutProps) {
   }, [sidebarWidth]);
 
   const activeWidth = treeCollapsed ? COLLAPSED_WIDTH : sidebarWidth;
-  const gridColumns = `${activeWidth}px 1fr`;
+  const showCollapsed = treeCollapsed && !isAnimating;
 
   return (
     <ToggleTreeContext.Provider value={{ treeCollapsed, toggleTree }}>
@@ -106,14 +108,13 @@ function KnowledgeBaseLayout({ sideNav, children }: KnowledgeBaseLayoutProps) {
         <div
           ref={layoutRef}
           className={`kb-layout${treeCollapsed ? " kb-layout--collapsed" : ""}${isAnimating ? " kb-layout--animating" : ""}`}
-          style={{ gridTemplateColumns: gridColumns }}
         >
           {/* Sidebar area */}
           <div
             className={`kb-sidebar-wrapper${treeCollapsed ? " kb-sidebar-wrapper--collapsed" : ""}${isAnimating ? " kb-sidebar-wrapper--animating" : ""}`}
             style={{ width: activeWidth }}
           >
-            {treeCollapsed ? (
+            {showCollapsed ? (
               /* Collapsed: only show expand button */
               <div className="kb-sidebar-collapsed">
                 <Tooltip title="显示文档树" placement="right">
@@ -132,7 +133,7 @@ function KnowledgeBaseLayout({ sideNav, children }: KnowledgeBaseLayoutProps) {
           </div>
 
           {/* Resize handle */}
-          {!treeCollapsed && (
+          {!treeCollapsed && !isAnimating && (
             <div
               className="kb-resize-handle"
               style={{ left: sidebarWidth - 3 }}

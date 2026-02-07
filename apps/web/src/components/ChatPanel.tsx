@@ -375,12 +375,12 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
         onReject={handleRejectTool}
       />
 
-      {/* Expanded Panel */}
-      {isExpanded && (
-        <div
-          className="chat-dock-panel"
-          style={{ height: `${panelHeight}px` }}
-        >
+      {/* Expanded Panel (animated open/close) */}
+      <div
+        className={`chat-dock-panel${isExpanded ? " is-expanded" : " is-collapsed"}${isResizing ? " is-resizing" : ""}`}
+        style={{ height: `${isExpanded ? panelHeight : 0}px` }}
+        aria-hidden={!isExpanded}
+      >
           {/* Resize Handle */}
           <div
             className="chat-dock-resize-handle"
@@ -540,8 +540,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
               </button>
             </div>
           )}
-        </div>
-      )}
+      </div>
 
       {/* Input Bar (Always visible) */}
       <div className="chat-dock-bar">

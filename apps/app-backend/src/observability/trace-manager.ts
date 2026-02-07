@@ -249,7 +249,8 @@ class TraceManager {
   endTrace(runId: string, output?: unknown): void {
     const trace = this.traces.get(runId);
     
-    if (trace) {
+    // Only update output if explicitly provided. Avoid overwriting previous output with `undefined`.
+    if (trace && output !== undefined) {
       trace.update({
         output,
       });

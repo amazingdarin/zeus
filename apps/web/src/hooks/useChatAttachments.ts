@@ -75,6 +75,7 @@ export function useChatAttachments(): UseChatAttachmentsReturn {
               ? {
                   ...a,
                   status: "ready",
+                  assetId: response.assetId,
                   content: response.content,
                   preview: response.preview || a.preview,
                 }

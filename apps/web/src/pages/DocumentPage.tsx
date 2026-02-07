@@ -27,8 +27,8 @@ import {
   createDocument,
   deleteDocument,
   fetchUrlHtml,
+  importFileAsDocument,
   importGit,
-  optimizeFormat,
   updateBlockAttrs,
   type DocumentDetail,
   type DocumentTreeItem,
@@ -1514,7 +1514,9 @@ function DocumentPage() {
           subdir: gitSubdir.trim() || undefined,
           parent_id: activeDocument?.id ?? "root",
           smart_import: smartImportEnabled,
-          smart_import_types: Array.from(smartImportTypes) as ("markdown" | "word" | "pdf")[],
+          smart_import_types: Array.from(smartImportTypes).filter((t) => t !== "all") as Array<
+            "markdown" | "word" | "pdf" | "image"
+          >,
           file_types: fileTypeFilters,
           enable_format_optimize: smartImportEnabled && formatOptimizeEnabled,
         });
@@ -1616,145 +1618,31 @@ function DocumentPage() {
         markCompleted();
       }
 
+      const selectedSmartImportTypes = Array.from(smartImportTypes).filter((t) => t !== "all") as Array<
+        "markdown" | "word" | "pdf" | "image"
+      >;
+
       for (const entry of files) {
         const docTitle = stripExtension(entry.name) || entry.name;
         const parentId = entry.parentPath
           ? directoryIds.get(entry.parentPath) ?? baseParentId
           : baseParentId;
-        const canSmartImport =
-          smartImportEnabled &&
-          smartImportTypes.has("markdown") &&
-          isMarkdownFile(entry.file);
-        const canDocxImport =
-          smartImportEnabled &&
-          smartImportTypes.has("word") &&
-          isDocxFile(entry.file);
-        const canImageImport =
-          smartImportEnabled &&
-          smartImportTypes.has("image") &&
-          isImageAsset(entry.file.type, entry.file.name);
-        const canPdfImport =
-          smartImportEnabled &&
-          smartImportTypes.has("pdf") &&
-          entry.file.type === "application/pdf";
-        
-        // PDF import: upload as file block
-        if (canPdfImport) {
-          try {
-            const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
-            const fileBlock = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, true);
-            await createDocumentRecord(
-              resolvedProjectKey,
-              {
-                title: docTitle,
-                parentId,
-              },
-              fileBlock ? { type: "doc", content: [fileBlock] } : { type: "doc", content: [] },
-            );
+
+        try {
+          const imported = await importFileAsDocument(resolvedProjectKey, entry.file, {
+            parent_id: parentId,
+            title: docTitle,
+            smart_import: smartImportEnabled,
+            smart_import_types: selectedSmartImportTypes,
+            enable_format_optimize: smartImportEnabled && formatOptimizeEnabled,
+          });
+          if (imported.mode === "smart") {
             converted += 1;
-          } catch (err) {
-            console.error("PDF import failed:", err);
+          } else {
             fallback += 1;
           }
-          markCompleted();
-          continue;
-        }
-        
-        // Image smart import: upload as image block + OCR for text content
-        if (canImageImport) {
-          try {
-            const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
-            const imageBlock = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, false);
-            
-            // Try OCR to extract text content
-            let contentItems: JSONContent[] = [];
-            try {
-              const ocrResult = await ocrApi.ocrFile(entry.file, { outputFormat: "tiptap" });
-              contentItems = Array.isArray(ocrResult.content.content) ? ocrResult.content.content : [];
-            } catch (ocrErr) {
-              console.warn("OCR failed, using image only:", ocrErr);
-            }
-            
-            await createDocumentRecord(
-              resolvedProjectKey,
-              {
-                title: docTitle,
-                parentId,
-              },
-              { type: "doc", content: [imageBlock, ...contentItems] },
-            );
-            converted += 1;
-          } catch (err) {
-            console.error("Image import failed:", err);
-            fallback += 1;
-          }
-          markCompleted();
-          continue;
-        }
-        if (canSmartImport || canDocxImport) {
-          try {
-            let markdown = canDocxImport
-              ? (await convertDocument(resolvedProjectKey, entry.file, "docx", "md")).content
-              : await entry.file.text();
-            
-            // Optionally optimize format using LLM
-            if (formatOptimizeEnabled && markdown.trim()) {
-              try {
-                const optimized = await optimizeFormat(resolvedProjectKey, markdown);
-                if (optimized.optimized) {
-                  markdown = optimized.markdown;
-                }
-              } catch (optErr) {
-                console.warn("Format optimization failed, using original:", optErr);
-              }
-            }
-            
-            const parsed = markdownToTiptapJson(markdown, { extensions: markdownExtensions });
-            const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
-            const fileBlock = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, true);
-            const contentItems = Array.isArray(parsed.content) ? parsed.content : [];
-            const mergedContent: JSONContent = {
-              ...parsed,
-              type: "doc",
-              content: [fileBlock, ...contentItems],
-            };
-            await createDocumentRecord(
-              resolvedProjectKey,
-              {
-                title: docTitle,
-                parentId,
-              },
-              mergedContent,
-            );
-            converted += 1;
-          } catch (err) {
-            const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
-            const fileBlock = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, true);
-            await createDocumentRecord(
-              resolvedProjectKey,
-              {
-                title: docTitle,
-                parentId,
-              },
-              fileBlock ? { type: "doc", content: [fileBlock] } : { type: "doc", content: [] },
-            );
-            fallback += 1;
-          }
-        } else {
-          const uploaded = await uploadSingleFile(resolvedProjectKey, entry.file);
-  const isText = await isLikelyTextFile(entry.file, {
-    filename: uploaded.filename,
-    mime: uploaded.mime,
-  });
-          const block = buildAssetBlock(resolvedProjectKey, uploaded, docTitle, isText);
-          await createDocumentRecord(
-            resolvedProjectKey,
-            {
-              title: docTitle,
-              parentId,
-            },
-            block ? { type: "doc", content: [block] } : { type: "doc", content: [] },
-          );
+        } catch (err) {
+          console.error("Import failed:", err);
           fallback += 1;
         }
         markCompleted();

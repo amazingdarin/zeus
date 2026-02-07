@@ -15,6 +15,8 @@ export type ChatAttachment = {
   name: string;
   /** Current processing status */
   status: ChatAttachmentStatus;
+  /** Backend asset id (for file/image attachments) */
+  assetId?: string;
   /** Extracted/fetched content for AI context */
   content?: string;
   /** Base64 preview URL for images */
@@ -36,6 +38,7 @@ export type AttachmentUploadResponse = {
   id: string;
   type: ChatAttachmentType;
   name: string;
+  assetId?: string;
   content?: string;
   preview?: string;
   mimeType?: string;
