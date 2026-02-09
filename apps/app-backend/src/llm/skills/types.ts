@@ -132,12 +132,46 @@ export type CreateDraftInput = {
 };
 
 /**
+ * Organize plan types for document reorganization
+ */
+export type OrganizeMove = {
+  docId: string;
+  title: string;
+  targetParentId: string;
+};
+
+export type OrganizeProposal = {
+  categories: Array<{
+    name: string;
+    existingDocId?: string;
+    children: Array<{
+      name: string;
+      existingDocId?: string;
+      docIds: string[];
+    }>;
+    docIds: string[];
+  }>;
+};
+
+export type OrganizePlan = {
+  id: string;
+  userId: string;
+  projectKey: string;
+  rootDocId: string;
+  proposal: OrganizeProposal;
+  moves: OrganizeMove[];
+  newFolders: string[];
+  createdAt: number;
+};
+
+/**
  * Chat stream chunk types extended for skills
  */
 export type SkillStreamChunk =
   | { type: "delta"; content: string }
   | { type: "thinking"; content: string }
   | { type: "draft"; draft: DocumentDraft }
+  | { type: "organize_plan"; plan: OrganizePlan }
   | { type: "done"; message?: string }
   | { type: "error"; error: string };
 

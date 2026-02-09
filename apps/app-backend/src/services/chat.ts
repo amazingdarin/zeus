@@ -11,12 +11,14 @@ import {
   skillRegistry,
   type SkillStreamChunk,
   type DocumentDraft,
+  type OrganizePlan,
   type SkillIntent,
   type TriggerResult,
   type PendingToolCall,
   type SkillDefinition,
   type RiskLevel,
 } from "../llm/skills/index.js";
+import { applyOrganizePlan } from "./organize.js";
 import { runDraftRefinementLoop } from "../llm/skills/refinement-loop.js";
 import {
   agentOrchestrator,
@@ -30,9 +32,13 @@ import { traceManager, type TraceContext } from "../observability/index.js";
 import {
   executeChatGraph,
   resumeChatGraph,
+  resumeChatGraphWithIntent,
+  resumeChatGraphWithRequiredInput,
   type ChatExecutionPlan,
   type ChatGraphResult,
   type GraphSourceReference,
+  type IntentOption,
+  type PendingIntentInfo,
 } from "./chat-graph.js";
 import { chatSettingsStore } from "./chat-settings-store.js";
 import { chatSessionStore } from "./chat-session-store.js";
@@ -75,9 +81,19 @@ export type ChatRun = {
   docIds?: string[];  // Resolved document IDs for knowledge search scope
   attachments?: ChatAttachmentRef[];
   deepSearch?: boolean;  // Enable deep search mode
-  status: "pending" | "running" | "completed" | "failed" | "cancelled" | "awaiting_confirmation";
+  status:
+    | "pending"
+    | "running"
+    | "completed"
+    | "failed"
+    | "cancelled"
+    | "awaiting_confirmation"
+    | "awaiting_intent"
+    | "awaiting_input";
   pendingTool?: PendingToolCall;  // Tool awaiting user confirmation
   pendingIntent?: SkillIntent;    // Intent to execute after confirmation
+  pendingIntentInfo?: import("./chat-graph.js").PendingIntentInfo;  // Intent clarification
+  pendingRequiredInput?: import("./chat-graph.js").PendingRequiredInputInfo;  // Required input clarification
   createdAt: number;
   updatedAt: number;
 };
@@ -86,13 +102,26 @@ export type ChatRun = {
 const runAbortControllers = new Map<string, AbortController>();
 
 export type ChatStreamChunk = {
-  type: "delta" | "done" | "error" | "thinking" | "draft" | "tool_pending" | "tool_rejected" | "search_start" | "search_result";
+  type:
+    | "delta"
+    | "done"
+    | "error"
+    | "thinking"
+    | "draft"
+    | "tool_pending"
+    | "tool_rejected"
+    | "intent_pending"
+    | "input_pending"
+    | "search_start"
+    | "search_result";
   content?: string;
   message?: string;
   error?: string;
   sources?: SourceReference[];
   draft?: DocumentDraft;
   pendingTool?: PendingToolCall;  // For tool_pending type
+  pendingIntent?: import("./chat-graph.js").PendingIntentInfo;  // For intent_pending type
+  pendingInput?: import("./chat-graph.js").PendingRequiredInputInfo;  // For input_pending type
   // Deep search specific fields
   phase?: "decompose" | "search_kb" | "evaluate" | "search_web" | "synthesize";
   subQueries?: string[];
@@ -111,6 +140,18 @@ const PENDING_TOOL_TTL = 5 * 60 * 1000;
 // Map of runId -> resolve function for confirmation waiting
 const pendingConfirmations = new Map<string, {
   resolve: (confirmed: boolean) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}>();
+
+// Event emitters for pending intent selection
+const pendingIntentSelections = new Map<string, {
+  resolve: (option: IntentOption | null) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}>();
+
+// Pending required input collection
+const pendingRequiredInputs = new Map<string, {
+  resolve: (payload: { doc_id: string } | null) => void;
   timeout: ReturnType<typeof setTimeout>;
 }>();
 
@@ -318,8 +359,14 @@ export function cancelRun(runId: string): boolean {
     return false;
   }
 
-  // Only cancel if running or pending
-  if (run.status !== "running" && run.status !== "pending") {
+  // Only cancel if the run is still active or waiting on user input
+  if (
+    run.status !== "running"
+    && run.status !== "pending"
+    && run.status !== "awaiting_confirmation"
+    && run.status !== "awaiting_intent"
+    && run.status !== "awaiting_input"
+  ) {
     return false;
   }
 
@@ -328,6 +375,30 @@ export function cancelRun(runId: string): boolean {
   if (controller) {
     controller.abort();
     runAbortControllers.delete(runId);
+  }
+
+  // If waiting for tool confirmation, resolve as rejected.
+  const pendingTool = pendingConfirmations.get(runId);
+  if (pendingTool) {
+    clearTimeout(pendingTool.timeout);
+    pendingTool.resolve(false);
+    pendingConfirmations.delete(runId);
+  }
+
+  // If waiting for intent selection, resolve as timeout (null).
+  const pendingIntent = pendingIntentSelections.get(runId);
+  if (pendingIntent) {
+    clearTimeout(pendingIntent.timeout);
+    pendingIntent.resolve(null);
+    pendingIntentSelections.delete(runId);
+  }
+
+  // If waiting for required input, resolve as timeout (null).
+  const pendingInput = pendingRequiredInputs.get(runId);
+  if (pendingInput) {
+    clearTimeout(pendingInput.timeout);
+    pendingInput.resolve(null);
+    pendingRequiredInputs.delete(runId);
   }
 
   run.status = "cancelled";
@@ -471,6 +542,73 @@ export function rejectTool(runId: string): boolean {
 }
 
 /**
+ * Wait for user to provide required input (e.g. doc scope)
+ */
+async function waitForRequiredInput(runId: string): Promise<{ doc_id: string } | null> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      pendingRequiredInputs.delete(runId);
+      resolve(null);
+    }, PENDING_TOOL_TTL);
+
+    pendingRequiredInputs.set(runId, { resolve, timeout });
+  });
+}
+
+/**
+ * Provide required input for a pending input clarification
+ */
+export function provideRequiredInput(runId: string, payload: { doc_id: string }): boolean {
+  const run = activeRuns.get(runId);
+  if (!run || run.status !== "awaiting_input") {
+    return false;
+  }
+
+  const pending = pendingRequiredInputs.get(runId);
+  if (pending) {
+    clearTimeout(pending.timeout);
+    pending.resolve(payload);
+    pendingRequiredInputs.delete(runId);
+  }
+
+  return true;
+}
+
+/**
+ * Wait for user to select an intent option
+ * Returns the selected option or null on timeout
+ */
+async function waitForIntentSelection(runId: string): Promise<IntentOption | null> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      pendingIntentSelections.delete(runId);
+      resolve(null);
+    }, PENDING_TOOL_TTL);
+
+    pendingIntentSelections.set(runId, { resolve, timeout });
+  });
+}
+
+/**
+ * Select an intent option for a pending intent clarification
+ */
+export function selectIntent(runId: string, selectedOption: IntentOption): boolean {
+  const run = activeRuns.get(runId);
+  if (!run || run.status !== "awaiting_intent") {
+    return false;
+  }
+
+  const pending = pendingIntentSelections.get(runId);
+  if (pending) {
+    clearTimeout(pending.timeout);
+    pending.resolve(selectedOption);
+    pendingIntentSelections.delete(runId);
+  }
+
+  return true;
+}
+
+/**
  * Get the pending tool for a run
  */
 export function getPendingTool(runId: string): PendingToolCall | undefined {
@@ -504,6 +642,8 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
 
   // Create trace for observability
   const traceContext = traceManager.startTrace(runId, {
+    name: "chat",
+    userId: run.userId,
     sessionId: run.sessionId,
     projectKey: run.projectKey,
     tags: ["chat"],
@@ -519,7 +659,7 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
 
   try {
     // ──────────────── Phase 1: LangGraph Planning ────────────────
-    const planSpan = traceManager.startSpan(traceContext, "chat-graph-plan", {
+    let planSpan = traceManager.startSpan(traceContext, "chat-graph-plan", {
       query: userQuery,
     });
 
@@ -550,64 +690,201 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
       return;
     }
 
-    console.log(`[chat] Graph result status: ${graphResult.status}, intent: ${graphResult.intent.type} (${graphResult.intent.confidence})`);
+    console.log(
+      `[chat] Graph result status: ${graphResult.status}, intent: ${graphResult.intent.type} (${graphResult.intent.confidence})`,
+    );
 
-    if (abortSignal.aborted) {
-      traceManager.endSpan(planSpan, { status: "cancelled" }, "WARNING");
-      run.status = "cancelled";
+    // ──────────────── Phase 1-2: Graph Interrupt Handling Loop ────────────────
+    // The graph can interrupt multiple times (intent selection, then tool confirmation).
+    // Each graph invocation (execute/resume) gets its own planning span.
+    while (graphResult.status !== "complete") {
+      if (abortSignal.aborted) {
+        traceManager.endSpan(planSpan, { status: "cancelled" }, "WARNING");
+        run.status = "cancelled";
+        run.updatedAt = Date.now();
+        return;
+      }
+
+      // ──────────────── Phase 1.5: Intent Clarification ────────────────
+      if (graphResult.status === "awaiting_intent") {
+        traceManager.endSpan(planSpan, {
+          intent: graphResult.intent.type,
+          planAction: "awaiting_intent",
+          candidates: graphResult.pendingIntent.options.length,
+        });
+
+        run.status = "awaiting_intent";
+        run.pendingIntentInfo = graphResult.pendingIntent;
+        run.updatedAt = Date.now();
+        yield { type: "intent_pending", pendingIntent: graphResult.pendingIntent };
+
+        // Wait for user to select an intent option
+        const selected = await waitForIntentSelection(runId);
+
+        run.pendingIntentInfo = undefined;
+
+        if (abortSignal.aborted) {
+          run.status = "cancelled";
+          run.updatedAt = Date.now();
+          return;
+        }
+
+        // Timeout — fall back to chat
+        const option = selected || {
+          type: "chat" as const,
+          label: "直接对话",
+          confidence: 1.0,
+        };
+
+        run.status = "running";
+        run.updatedAt = Date.now();
+
+        planSpan = traceManager.startSpan(traceContext, "chat-graph-plan-resume-intent", {
+          selected: option.label,
+          type: option.type,
+          skillHint: option.skillHint,
+        });
+
+        try {
+          graphResult = await resumeChatGraphWithIntent(runId, option);
+        } catch (resumeErr) {
+          const errMsg = resumeErr instanceof Error ? resumeErr.message : "Graph resume failed";
+          console.error("[chat] Graph resume (intent) error:", errMsg);
+          traceManager.endSpan(planSpan, { error: errMsg }, "ERROR");
+          run.status = "failed";
+          run.updatedAt = Date.now();
+          yield { type: "error", error: errMsg };
+          return;
+        }
+
+        console.log(
+          `[chat] After intent selection: ${graphResult.status}, intent: ${graphResult.intent.type}`,
+        );
+        continue;
+      }
+
+      if (graphResult.status === "awaiting_input") {
+        traceManager.endSpan(planSpan, {
+          intent: graphResult.intent.type,
+          planAction: "awaiting_input",
+          kind: graphResult.pendingInput.kind,
+          skill: graphResult.pendingInput.skillName,
+        });
+
+        run.status = "awaiting_input";
+        run.pendingRequiredInput = graphResult.pendingInput;
+        run.updatedAt = Date.now();
+        yield { type: "input_pending", pendingInput: graphResult.pendingInput };
+
+        const provided = await waitForRequiredInput(runId);
+        run.pendingRequiredInput = undefined;
+
+        if (abortSignal.aborted) {
+          run.status = "cancelled";
+          run.updatedAt = Date.now();
+          return;
+        }
+
+        const payload = provided || { doc_id: "" };
+
+        run.status = "running";
+        run.updatedAt = Date.now();
+
+        planSpan = traceManager.startSpan(traceContext, "chat-graph-plan-resume-input", {
+          kind: graphResult.pendingInput.kind,
+          skill: graphResult.pendingInput.skillName,
+          doc_id: payload.doc_id ? payload.doc_id : undefined,
+        });
+
+        try {
+          graphResult = await resumeChatGraphWithRequiredInput(runId, payload);
+        } catch (resumeErr) {
+          const errMsg = resumeErr instanceof Error ? resumeErr.message : "Graph resume failed";
+          console.error("[chat] Graph resume (input) error:", errMsg);
+          traceManager.endSpan(planSpan, { error: errMsg }, "ERROR");
+          run.status = "failed";
+          run.updatedAt = Date.now();
+          yield { type: "error", error: errMsg };
+          return;
+        }
+
+        continue;
+      }
+
+      // ──────────────── Phase 2: Human-in-the-Loop (Tool Confirmation) ────────────────
+      if (graphResult.status === "awaiting_confirmation") {
+        traceManager.endSpan(planSpan, {
+          intent: graphResult.intent.type,
+          planAction: "awaiting_confirmation",
+          skill: graphResult.pendingTool.skillName,
+        });
+
+        // Build a PendingToolCall for the SSE event
+        const pendingTool = createPendingToolCallFromGraphInfo(graphResult.pendingTool);
+        run.status = "awaiting_confirmation";
+        run.pendingTool = pendingTool;
+        run.updatedAt = Date.now();
+        yield { type: "tool_pending", pendingTool };
+
+        // Wait for user confirmation (via confirmTool / rejectTool endpoints)
+        const confirmed = await waitForConfirmation(runId);
+
+        run.pendingTool = undefined;
+
+        if (abortSignal.aborted) {
+          run.status = "cancelled";
+          run.updatedAt = Date.now();
+          return;
+        }
+
+        // Resume graph with the user's decision (false = rejected/timeout)
+        run.status = "running";
+        run.updatedAt = Date.now();
+
+        planSpan = traceManager.startSpan(traceContext, "chat-graph-plan-resume-confirmation", {
+          confirmed,
+          skill: pendingTool.skillName,
+        });
+
+        try {
+          graphResult = await resumeChatGraph(runId, confirmed && !abortSignal.aborted);
+        } catch (resumeErr) {
+          const errMsg = resumeErr instanceof Error ? resumeErr.message : "Graph resume failed";
+          console.error("[chat] Graph resume error:", errMsg);
+          traceManager.endSpan(planSpan, { error: errMsg }, "ERROR");
+          run.status = "failed";
+          run.updatedAt = Date.now();
+          yield { type: "error", error: errMsg };
+          return;
+        }
+
+        if (!confirmed || abortSignal.aborted) {
+          traceManager.endSpan(planSpan, { status: "rejected" }, "WARNING");
+          run.status = "completed";
+          run.updatedAt = Date.now();
+          yield { type: "tool_rejected", message: "操作已取消" };
+          return;
+        }
+
+        console.log(
+          `[chat] After tool confirmation: ${graphResult.status}, intent: ${graphResult.intent.type}`,
+        );
+        continue;
+      }
+
+      // Unexpected interrupt type
+      traceManager.endSpan(planSpan, { error: "Unexpected graph interrupt" }, "ERROR");
+      run.status = "failed";
       run.updatedAt = Date.now();
+      yield { type: "error", error: "Unexpected graph interrupt" };
       return;
     }
 
-    // ──────────────── Phase 2: Human-in-the-Loop ────────────────
-    if (graphResult.status === "awaiting_confirmation") {
-      traceManager.endSpan(planSpan, {
-        intent: graphResult.intent.type,
-        planAction: "awaiting_confirmation",
-        skill: graphResult.pendingTool.skillName,
-      });
-
-      // Build a PendingToolCall for the SSE event
-      const pendingTool = createPendingToolCallFromGraphInfo(graphResult.pendingTool);
-      run.status = "awaiting_confirmation";
-      run.pendingTool = pendingTool;
-      run.updatedAt = Date.now();
-      yield { type: "tool_pending", pendingTool };
-
-      // Wait for user confirmation (via confirmTool / rejectTool endpoints)
-      const confirmed = await waitForConfirmation(runId);
-
-      run.pendingTool = undefined;
-
-      if (!confirmed || abortSignal.aborted) {
-        // User rejected or run was cancelled during wait
-        run.status = "completed";
-        run.updatedAt = Date.now();
-        // Resume graph with rejection so it completes cleanly
-        try { await resumeChatGraph(runId, false); } catch { /* ignore */ }
-        yield { type: "tool_rejected", message: "操作已取消" };
-        return;
-      }
-
-      // Resume graph with confirmation
-      run.status = "running";
-      run.updatedAt = Date.now();
-      try {
-        graphResult = await resumeChatGraph(runId, true);
-      } catch (resumeErr) {
-        const errMsg = resumeErr instanceof Error ? resumeErr.message : "Graph resume failed";
-        console.error("[chat] Graph resume error:", errMsg);
-        run.status = "failed";
-        run.updatedAt = Date.now();
-        yield { type: "error", error: errMsg };
-        return;
-      }
-    } else {
-      traceManager.endSpan(planSpan, {
-        intent: graphResult.intent.type,
-        planAction: graphResult.plan.action,
-      });
-    }
+    // Graph is complete — end the last planning span with the final plan action.
+    traceManager.endSpan(planSpan, {
+      intent: graphResult.intent.type,
+      planAction: graphResult.plan.action,
+    });
 
     if (abortSignal.aborted) {
       run.status = "cancelled";
@@ -617,7 +894,7 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
 
     // ──────────────── Phase 3: Streaming Execution ────────────────
     // At this point graphResult.status is always "complete"
-    const plan = (graphResult as Extract<ChatGraphResult, { status: "complete" }>).plan;
+    const plan = graphResult.plan;
     console.log(`[chat] Executing plan: ${plan.action}`);
 
     switch (plan.action) {
@@ -921,6 +1198,61 @@ async function* executeSkillDirect(
               console.warn("[chat] FullAccess auto-apply failed, falling back to draft preview:", applyErr);
               // Fall through to normal draft preview
             }
+          }
+
+          // Handle organize_plan: fullAccess auto-applies, otherwise ask for confirmation
+          if (chunk.type === "organize_plan") {
+            if (fullAccess) {
+              try {
+                const result = await applyOrganizePlan(chunk.plan);
+                const msg = `文档整理已自动执行：创建 ${result.created} 个目录，移动 ${result.moved} 篇文档` +
+                  (result.errors.length > 0 ? `，${result.errors.length} 个错误` : "");
+                yield { type: "done", message: msg };
+                continue;
+              } catch (applyErr) {
+                console.warn("[chat] FullAccess organize auto-apply failed:", applyErr);
+              }
+            }
+
+            // Non-fullAccess: trigger confirmation via tool_pending
+            const pendingTool: PendingToolCall = {
+              id: uuidv4(),
+              skillName: "doc-organize",
+              skillDescription: `整理文档目录结构（${chunk.plan.moves.length} 次移动，${chunk.plan.newFolders.length} 个新目录）`,
+              args: { plan_id: chunk.plan.id },
+              riskLevel: "high",
+              warningMessage: "此操作将重新组织文档目录结构，请确认后执行。",
+              createdAt: Date.now(),
+              expiresAt: Date.now() + 5 * 60 * 1000,
+            };
+
+            run.status = "awaiting_confirmation";
+            run.pendingTool = pendingTool;
+            run.updatedAt = Date.now();
+            yield { type: "tool_pending", pendingTool };
+
+            const confirmed = await waitForConfirmation(run.id);
+            run.pendingTool = undefined;
+
+            if (!confirmed || abortSignal.aborted) {
+              run.status = "completed";
+              run.updatedAt = Date.now();
+              yield { type: "tool_rejected", message: "文档整理已取消" };
+              return;
+            }
+
+            run.status = "running";
+            run.updatedAt = Date.now();
+
+            try {
+              const result = await applyOrganizePlan(chunk.plan);
+              const msg = `文档整理已完成：创建 ${result.created} 个目录，移动 ${result.moved} 篇文档` +
+                (result.errors.length > 0 ? `\n⚠️ ${result.errors.length} 个错误：\n${result.errors.join("\n")}` : "");
+              yield { type: "done", message: msg };
+            } catch (applyErr) {
+              yield { type: "error", error: `执行文档整理失败: ${applyErr instanceof Error ? applyErr.message : String(applyErr)}` };
+            }
+            continue;
           }
 
           const mappedChunk = mapSkillChunkToChatChunk(chunk);
@@ -1843,6 +2175,10 @@ function mapSkillChunkToChatChunk(chunk: SkillStreamChunk): ChatStreamChunk {
       return { type: "thinking", content: chunk.content };
     case "draft":
       return { type: "draft", draft: chunk.draft };
+    case "organize_plan":
+      // organize_plan is handled inline by executeSkillDirect; if it
+      // reaches mapSkillChunkToChatChunk, treat it as a noop done.
+      return { type: "done", message: "文档整理方案已生成" };
     case "done":
       return { type: "done", message: chunk.message };
     case "error":

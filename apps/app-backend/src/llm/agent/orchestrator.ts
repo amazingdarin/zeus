@@ -88,6 +88,8 @@ function buildCommandArgs(
       return { repo_url: trimmed };
     case "doc-smart-import":
       return { asset_id: trimmed };
+    case "doc-organize":
+      return {};
     case "doc-convert":
       return { content: trimmed, from: "txt", to: "markdown" };
     default:

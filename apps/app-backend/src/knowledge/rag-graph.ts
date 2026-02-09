@@ -18,7 +18,9 @@ import type {
   IndexSearchOptions,
 } from "./types.js";
 import { indexStore } from "./index-store.js";
+import { searchRaptorTree } from "./raptor.js";
 import { llmGateway, configStore } from "../llm/index.js";
+import { ragTraceManager, type TraceContext } from "../observability/index.js";
 
 // ============================================================
 // Configuration
@@ -64,6 +66,7 @@ const RAGGraphState = Annotation.Root({
     default: () => 0,
   }),
   graphConfig: Annotation<GraphConfig>(lv<GraphConfig>(() => ({ ...DEFAULT_CONFIG }))),
+  traceContext: Annotation<TraceContext | undefined>(lv<TraceContext | undefined>(() => undefined)),
 });
 
 type RAGGraphRuntimeState = typeof RAGGraphState.State;
@@ -144,8 +147,12 @@ Output only the type name, nothing else.`,
 async function hydeTransform(
   state: RAGGraphRuntimeState,
 ): Promise<Partial<RAGGraphRuntimeState>> {
+  const tc = state.traceContext;
+  const hydeSpan = tc ? ragTraceManager.startHydeSpan(tc, state.query) : null;
+
   const config = await configStore.getInternalByType("llm");
   if (!config || !config.enabled) {
+    if (hydeSpan) ragTraceManager.endHydeSpan(hydeSpan, state.query);
     return { transformedQuery: state.query };
   }
 
@@ -169,9 +176,12 @@ async function hydeTransform(
       maxTokens: 300,
     });
 
-    return { transformedQuery: response.content.trim() };
+    const transformed = response.content.trim();
+    if (hydeSpan) ragTraceManager.endHydeSpan(hydeSpan, transformed);
+    return { transformedQuery: transformed };
   } catch (err) {
     console.warn("[RAGGraph] HyDE transform failed:", err);
+    if (hydeSpan) ragTraceManager.endHydeSpan(hydeSpan, state.query);
     return { transformedQuery: state.query };
   }
 }
@@ -182,6 +192,10 @@ async function hydeTransform(
 async function basicRetrieve(
   state: RAGGraphRuntimeState,
 ): Promise<Partial<RAGGraphRuntimeState>> {
+  const tc = state.traceContext;
+  const retrievalSpan = tc ? ragTraceManager.startRetrievalSpan(tc, "basic", state.query) : null;
+  const startTime = Date.now();
+
   const searchQuery = state.transformedQuery || state.query;
   const options: IndexSearchOptions = {
     limit: DEFAULT_LIMIT * 2,
@@ -207,6 +221,17 @@ async function basicRetrieve(
     options,
   );
 
+  if (retrievalSpan) {
+    ragTraceManager.endRetrievalSpan(retrievalSpan, {
+      strategy: "basic",
+      queryType: state.queryType,
+      granularities: options.granularities,
+      resultCount: results.length,
+      topScore: results[0]?.score,
+      durationMs: Date.now() - startTime,
+    }, results);
+  }
+
   return { retrievedDocs: results };
 }
 
@@ -216,6 +241,10 @@ async function basicRetrieve(
 async function multiRetrieve(
   state: RAGGraphRuntimeState,
 ): Promise<Partial<RAGGraphRuntimeState>> {
+  const tc = state.traceContext;
+  const retrievalSpan = tc ? ragTraceManager.startRetrievalSpan(tc, "multi", state.query) : null;
+  const startTime = Date.now();
+
   const options: IndexSearchOptions = {
     limit: DEFAULT_LIMIT * 2,
     docIds: state.docIds,
@@ -247,17 +276,57 @@ async function multiRetrieve(
     DEFAULT_LIMIT * 2,
   );
 
+  if (retrievalSpan) {
+    ragTraceManager.endRetrievalSpan(retrievalSpan, {
+      strategy: "multi",
+      queryType: state.queryType,
+      resultCount: fused.length,
+      topScore: fused[0]?.score,
+      durationMs: Date.now() - startTime,
+    }, fused);
+  }
+
   return { retrievedDocs: fused };
 }
 
 /**
  * RAPTOR tree-based retrieval
- * TODO: Implement actual RAPTOR tree search
+ * Tries the RAPTOR tree first; falls back to document + section vector search.
  */
 async function raptorRetrieve(
   state: RAGGraphRuntimeState,
 ): Promise<Partial<RAGGraphRuntimeState>> {
-  // For now, use document + section level search as a simplified version
+  const tc = state.traceContext;
+  const retrievalSpan = tc ? ragTraceManager.startRetrievalSpan(tc, "raptor", state.query) : null;
+  const startTime = Date.now();
+
+  // Try RAPTOR tree search first
+  try {
+    const raptorResults = await searchRaptorTree(
+      state.userId,
+      state.projectKey,
+      state.query,
+      state.docIds,
+      { limit: DEFAULT_LIMIT * 2, expandLevel: 2 },
+    );
+
+    if (raptorResults.length > 0) {
+      if (retrievalSpan) {
+        ragTraceManager.endRetrievalSpan(retrievalSpan, {
+          strategy: "raptor",
+          queryType: state.queryType,
+          resultCount: raptorResults.length,
+          topScore: raptorResults[0]?.score,
+          durationMs: Date.now() - startTime,
+        }, raptorResults);
+      }
+      return { retrievedDocs: raptorResults };
+    }
+  } catch (err) {
+    console.warn("[RAGGraph] RAPTOR retrieval failed, falling back:", err);
+  }
+
+  // Fallback: document + section level vector search
   const results = await indexStore.searchByVector(
     state.userId,
     state.projectKey,
@@ -268,6 +337,17 @@ async function raptorRetrieve(
       limit: DEFAULT_LIMIT * 2,
     },
   );
+
+  if (retrievalSpan) {
+    ragTraceManager.endRetrievalSpan(retrievalSpan, {
+      strategy: "raptor",
+      queryType: state.queryType,
+      granularities: ["document", "section"],
+      resultCount: results.length,
+      topScore: results[0]?.score,
+      durationMs: Date.now() - startTime,
+    }, results);
+  }
 
   return { retrievedDocs: results };
 }
@@ -427,8 +507,20 @@ async function routeStrategy(
     });
   }
 
+  const tc = state.traceContext;
+  const classifySpan = tc ? ragTraceManager.startClassifySpan(tc, state.query) : null;
+  const startTime = Date.now();
+
   const classified = await classifyQuery(state);
   const nextStrategy = (classified.strategy || "basic") as RAGStrategy;
+
+  if (classifySpan) {
+    ragTraceManager.endClassifySpan(
+      classifySpan,
+      classified.queryType as QueryType || "general",
+      nextStrategy,
+    );
+  }
 
   return new Command({
     goto: strategyToEntryNode(nextStrategy),
@@ -442,7 +534,23 @@ async function maybeRerank(
   if (!state.graphConfig?.enableReranking || state.retrievedDocs.length === 0) {
     return { rerankedDocs: state.retrievedDocs };
   }
-  return rerank(state);
+
+  const tc = state.traceContext;
+  const rerankSpan = tc ? ragTraceManager.startRerankSpan(tc, state.retrievedDocs.length) : null;
+  const startTime = Date.now();
+
+  const result = await rerank(state);
+
+  if (rerankSpan) {
+    ragTraceManager.endRerankSpan(rerankSpan, {
+      inputCount: state.retrievedDocs.length,
+      outputCount: result.rerankedDocs?.length || 0,
+      model: process.env.COHERE_API_KEY ? "rerank-multilingual-v3.0" : "fallback",
+      durationMs: Date.now() - startTime,
+    });
+  }
+
+  return result;
 }
 
 async function maybeEvaluateSufficiency(
@@ -451,7 +559,21 @@ async function maybeEvaluateSufficiency(
   if (!state.graphConfig?.enableSelfRAG) {
     return { sufficiency: { sufficient: true } };
   }
-  return evaluateSufficiency(state);
+
+  const tc = state.traceContext;
+  const evalSpan = tc ? ragTraceManager.startEvaluationSpan(tc) : null;
+
+  const result = await evaluateSufficiency(state);
+
+  if (evalSpan) {
+    ragTraceManager.endEvaluationSpan(
+      evalSpan,
+      result.sufficiency?.sufficient ?? true,
+      result.sufficiency?.missing,
+    );
+  }
+
+  return result;
 }
 
 function decideAfterEvaluation(state: RAGGraphRuntimeState): "expand" | "end" {
@@ -516,6 +638,7 @@ const ragGraph = new StateGraph(RAGGraphState)
 export async function executeRAGGraph(
   initialState: Omit<RAGState, "queryType" | "retrievedDocs" | "rerankedDocs">,
   config: Partial<GraphConfig> = {},
+  traceContext?: TraceContext,
 ): Promise<RAGState> {
   const mergedConfig: GraphConfig = {
     ...DEFAULT_CONFIG,
@@ -535,12 +658,14 @@ export async function executeRAGGraph(
     sufficiency: undefined,
     iteration: 0,
     graphConfig: mergedConfig,
+    traceContext,
   };
 
   const final = await ragGraph.invoke(graphInput);
-  // Strip internal config field so callers keep the original RAGState shape.
-  const { graphConfig: _graphConfig, ...rest } = final as RAGGraphRuntimeState & {
+  // Strip internal config and traceContext fields so callers keep the original RAGState shape.
+  const { graphConfig: _graphConfig, traceContext: _tc, ...rest } = final as RAGGraphRuntimeState & {
     graphConfig?: GraphConfig;
+    traceContext?: TraceContext;
   };
   return rest as unknown as RAGState;
 }
@@ -562,9 +687,10 @@ export async function ragSearch(
     enableSelfRAG?: boolean;
     enableReranking?: boolean;
     limit?: number;
+    traceContext?: TraceContext;
   } = {},
 ): Promise<IndexSearchResult[]> {
-  const { strategy = "adaptive", limit = DEFAULT_LIMIT, ...graphConfig } = options;
+  const { strategy = "adaptive", limit = DEFAULT_LIMIT, traceContext, ...graphConfig } = options;
 
   const result = await executeRAGGraph(
     {
@@ -575,6 +701,7 @@ export async function ragSearch(
       strategy,
     },
     graphConfig,
+    traceContext,
   );
 
   return result.rerankedDocs.slice(0, limit);
@@ -592,9 +719,10 @@ export async function ragSearchWithState(
     strategy?: RAGStrategy;
     enableSelfRAG?: boolean;
     enableReranking?: boolean;
+    traceContext?: TraceContext;
   } = {},
 ): Promise<RAGState> {
-  const { strategy = "adaptive", ...graphConfig } = options;
+  const { strategy = "adaptive", traceContext, ...graphConfig } = options;
 
   return executeRAGGraph(
     {
@@ -605,5 +733,6 @@ export async function ragSearchWithState(
       strategy,
     },
     graphConfig,
+    traceContext,
   );
 }

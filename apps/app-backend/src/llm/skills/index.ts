@@ -20,6 +20,7 @@ export type {
   RiskLevel,
   SkillConfirmation,
   PendingToolCall,
+  OrganizePlan,
 } from "./types.js";
 
 // Document skills
@@ -37,6 +38,7 @@ export {
   docFetchUrlSkill,
   docImportGitSkill,
   docConvertSkill,
+  docOrganizeSkill,
 } from "./document-skills.js";
 
 // Spec loader

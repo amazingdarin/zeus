@@ -65,6 +65,7 @@ class RAGTraceManager {
     const traceId = `rag-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     const traceContext = traceManager.startTrace(traceId, {
+      name: "rag-search",
       sessionId: metadata.sessionId,
       userId: metadata.userId,
       projectKey: metadata.projectKey,

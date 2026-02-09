@@ -31,6 +31,8 @@ import {
 } from "../hooks/useChatLogic";
 import MentionDropdown from "./MentionDropdown";
 import DraftPreviewModal from "./DraftPreviewModal";
+import IntentSelectDialog from "./IntentSelectDialog";
+import RequiredInputDialog from "./RequiredInputDialog";
 import ToolConfirmDialog from "./ToolConfirmDialog";
 import ChatAttachmentTags from "./ChatAttachmentTags";
 
@@ -81,7 +83,11 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     handleProposalAction,
     handleConfirmTool,
     handleRejectTool,
+    handleSelectIntent,
+    handleProvideRequiredInput,
     pendingTool,
+    pendingIntentInfo,
+    pendingRequiredInput,
     toggleSourcesExpanded,
     // Attachments
     attachments,
@@ -255,8 +261,18 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     const kbSources = sources.filter((s) => s.type !== "web");
     const webSources = sources.filter((s) => s.type === "web");
 
+    // Group KB sources by document
+    const kbDocGroups = new Map<string, { title: string; blocks: typeof kbSources }>();
+    for (const source of kbSources) {
+      const key = source.docId || "unknown";
+      if (!kbDocGroups.has(key)) {
+        kbDocGroups.set(key, { title: source.title, blocks: [] });
+      }
+      kbDocGroups.get(key)!.blocks.push(source);
+    }
+
     const totalLabel = [];
-    if (kbSources.length > 0) totalLabel.push(`${kbSources.length} 个文档`);
+    if (kbDocGroups.size > 0) totalLabel.push(`${kbDocGroups.size} 个文档`);
     if (webSources.length > 0) totalLabel.push(`${webSources.length} 个网页`);
 
     return (
@@ -276,23 +292,38 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
         </button>
         {isSourceExpanded && (
           <div className="chat-sources-list">
-            {/* KB Sources */}
-            {kbSources.map((source, index) => (
-              <div
-                key={`kb-${source.docId}-${source.blockId || ""}-${index}`}
-                className="chat-source-item chat-source-kb"
-                onClick={() => source.docId && handleDocumentNavigate(source.docId, { blockId: source.blockId })}
-              >
-                <div className="chat-source-title">
+            {/* KB Sources - grouped by document */}
+            {Array.from(kbDocGroups).map(([docId, group]) => (
+              <div key={`kb-doc-${docId}`} className="chat-source-doc-group">
+                <div
+                  className="chat-source-doc-header"
+                  onClick={() => docId !== "unknown" && handleDocumentNavigate(docId, {})}
+                >
                   <span className="chat-source-type-icon">📄</span>
-                  {source.title}
-                  {source.blockId && (
-                    <span className="chat-source-block-hint">
-                      #{source.blockId.slice(0, 8)}
-                    </span>
-                  )}
+                  <span className="chat-source-doc-title">{group.title}</span>
+                  <span className="chat-source-block-count">
+                    {group.blocks.length} 处引用
+                  </span>
                 </div>
-                <div className="chat-source-snippet">{source.snippet}</div>
+                <div className="chat-source-blocks">
+                  {group.blocks.map((block, index) => (
+                    <div
+                      key={`kb-block-${docId}-${block.blockId || index}`}
+                      className="chat-source-block-item"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        docId !== "unknown" && handleDocumentNavigate(docId, { blockId: block.blockId });
+                      }}
+                    >
+                      {block.blockId && (
+                        <span className="chat-source-block-hint">
+                          #{block.blockId.slice(0, 8)}
+                        </span>
+                      )}
+                      <span className="chat-source-block-snippet">{block.snippet}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
             {/* Web Sources */}
@@ -340,6 +371,21 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
           onConfirm={handleConfirmTool}
           onReject={handleRejectTool}
         />
+
+        {/* Intent Selection Dialog */}
+        <IntentSelectDialog
+          visible={!!pendingIntentInfo}
+          pendingIntent={pendingIntentInfo}
+          onSelect={handleSelectIntent}
+        />
+
+        {/* Required Input Dialog */}
+        <RequiredInputDialog
+          visible={!!pendingRequiredInput}
+          projectKey={projectKey}
+          pendingInput={pendingRequiredInput}
+          onSubmitDocId={handleProvideRequiredInput}
+        />
         <button
           type="button"
           className="chat-floating-btn"
@@ -373,6 +419,21 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
         pendingTool={pendingTool}
         onConfirm={handleConfirmTool}
         onReject={handleRejectTool}
+      />
+
+      {/* Intent Selection Dialog */}
+      <IntentSelectDialog
+        visible={!!pendingIntentInfo}
+        pendingIntent={pendingIntentInfo}
+        onSelect={handleSelectIntent}
+      />
+
+      {/* Required Input Dialog */}
+      <RequiredInputDialog
+        visible={!!pendingRequiredInput}
+        projectKey={projectKey}
+        pendingInput={pendingRequiredInput}
+        onSubmitDocId={handleProvideRequiredInput}
       />
 
       {/* Expanded Panel (animated open/close) */}

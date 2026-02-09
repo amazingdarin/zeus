@@ -240,6 +240,9 @@ importers:
       lowlight:
         specifier: ^3.3.0
         version: 3.3.0
+      markdown-it:
+        specifier: ^14.1.0
+        version: 14.1.0
       pdfjs-dist:
         specifier: ^4.8.69
         version: 4.10.38
@@ -286,6 +289,9 @@ importers:
       '@types/lodash.throttle':
         specifier: ^4.1.9
         version: 4.1.9
+      '@types/markdown-it':
+        specifier: ^14.1.2
+        version: 14.1.2
       '@types/react':
         specifier: ^19.1.8
         version: 19.2.10

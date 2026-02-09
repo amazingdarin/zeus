@@ -108,6 +108,30 @@ export class IndexManager {
   }
 
   /**
+   * Get titles of sibling documents (same parent), optionally excluding a specific doc
+   * @param cacheKey - The cache key (format: "{userId}:{projectKey}")
+   * @param parentId - The parent document ID ("root" or "" for root-level)
+   * @param excludeDocId - Optional document ID to exclude (for updates)
+   */
+  getSiblingTitles(cacheKey: string, parentId: string, excludeDocId?: string): Set<string> {
+    const projectIndex = this.indexes.get(cacheKey);
+    if (!projectIndex) return new Set();
+
+    const normalizedParentId = (!parentId || parentId === "root") ? "" : parentId;
+    const titles = new Set<string>();
+
+    for (const [docId, cached] of projectIndex) {
+      if (excludeDocId && docId === excludeDocId) continue;
+      const cachedParentId = (!cached.parentId || cached.parentId === "root") ? "" : cached.parentId;
+      if (cachedParentId === normalizedParentId) {
+        titles.add(cached.title);
+      }
+    }
+
+    return titles;
+  }
+
+  /**
    * Find document ID by its path
    * @param cacheKey - The cache key (format: "{userId}:{projectKey}")
    * @param docPath - The document path

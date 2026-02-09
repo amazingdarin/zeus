@@ -45,6 +45,26 @@
   align-items: center;
 }
 
+.file-block-download {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.file-block-download:hover {
+  background: rgba(31, 35, 40, 0.08);
+  color: var(--primary, #6366f1);
+}
+
 .file-block-toggle {
   display: flex;
   align-items: center;

@@ -31,7 +31,17 @@ import {
   type LLMProviderId,
   type ConfigType,
 } from "./llm/index.js";
-import { createRun, getRun, streamRun, clearSession, cancelRun, confirmTool, rejectTool } from "./services/chat.js";
+import {
+  createRun,
+  getRun,
+  streamRun,
+  clearSession,
+  cancelRun,
+  confirmTool,
+  rejectTool,
+  selectIntent,
+  provideRequiredInput,
+} from "./services/chat.js";
 import { draftService } from "./services/draft.js";
 import {
   createTask as createOptimizeTask,
@@ -742,6 +752,7 @@ export const buildRouter = () => {
       const body = (req.body ?? {}) as Record<string, unknown>;
 
       const traceContext = traceManager.startTrace(traceId, {
+        name: "import-git",
         userId,
         projectKey,
         tags: ["import", "import-git"],
@@ -864,6 +875,7 @@ export const buildRouter = () => {
       const filename = fixFilename(file.originalname);
       const traceId = `import-file-${uuidv4()}`;
       const traceContext = traceManager.startTrace(traceId, {
+        name: "import-file",
         userId,
         projectKey,
         tags: ["import", "import-file"],
@@ -958,6 +970,7 @@ export const buildRouter = () => {
 
       const traceId = `optimize-format-${uuidv4()}`;
       const traceContext = traceManager.startTrace(traceId, {
+        name: "optimize-format",
         userId,
         projectKey,
         tags: ["llm", "optimize-format"],
@@ -2061,6 +2074,10 @@ export const buildRouter = () => {
           })}\n\n`);
         } else if (chunk.type === "tool_pending") {
           res.write(`event: assistant.tool_pending\ndata: ${JSON.stringify(chunk.pendingTool)}\n\n`);
+        } else if (chunk.type === "intent_pending") {
+          res.write(`event: assistant.intent_pending\ndata: ${JSON.stringify(chunk.pendingIntent)}\n\n`);
+        } else if (chunk.type === "input_pending") {
+          res.write(`event: assistant.input_pending\ndata: ${JSON.stringify(chunk.pendingInput)}\n\n`);
         } else if (chunk.type === "tool_rejected") {
           res.write(`event: assistant.tool_rejected\ndata: ${JSON.stringify({ message: chunk.message })}\n\n`);
         } else if (chunk.type === "error") {
@@ -2130,6 +2147,56 @@ export const buildRouter = () => {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to reject tool";
       error(res, "REJECT_TOOL_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Select an intent option for a pending intent clarification
+   * POST /projects/:projectKey/chat/runs/:runId/select-intent
+   */
+  router.post("/projects/:projectKey/chat/runs/:runId/select-intent", async (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const option = req.body as { type?: string; skillHint?: string; label?: string; confidence?: number };
+      if (!option?.type) {
+        error(res, "INVALID_REQUEST", "option.type is required");
+        return;
+      }
+      const selected = selectIntent(runId, {
+        type: option.type as "command" | "skill" | "deep_search" | "chat",
+        skillHint: option.skillHint,
+        label: option.label || option.type,
+        confidence: option.confidence ?? 1.0,
+      });
+      if (!selected) {
+        error(res, "NOT_FOUND", "No pending intent selection for this run", 404);
+        return;
+      }
+      success(res, { selected: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to select intent";
+      error(res, "SELECT_INTENT_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Provide required input for a pending input clarification (e.g. doc scope)
+   * POST /projects/:projectKey/chat/runs/:runId/provide-input
+   */
+  router.post("/projects/:projectKey/chat/runs/:runId/provide-input", async (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const body = req.body as { doc_id?: string };
+      const docId = typeof body?.doc_id === "string" ? body.doc_id.trim() : "";
+      const ok = provideRequiredInput(runId, { doc_id: docId });
+      if (!ok) {
+        error(res, "NOT_FOUND", "No pending input for this run", 404);
+        return;
+      }
+      success(res, { provided: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to provide input";
+      error(res, "PROVIDE_INPUT_FAILED", msg, 500);
     }
   });
 

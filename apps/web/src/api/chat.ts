@@ -95,6 +95,25 @@ export type PendingToolCall = {
   expiresAt: number;
 };
 
+export type IntentOption = {
+  type: "command" | "skill" | "deep_search" | "chat";
+  skillHint?: string;
+  label: string;
+  confidence: number;
+};
+
+export type PendingIntentInfo = {
+  message: string;
+  options: IntentOption[];
+};
+
+export type PendingRequiredInputInfo = {
+  kind: "doc_scope";
+  message: string;
+  skillName: string;
+  skillDescription: string;
+};
+
 /**
  * Confirm a pending tool execution
  */
@@ -126,5 +145,49 @@ export const rejectTool = async (
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
     throw new Error(payload?.message || "Failed to reject tool");
+  }
+};
+
+/**
+ * Select an intent option for a pending intent clarification
+ */
+export const selectIntent = async (
+  projectKey: string,
+  runId: string,
+  option: IntentOption,
+): Promise<void> => {
+  const response = await apiFetch(
+    `/api/projects/${projectKey}/chat/runs/${encodeURIComponent(runId)}/select-intent`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(option),
+    },
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.message || "Failed to select intent");
+  }
+};
+
+/**
+ * Provide required input for a pending clarification (e.g. doc scope)
+ */
+export const provideRequiredInput = async (
+  projectKey: string,
+  runId: string,
+  payload: { doc_id: string },
+): Promise<void> => {
+  const response = await apiFetch(
+    `/api/projects/${projectKey}/chat/runs/${encodeURIComponent(runId)}/provide-input`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.message || "Failed to provide input");
   }
 };

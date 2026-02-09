@@ -8,6 +8,7 @@ import type { Langfuse, LangfuseTraceClient, LangfuseSpanClient, LangfuseGenerat
 import { getLangfuse } from "./langfuse.js";
 
 export type TraceMetadata = {
+  name?: string;
   sessionId?: string;
   projectKey?: string;
   userId?: string;
@@ -70,6 +71,7 @@ class TraceManager {
 
     const trace = langfuse.trace({
       id: runId,
+      name: metadata.name,
       sessionId: metadata.sessionId,
       userId: metadata.userId,
       tags: metadata.tags,

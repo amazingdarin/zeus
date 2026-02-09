@@ -1,5 +1,6 @@
-import { useMemo, useState, memo, type DragEvent } from "react";
-import { DownOutlined, RightOutlined, ReloadOutlined, DatabaseOutlined, MenuFoldOutlined } from "@ant-design/icons";
+import { useCallback, useMemo, useState, memo, type DragEvent } from "react";
+import type { JSONContent } from "@tiptap/react";
+import { DownOutlined, RightOutlined, ReloadOutlined, DatabaseOutlined, MenuFoldOutlined, UnorderedListOutlined, ApartmentOutlined } from "@ant-design/icons";
 import { Tooltip } from "antd";
 import { useToggleTree } from "./KnowledgeBaseLayout";
 
@@ -45,6 +46,9 @@ type KnowledgeBaseSideNavProps = {
   onRebuildIndex?: () => void;
   onEmptyAreaClick?: () => void;
   onAddDocument?: () => void;
+  outlineMode?: boolean;
+  onToggleOutline?: () => void;
+  documentContent?: JSONContent | null;
 };
 
 const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
@@ -63,6 +67,9 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
   onRebuildIndex,
   onEmptyAreaClick,
   onAddDocument,
+  outlineMode,
+  onToggleOutline,
+  documentContent,
 }: KnowledgeBaseSideNavProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{
@@ -317,6 +324,17 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
       onDrop={handleRootDrop}
     >
       <div className="kb-sidebar-toolbar">
+        {onToggleOutline && documentContent && (
+          <Tooltip title={outlineMode ? "文档树" : "文档结构"}>
+            <button
+              className={`kb-sidebar-toolbar-btn${outlineMode ? " active" : ""}`}
+              type="button"
+              onClick={onToggleOutline}
+            >
+              {outlineMode ? <ApartmentOutlined /> : <UnorderedListOutlined />}
+            </button>
+          </Tooltip>
+        )}
         <div className="kb-sidebar-toolbar-spacer" />
         {onRebuildIndex && (
           <Tooltip 
@@ -367,7 +385,9 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
           }
         }}
       >
-        {rootLoading ? (
+        {outlineMode && documentContent ? (
+          <DocumentOutlineContent content={documentContent} />
+        ) : rootLoading ? (
           <div className="kb-doc-loading">加载中...</div>
         ) : documents.length === 0 ? (
           <div 
@@ -392,6 +412,83 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
 });
 
 export default KnowledgeBaseSideNav;
+
+// ── Document Outline (heading tree) ────────────────────────────────────
+
+type HeadingItem = { id: string; level: number; text: string };
+
+function extractTextFromNode(node: JSONContent): string {
+  if (node.text) return node.text;
+  if (!node.content) return "";
+  return node.content.map(extractTextFromNode).join("");
+}
+
+function extractHeadingsFromJson(content: JSONContent | null | undefined): HeadingItem[] {
+  if (!content?.content) return [];
+  const headings: HeadingItem[] = [];
+
+  function walk(nodes: JSONContent[]) {
+    for (const node of nodes) {
+      if (
+        node.type === "heading" &&
+        typeof node.attrs?.level === "number" &&
+        node.attrs.level >= 1 &&
+        node.attrs.level <= 4
+      ) {
+        const text = extractTextFromNode(node);
+        if (text.trim()) {
+          headings.push({
+            id: (node.attrs.id as string) || "",
+            level: node.attrs.level as number,
+            text,
+          });
+        }
+      }
+      if (node.content) walk(node.content);
+    }
+  }
+
+  walk(content.content);
+  return headings;
+}
+
+function DocumentOutlineContent({ content }: { content: JSONContent | null | undefined }) {
+  const headings = useMemo(() => extractHeadingsFromJson(content), [content]);
+
+  const handleClick = useCallback((id: string) => {
+    if (!id) return;
+    const el = document.querySelector(`[data-block-id="${id}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      el.classList.add("block-highlight");
+      setTimeout(() => el.classList.remove("block-highlight"), 2000);
+    }
+  }, []);
+
+  if (headings.length === 0) {
+    return <div className="doc-outline-empty">暂无标题</div>;
+  }
+
+  return (
+    <div className="doc-outline-list">
+      {headings.map((h, i) => (
+        <button
+          key={h.id || `h-${i}`}
+          type="button"
+          className={`doc-outline-item doc-outline-item-h${h.level}`}
+          style={{ paddingLeft: `${8 + (h.level - 1) * 16}px` }}
+          onClick={() => handleClick(h.id)}
+          title={h.text}
+        >
+          <span className="doc-outline-level">H{h.level}</span>
+          <span className="doc-outline-text">{h.text}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────
 
 function isRootId(value: string): boolean {
   return value.trim() === "" || value.trim().toLowerCase() === "root";

@@ -36,6 +36,7 @@ import { TocNode } from "../../nodes/toc-node/toc-node-extension"
 import { MathNode } from "../../nodes/math-node/math-node-extension"
 import { MusicNode } from "../../nodes/music-node/music-node-extension"
 import { ChartNode } from "../../nodes/chart-node/chart-node-extension"
+import { MindmapNode } from "../../nodes/mindmap-node/mindmap-node-extension"
 import { createTableExtensions } from "../../nodes/table-node/table-node-extension"
 import "../../nodes/blockquote-node/blockquote-node.scss"
 import "../../nodes/code-block-node/code-block-node.scss"
@@ -50,6 +51,7 @@ import "../../nodes/table-node/table-node.scss"
 import "../../nodes/math-node/math-node.scss"
 import "../../nodes/music-node/music-node.scss"
 import "../../nodes/chart-node/chart-node.scss"
+import "../../nodes/mindmap-node/mindmap-node.scss"
 import "../../ui/table-button/table-menu.scss"
 import "../../ui/music-button/music-button.scss"
 import "../../ui/chart-button/chart-button.scss"
@@ -68,6 +70,7 @@ import { TableMenu } from "../../ui/table-button"
 import { MathButton } from "../../ui/math-button"
 import { MusicButton } from "../../ui/music-button"
 import { ChartButton } from "../../ui/chart-button"
+import { MindmapButton } from "../../ui/mindmap-button"
 import {
   ColorHighlightPopover,
   ColorHighlightPopoverContent,
@@ -151,6 +154,7 @@ const MainToolbarContent = ({
         <MathButton />
         <MusicButton />
         <ChartButton />
+        <MindmapButton />
         <TableMenu />
         <TocButton />
       </ToolbarGroup>
@@ -308,6 +312,7 @@ export function DocEditor({
       MathNode,
       MusicNode,
       ChartNode,
+      MindmapNode,
       ...createTableExtensions(),
       ...extensions,
     ],

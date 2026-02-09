@@ -33,10 +33,24 @@ import { importAssetAsDocument } from "../../services/smart-import.js";
 import { knowledgeSearch } from "../../knowledge/search.js";
 import { notifyDocumentMoved } from "../../knowledge/tree-sync.js";
 import {
+  collectDocTree,
+  fetchSummaries,
+  classifyDocs,
+  proposeStructure,
+  buildOrganizePlan,
+  formatPlanAsMarkdown,
+} from "../../services/organize.js";
+import {
   getOptimizeCapability,
   runDocOptimize,
   type OptimizeCapabilityId,
 } from "../agent/optimize/index.js";
+import { assetStore } from "../../storage/asset-store.js";
+import {
+  parseFile,
+  parseImage,
+  parseUrl,
+} from "../../services/parse-service.js";
 
 // Maximum retries for LLM content generation
 const MAX_RETRIES = 2;
@@ -215,6 +229,16 @@ export function detectSkillIntent(
     };
   }
 
+  if (trimmed.startsWith("/doc-organize")) {
+    return {
+      skill: "doc-organize",
+      command: "/doc-organize",
+      args: {},
+      rawMessage: message,
+      docIds,
+    };
+  }
+
   if (trimmed.startsWith("/doc-convert")) {
     const rest = trimmed.slice("/doc-convert".length).trim();
     return {
@@ -225,6 +249,39 @@ export function detectSkillIntent(
         to: "markdown",
         content: rest,
       },
+      rawMessage: message,
+      docIds,
+    };
+  }
+
+  if (trimmed.startsWith("/file-parse")) {
+    const rest = trimmed.slice("/file-parse".length).trim();
+    return {
+      skill: "file-parse",
+      command: "/file-parse",
+      args: { asset_id: rest },
+      rawMessage: message,
+      docIds,
+    };
+  }
+
+  if (trimmed.startsWith("/image-analyze")) {
+    const rest = trimmed.slice("/image-analyze".length).trim();
+    return {
+      skill: "image-analyze",
+      command: "/image-analyze",
+      args: { asset_id: rest },
+      rawMessage: message,
+      docIds,
+    };
+  }
+
+  if (trimmed.startsWith("/url-extract")) {
+    const rest = trimmed.slice("/url-extract".length).trim();
+    return {
+      skill: "url-extract",
+      command: "/url-extract",
+      args: { url: rest },
       rawMessage: message,
       docIds,
     };
@@ -339,6 +396,18 @@ export async function* executeSkillWithStream(
         break;
       case "doc-convert":
         yield* executeDocConvert(userId, projectKey, intent);
+        break;
+      case "doc-organize":
+        yield* executeDocOrganize(userId, projectKey, intent, traceContext);
+        break;
+      case "file-parse":
+        yield* executeFileParse(userId, projectKey, intent, traceContext);
+        break;
+      case "image-analyze":
+        yield* executeImageAnalyze(userId, projectKey, intent, traceContext);
+        break;
+      case "url-extract":
+        yield* executeUrlExtract(userId, projectKey, intent);
         break;
       default:
         yield { type: "error", error: `Unknown skill: ${intent.skill}` };
@@ -1299,6 +1368,88 @@ async function* executeDocDelete(
   }
 }
 
+// ============================================================================
+// Document Organize Skill
+// ============================================================================
+
+const ORGANIZE_MAX_DOCS = 500;
+
+/**
+ * Execute doc-organize skill
+ *
+ * Analyses document tree using titles + knowledge-index summaries (no full
+ * content loading), asks LLM to categorize & propose a new directory
+ * structure, then yields an organize_plan chunk so chat.ts can handle
+ * the confirmation / auto-apply logic.
+ */
+async function* executeDocOrganize(
+  userId: string,
+  projectKey: string,
+  intent: SkillIntent,
+  traceContext?: TraceContext,
+): AsyncGenerator<SkillStreamChunk> {
+  const rootId = (intent.docIds?.[0] || intent.args.doc_id as string || "root").trim() || "root";
+
+  yield { type: "thinking", content: "正在扫描文档结构..." };
+
+  try {
+    // 1. Collect document tree (titles only – zero file I/O)
+    const docs = await collectDocTree(userId, projectKey, rootId);
+
+    if (docs.length === 0) {
+      yield { type: "done", message: "该目录下没有文档，无需整理。" };
+      return;
+    }
+
+    if (docs.length > ORGANIZE_MAX_DOCS) {
+      yield {
+        type: "error",
+        error: `文档数量 (${docs.length}) 超过上限 (${ORGANIZE_MAX_DOCS})，请指定一个更小的目录范围。`,
+      };
+      return;
+    }
+
+    yield { type: "thinking", content: `共扫描到 ${docs.length} 篇文档，正在获取摘要...` };
+
+    // 2. Fetch pre-computed summaries from knowledge_index
+    const leafDocs = docs.filter((d) => d.kind !== "dir");
+    const summaryMap = await fetchSummaries(userId, projectKey, leafDocs.map((d) => d.id));
+    for (const doc of docs) {
+      doc.summary = summaryMap.get(doc.id) || "";
+    }
+
+    yield { type: "thinking", content: `正在分析 ${leafDocs.length} 篇文档的类别...` };
+
+    // 3. Classify documents via LLM (batched)
+    const categories = await classifyDocs(leafDocs);
+
+    yield { type: "thinking", content: "正在规划新目录结构..." };
+
+    // 4. Propose new directory structure via LLM
+    const existingDirs = docs.filter((d) => d.kind === "dir");
+    const proposal = await proposeStructure(leafDocs, categories, existingDirs);
+
+    // 5. Build the plan (computes moves & new folders)
+    const plan = await buildOrganizePlan(userId, projectKey, rootId, docs, categories, proposal);
+
+    // 6. Stream the formatted plan
+    const markdown = formatPlanAsMarkdown(plan);
+    yield { type: "delta", content: markdown };
+
+    // 7. Yield organize_plan for chat.ts to handle confirmation/auto-apply
+    if (plan.moves.length > 0 || plan.newFolders.length > 0) {
+      yield { type: "organize_plan", plan };
+    }
+
+    yield { type: "done", message: "文档整理方案已生成" };
+  } catch (err) {
+    yield {
+      type: "error",
+      error: `文档整理失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
 /**
  * Execute kb-search skill
  */
@@ -1505,6 +1656,160 @@ async function* executeDocConvert(
     yield {
       type: "error",
       error: `内容转换失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+// ============================================================================
+// Parse Skills (file-parse, image-analyze, url-extract)
+// ============================================================================
+
+/**
+ * Execute file-parse skill
+ *
+ * Loads asset buffer from store, detects file type, and extracts content as
+ * markdown text. Does NOT create a document — content is returned directly
+ * in the conversation.
+ */
+async function* executeFileParse(
+  userId: string,
+  projectKey: string,
+  intent: SkillIntent,
+  traceContext?: TraceContext,
+): AsyncGenerator<SkillStreamChunk> {
+  const assetId = String(intent.args.asset_id || "").trim();
+  if (!assetId) {
+    yield { type: "error", error: "asset_id 参数不能为空，请先上传文件附件" };
+    return;
+  }
+
+  yield { type: "thinking", content: "正在加载文件..." };
+
+  try {
+    const asset = await assetStore.getContent(userId, projectKey, assetId);
+    if (!asset) {
+      yield { type: "error", error: `未找到附件 ${assetId}，可能已过期或不存在` };
+      return;
+    }
+
+    yield { type: "thinking", content: `正在解析 ${asset.meta.filename}...` };
+
+    const result = await parseFile(asset.buffer, asset.meta.filename, asset.meta.mime);
+
+    if (!result.content.trim()) {
+      yield { type: "done", message: "文件解析完成，但未提取到有效内容" };
+      return;
+    }
+
+    // Stream the parsed content
+    yield {
+      type: "delta",
+      content: `**📄 ${asset.meta.filename}** (${result.sourceType})\n\n${result.content}`,
+    };
+    yield { type: "done", message: `文件解析完成 (${result.sourceType})` };
+  } catch (err) {
+    yield {
+      type: "error",
+      error: `文件解析失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Execute image-analyze skill
+ *
+ * Loads image asset from store and performs OCR or LLM vision Q&A.
+ * Does NOT create a document.
+ */
+async function* executeImageAnalyze(
+  userId: string,
+  projectKey: string,
+  intent: SkillIntent,
+  traceContext?: TraceContext,
+): AsyncGenerator<SkillStreamChunk> {
+  const assetId = String(intent.args.asset_id || "").trim();
+  if (!assetId) {
+    yield { type: "error", error: "asset_id 参数不能为空，请先上传图片附件" };
+    return;
+  }
+
+  const question = typeof intent.args.question === "string"
+    ? intent.args.question.trim()
+    : undefined;
+
+  yield { type: "thinking", content: question ? "正在分析图片..." : "正在识别图片文字..." };
+
+  try {
+    const asset = await assetStore.getContent(userId, projectKey, assetId);
+    if (!asset) {
+      yield { type: "error", error: `未找到附件 ${assetId}，可能已过期或不存在` };
+      return;
+    }
+
+    const result = await parseImage(asset.buffer, asset.meta.mime, question, traceContext);
+
+    if (!result.content.trim()) {
+      yield { type: "done", message: "图片分析完成，但未提取到有效内容" };
+      return;
+    }
+
+    const header = question
+      ? `**🖼️ ${asset.meta.filename}** — ${question}`
+      : `**🖼️ ${asset.meta.filename}** OCR 识别结果`;
+
+    yield {
+      type: "delta",
+      content: `${header}\n\n${result.content}`,
+    };
+    yield {
+      type: "done",
+      message: question ? "图片分析完成" : "图片文字识别完成",
+    };
+  } catch (err) {
+    yield {
+      type: "error",
+      error: `图片分析失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Execute url-extract skill
+ *
+ * Fetches URL and extracts clean article content as Markdown.
+ * Does NOT create a document.
+ */
+async function* executeUrlExtract(
+  userId: string,
+  projectKey: string,
+  intent: SkillIntent,
+): AsyncGenerator<SkillStreamChunk> {
+  const targetUrl = String(intent.args.url || "").trim();
+  if (!targetUrl) {
+    yield { type: "error", error: "url 参数不能为空" };
+    return;
+  }
+
+  yield { type: "thinking", content: `正在抓取 ${targetUrl}...` };
+
+  try {
+    const result = await parseUrl(targetUrl);
+
+    if (!result.content.trim()) {
+      yield { type: "done", message: "页面抓取完成，但未提取到有效内容" };
+      return;
+    }
+
+    const title = (result.metadata?.title as string) || targetUrl;
+    yield {
+      type: "delta",
+      content: `**🔗 ${title}**\n\n${result.content}`,
+    };
+    yield { type: "done", message: "URL 内容提取完成" };
+  } catch (err) {
+    yield {
+      type: "error",
+      error: `URL 提取失败: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 }

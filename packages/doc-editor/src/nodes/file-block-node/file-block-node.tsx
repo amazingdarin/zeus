@@ -10,6 +10,7 @@ import { Button } from "../../primitives/button"
 import { TrashIcon } from "../../icons/trash-icon"
 import { ImagePlusIcon } from "../../icons/image-plus-icon"
 import { ChevronDownIcon } from "../../icons/chevron-down-icon"
+import { DownloadIcon } from "../../icons/download-icon"
 import type {
   FileBlockAttrs,
   FileBlockNodeOptions,
@@ -341,6 +342,17 @@ export function FileBlockNodeView({ node, editor, extension, getPos }: NodeViewP
     setTextState({ loading: false, error: null, text: "", truncated: false })
   }
 
+  const handleDownload = useCallback(() => {
+    if (!assetUrl) return
+    const link = document.createElement("a")
+    link.href = assetUrl
+    link.download = fileName || "download"
+    link.rel = "noopener noreferrer"
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }, [assetUrl, fileName])
+
   const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     event.target.value = ""
@@ -423,6 +435,15 @@ export function FileBlockNodeView({ node, editor, extension, getPos }: NodeViewP
             </div>
           ) : assetId ? (
             <div className="file-block-actions">
+              <button
+                type="button"
+                className="file-block-download"
+                onClick={handleDownload}
+                aria-label="Download file"
+                title="下载文件"
+              >
+                <DownloadIcon className="file-block-action-icon" />
+              </button>
               <button
                 type="button"
                 className="file-block-toggle"

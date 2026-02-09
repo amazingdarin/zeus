@@ -3,7 +3,7 @@ import { documentStore } from "../storage/document-store.js";
 import { indexStore, clearEmbeddingConfigCache } from "./index-store.js";
 import type { IndexSearchResult } from "./types.js";
 import { clearProjectSummaryCache, clearSummaryCache } from "./hierarchy.js";
-import { clearProjectRaptorTrees, clearRaptorTree } from "./raptor.js";
+import { buildRaptorTree, clearProjectRaptorTrees, clearRaptorTree } from "./raptor.js";
 
 export type SearchMode = "fulltext" | "embedding" | "hybrid";
 
@@ -68,8 +68,21 @@ export const knowledgeSearch = {
    */
   async indexDocument(userId: string, projectKey: string, doc: Document): Promise<void> {
     const parentPath = await getParentPathTitles(userId, projectKey, doc.meta.id);
-    await indexStore.indexDocument(userId, projectKey, doc, parentPath);
+    const { indexed } = await indexStore.indexDocument(userId, projectKey, doc, parentPath);
     await clearSummaryCache(doc.meta.id);
+
+    // Build RAPTOR tree from block/code-level chunks
+    if (indexed > 0) {
+      try {
+        const entries = await indexStore.getByDocument(userId, projectKey, doc.meta.id, ["block", "code"]);
+        if (entries.length > 0) {
+          const chunks = entries.map((e) => ({ id: e.id, content: e.content }));
+          await buildRaptorTree(userId, projectKey, doc.meta.id, chunks);
+        }
+      } catch (err) {
+        console.warn("[Knowledge] RAPTOR tree build failed:", err);
+      }
+    }
   },
 
   /**
@@ -119,8 +132,22 @@ export const knowledgeSearch = {
     for (const doc of documents) {
       try {
         const parentPath = computeParentPathFromList(metaById, doc.meta.id);
-        await indexStore.indexDocument(userId, projectKey, doc, parentPath);
+        const { indexed } = await indexStore.indexDocument(userId, projectKey, doc, parentPath);
         await clearSummaryCache(doc.meta.id);
+
+        // Build RAPTOR tree from block/code-level chunks
+        if (indexed > 0) {
+          try {
+            const entries = await indexStore.getByDocument(userId, projectKey, doc.meta.id, ["block", "code"]);
+            if (entries.length > 0) {
+              const chunks = entries.map((e) => ({ id: e.id, content: e.content }));
+              await buildRaptorTree(userId, projectKey, doc.meta.id, chunks);
+            }
+          } catch (err) {
+            console.warn("[Knowledge] RAPTOR tree build failed for doc", doc.meta.id, err);
+          }
+        }
+
         progress.succeeded++;
       } catch (err) {
         progress.failed++;

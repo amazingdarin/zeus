@@ -58,6 +58,28 @@ function normalizeSlug(title: string): string {
 }
 
 /**
+ * Ensure a unique title among siblings.
+ * If the title already exists, appends "- 副本", "- 副本 2", etc.
+ */
+function ensureUniqueTitle(title: string, siblingTitles: Set<string>): string {
+  if (!siblingTitles.has(title)) {
+    return title;
+  }
+
+  const suffix = " - 副本";
+  let candidate = `${title}${suffix}`;
+  if (!siblingTitles.has(candidate)) {
+    return candidate;
+  }
+
+  let count = 2;
+  while (siblingTitles.has(`${title}${suffix} ${count}`)) {
+    count++;
+  }
+  return `${title}${suffix} ${count}`;
+}
+
+/**
  * Ensure a unique slug in the target directory
  */
 async function ensureUniqueSlug(dir: string, slug: string): Promise<string> {
@@ -160,6 +182,20 @@ export const documentStore = {
       } else {
         targetDir = root;
       }
+    }
+
+    // Ensure unique title among siblings
+    const parentId = doc.meta.parent_id || "root";
+    if (exists && cached) {
+      // For updates: only deduplicate if title actually changed
+      if (cached.title !== doc.meta.title) {
+        const siblingTitles = indexManager.getSiblingTitles(cacheKey, parentId, doc.meta.id);
+        doc.meta.title = ensureUniqueTitle(doc.meta.title, siblingTitles);
+      }
+    } else {
+      // For new documents: always check
+      const siblingTitles = indexManager.getSiblingTitles(cacheKey, parentId, doc.meta.id);
+      doc.meta.title = ensureUniqueTitle(doc.meta.title, siblingTitles);
     }
 
     // Generate slug
@@ -386,6 +422,10 @@ export const documentStore = {
       newPath = path.join(targetDir, newFilename);
       await renameFileAndDir(oldPath, newPath);
 
+      // Ensure unique title in the new parent
+      const siblingTitles = indexManager.getSiblingTitles(cacheKey, targetParentId, docId);
+      const uniqueTitle = ensureUniqueTitle(cached.title, siblingTitles);
+
       // Update document metadata
       const content = await readFile(newPath, "utf-8");
       const doc = JSON.parse(content) as Document;
@@ -393,6 +433,7 @@ export const documentStore = {
 
       doc.meta.parent_id = targetParentId;
       doc.meta.path = relPath;
+      doc.meta.title = uniqueTitle;
       doc.meta.updated_at = new Date().toISOString();
 
       await writeFile(newPath, JSON.stringify(doc, null, 2), "utf-8");
@@ -400,7 +441,7 @@ export const documentStore = {
       // Update in-memory index
       indexManager.update(cacheKey, docId, {
         path: relPath,
-        title: cached.title,
+        title: uniqueTitle,
         parentId: targetParentId,
       });
     }

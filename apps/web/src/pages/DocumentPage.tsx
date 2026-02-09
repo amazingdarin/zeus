@@ -297,6 +297,7 @@ function DocumentPage() {
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
   const [loadingIds, setLoadingIds] = useState<Record<string, boolean>>({});
   const [rootLoading, setRootLoading] = useState(false);
+  const [outlineMode, setOutlineMode] = useState(false);
   const [rebuildingIndex, setRebuildingIndex] = useState(false);
   const [rebuildProgress, setRebuildProgress] = useState<{
     total: number;
@@ -1793,6 +1794,9 @@ function DocumentPage() {
           onRebuildIndex={handleRebuildIndex}
           onEmptyAreaClick={() => navigate("/documents")}
           onAddDocument={() => navigate("/documents/new")}
+          outlineMode={outlineMode}
+          onToggleOutline={() => setOutlineMode((v) => !v)}
+          documentContent={activeDocument?.content ?? null}
         />
       }
     >

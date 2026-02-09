@@ -415,13 +415,15 @@ export function buildHierarchyContextString(hierarchy: HierarchyContext): string
 /**
  * Enrich search results with hierarchy context
  */
-export async function enrichResultsWithHierarchy(
+export async function enrichResultsWithHierarchy<
+  T extends { doc_id: string; content: string }
+>(
   userId: string,
   projectKey: string,
-  results: Array<{ doc_id: string; content: string; [key: string]: unknown }>,
+  results: T[],
   loadConfig: AncestorLoadConfig[] = DEFAULT_LOAD_CONFIG,
 ): Promise<{
-  results: Array<{ doc_id: string; content: string; [key: string]: unknown }>;
+  results: T[];
   hierarchyContext: HierarchyContext;
   contextString: string;
 }> {

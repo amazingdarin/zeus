@@ -14,13 +14,27 @@ import {
 } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { createChatRun, buildChatStreamUrl, clearChatSession, confirmTool, rejectTool, type DocumentScope, type PendingToolCall } from "../api/chat";
+import {
+  createChatRun,
+  buildChatStreamUrl,
+  clearChatSession,
+  confirmTool,
+  rejectTool,
+  selectIntent,
+  provideRequiredInput,
+  type DocumentScope,
+  type PendingToolCall,
+  type PendingIntentInfo,
+  type PendingRequiredInputInfo,
+  type IntentOption,
+} from "../api/chat";
 import { applyProposal, rejectProposal } from "../api/documents";
 import { executeCommand } from "../api/commands";
 import { useProjectContext } from "../context/ProjectContext";
 import { getConfigByType, type ProviderConfig } from "../api/llm-config";
 import type { MentionItem } from "../components/MentionDropdown";
 import type { DocumentDraft } from "../api/drafts";
+import Markdown from "../components/Markdown";
 import {
   filterCommands,
   setCommandCatalog,
@@ -116,101 +130,9 @@ const normalizeDonePayload = (
   return { message, artifacts, sources };
 };
 
-// Simple markdown rendering (bold, italic, code, links)
+// Markdown rendering for assistant messages
 export function renderMarkdown(content: string): React.ReactNode {
-  const lines = content.split("\n");
-  const elements: React.ReactNode[] = [];
-  let inCodeBlock = false;
-  let codeContent: string[] = [];
-  let codeLanguage = "";
-
-  lines.forEach((line, lineIndex) => {
-    // Code block start/end
-    if (line.startsWith("```")) {
-      if (inCodeBlock) {
-        elements.push(
-          <pre key={`code-${lineIndex}`} className="chat-code-block">
-            <code className={codeLanguage ? `language-${codeLanguage}` : ""}>
-              {codeContent.join("\n")}
-            </code>
-          </pre>,
-        );
-        codeContent = [];
-        codeLanguage = "";
-        inCodeBlock = false;
-      } else {
-        inCodeBlock = true;
-        codeLanguage = line.slice(3).trim();
-      }
-      return;
-    }
-
-    if (inCodeBlock) {
-      codeContent.push(line);
-      return;
-    }
-
-    // Parse inline elements
-    const parseInline = (text: string): React.ReactNode[] => {
-      const result: React.ReactNode[] = [];
-      let remaining = text;
-      let key = 0;
-
-      while (remaining) {
-        // Inline code
-        const codeMatch = remaining.match(/`([^`]+)`/);
-        if (codeMatch && codeMatch.index !== undefined) {
-          if (codeMatch.index > 0) {
-            result.push(remaining.slice(0, codeMatch.index));
-          }
-          result.push(
-            <code key={key++} className="chat-inline-code">
-              {codeMatch[1]}
-            </code>,
-          );
-          remaining = remaining.slice(codeMatch.index + codeMatch[0].length);
-          continue;
-        }
-
-        // Bold
-        const boldMatch = remaining.match(/\*\*([^*]+)\*\*/);
-        if (boldMatch && boldMatch.index !== undefined) {
-          if (boldMatch.index > 0) {
-            result.push(remaining.slice(0, boldMatch.index));
-          }
-          result.push(<strong key={key++}>{boldMatch[1]}</strong>);
-          remaining = remaining.slice(boldMatch.index + boldMatch[0].length);
-          continue;
-        }
-
-        // Italic
-        const italicMatch = remaining.match(/\*([^*]+)\*/);
-        if (italicMatch && italicMatch.index !== undefined) {
-          if (italicMatch.index > 0) {
-            result.push(remaining.slice(0, italicMatch.index));
-          }
-          result.push(<em key={key++}>{italicMatch[1]}</em>);
-          remaining = remaining.slice(italicMatch.index + italicMatch[0].length);
-          continue;
-        }
-
-        // No more matches
-        result.push(remaining);
-        break;
-      }
-
-      return result;
-    };
-
-    elements.push(
-      <span key={`line-${lineIndex}`}>
-        {parseInline(line)}
-        {lineIndex < lines.length - 1 && <br />}
-      </span>,
-    );
-  });
-
-  return <>{elements}</>;
+  return <Markdown content={content} variant="chat" />;
 }
 
 type UseChatLogicOptions = {
@@ -237,6 +159,8 @@ export type UseChatLogicReturn = {
   mentionState: MentionState;
   pendingDraft: DocumentDraft | null;
   pendingTool: PendingToolCall | null;
+  pendingIntentInfo: PendingIntentInfo | null;
+  pendingRequiredInput: PendingRequiredInputInfo | null;
   slashActive: boolean;
   slashQuery: string;
   slashSelectedIndex: number;
@@ -277,6 +201,8 @@ export type UseChatLogicReturn = {
   handleProposalAction: (action: string, docId: string, proposalId: string) => Promise<void>;
   handleConfirmTool: () => Promise<void>;
   handleRejectTool: () => Promise<void>;
+  handleSelectIntent: (option: IntentOption) => Promise<void>;
+  handleProvideRequiredInput: (docId: string) => Promise<void>;
   toggleSourcesExpanded: (messageId: string) => void;
   handlePaste: (e: React.ClipboardEvent) => void;
   removeAttachment: (id: string) => void;
@@ -375,6 +301,8 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
 
   // Pending tool confirmation state
   const [pendingTool, setPendingTool] = useState<PendingToolCall | null>(null);
+  const [pendingIntentInfo, setPendingIntentInfo] = useState<PendingIntentInfo | null>(null);
+  const [pendingRequiredInput, setPendingRequiredInput] = useState<PendingRequiredInputInfo | null>(null);
   const currentRunIdRef = useRef<string | null>(null);
 
   // Slash command state
@@ -701,6 +629,8 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     setSelectedCommand(null);
     setMentionState({ active: false, query: "", startPos: 0 });
     setError(null);
+    setPendingIntentInfo(null);
+    setPendingRequiredInput(null);
     clearAttachments();
 
     // Build display message with mention info and attachments
@@ -787,10 +717,28 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         }
       });
 
+      source.addEventListener("assistant.intent_pending", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        if (payload && typeof payload === "object" && payload !== null) {
+          setPendingIntentInfo(payload as PendingIntentInfo);
+        }
+      });
+
+      source.addEventListener("assistant.input_pending", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        if (payload && typeof payload === "object" && payload !== null) {
+          setPendingRequiredInput(payload as PendingRequiredInputInfo);
+        }
+      });
+
       source.addEventListener("assistant.tool_pending", (event) => {
         hasCustomEventsRef.current = true;
         const payload = parsePayload((event as MessageEvent).data);
         if (payload && typeof payload === "object") {
+          setPendingIntentInfo(null);
+          setPendingRequiredInput(null);
           setPendingTool(payload as PendingToolCall);
         }
       });
@@ -803,6 +751,8 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
           : "操作已取消";
         appendMessage("system", msg);
         setPendingTool(null);
+        setPendingIntentInfo(null);
+        setPendingRequiredInput(null);
         setIsGenerating(false);
         closeStream();
       });
@@ -812,6 +762,8 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         const payload = parsePayload((event as MessageEvent).data);
         const { message: doneMessage, artifacts, sources } = normalizeDonePayload(payload);
         setIsGenerating(false);
+        setPendingIntentInfo(null);
+        setPendingRequiredInput(null);
         commitAssistantBuffer(artifacts, doneMessage, sources);
         closeStream();
       });
@@ -826,6 +778,8 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         setError(errMsg);
         appendMessage("system", `错误: ${errMsg}`);
         setIsGenerating(false);
+        setPendingIntentInfo(null);
+        setPendingRequiredInput(null);
         resetAssistantBuffer();
         closeStream();
       });
@@ -861,6 +815,8 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         setError("连接中断");
         appendMessage("system", "错误: 连接中断");
         setIsGenerating(false);
+        setPendingIntentInfo(null);
+        setPendingRequiredInput(null);
         resetAssistantBuffer();
         closeStream();
       };
@@ -941,6 +897,8 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   const handleStop = useCallback(() => {
     // Close the stream connection
     closeStream();
+    setPendingIntentInfo(null);
+    setPendingRequiredInput(null);
     
     // If there's a partial response in the buffer, save it
     if (assistantBufferRef.current) {
@@ -996,6 +954,46 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       appendMessage("system", `错误: ${msg}`);
       setPendingTool(null);
       setIsGenerating(false);
+    }
+  }, [projectKey, appendMessage, closeStream]);
+
+  const handleSelectIntent = useCallback(async (option: IntentOption) => {
+    const runId = currentRunIdRef.current;
+    if (!projectKey || !runId) {
+      setPendingIntentInfo(null);
+      return;
+    }
+
+    try {
+      await selectIntent(projectKey, runId, option);
+      setPendingIntentInfo(null);
+      // The SSE stream will continue after selection.
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "选择失败";
+      appendMessage("system", `错误: ${msg}`);
+      setPendingIntentInfo(null);
+      setIsGenerating(false);
+      closeStream();
+    }
+  }, [projectKey, appendMessage, closeStream]);
+
+  const handleProvideRequiredInput = useCallback(async (docId: string) => {
+    const runId = currentRunIdRef.current;
+    if (!projectKey || !runId) {
+      setPendingRequiredInput(null);
+      return;
+    }
+
+    try {
+      await provideRequiredInput(projectKey, runId, { doc_id: docId });
+      setPendingRequiredInput(null);
+      // SSE stream will continue after providing input.
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "提交失败";
+      appendMessage("system", `错误: ${msg}`);
+      setPendingRequiredInput(null);
+      setIsGenerating(false);
+      closeStream();
     }
   }, [projectKey, appendMessage, closeStream]);
 
@@ -1256,6 +1254,8 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     mentionState,
     pendingDraft,
     pendingTool,
+    pendingIntentInfo,
+    pendingRequiredInput,
     slashActive,
     slashQuery,
     slashSelectedIndex,
@@ -1296,6 +1296,8 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     handleProposalAction,
     handleConfirmTool,
     handleRejectTool,
+    handleSelectIntent,
+    handleProvideRequiredInput,
     toggleSourcesExpanded,
     handlePaste,
     removeAttachment,

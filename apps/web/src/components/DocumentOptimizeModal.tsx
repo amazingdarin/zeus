@@ -6,7 +6,7 @@
 
 import { useState, useCallback, useRef, useEffect, memo } from "react";
 import type { JSONContent } from "@tiptap/react";
-import ReactMarkdown from "react-markdown";
+import Markdown from "./Markdown";
 
 import {
   startOptimize,
@@ -248,13 +248,13 @@ function DocumentOptimizeModal({
                     <div className="optimize-preview-panel">
                       <div className="optimize-preview-title">原文</div>
                       <div className="optimize-preview-content">
-                        <ReactMarkdown>{result.originalMarkdown}</ReactMarkdown>
+                        <Markdown content={result.originalMarkdown} />
                       </div>
                     </div>
                     <div className="optimize-preview-panel">
                       <div className="optimize-preview-title">优化后</div>
                       <div className="optimize-preview-content">
-                        <ReactMarkdown>{result.optimizedMarkdown}</ReactMarkdown>
+                        <Markdown content={result.optimizedMarkdown} />
                       </div>
                     </div>
                   </>
@@ -262,7 +262,7 @@ function DocumentOptimizeModal({
                   <div className="optimize-streaming-panel">
                     <div className="optimize-preview-title">优化中...</div>
                     <div className="optimize-preview-content optimize-streaming">
-                      <ReactMarkdown>{streamingContent}</ReactMarkdown>
+                      <Markdown content={streamingContent} />
                       <span className="optimize-cursor" />
                     </div>
                   </div>

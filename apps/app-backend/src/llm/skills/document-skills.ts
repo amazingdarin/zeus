@@ -437,6 +437,39 @@ export const docSmartImportSkill: SkillDefinition = {
 };
 
 /**
+ * Organize document directory structure
+ * High risk - rearranges document hierarchy
+ *
+ * Uses knowledge-index summaries (not full content) + LLM to classify
+ * documents and propose a new tree structure. Confirmation is handled
+ * at the chat layer (organize_plan chunk) so the analysis phase can
+ * always run first.
+ */
+export const docOrganizeSkill: SkillDefinition = {
+  name: "doc-organize",
+  category: "doc",
+  command: "/doc-organize",
+  description:
+    "整理文档目录结构。自动分析所有子文档类别，提议新的目录结构并批量移动。可通过 @ 指定目录文档，不指定则整理整个项目。",
+  required: false,
+  confirmation: {
+    required: false, // analysis is safe; confirmation handled by chat.ts on organize_plan chunk
+    riskLevel: "high",
+  },
+  parameters: {
+    type: "object",
+    properties: {
+      doc_id: {
+        type: "string",
+        description: "目标目录文档 ID（从 @ 提及中解析），留空则整理整个项目根目录",
+        optional: true,
+      },
+    },
+    required: [],
+  },
+};
+
+/**
  * Convert text content to markdown-like output
  */
 export const docConvertSkill: SkillDefinition = {
@@ -470,6 +503,92 @@ export const docConvertSkill: SkillDefinition = {
 };
 
 /**
+ * Parse uploaded file (PDF/Word/HTML/text/code) and return extracted content.
+ * Read-only operation — does not create a document.
+ */
+export const fileParseSkill: SkillDefinition = {
+  name: "file-parse",
+  category: "doc",
+  command: "/file-parse",
+  description:
+    "解析上传的文件（PDF/Word/HTML/文本等），提取内容为 Markdown 文本返回到对话中。通过聊天附件上传文件。",
+  required: false,
+  confirmation: {
+    required: false,
+    riskLevel: "low",
+  },
+  parameters: {
+    type: "object",
+    properties: {
+      asset_id: {
+        type: "string",
+        description: "附件资产 ID（来自聊天附件上传返回的 asset_id）",
+      },
+    },
+    required: ["asset_id"],
+  },
+};
+
+/**
+ * Analyze image content via OCR or LLM vision Q&A.
+ * Read-only operation — does not create a document.
+ */
+export const imageAnalyzeSkill: SkillDefinition = {
+  name: "image-analyze",
+  category: "img",
+  command: "/image-analyze",
+  description:
+    "分析图片内容：OCR 文字识别，或基于图片回答问题。通过聊天附件上传图片。",
+  required: false,
+  confirmation: {
+    required: false,
+    riskLevel: "low",
+  },
+  parameters: {
+    type: "object",
+    properties: {
+      asset_id: {
+        type: "string",
+        description: "图片资产 ID（来自聊天附件上传返回的 asset_id）",
+      },
+      question: {
+        type: "string",
+        description: "关于图片的问题（可选，默认进行 OCR 文字识别）",
+        optional: true,
+      },
+    },
+    required: ["asset_id"],
+  },
+};
+
+/**
+ * Fetch URL page and extract main article content as clean Markdown.
+ * Read-only operation — does not create a document.
+ */
+export const urlExtractSkill: SkillDefinition = {
+  name: "url-extract",
+  category: "doc",
+  command: "/url-extract",
+  description:
+    "抓取 URL 页面并提取正文内容为 Markdown 格式返回到对话中。",
+  required: false,
+  confirmation: {
+    required: false,
+    riskLevel: "low",
+  },
+  parameters: {
+    type: "object",
+    properties: {
+      url: {
+        type: "string",
+        description: "目标 URL",
+      },
+    },
+    required: ["url"],
+  },
+};
+
+/**
  * All document skills
  */
 export const documentSkills: SkillDefinition[] = [
@@ -483,11 +602,15 @@ export const documentSkills: SkillDefinition[] = [
   docSummarySkill,
   docMoveSkill,
   docDeleteSkill,
+  docOrganizeSkill,
   kbSearchSkill,
   docFetchUrlSkill,
   docImportGitSkill,
   docSmartImportSkill,
   docConvertSkill,
+  fileParseSkill,
+  imageAnalyzeSkill,
+  urlExtractSkill,
 ];
 
 /**
