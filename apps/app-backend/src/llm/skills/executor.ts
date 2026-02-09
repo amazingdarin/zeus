@@ -747,11 +747,15 @@ async function* executeDocOptimize(
 
   try {
     const capability = getOptimizeCapability(capabilityId);
+    // runDraftRefinementLoop may append feedback into `input` when `instructions` is absent.
+    const instructions = typeof intent.args.instructions === "string"
+      ? intent.args.instructions
+      : typeof intent.args.input === "string"
+        ? intent.args.input
+        : undefined;
     const args = {
       docId: intent.docIds[0],
-      instructions: typeof intent.args.instructions === "string"
-        ? intent.args.instructions
-        : undefined,
+      instructions,
       style: typeof intent.args.style === "string" ? intent.args.style : undefined,
     };
 
@@ -912,7 +916,11 @@ async function* executeDocOptimizePpt(
     const includeAgenda = typeof args.include_agenda === "boolean" ? args.include_agenda : true;
     const includeQna = typeof args.include_qna === "boolean" ? args.include_qna : true;
 
-    const extraInstructions = typeof args.instructions === "string" ? args.instructions.trim() : "";
+    const extraInstructions = typeof args.instructions === "string"
+      ? args.instructions.trim()
+      : typeof args.input === "string"
+        ? args.input.trim()
+        : "";
 
     // Get LLM config
     const llmConfig = await configStore.getInternalByType("llm");
