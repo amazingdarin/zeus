@@ -14,6 +14,7 @@ import { draftService } from "../../services/draft.js";
 import {
   buildCreateDocumentPrompt,
   buildEditDocumentPrompt,
+  buildPptOptimizeDocumentPrompt,
 } from "./spec-loader.js";
 import type {
   SkillIntent,
@@ -147,6 +148,17 @@ export function detectSkillIntent(
     return {
       skill: "doc-optimize-full",
       command: "/doc-optimize-full",
+      args: rest ? { instructions: rest } : {},
+      rawMessage: message,
+      docIds,
+    };
+  }
+
+  if (trimmed.startsWith("/doc-optimize-ppt")) {
+    const rest = trimmed.slice("/doc-optimize-ppt".length).trim();
+    return {
+      skill: "doc-optimize-ppt",
+      command: "/doc-optimize-ppt",
       args: rest ? { instructions: rest } : {},
       rawMessage: message,
       docIds,
@@ -372,6 +384,9 @@ export async function* executeSkillWithStream(
         break;
       case "doc-optimize-full":
         yield* executeDocOptimizeFull(userId, projectKey, intent, traceContext);
+        break;
+      case "doc-optimize-ppt":
+        yield* executeDocOptimizePpt(userId, projectKey, intent, traceContext);
         break;
       case "doc-summary":
         yield* executeDocSummary(userId, projectKey, intent, traceContext);
@@ -822,6 +837,162 @@ async function* executeDocOptimizeFull(
   traceContext?: TraceContext,
 ): AsyncGenerator<SkillStreamChunk> {
   yield* executeDocOptimize(userId, projectKey, intent, "doc-optimize-full", traceContext);
+}
+
+// ============================================================================
+// PPT-Style Deck Skill
+// ============================================================================
+
+const PPT_SOURCE_MARKDOWN_MAX_LEN = 30_000;
+
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = typeof value === "number"
+    ? value
+    : typeof value === "string"
+      ? Number.parseInt(value, 10)
+      : Number.NaN;
+  const n = Number.isFinite(parsed) ? Math.floor(parsed) : fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function normalizeDeckTitle(raw: string): string {
+  const title = raw.trim();
+  if (!title) return "演示稿（PPT）";
+  if (/(\(ppt\)|（ppt）)/i.test(title)) return title;
+  return `${title}（PPT）`;
+}
+
+/**
+ * Execute doc-optimize-ppt skill
+ *
+ * Generates a new PPT-style deck document draft (does not overwrite the source doc).
+ */
+async function* executeDocOptimizePpt(
+  userId: string,
+  projectKey: string,
+  intent: SkillIntent,
+  traceContext?: TraceContext,
+): AsyncGenerator<SkillStreamChunk> {
+  if (!intent.docIds || intent.docIds.length === 0) {
+    yield { type: "error", error: "请使用 @ 指定要生成演示稿的文档" };
+    return;
+  }
+
+  const docId = intent.docIds[0];
+
+  yield { type: "thinking", content: "正在读取源文档..." };
+
+  try {
+    const doc = await documentStore.get(userId, projectKey, docId);
+    const originalContent = doc.body.type === "markdown" && typeof doc.body.content === "string"
+      ? markdownToTiptapJson(doc.body.content)
+      : extractTiptapDoc(doc.body);
+    const originalMarkdownFull = tiptapJsonToMarkdown(originalContent);
+    const originalMarkdown = originalMarkdownFull.length > PPT_SOURCE_MARKDOWN_MAX_LEN
+      ? `${originalMarkdownFull.slice(0, PPT_SOURCE_MARKDOWN_MAX_LEN)}\n\n[内容已截断]`
+      : originalMarkdownFull;
+
+    const args = intent.args || {};
+
+    const deckTitleRaw = typeof args.title === "string" && args.title.trim()
+      ? args.title.trim()
+      : String(doc.meta.title || "演示稿");
+    const deckTitle = normalizeDeckTitle(deckTitleRaw);
+
+    const presenter = typeof args.presenter === "string" && args.presenter.trim()
+      ? args.presenter.trim()
+      : "待填写";
+
+    const reportTime = typeof args.report_time === "string" && args.report_time.trim()
+      ? args.report_time.trim()
+      : new Date().toISOString().slice(0, 10);
+
+    const maxSlides = clampInt(args.max_slides, 12, 5, 20);
+
+    const includeAgenda = typeof args.include_agenda === "boolean" ? args.include_agenda : true;
+    const includeQna = typeof args.include_qna === "boolean" ? args.include_qna : true;
+
+    const extraInstructions = typeof args.instructions === "string" ? args.instructions.trim() : "";
+
+    // Get LLM config
+    const llmConfig = await configStore.getInternalByType("llm");
+    if (!llmConfig) {
+      yield { type: "error", error: "LLM 未配置，请先在设置中配置对话模型" };
+      return;
+    }
+
+    yield { type: "thinking", content: "正在生成演示稿草稿..." };
+
+    const systemPrompt = buildPptOptimizeDocumentPrompt();
+    const userPrompt = `源文档标题: ${doc.meta.title}
+
+演示稿参数:
+- deck_title: ${deckTitleRaw}
+- presenter: ${presenter}
+- report_time: ${reportTime}
+- max_slides: ${maxSlides}
+- include_agenda: ${includeAgenda}
+- include_qna: ${includeQna}
+
+额外要求:
+${extraInstructions || "无"}
+
+源文档内容（Markdown，可能被截断）:
+\`\`\`markdown
+${originalMarkdown}
+\`\`\`
+
+请输出“类 PPT 演示稿”的完整文档正文（Tiptap JSON，type=doc）。`;
+
+    let fullContent = "";
+    const stream = await llmGateway.chatStream({
+      provider: llmConfig.providerId,
+      model: llmConfig.defaultModel || "gpt-4o",
+      apiKey: llmConfig.apiKey,
+      baseUrl: llmConfig.baseUrl,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.45,
+      traceContext,
+    });
+
+    for await (const chunk of stream.textStream) {
+      fullContent += chunk;
+      yield { type: "delta", content: chunk };
+    }
+
+    const { content: proposedContent, error: parseError } = await parseAndValidateContent(
+      fullContent,
+      projectKey,
+      intent,
+      llmConfig,
+    );
+
+    if (parseError) {
+      yield { type: "error", error: parseError };
+      return;
+    }
+
+    const draft = draftService.create({
+      userId,
+      projectKey,
+      docId: null, // new document
+      parentId: doc.meta.parent_id || null,
+      title: deckTitle,
+      originalContent: null,
+      proposedContent: proposedContent!,
+    });
+
+    yield { type: "draft", draft };
+    yield { type: "done", message: "演示稿草稿已生成" };
+  } catch (err) {
+    yield {
+      type: "error",
+      error: `生成演示稿失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 }
 
 // ============================================================================

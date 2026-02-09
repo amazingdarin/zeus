@@ -1,5 +1,6 @@
 import { traceManager, type TraceContext } from "../../observability/index.js";
 import { inferPolicy, runDocGuard, type DocGuardPolicy } from "./doc-guard.js";
+import { validatePptSlideDeck } from "./ppt-guard.js";
 import type { DraftValidation, DocumentDraft, SkillStreamChunk } from "./types.js";
 
 export function appendFeedbackToArgs(
@@ -123,16 +124,37 @@ export async function* runDraftRefinementLoop(input: {
 
     // Persist fixed content + validation info on the draft object.
     capturedDraft.proposedContent = guard.fixedProposed;
+    const issues = [...guard.issues];
+    let feedback = guard.feedback;
+    let passed = guard.passed;
+    let pptGuardFailed = false;
+
+    if (passed && input.skillLegacyName === "doc-optimize-ppt") {
+      const ppt = validatePptSlideDeck(guard.fixedProposed);
+      if (!ppt.passed) {
+        pptGuardFailed = true;
+        passed = false;
+        for (const msg of ppt.issues) {
+          issues.push({
+            severity: "error",
+            code: "ppt_guard",
+            message: msg,
+          });
+        }
+        feedback = [feedback, ppt.feedback].filter(Boolean).join("\n\n");
+      }
+    }
+
     const validation: DraftValidation = {
-      passed: guard.passed,
+      passed,
       attempt,
       policy,
-      issues: guard.issues,
-      feedback: guard.feedback,
+      issues,
+      feedback,
     };
     capturedDraft.validation = validation;
 
-    if (guard.passed) {
+    if (validation.passed) {
       const finalSpan = input.traceContext
         ? traceManager.startSpan(input.traceContext, "doc-guard.final", {
             attempt,
@@ -166,8 +188,9 @@ export async function* runDraftRefinementLoop(input: {
       }
 
       input.deleteDraft(capturedDraft.id);
-      yield { type: "thinking", content: `校验未通过，正在进行第 ${attempt + 1} 次修正...` };
-      args = appendFeedbackToArgs(args, guard.feedback || "");
+      const hint = pptGuardFailed ? "PPT 结构校验未通过" : "校验未通过";
+      yield { type: "thinking", content: `${hint}，正在进行第 ${attempt + 1} 次修正...` };
+      args = appendFeedbackToArgs(args, validation.feedback || "");
       continue;
     }
 
@@ -194,6 +217,21 @@ export async function* runDraftRefinementLoop(input: {
       return;
     }
 
+    // Protocol is OK but PPT slide structure is not.
+    if (pptGuardFailed) {
+      input.deleteDraft(capturedDraft.id);
+      if (finalSpan) {
+        traceManager.endSpan(finalSpan, { passed: false, attempt, policy, reason: "ppt_guard" }, "ERROR");
+      }
+
+      const first = validation.issues.find((i) => i.code === "ppt_guard")?.message || "未知结构问题";
+      yield {
+        type: "error",
+        error: `PPT 结构校验失败（已尝试 ${maxAttempts} 次）：${first}`,
+      };
+      return;
+    }
+
     if (finalSpan) {
       traceManager.endSpan(finalSpan, { passed: false, attempt, policy, reason: "additive" }, "WARNING");
     }
@@ -207,4 +245,3 @@ export async function* runDraftRefinementLoop(input: {
     return;
   }
 }
-

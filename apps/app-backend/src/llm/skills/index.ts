@@ -32,6 +32,7 @@ export {
   docReadSkill,
   docCreateSkill,
   docEditSkill,
+  docOptimizePptSkill,
   docMoveSkill,
   docDeleteSkill,
   kbSearchSkill,
@@ -47,6 +48,7 @@ export {
   clearSpecCache,
   buildCreateDocumentPrompt,
   buildEditDocumentPrompt,
+  buildPptOptimizeDocumentPrompt,
 } from "./spec-loader.js";
 
 // Skill executor

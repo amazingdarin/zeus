@@ -75,6 +75,14 @@ export const documentCommands: SlashCommand[] = [
     requiresDocScope: true,
   },
   {
+    command: "/doc-optimize-ppt",
+    name: "PPT 化",
+    description: "把文档重组为类 PPT（每页 Heading 1 + 分割线分页），需先用 @ 指定文档",
+    category: "doc",
+    icon: "📊",
+    requiresDocScope: true,
+  },
+  {
     command: "/doc-summary",
     name: "生成摘要",
     description: "为文档或目录生成摘要。需要先用 @ 指定文档",

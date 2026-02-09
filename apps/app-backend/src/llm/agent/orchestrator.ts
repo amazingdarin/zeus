@@ -60,6 +60,7 @@ function buildCommandArgs(
     case "doc-optimize-format":
     case "doc-optimize-content":
     case "doc-optimize-full":
+    case "doc-optimize-ppt":
       return trimmed ? { instructions: trimmed } : {};
     case "doc-optimize-style": {
       const [style, ...instructionParts] = trimmed.split(/\s+/).filter(Boolean);

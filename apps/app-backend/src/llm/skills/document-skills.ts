@@ -200,6 +200,73 @@ export const docOptimizeFullSkill = createDocOptimizeSkill({
 });
 
 /**
+ * Optimize document into a slide-like (PPT-style) deck.
+ *
+ * Output format rules are enforced by prompt + ppt-guard in the refinement loop:
+ * - Each slide starts with Heading 1
+ * - Slides separated by horizontalRule
+ * - Cover slide contains title + metadata only
+ */
+export const docOptimizePptSkill: SkillDefinition = {
+  name: "doc-optimize-ppt",
+  category: "doc",
+  command: "/doc-optimize-ppt",
+  description:
+    "将文档总结并重组为类 PPT 演示稿格式（每页以 Heading 1 开始，使用分割线分页）。需要通过 @ 指定文档。",
+  required: false,
+  confirmation: {
+    required: true,
+    riskLevel: "medium",
+    warningMessage: "将基于原文生成新的演示稿文档草稿（不会覆盖原文），是否继续？",
+  },
+  parameters: {
+    type: "object",
+    properties: {
+      doc_id: {
+        type: "string",
+        description: "源文档 ID（从 @ 提及中解析）",
+      },
+      title: {
+        type: "string",
+        description: "演示稿标题（可选，默认使用源文档标题）",
+        optional: true,
+      },
+      presenter: {
+        type: "string",
+        description: "报告人（可选，默认“待填写”）",
+        optional: true,
+      },
+      report_time: {
+        type: "string",
+        description: "报告时间（可选，格式 YYYY-MM-DD；默认当天）",
+        optional: true,
+      },
+      max_slides: {
+        type: "number",
+        description: "最大页数（可选，默认 12，建议 5-20）",
+        optional: true,
+      },
+      include_agenda: {
+        type: "boolean",
+        description: "是否包含目录页（可选，默认 true）",
+        optional: true,
+      },
+      include_qna: {
+        type: "boolean",
+        description: "是否包含 Q&A 页（可选，默认 true）",
+        optional: true,
+      },
+      instructions: {
+        type: "string",
+        description: "额外要求（可选，例如面向管理层、突出风险与收益、强调时间线）",
+        optional: true,
+      },
+    },
+    required: ["doc_id"],
+  },
+};
+
+/**
  * Document summary skill
  * Medium risk - inserts summary at document top
  * 
@@ -599,6 +666,7 @@ export const documentSkills: SkillDefinition[] = [
   docOptimizeContentSkill,
   docOptimizeStyleSkill,
   docOptimizeFullSkill,
+  docOptimizePptSkill,
   docSummarySkill,
   docMoveSkill,
   docDeleteSkill,

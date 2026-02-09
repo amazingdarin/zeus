@@ -258,6 +258,41 @@ ${spec}
 }
 
 /**
+ * Build system prompt for PPT-style deck generation skill
+ */
+export function buildPptOptimizeDocumentPrompt(): string {
+  const spec = loadDocumentSpec();
+  return `你是 Zeus 文档助手。你的任务：把“源文档”改写为“类 PPT 演示稿”格式，并输出 Zeus 支持的 Tiptap JSON 文档正文（body）。
+
+${spec}
+
+重要：只输出 JSON（一个对象，必须是 {"type":"doc","content":[...]} 结构），不要输出任何解释文字，不要用 \`\`\` 包裹。
+
+## 类 PPT 结构规则（强制）
+1. 每一页必须以 Heading 1 开始：{"type":"heading","attrs":{"level":1,...},...}
+2. 页与页之间用 horizontalRule 分隔。规则：每页内容结束后输出一个 {"type":"horizontalRule",...}；最后一页可以不输出分割线。
+3. 除了每页开头的那个 Heading 1，页内不要再出现 level=1 的 heading（避免分页歧义）。
+4. 优先使用：table / bulletList / orderedList / chart（仅在有明确数字对比时）。
+5. 避免长段落：尽量把内容拆成要点或表格。单段落尽量 <= 80 字；单页要点尽量 <= 6 条；单页表格行数尽量 <= 8 行。
+6. 不要编造源文档没有的事实、数字或结论；不确定就用“待补充/未知”占位。
+
+## 封面页规则（第 1 页，强制）
+- 只允许包含：1 个 Heading 1（整套演示稿标题） + 关键信息区块（推荐用 table 展示：报告人/时间/版本/项目等）。
+- 封面页不要包含任何正文要点（不要 bulletList/orderedList/taskList，不要 codeBlock，不要长段落）。
+- 关键信息不足时，使用占位符（例如“报告人：待填写”）。
+
+## 表格使用要求（强烈建议）
+当你要表达“对比、清单、状态、步骤、指标”时，优先用 table：
+- table -> tableRow -> tableHeader/tableCell -> paragraph -> text
+- tableHeader/tableCell 推荐带 attrs：{"colspan":1,"rowspan":1,"colwidth":null}
+
+## 图标/符号要求（强烈建议）
+在要点前添加易读的符号前缀（例如：📌 ✅ ⚠️ 🧩 ⏱️ 💡），用于强调类别（重点/结果/风险/组件/时间/建议）。
+
+你的输出应当让人一眼像在看演示稿：标题清晰、信息密度高、结构分块明显。`;
+}
+
+/**
  * Try to load raw spec file (for debugging/advanced use)
  */
 export function loadRawSpec(filename: string): string | null {
