@@ -2,13 +2,13 @@
  * RequiredInputDialog
  *
  * Modal dialog for collecting missing required input before a skill can run.
- * Currently supports doc scope selection.
+ * Supports doc scope selection and schema-driven argument collection.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Modal, Button, Select, Typography, Space, Tag } from "antd";
+import { Modal, Button, Select, Typography, Space, Tag, Form, Input, InputNumber, message } from "antd";
 import { suggestDocuments } from "../api/documents";
-import type { PendingRequiredInputInfo } from "../api/chat";
+import type { PendingRequiredInputInfo, ProvideRequiredInputPayload } from "../api/chat";
 
 const { Text, Paragraph } = Typography;
 
@@ -16,7 +16,7 @@ export type RequiredInputDialogProps = {
   visible: boolean;
   projectKey: string;
   pendingInput: PendingRequiredInputInfo | null;
-  onSubmitDocId: (docId: string) => void;
+  onSubmit: (payload: ProvideRequiredInputPayload) => void;
   loading?: boolean;
 };
 
@@ -31,9 +31,10 @@ export default function RequiredInputDialog({
   visible,
   projectKey,
   pendingInput,
-  onSubmitDocId,
+  onSubmit,
   loading = false,
 }: RequiredInputDialogProps) {
+  const [form] = Form.useForm();
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<DocOption[]>([]);
   const [selectedDocId, setSelectedDocId] = useState<string>("");
@@ -41,6 +42,10 @@ export default function RequiredInputDialog({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const kind = pendingInput?.kind;
+  const requiredKeys = useMemo(() => {
+    if (!pendingInput || pendingInput.kind !== "skill_args") return new Set<string>();
+    return new Set<string>(pendingInput.missing || []);
+  }, [pendingInput]);
 
   const title = useMemo(() => {
     if (!pendingInput) return "需要补充信息";
@@ -52,8 +57,9 @@ export default function RequiredInputDialog({
       setQuery("");
       setOptions([]);
       setSelectedDocId("");
+      form.resetFields();
     }
-  }, [visible]);
+  }, [visible, form]);
 
   useEffect(() => {
     if (!visible || !projectKey || kind !== "doc_scope") return;
@@ -88,6 +94,107 @@ export default function RequiredInputDialog({
     };
   }, [visible, projectKey, kind, query]);
 
+  useEffect(() => {
+    if (!visible || !pendingInput) return;
+    if (pendingInput.kind !== "skill_args") return;
+
+    const initialValues: Record<string, unknown> = {};
+    for (const f of pendingInput.fields || []) {
+      const v = pendingInput.currentArgs?.[f.key];
+      if (typeof v === "undefined") continue;
+      if (f.type === "object" || f.type === "array") {
+        try {
+          initialValues[f.key] = JSON.stringify(v, null, 2);
+        } catch {
+          // Ignore JSON stringify errors
+        }
+      } else {
+        initialValues[f.key] = v;
+      }
+    }
+    form.setFieldsValue(initialValues);
+  }, [visible, pendingInput, form]);
+
+  const submit = async () => {
+    if (!pendingInput) return;
+
+    if (pendingInput.kind === "doc_scope") {
+      onSubmit({ doc_id: selectedDocId });
+      return;
+    }
+
+    // skill_args
+    try {
+      const values = (await form.validateFields()) as Record<string, unknown>;
+      const argsUpdate: Record<string, unknown> = {};
+
+      for (const f of pendingInput.fields || []) {
+        const raw = values[f.key];
+        if (typeof raw === "undefined") continue;
+
+        if (f.type === "string") {
+          const s = String(raw);
+          if (s.trim().length === 0) continue;
+          argsUpdate[f.key] = s;
+          continue;
+        }
+
+        if (f.type === "integer") {
+          if (typeof raw === "number" && Number.isFinite(raw)) {
+            argsUpdate[f.key] = Math.trunc(raw);
+          }
+          continue;
+        }
+
+        if (f.type === "number") {
+          if (typeof raw === "number" && Number.isFinite(raw)) {
+            argsUpdate[f.key] = raw;
+          }
+          continue;
+        }
+
+        if (f.type === "boolean") {
+          if (typeof raw === "boolean") {
+            argsUpdate[f.key] = raw;
+          }
+          continue;
+        }
+
+        if (f.type === "object" || f.type === "array") {
+          const s = typeof raw === "string" ? raw.trim() : "";
+          if (!s) continue;
+          try {
+            argsUpdate[f.key] = JSON.parse(s);
+          } catch {
+            // validateFields should prevent this, but keep a guard.
+            return;
+          }
+          continue;
+        }
+
+        argsUpdate[f.key] = raw;
+      }
+
+      if (Object.keys(argsUpdate).length === 0) {
+        message.warning("请至少填写一个参数后继续，或点击取消操作。");
+        return;
+      }
+
+      onSubmit({ args: argsUpdate });
+    } catch {
+      // Form validation failed
+    }
+  };
+
+  const cancel = () => {
+    if (!pendingInput) return;
+    if (pendingInput.kind === "doc_scope") {
+      onSubmit({ doc_id: "" });
+      return;
+    }
+    onSubmit({ args: {} });
+  };
+
   if (!pendingInput) return null;
 
   return (
@@ -101,7 +208,7 @@ export default function RequiredInputDialog({
       footer={[
         <Button
           key="cancel"
-          onClick={() => onSubmitDocId("")}
+          onClick={cancel}
           disabled={loading}
         >
           取消操作
@@ -109,8 +216,8 @@ export default function RequiredInputDialog({
         <Button
           key="submit"
           type="primary"
-          onClick={() => onSubmitDocId(selectedDocId)}
-          disabled={!selectedDocId || loading}
+          onClick={submit}
+          disabled={(pendingInput.kind === "doc_scope" && !selectedDocId) || loading}
           loading={loading}
         >
           继续执行
@@ -120,7 +227,7 @@ export default function RequiredInputDialog({
       <Space direction="vertical" size={10} style={{ width: "100%" }}>
         <div>
           <Space size={8}>
-            <Tag color="gold">需要文档</Tag>
+            <Tag color="gold">{pendingInput.kind === "doc_scope" ? "需要文档" : "需要参数"}</Tag>
             <Text strong>{pendingInput.skillName}</Text>
           </Space>
           <Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
@@ -144,8 +251,131 @@ export default function RequiredInputDialog({
             style={{ width: "100%" }}
           />
         )}
+
+        {pendingInput.kind === "skill_args" && (
+          <Form
+            form={form}
+            layout="vertical"
+            style={{ width: "100%" }}
+          >
+            {Array.isArray(pendingInput.missing) && pendingInput.missing.length > 0 && (
+              <Text type="secondary">
+                缺少参数: {pendingInput.missing.slice(0, 12).join(", ")}
+              </Text>
+            )}
+            {Array.isArray(pendingInput.issues) && pendingInput.issues.length > 0 && (
+              <Paragraph type="secondary" style={{ marginTop: 6, marginBottom: 0 }}>
+                校验提示: {pendingInput.issues.slice(0, 3).map((i) => i.message).join("; ")}
+              </Paragraph>
+            )}
+
+            {pendingInput.fields.map((f) => {
+              const isRequired = requiredKeys.has(f.key);
+              const desc = f.description && f.description !== f.key ? f.description : "";
+
+              if (Array.isArray(f.enum) && f.enum.length > 0) {
+                return (
+                  <Form.Item
+                    key={f.key}
+                    name={f.key}
+                    label={f.key}
+                    extra={desc || undefined}
+                    rules={isRequired ? [{ required: true, message: "必填" }] : undefined}
+                  >
+                    <Select
+                      placeholder={desc || "请选择"}
+                      options={f.enum.map((v) => ({ label: v, value: v }))}
+                      allowClear={!isRequired}
+                    />
+                  </Form.Item>
+                );
+              }
+
+              if (f.type === "boolean") {
+                return (
+                  <Form.Item
+                    key={f.key}
+                    name={f.key}
+                    label={f.key}
+                    extra={desc || undefined}
+                    rules={isRequired ? [{ required: true, message: "必填" }] : undefined}
+                  >
+                    <Select
+                      placeholder={desc || "请选择"}
+                      options={[
+                        { label: "是", value: true },
+                        { label: "否", value: false },
+                      ]}
+                      allowClear={!isRequired}
+                    />
+                  </Form.Item>
+                );
+              }
+
+              if (f.type === "number" || f.type === "integer") {
+                return (
+                  <Form.Item
+                    key={f.key}
+                    name={f.key}
+                    label={f.key}
+                    extra={desc || undefined}
+                    rules={isRequired ? [{ required: true, message: "必填" }] : undefined}
+                  >
+                    <InputNumber
+                      style={{ width: "100%" }}
+                      precision={f.type === "integer" ? 0 : undefined}
+                      placeholder={desc || "请输入数字"}
+                    />
+                  </Form.Item>
+                );
+              }
+
+              if (f.type === "object" || f.type === "array") {
+                return (
+                  <Form.Item
+                    key={f.key}
+                    name={f.key}
+                    label={f.key}
+                    extra={desc ? `${desc} (JSON)` : "JSON"}
+                    rules={[
+                      ...(isRequired ? [{ required: true, message: "必填" }] : []),
+                      {
+                        validator: async (_rule, value) => {
+                          const s = typeof value === "string" ? value.trim() : "";
+                          if (!s) return Promise.resolve();
+                          try {
+                            JSON.parse(s);
+                            return Promise.resolve();
+                          } catch {
+                            return Promise.reject(new Error("请输入有效 JSON"));
+                          }
+                        },
+                      },
+                    ]}
+                  >
+                    <Input.TextArea
+                      placeholder={f.type === "array" ? "[]" : "{}"}
+                      autoSize={{ minRows: 3, maxRows: 10 }}
+                    />
+                  </Form.Item>
+                );
+              }
+
+              return (
+                <Form.Item
+                  key={f.key}
+                  name={f.key}
+                  label={f.key}
+                  extra={desc || undefined}
+                  rules={isRequired ? [{ required: true, message: "必填" }] : undefined}
+                >
+                  <Input placeholder={desc || "请输入"} />
+                </Form.Item>
+              );
+            })}
+          </Form>
+        )}
       </Space>
     </Modal>
   );
 }
-

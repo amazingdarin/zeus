@@ -107,12 +107,32 @@ export type PendingIntentInfo = {
   options: IntentOption[];
 };
 
-export type PendingRequiredInputInfo = {
-  kind: "doc_scope";
-  message: string;
-  skillName: string;
-  skillDescription: string;
-};
+export type PendingRequiredInputInfo =
+  | {
+      kind: "doc_scope";
+      message: string;
+      skillName: string;
+      skillDescription: string;
+    }
+  | {
+      kind: "skill_args";
+      message: string;
+      skillName: string;
+      skillDescription: string;
+      missing?: string[];
+      issues?: Array<{ path: string; message: string }>;
+      fields: Array<{
+        key: string;
+        type: string;
+        description: string;
+        enum?: string[];
+      }>;
+      currentArgs?: Record<string, unknown>;
+    };
+
+export type ProvideRequiredInputPayload =
+  | { doc_id: string }
+  | { args: Record<string, unknown> };
 
 /**
  * Confirm a pending tool execution
@@ -176,7 +196,7 @@ export const selectIntent = async (
 export const provideRequiredInput = async (
   projectKey: string,
   runId: string,
-  payload: { doc_id: string },
+  payload: ProvideRequiredInputPayload,
 ): Promise<void> => {
   const response = await apiFetch(
     `/api/projects/${projectKey}/chat/runs/${encodeURIComponent(runId)}/provide-input`,

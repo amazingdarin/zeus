@@ -468,7 +468,7 @@ function ChatPage() {
         visible={!!pendingRequiredInput}
         projectKey={projectKey}
         pendingInput={pendingRequiredInput}
-        onSubmitDocId={handleProvideRequiredInput}
+        onSubmit={handleProvideRequiredInput}
       />
 
       {/* Tool Confirmation Dialog */}

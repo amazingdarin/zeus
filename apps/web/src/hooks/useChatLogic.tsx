@@ -26,6 +26,7 @@ import {
   type PendingToolCall,
   type PendingIntentInfo,
   type PendingRequiredInputInfo,
+  type ProvideRequiredInputPayload,
   type IntentOption,
 } from "../api/chat";
 import { applyProposal, rejectProposal } from "../api/documents";
@@ -202,7 +203,7 @@ export type UseChatLogicReturn = {
   handleConfirmTool: () => Promise<void>;
   handleRejectTool: () => Promise<void>;
   handleSelectIntent: (option: IntentOption) => Promise<void>;
-  handleProvideRequiredInput: (docId: string) => Promise<void>;
+  handleProvideRequiredInput: (payload: ProvideRequiredInputPayload) => Promise<void>;
   toggleSourcesExpanded: (messageId: string) => void;
   handlePaste: (e: React.ClipboardEvent) => void;
   removeAttachment: (id: string) => void;
@@ -977,7 +978,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     }
   }, [projectKey, appendMessage, closeStream]);
 
-  const handleProvideRequiredInput = useCallback(async (docId: string) => {
+  const handleProvideRequiredInput = useCallback(async (payload: ProvideRequiredInputPayload) => {
     const runId = currentRunIdRef.current;
     if (!projectKey || !runId) {
       setPendingRequiredInput(null);
@@ -985,7 +986,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     }
 
     try {
-      await provideRequiredInput(projectKey, runId, { doc_id: docId });
+      await provideRequiredInput(projectKey, runId, payload);
       setPendingRequiredInput(null);
       // SSE stream will continue after providing input.
     } catch (err) {

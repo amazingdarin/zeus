@@ -384,7 +384,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
           visible={!!pendingRequiredInput}
           projectKey={projectKey}
           pendingInput={pendingRequiredInput}
-          onSubmitDocId={handleProvideRequiredInput}
+          onSubmit={handleProvideRequiredInput}
         />
         <button
           type="button"
@@ -433,7 +433,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
         visible={!!pendingRequiredInput}
         projectKey={projectKey}
         pendingInput={pendingRequiredInput}
-        onSubmitDocId={handleProvideRequiredInput}
+        onSubmit={handleProvideRequiredInput}
       />
 
       {/* Expanded Panel (animated open/close) */}
