@@ -3,6 +3,7 @@
 import { forwardRef, useCallback } from "react"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import type { Editor } from "@tiptap/react"
+import { cn } from "../../lib/tiptap-utils"
 
 // --- Hooks ---
 import { useTiptapEditor } from "../../hooks/use-tiptap-editor"
@@ -30,11 +31,15 @@ interface MenuItemProps {
   label: string
   onClick: () => void
   disabled?: boolean
+  danger?: boolean
 }
 
-const MenuItem = ({ label, onClick, disabled }: MenuItemProps) => (
+const MenuItem = ({ label, onClick, disabled, danger }: MenuItemProps) => (
   <DropdownMenu.Item
-    className="zeus-table-menu-item"
+    className={cn(
+      "zeus-table-menu-item",
+      danger && "zeus-table-menu-item-danger"
+    )}
     onClick={onClick}
     disabled={disabled}
   >
@@ -155,7 +160,7 @@ export const TableMenu = forwardRef<HTMLButtonElement, TableMenuProps>(
 
                 <MenuSeparator />
 
-                <MenuItem label="Delete Table" onClick={handleDelete} />
+                <MenuItem label="Delete Table" onClick={handleDelete} danger />
               </>
             )}
           </DropdownMenu.Content>

@@ -1,6 +1,61 @@
 // Table Node Styles
 
-.ProseMirror {
+.tiptap.ProseMirror {
+  --tt-table-border-color: var(--zeus-table-border-color, var(--tt-border-color));
+  --tt-table-header-bg-color: var(
+    --zeus-table-header-bg,
+    var(--tt-gray-light-a-100)
+  );
+  --tt-table-cell-bg-color: var(--zeus-table-cell-bg, var(--tt-bg-color));
+  --tt-table-hover-bg-color: var(--zeus-table-hover-bg, var(--tt-gray-light-a-50));
+  --tt-table-header-hover-bg-color: var(
+    --zeus-table-header-hover-bg,
+    var(--tt-gray-light-a-200)
+  );
+  --tt-table-selected-bg-color: var(
+    --zeus-table-selected-bg,
+    var(--tt-selection-color)
+  );
+  --tt-table-selected-outline-color: var(
+    --zeus-primary-color,
+    var(--tt-cursor-color)
+  );
+  --tt-table-resize-handle-color: var(--zeus-primary-color, var(--tt-cursor-color));
+  --tt-table-shadow-color: var(--tt-gray-light-a-100);
+
+  [data-theme="dark"] & {
+    --tt-table-border-color: var(
+      --zeus-table-border-color-dark,
+      var(--tt-gray-dark-a-200)
+    );
+    --tt-table-header-bg-color: var(
+      --zeus-table-header-bg-dark,
+      var(--tt-gray-dark-a-100)
+    );
+    --tt-table-cell-bg-color: var(--zeus-table-cell-bg-dark, var(--tt-bg-color));
+    --tt-table-hover-bg-color: var(
+      --zeus-table-hover-bg-dark,
+      var(--tt-gray-dark-a-50)
+    );
+    --tt-table-header-hover-bg-color: var(
+      --zeus-table-header-hover-bg-dark,
+      var(--tt-gray-dark-a-200)
+    );
+    --tt-table-selected-bg-color: var(
+      --zeus-table-selected-bg-dark,
+      var(--tt-selection-color)
+    );
+    --tt-table-selected-outline-color: var(
+      --zeus-primary-color,
+      var(--tt-cursor-color)
+    );
+    --tt-table-resize-handle-color: var(
+      --zeus-primary-color,
+      var(--tt-cursor-color)
+    );
+    --tt-table-shadow-color: var(--tt-gray-dark-a-100);
+  }
+
   // Table wrapper (Tiptap default)
   .tableWrapper {
     overflow-x: auto;
@@ -15,21 +70,22 @@
     table-layout: fixed;
     width: 100%;
     margin: 0;
-    border: 2px solid var(--zeus-table-border-color, #bbb);
-    border-radius: 6px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    border: 1px solid var(--tt-table-border-color);
+    border-radius: var(--tt-radius-md, 0.5rem);
+    box-shadow: 0 1px 2px var(--tt-table-shadow-color);
     overflow: hidden;
 
     // Common cell styles
     td,
     th {
-      min-width: 80px;
-      padding: 8px 12px;
-      border-bottom: 1px solid var(--zeus-border-color, #e0e0e0);
-      border-right: 1px solid var(--zeus-border-color, #e0e0e0);
+      min-width: 5rem;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--tt-table-border-color);
+      border-right: 1px solid var(--tt-table-border-color);
       vertical-align: top;
       box-sizing: border-box;
       position: relative;
+      background-color: var(--tt-table-cell-bg-color);
 
       // Remove right border on last cell
       &:last-child {
@@ -43,7 +99,7 @@
 
       // Selection state
       &.selectedCell {
-        background-color: var(--zeus-table-selected-bg, rgba(200, 200, 255, 0.4));
+        background-color: var(--tt-table-selected-bg-color);
       }
     }
 
@@ -55,24 +111,19 @@
 
     // Header cell styles
     th {
-      background-color: var(--zeus-table-header-bg, #f5f5f5);
+      background-color: var(--tt-table-header-bg-color);
       font-weight: 600;
       text-align: left;
     }
 
-    // Regular cell styles
-    td {
-      background-color: var(--zeus-table-cell-bg, #fff);
-    }
-
     // Row hover effect
-    tr:hover td,
-    tr:hover th {
-      background-color: var(--zeus-table-hover-bg, #fafafa);
+    tr:hover td:not(.selectedCell),
+    tr:hover th:not(.selectedCell) {
+      background-color: var(--tt-table-hover-bg-color);
     }
 
-    tr:hover th {
-      background-color: var(--zeus-table-header-hover-bg, #ebebeb);
+    tr:hover th:not(.selectedCell) {
+      background-color: var(--tt-table-header-hover-bg-color);
     }
   }
 
@@ -83,7 +134,7 @@
     top: 0;
     bottom: 0;
     width: 4px;
-    background-color: var(--zeus-primary-color, #4a90d9);
+    background-color: var(--tt-table-resize-handle-color);
     pointer-events: none;
     z-index: 20;
   }
@@ -102,40 +153,7 @@
     right: 0;
     bottom: 0;
     pointer-events: none;
-    border: 2px solid var(--zeus-primary-color, #4a90d9);
+    border: 2px solid var(--tt-table-selected-outline-color);
     z-index: 10;
-  }
-}
-
-// Dark mode support
-@media (prefers-color-scheme: dark) {
-  .ProseMirror {
-    table,
-    .zeus-table {
-      border-color: var(--zeus-table-border-color-dark, #4a4a4a);
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-
-      td,
-      th {
-        border-color: var(--zeus-border-color-dark, #3a3a3a);
-      }
-
-      th {
-        background-color: var(--zeus-table-header-bg-dark, #2a2a2a);
-      }
-
-      td {
-        background-color: var(--zeus-table-cell-bg-dark, #1a1a1a);
-      }
-
-      tr:hover td,
-      tr:hover th {
-        background-color: var(--zeus-table-hover-bg-dark, #252525);
-      }
-
-      tr:hover th {
-        background-color: var(--zeus-table-header-hover-bg-dark, #333);
-      }
-    }
   }
 }

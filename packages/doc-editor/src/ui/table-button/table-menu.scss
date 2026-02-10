@@ -1,109 +1,127 @@
 // Table Menu Styles
 
 .zeus-table-menu-content {
-  min-width: 180px;
-  background-color: var(--zeus-menu-bg, #fff);
-  border: 1px solid var(--zeus-border-color, #e0e0e0);
-  border-radius: 6px;
-  padding: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  z-index: 1000;
-  animation: fadeIn 0.15s ease-out;
+  --tt-table-menu-bg-color: var(--zeus-menu-bg, var(--tt-card-bg-color));
+  --tt-table-menu-border-color: var(
+    --zeus-border-color,
+    var(--tt-card-border-color)
+  );
+  --tt-table-menu-label-color: var(--zeus-text-muted, var(--tt-gray-light-a-400));
+  --tt-table-menu-text-color: var(--zeus-text-color, var(--tt-gray-light-a-700));
+  --tt-table-menu-hover-bg-color: var(--zeus-menu-hover-bg, var(--tt-gray-light-a-100));
+  --tt-table-menu-disabled-color: var(
+    --zeus-text-disabled,
+    var(--tt-gray-light-a-300)
+  );
+  --tt-table-menu-separator-color: var(
+    --zeus-border-color,
+    var(--tt-card-border-color)
+  );
+  --tt-table-menu-danger-color: var(--zeus-danger-color, var(--tt-color-red-base));
+  --tt-table-menu-danger-hover-bg-color: var(
+    --zeus-danger-bg,
+    var(--tt-color-red-inc-5)
+  );
 
-  @keyframes fadeIn {
-    from {
-      opacity: 0;
-      transform: translateY(-4px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
+  [data-theme="dark"] & {
+    --tt-table-menu-bg-color: var(--zeus-menu-bg-dark, var(--tt-card-bg-color));
+    --tt-table-menu-border-color: var(
+      --zeus-border-color-dark,
+      var(--tt-card-border-color)
+    );
+    --tt-table-menu-label-color: var(
+      --zeus-text-muted-dark,
+      var(--tt-gray-dark-a-400)
+    );
+    --tt-table-menu-text-color: var(
+      --zeus-text-color-dark,
+      var(--tt-gray-dark-a-700)
+    );
+    --tt-table-menu-hover-bg-color: var(
+      --zeus-menu-hover-bg-dark,
+      var(--tt-gray-dark-a-100)
+    );
+    --tt-table-menu-disabled-color: var(
+      --zeus-text-disabled-dark,
+      var(--tt-gray-dark-a-300)
+    );
+    --tt-table-menu-separator-color: var(
+      --zeus-border-color-dark,
+      var(--tt-card-border-color)
+    );
+    --tt-table-menu-danger-color: var(--zeus-danger-color, var(--tt-color-red-inc-1));
+    --tt-table-menu-danger-hover-bg-color: var(
+      --zeus-danger-bg-dark,
+      var(--tt-color-red-dec-4)
+    );
   }
+
+  min-width: 11.25rem;
+  background-color: var(--tt-table-menu-bg-color);
+  border: 1px solid var(--tt-table-menu-border-color);
+  border-radius: calc(var(--tt-radius-lg, 0.75rem) + 0.125rem);
+  padding: 0.25rem;
+  box-shadow: var(--tt-shadow-elevated-md);
+  z-index: 1000;
+  outline: none;
+}
+
+.zeus-table-menu-content[data-state="open"] {
+  animation:
+    fadeIn 150ms cubic-bezier(0.16, 1, 0.3, 1),
+    zoomIn 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.zeus-table-menu-content[data-state="closed"] {
+  animation:
+    fadeOut 150ms cubic-bezier(0.16, 1, 0.3, 1),
+    zoomOut 150ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .zeus-table-menu-label {
-  padding: 4px 8px;
-  font-size: 11px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.6875rem;
   font-weight: 600;
-  color: var(--zeus-text-muted, #888);
+  color: var(--tt-table-menu-label-color);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.04em;
 }
 
 .zeus-table-menu-item {
   display: flex;
   align-items: center;
-  padding: 8px 12px;
-  font-size: 13px;
-  color: var(--zeus-text-color, #333);
-  border-radius: 4px;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+  color: var(--tt-table-menu-text-color);
+  border-radius: var(--tt-radius-sm, 0.375rem);
   cursor: pointer;
   outline: none;
   user-select: none;
 
   &:hover,
-  &:focus {
-    background-color: var(--zeus-menu-hover-bg, #f5f5f5);
+  &:focus-visible {
+    background-color: var(--tt-table-menu-hover-bg-color);
   }
 
   &[data-disabled] {
-    color: var(--zeus-text-disabled, #aaa);
+    color: var(--tt-table-menu-disabled-color);
     pointer-events: none;
   }
+}
 
-  // Delete item style
-  &:last-child {
-    color: var(--zeus-danger-color, #dc3545);
+.zeus-table-menu-item.zeus-table-menu-item-danger {
+  color: var(--tt-table-menu-danger-color);
 
-    &:hover,
-    &:focus {
-      background-color: var(--zeus-danger-bg, #fef2f2);
-    }
+  &:hover,
+  &:focus-visible {
+    background-color: var(--tt-table-menu-danger-hover-bg-color);
   }
 }
 
 .zeus-table-menu-separator {
   height: 1px;
-  margin: 4px 0;
-  background-color: var(--zeus-border-color, #e0e0e0);
-}
-
-// Dark mode support
-@media (prefers-color-scheme: dark) {
-  .zeus-table-menu-content {
-    background-color: var(--zeus-menu-bg-dark, #2a2a2a);
-    border-color: var(--zeus-border-color-dark, #3a3a3a);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-  }
-
-  .zeus-table-menu-label {
-    color: var(--zeus-text-muted-dark, #888);
-  }
-
-  .zeus-table-menu-item {
-    color: var(--zeus-text-color-dark, #e0e0e0);
-
-    &:hover,
-    &:focus {
-      background-color: var(--zeus-menu-hover-bg-dark, #3a3a3a);
-    }
-
-    &[data-disabled] {
-      color: var(--zeus-text-disabled-dark, #666);
-    }
-
-    &:last-child {
-      color: var(--zeus-danger-color, #ef4444);
-
-      &:hover,
-      &:focus {
-        background-color: var(--zeus-danger-bg-dark, #3f1e1e);
-      }
-    }
-  }
-
-  .zeus-table-menu-separator {
-    background-color: var(--zeus-border-color-dark, #3a3a3a);
-  }
+  margin: 0.25rem 0;
+  background-color: var(--tt-table-menu-separator-color);
 }
