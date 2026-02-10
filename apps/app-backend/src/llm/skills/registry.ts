@@ -14,6 +14,8 @@ import type { UnifiedSkillDefinition } from "./adapters/types.js";
 import { documentSkills } from "./document-skills.js";
 import { skillScanner } from "./discovery/filesystem-scanner.js";
 import { resourceLoader } from "./resources/resource-loader.js";
+import { z } from "zod";
+import { zodObjectToOpenAIParameters } from "../zod.js";
 
 /**
  * OpenAI Function Calling tool format
@@ -371,78 +373,25 @@ class SkillRegistry {
       function: {
         name: skill.name,
         description: skill.description,
-        parameters: {
-          type: "object",
-          properties: this.convertProperties(skill.parameters.properties),
-          required: skill.parameters.required,
-        },
+        parameters: zodObjectToOpenAIParameters(skill.inputSchema),
       },
     };
   }
 
   private anthropicSkillToOpenAITool(skill: UnifiedSkillDefinition): OpenAITool {
-    // Anthropic Skills 通常没有严格参数定义
-    // 使用通用参数结构
-    const parameters = skill.parameters || {
-      type: "object" as const,
-      properties: {
-        request: {
-          type: "string",
-          description: "The user's request to process with this skill",
-        },
-        context: {
-          type: "string",
-          description: "Additional context or data for the skill",
-          optional: true,
-        },
-      },
-      required: ["request"],
-    };
-
     return {
       type: "function",
       function: {
         name: skill.name,
         description: skill.description,
-        parameters: {
-          type: "object",
-          properties: this.convertUnifiedProperties(parameters.properties),
-          required: parameters.required,
-        },
+        parameters: zodObjectToOpenAIParameters(
+          skill.inputSchema || z.object({
+            request: z.string().describe("The user's request to process with this skill"),
+            context: z.string().describe("Additional context or data for the skill").optional(),
+          }),
+        ),
       },
     };
-  }
-
-  private convertProperties(
-    props: SkillDefinition["parameters"]["properties"],
-  ): OpenAITool["function"]["parameters"]["properties"] {
-    const result: OpenAITool["function"]["parameters"]["properties"] = {};
-
-    for (const [key, value] of Object.entries(props)) {
-      result[key] = {
-        type: value.type,
-        description: value.description,
-        ...(value.enum ? { enum: value.enum } : {}),
-      };
-    }
-
-    return result;
-  }
-
-  private convertUnifiedProperties(
-    props: Record<string, { type: string; description: string; enum?: string[]; optional?: boolean }>,
-  ): OpenAITool["function"]["parameters"]["properties"] {
-    const result: OpenAITool["function"]["parameters"]["properties"] = {};
-
-    for (const [key, value] of Object.entries(props)) {
-      result[key] = {
-        type: value.type,
-        description: value.description,
-        ...(value.enum ? { enum: value.enum } : {}),
-      };
-    }
-
-    return result;
   }
 
   private extractKeywordsFromDescription(description: string): string[] {

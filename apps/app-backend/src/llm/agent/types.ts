@@ -1,4 +1,5 @@
 import type { TraceContext } from "../../observability/index.js";
+import type { AnyZodObject } from "../zod.js";
 
 export type AgentSkillSource = "native" | "anthropic" | "mcp";
 
@@ -6,19 +7,9 @@ export type AgentRiskLevel = "low" | "medium" | "high";
 
 export type AgentExecutionMode = "native-handler" | "llm-guided" | "mcp-tool";
 
-export type AgentInputSchema = {
-  type: "object";
-  properties: Record<
-    string,
-    {
-      type: string;
-      description: string;
-      enum?: string[];
-      optional?: boolean;
-    }
-  >;
-  required: string[];
-};
+// Zod-based schema for tool-call arguments.
+// Conversion to OpenAI JSON schema happens at the catalog layer.
+export type AgentInputSchema = AnyZodObject;
 
 export type AgentSkillDefinition = {
   id: string;
@@ -92,15 +83,3 @@ export type ProjectSkillCategory = {
     requiresDocScope?: boolean;
   }>;
 };
-
-export type AgentPlan =
-  | { mode: "chat" }
-  | { mode: "llm_text"; text: string }
-  | { mode: "blocked"; reason: string; command?: string }
-  | {
-      mode: "execute";
-      skill: AgentSkillDefinition;
-      args: Record<string, unknown>;
-      docIds: string[];
-      sourceIntent: "command" | "anthropic-keyword" | "tool";
-    };

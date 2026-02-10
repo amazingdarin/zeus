@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from "uuid";
 import { query } from "../../db/postgres.js";
 import { documentSkills } from "./document-skills.js";
 import { skillRegistry } from "./registry.js";
+import { zodObjectToJsonSchema } from "../zod.js";
 import type {
   SkillConfig,
   SkillDefinition,
@@ -200,8 +201,10 @@ export const skillConfigStore = {
       if (def.required) {
         config.enabled = true;
       }
+      const { inputSchema: _schema, ...rest } = def;
       return {
-        ...def,
+        ...rest,
+        parameters: zodObjectToJsonSchema(def.inputSchema),
         config,
         isConfigurable: !def.required,
       };

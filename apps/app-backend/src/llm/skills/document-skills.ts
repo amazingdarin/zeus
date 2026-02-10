@@ -4,6 +4,7 @@
  * Skill definitions for document operations.
  */
 
+import { z } from "zod";
 import type { SkillDefinition } from "./types.js";
 
 /**
@@ -20,16 +21,9 @@ export const docReadSkill: SkillDefinition = {
     required: false,
     riskLevel: "low",
   },
-  parameters: {
-    type: "object",
-    properties: {
-      doc_id: {
-        type: "string",
-        description: "要读取的文档 ID（从 @ 提及中解析）",
-      },
-    },
-    required: ["doc_id"],
-  },
+  inputSchema: z.object({
+    doc_id: z.string().describe("要读取的文档 ID（从 @ 提及中解析）"),
+  }),
 };
 
 /**
@@ -46,25 +40,11 @@ export const docCreateSkill: SkillDefinition = {
     required: false,
     riskLevel: "low",
   },
-  parameters: {
-    type: "object",
-    properties: {
-      title: {
-        type: "string",
-        description: "文档标题",
-      },
-      description: {
-        type: "string",
-        description: "文档内容描述或要求",
-      },
-      parent_id: {
-        type: "string",
-        description: "父文档 ID（可选，用于创建子文档）",
-        optional: true,
-      },
-    },
-    required: ["title"],
-  },
+  inputSchema: z.object({
+    title: z.string().describe("文档标题"),
+    description: z.string().describe("文档内容描述或要求").optional(),
+    parent_id: z.string().describe("父文档 ID（可选，用于创建子文档）").optional(),
+  }),
 };
 
 /**
@@ -82,20 +62,10 @@ export const docEditSkill: SkillDefinition = {
     riskLevel: "medium",
     warningMessage: "此操作将修改现有文档内容，请确认后执行。",
   },
-  parameters: {
-    type: "object",
-    properties: {
-      doc_id: {
-        type: "string",
-        description: "要编辑的文档 ID（从 @ 提及中解析）",
-      },
-      instructions: {
-        type: "string",
-        description: "修改指令或要求",
-      },
-    },
-    required: ["doc_id", "instructions"],
-  },
+  inputSchema: z.object({
+    doc_id: z.string().describe("要编辑的文档 ID（从 @ 提及中解析）"),
+    instructions: z.string().describe("修改指令或要求"),
+  }),
 };
 
 const OPTIMIZE_STYLE_VALUES = [
@@ -114,25 +84,19 @@ function createDocOptimizeSkill(input: {
   warningMessage: string;
   includeStyle?: boolean;
 }): SkillDefinition {
-  const properties: SkillDefinition["parameters"]["properties"] = {
-    doc_id: {
-      type: "string",
-      description: "要优化的文档 ID（从 @ 提及中解析）",
-    },
-    instructions: {
-      type: "string",
-      description: "可选：额外优化要求",
-      optional: true,
-    },
+  const baseShape = {
+    doc_id: z.string().describe("要优化的文档 ID（从 @ 提及中解析）"),
+    instructions: z.string().describe("可选：额外优化要求").optional(),
   };
 
-  if (input.includeStyle) {
-    properties.style = {
-      type: "string",
-      description: "风格类型（professional/concise/friendly/academic/technical/marketing）",
-      enum: [...OPTIMIZE_STYLE_VALUES],
-    };
-  }
+  const inputSchema = input.includeStyle
+    ? z.object({
+        ...baseShape,
+        style: z
+          .enum(OPTIMIZE_STYLE_VALUES)
+          .describe("风格类型（professional/concise/friendly/academic/technical/marketing）"),
+      })
+    : z.object(baseShape);
 
   return {
     name: input.name,
@@ -145,11 +109,7 @@ function createDocOptimizeSkill(input: {
       riskLevel: "medium",
       warningMessage: input.warningMessage,
     },
-    parameters: {
-      type: "object",
-      properties,
-      required: input.includeStyle ? ["doc_id", "style"] : ["doc_id"],
-    },
+    inputSchema,
   };
 }
 
@@ -219,51 +179,16 @@ export const docOptimizePptSkill: SkillDefinition = {
     riskLevel: "medium",
     warningMessage: "将基于原文生成新的演示稿文档草稿（不会覆盖原文），是否继续？",
   },
-  parameters: {
-    type: "object",
-    properties: {
-      doc_id: {
-        type: "string",
-        description: "源文档 ID（从 @ 提及中解析）",
-      },
-      title: {
-        type: "string",
-        description: "演示稿标题（可选，默认使用源文档标题）",
-        optional: true,
-      },
-      presenter: {
-        type: "string",
-        description: "报告人（可选，默认“待填写”）",
-        optional: true,
-      },
-      report_time: {
-        type: "string",
-        description: "报告时间（可选，格式 YYYY-MM-DD；默认当天）",
-        optional: true,
-      },
-      max_slides: {
-        type: "number",
-        description: "最大页数（可选，默认 12，建议 5-20）",
-        optional: true,
-      },
-      include_agenda: {
-        type: "boolean",
-        description: "是否包含目录页（可选，默认 true）",
-        optional: true,
-      },
-      include_qna: {
-        type: "boolean",
-        description: "是否包含 Q&A 页（可选，默认 true）",
-        optional: true,
-      },
-      instructions: {
-        type: "string",
-        description: "额外要求（可选，例如面向管理层、突出风险与收益、强调时间线）",
-        optional: true,
-      },
-    },
-    required: ["doc_id"],
-  },
+  inputSchema: z.object({
+    doc_id: z.string().describe("源文档 ID（从 @ 提及中解析）"),
+    title: z.string().describe("演示稿标题（可选，默认使用源文档标题）").optional(),
+    presenter: z.string().describe("报告人（可选，默认“待填写”）").optional(),
+    report_time: z.string().describe("报告时间（可选，格式 YYYY-MM-DD；默认当天）").optional(),
+    max_slides: z.number().describe("最大页数（可选，默认 12，建议 5-20）").optional(),
+    include_agenda: z.boolean().describe("是否包含目录页（可选，默认 true）").optional(),
+    include_qna: z.boolean().describe("是否包含 Q&A 页（可选，默认 true）").optional(),
+    instructions: z.string().describe("额外要求（可选，例如面向管理层、突出风险与收益、强调时间线）").optional(),
+  }),
 };
 
 /**
@@ -286,16 +211,9 @@ export const docSummarySkill: SkillDefinition = {
     riskLevel: "medium",
     warningMessage: "此操作将在文档顶部插入摘要，请确认后执行。",
   },
-  parameters: {
-    type: "object",
-    properties: {
-      doc_id: {
-        type: "string",
-        description: "目标文档或目录的 ID（从 @ 提及中解析）",
-      },
-    },
-    required: ["doc_id"],
-  },
+  inputSchema: z.object({
+    doc_id: z.string().describe("目标文档或目录的 ID（从 @ 提及中解析）"),
+  }),
 };
 
 /**
@@ -313,30 +231,12 @@ export const docMoveSkill: SkillDefinition = {
     riskLevel: "high",
     warningMessage: "此操作将修改文档层级结构，请确认后执行。",
   },
-  parameters: {
-    type: "object",
-    properties: {
-      doc_id: {
-        type: "string",
-        description: "要移动的文档 ID（从 @ 提及中解析）",
-      },
-      target_parent_id: {
-        type: "string",
-        description: "目标父文档 ID，root 表示根目录",
-      },
-      before_doc_id: {
-        type: "string",
-        description: "可选：插入到指定文档之前",
-        optional: true,
-      },
-      after_doc_id: {
-        type: "string",
-        description: "可选：插入到指定文档之后",
-        optional: true,
-      },
-    },
-    required: ["doc_id", "target_parent_id"],
-  },
+  inputSchema: z.object({
+    doc_id: z.string().describe("要移动的文档 ID（从 @ 提及中解析）"),
+    target_parent_id: z.string().describe("目标父文档 ID，root 表示根目录"),
+    before_doc_id: z.string().describe("可选：插入到指定文档之前").optional(),
+    after_doc_id: z.string().describe("可选：插入到指定文档之后").optional(),
+  }),
 };
 
 /**
@@ -354,21 +254,10 @@ export const docDeleteSkill: SkillDefinition = {
     riskLevel: "high",
     warningMessage: "此操作会删除文档内容，可能无法恢复，请确认后执行。",
   },
-  parameters: {
-    type: "object",
-    properties: {
-      doc_id: {
-        type: "string",
-        description: "要删除的文档 ID（从 @ 提及中解析）",
-      },
-      recursive: {
-        type: "boolean",
-        description: "是否递归删除子文档",
-        optional: true,
-      },
-    },
-    required: ["doc_id"],
-  },
+  inputSchema: z.object({
+    doc_id: z.string().describe("要删除的文档 ID（从 @ 提及中解析）"),
+    recursive: z.boolean().describe("是否递归删除子文档").optional(),
+  }),
 };
 
 /**
@@ -384,21 +273,10 @@ export const kbSearchSkill: SkillDefinition = {
     required: false,
     riskLevel: "low",
   },
-  parameters: {
-    type: "object",
-    properties: {
-      query: {
-        type: "string",
-        description: "搜索关键词",
-      },
-      limit: {
-        type: "number",
-        description: "返回结果数量（默认 5）",
-        optional: true,
-      },
-    },
-    required: ["query"],
-  },
+  inputSchema: z.object({
+    query: z.string().describe("搜索关键词"),
+    limit: z.number().describe("返回结果数量（默认 5）").optional(),
+  }),
 };
 
 /**
@@ -414,16 +292,9 @@ export const docFetchUrlSkill: SkillDefinition = {
     required: false,
     riskLevel: "low",
   },
-  parameters: {
-    type: "object",
-    properties: {
-      url: {
-        type: "string",
-        description: "目标 URL",
-      },
-    },
-    required: ["url"],
-  },
+  inputSchema: z.object({
+    url: z.string().describe("目标 URL"),
+  }),
 };
 
 /**
@@ -440,26 +311,11 @@ export const docImportGitSkill: SkillDefinition = {
     riskLevel: "medium",
     warningMessage: "该操作会访问远程仓库并写入文档，请确认后执行。",
   },
-  parameters: {
-    type: "object",
-    properties: {
-      repo_url: {
-        type: "string",
-        description: "Git 仓库 URL（http/https）",
-      },
-      branch: {
-        type: "string",
-        description: "分支名（默认 main）",
-        optional: true,
-      },
-      parent_id: {
-        type: "string",
-        description: "父文档 ID（默认 root）",
-        optional: true,
-      },
-    },
-    required: ["repo_url"],
-  },
+  inputSchema: z.object({
+    repo_url: z.string().describe("Git 仓库 URL（http/https）"),
+    branch: z.string().describe("分支名（默认 main）").optional(),
+    parent_id: z.string().describe("父文档 ID（默认 root）").optional(),
+  }),
 };
 
 /**
@@ -476,31 +332,12 @@ export const docSmartImportSkill: SkillDefinition = {
     riskLevel: "medium",
     warningMessage: "该操作会解析附件并创建文档，请确认后执行。",
   },
-  parameters: {
-    type: "object",
-    properties: {
-      asset_id: {
-        type: "string",
-        description: "附件资产 ID（来自聊天附件上传返回的 asset_id）",
-      },
-      parent_id: {
-        type: "string",
-        description: "父文档 ID（默认 root）",
-        optional: true,
-      },
-      title: {
-        type: "string",
-        description: "文档标题（可选，默认使用文件名）",
-        optional: true,
-      },
-      enable_format_optimize: {
-        type: "boolean",
-        description: "是否启用格式优化（默认 false）",
-        optional: true,
-      },
-    },
-    required: ["asset_id"],
-  },
+  inputSchema: z.object({
+    asset_id: z.string().describe("附件资产 ID（来自聊天附件上传返回的 asset_id）"),
+    parent_id: z.string().describe("父文档 ID（默认 root）").optional(),
+    title: z.string().describe("文档标题（可选，默认使用文件名）").optional(),
+    enable_format_optimize: z.boolean().describe("是否启用格式优化（默认 false）").optional(),
+  }),
 };
 
 /**
@@ -523,17 +360,9 @@ export const docOrganizeSkill: SkillDefinition = {
     required: false, // analysis is safe; confirmation handled by chat.ts on organize_plan chunk
     riskLevel: "high",
   },
-  parameters: {
-    type: "object",
-    properties: {
-      doc_id: {
-        type: "string",
-        description: "目标目录文档 ID（从 @ 提及中解析），留空则整理整个项目根目录",
-        optional: true,
-      },
-    },
-    required: [],
-  },
+  inputSchema: z.object({
+    doc_id: z.string().describe("目标目录文档 ID（从 @ 提及中解析），留空则整理整个项目根目录").optional(),
+  }),
 };
 
 /**
@@ -549,24 +378,11 @@ export const docConvertSkill: SkillDefinition = {
     required: false,
     riskLevel: "low",
   },
-  parameters: {
-    type: "object",
-    properties: {
-      from: {
-        type: "string",
-        description: "源格式（如 txt/html/json）",
-      },
-      to: {
-        type: "string",
-        description: "目标格式（当前支持 markdown）",
-      },
-      content: {
-        type: "string",
-        description: "待转换内容",
-      },
-    },
-    required: ["from", "to", "content"],
-  },
+  inputSchema: z.object({
+    from: z.string().describe("源格式（如 txt/html/json）"),
+    to: z.string().describe("目标格式（当前支持 markdown）"),
+    content: z.string().describe("待转换内容"),
+  }),
 };
 
 /**
@@ -584,16 +400,9 @@ export const fileParseSkill: SkillDefinition = {
     required: false,
     riskLevel: "low",
   },
-  parameters: {
-    type: "object",
-    properties: {
-      asset_id: {
-        type: "string",
-        description: "附件资产 ID（来自聊天附件上传返回的 asset_id）",
-      },
-    },
-    required: ["asset_id"],
-  },
+  inputSchema: z.object({
+    asset_id: z.string().describe("附件资产 ID（来自聊天附件上传返回的 asset_id）"),
+  }),
 };
 
 /**
@@ -611,21 +420,10 @@ export const imageAnalyzeSkill: SkillDefinition = {
     required: false,
     riskLevel: "low",
   },
-  parameters: {
-    type: "object",
-    properties: {
-      asset_id: {
-        type: "string",
-        description: "图片资产 ID（来自聊天附件上传返回的 asset_id）",
-      },
-      question: {
-        type: "string",
-        description: "关于图片的问题（可选，默认进行 OCR 文字识别）",
-        optional: true,
-      },
-    },
-    required: ["asset_id"],
-  },
+  inputSchema: z.object({
+    asset_id: z.string().describe("图片资产 ID（来自聊天附件上传返回的 asset_id）"),
+    question: z.string().describe("关于图片的问题（可选，默认进行 OCR 文字识别）").optional(),
+  }),
 };
 
 /**
@@ -643,16 +441,9 @@ export const urlExtractSkill: SkillDefinition = {
     required: false,
     riskLevel: "low",
   },
-  parameters: {
-    type: "object",
-    properties: {
-      url: {
-        type: "string",
-        description: "目标 URL",
-      },
-    },
-    required: ["url"],
-  },
+  inputSchema: z.object({
+    url: z.string().describe("目标 URL"),
+  }),
 };
 
 /**

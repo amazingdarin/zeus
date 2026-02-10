@@ -1,5 +1,6 @@
 import type { McpToolDefinition } from "./mcp-client-manager.js";
 import type { AgentSkillDefinition } from "./types.js";
+import { jsonSchemaToZodObject, zodObjectHasRequiredKey } from "../zod.js";
 
 function normalizeToolName(server: string, name: string): string {
   const raw = `mcp_${server}_${name}`.toLowerCase();
@@ -7,6 +8,7 @@ function normalizeToolName(server: string, name: string): string {
 }
 
 export function mcpToolToAgentSkill(tool: McpToolDefinition): AgentSkillDefinition {
+  const inputSchema = jsonSchemaToZodObject(tool.inputSchema);
   return {
     id: `mcp:${tool.id}`,
     source: "mcp",
@@ -14,7 +16,7 @@ export function mcpToolToAgentSkill(tool: McpToolDefinition): AgentSkillDefiniti
     displayName: tool.name,
     description: tool.description,
     category: "mcp",
-    inputSchema: tool.inputSchema,
+    inputSchema,
     triggers: {
       keywords: [tool.name.toLowerCase(), tool.server.toLowerCase()],
       patterns: [],
@@ -34,6 +36,7 @@ export function mcpToolToAgentSkill(tool: McpToolDefinition): AgentSkillDefiniti
       mcpToolId: tool.id,
       mcpServer: tool.server,
       mcpReadOnly: tool.readOnly,
+      requiresDocScope: zodObjectHasRequiredKey(inputSchema, "doc_id"),
     },
   };
 }

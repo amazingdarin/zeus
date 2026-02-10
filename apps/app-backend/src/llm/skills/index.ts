@@ -12,6 +12,8 @@
 export type {
   SkillCategory,
   SkillDefinition,
+  SkillDefinitionDTO,
+  SkillParameters,
   SkillIntent,
   SkillResult,
   DocumentDraft,
@@ -99,7 +101,6 @@ export type {
   SkillResourceType,
   UnifiedSkillDefinition,
   SkillTriggers,
-  SkillParameters,
   SkillExecution,
   SkillAdapter,
   DiscoveryConfig,

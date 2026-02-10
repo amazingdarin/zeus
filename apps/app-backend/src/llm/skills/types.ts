@@ -5,6 +5,7 @@
  */
 
 import type { JSONContent } from "@tiptap/core";
+import type { AnyZodObject } from "../zod.js";
 
 /**
  * Skill category for organizing skills
@@ -26,7 +27,28 @@ export type SkillConfirmation = {
 };
 
 /**
+ * Skill parameters (OpenAI Function Calling compatible JSON Schema subset)
+ *
+ * Note: this is the API/transport shape. Runtime skill contracts use Zod.
+ */
+export type SkillParameters = {
+  type: "object";
+  properties: Record<
+    string,
+    {
+      type: string;
+      description: string;
+      enum?: string[];
+      optional?: boolean;
+    }
+  >;
+  required: string[];
+};
+
+/**
  * Skill definition for registration
+ *
+ * Runtime contract: uses Zod as the source of truth.
  */
 export type SkillDefinition = {
   name: string; // e.g., "doc-create"
@@ -35,19 +57,14 @@ export type SkillDefinition = {
   description: string;
   required: boolean; // Whether this skill is required (cannot be disabled)
   confirmation?: SkillConfirmation; // Confirmation settings for dangerous operations
-  parameters: {
-    type: "object";
-    properties: Record<
-      string,
-      {
-        type: string;
-        description: string;
-        enum?: string[];
-        optional?: boolean;
-      }
-    >;
-    required: string[];
-  };
+  inputSchema: AnyZodObject;
+};
+
+/**
+ * Skill definition DTO (API-friendly)
+ */
+export type SkillDefinitionDTO = Omit<SkillDefinition, "inputSchema"> & {
+  parameters: SkillParameters;
 };
 
 /**
@@ -191,7 +208,7 @@ export type SkillConfig = {
 /**
  * Complete skill info (definition + config)
  */
-export type SkillInfo = SkillDefinition & {
+export type SkillInfo = SkillDefinitionDTO & {
   config: SkillConfig;
   isConfigurable: boolean; // Whether the skill can be enabled/disabled (!required)
 };

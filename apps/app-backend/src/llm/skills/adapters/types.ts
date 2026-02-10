@@ -5,6 +5,8 @@
  * 参考: https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview
  */
 
+import type { AnyZodObject } from "../../zod.js";
+
 /**
  * Anthropic Agent Skills YAML Frontmatter
  * 
@@ -73,8 +75,10 @@ export type UnifiedSkillDefinition = {
   // === 触发方式 ===
   triggers: SkillTriggers;
   
-  // === 参数定义 ===
-  parameters?: SkillParameters;
+  // === 入参定义 ===
+  // Anthropic skills usually have a small contract ("request", optional "context").
+  // We keep this as Zod so it can be converted to tool schemas consistently.
+  inputSchema?: AnyZodObject;
   
   // === 执行配置 ===
   execution: SkillExecution;
@@ -98,26 +102,6 @@ export type SkillTriggers = {
   command?: string;                   // 斜杠命令 (native)
   patterns?: string[];                // 触发模式 (从 description 提取)
   keywords?: string[];                // 关键词
-};
-
-/**
- * 技能参数定义 (JSON Schema 风格)
- */
-export type SkillParameters = {
-  type: "object";
-  properties: Record<string, ParameterDef>;
-  required: string[];
-};
-
-/**
- * 参数定义
- */
-export type ParameterDef = {
-  type: string;
-  description: string;
-  enum?: string[];
-  default?: unknown;
-  optional?: boolean;
 };
 
 /**

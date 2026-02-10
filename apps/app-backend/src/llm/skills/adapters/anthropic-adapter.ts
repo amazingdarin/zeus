@@ -11,6 +11,7 @@
 
 import { readFile, readdir, access } from "node:fs/promises";
 import path from "node:path";
+import { z } from "zod";
 import type {
   SkillAdapter,
   UnifiedSkillDefinition,
@@ -165,8 +166,11 @@ export class AnthropicSkillAdapter implements SkillAdapter {
         // 不提供 command，因为 Anthropic Skills 不使用斜杠命令
       },
 
-      // 参数定义 (Anthropic Skills 不使用严格参数，由 LLM 解析)
-      parameters: undefined,
+      // 入参定义 (tool-call 合约；真实解析仍由 LLM + skill instructions 决定)
+      inputSchema: z.object({
+        request: z.string().describe("The user's request to process with this skill"),
+        context: z.string().describe("Additional context or data for the skill").optional(),
+      }),
 
       // 执行配置
       execution: {

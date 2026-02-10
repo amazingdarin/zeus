@@ -52,6 +52,7 @@ import {
 } from "./services/optimize.js";
 import { skillConfigStore } from "./llm/skills/skill-config-store.js";
 import { agentSkillCatalog, projectSkillConfigStore } from "./llm/agent/index.js";
+import { zodObjectHasRequiredKey } from "./llm/zod.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -2186,9 +2187,25 @@ export const buildRouter = () => {
   router.post("/projects/:projectKey/chat/runs/:runId/provide-input", async (req: Request, res: Response) => {
     try {
       const { runId } = req.params;
-      const body = req.body as { doc_id?: string };
-      const docId = typeof body?.doc_id === "string" ? body.doc_id.trim() : "";
-      const ok = provideRequiredInput(runId, { doc_id: docId });
+      const raw = req.body as unknown;
+      const payload: Record<string, unknown> =
+        raw && typeof raw === "object" && raw !== null
+          ? (raw as Record<string, unknown>)
+          : {};
+
+      // Normalize common fields
+      if (typeof payload.doc_id === "string") {
+        payload.doc_id = payload.doc_id.trim();
+      }
+
+      if ("args" in payload) {
+        const args = (payload as { args?: unknown }).args;
+        if (!args || typeof args !== "object" || Array.isArray(args)) {
+          payload.args = {};
+        }
+      }
+
+      const ok = provideRequiredInput(runId, payload);
       if (!ok) {
         error(res, "NOT_FOUND", "No pending input for this run", 404);
         return;
@@ -2654,7 +2671,7 @@ export const buildRouter = () => {
         .filter((skill) => enabledIds.has(skill.id) && typeof skill.command === "string")
         .map((skill) => {
           const fromMetadata = Boolean(skill.metadata && skill.metadata.requiresDocScope === true);
-          const fromSchema = skill.inputSchema.required.includes("doc_id");
+          const fromSchema = zodObjectHasRequiredKey(skill.inputSchema, "doc_id");
           return {
             skill_id: skill.id,
             command: skill.command as string,

@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { query } from "../../db/postgres.js";
+import { zodObjectHasRequiredKey } from "../zod.js";
 import type {
   AgentRiskLevel,
   AgentSkillDefinition,
@@ -296,7 +297,7 @@ export const projectSkillConfigStore = {
         command: skill.command,
         requiresDocScope:
           (skill.metadata && skill.metadata.requiresDocScope === true) ||
-          skill.inputSchema.required.includes("doc_id"),
+          zodObjectHasRequiredKey(skill.inputSchema, "doc_id"),
       });
     }
 

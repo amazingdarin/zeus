@@ -1,30 +1,23 @@
 import { v4 as uuidv4 } from "uuid";
 import { configStore, llmGateway, type ProviderConfigInternal } from "../llm/index.js";
-import { knowledgeSearch } from "../knowledge/search.js";
 import { documentStore } from "../storage/document-store.js";
-import type { SearchResult } from "../storage/types.js";
 import {
   executeSkillWithStream,
   executeAnthropicSkillWithStream,
-  analyzeTrigger,
-  extractDocIdsFromArgs,
   skillRegistry,
   type SkillStreamChunk,
   type DocumentDraft,
   type OrganizePlan,
   type SkillIntent,
-  type TriggerResult,
   type PendingToolCall,
-  type SkillDefinition,
   type RiskLevel,
 } from "../llm/skills/index.js";
 import { applyOrganizePlan } from "./organize.js";
 import { runDraftRefinementLoop } from "../llm/skills/refinement-loop.js";
 import {
-  agentOrchestrator,
-  agentPolicyEngine,
+  agentSkillCatalog,
   mcpClientManager,
-  type AgentPlan,
+  normalizeAndValidateSkillArgs,
   type AgentSkillDefinition,
 } from "../llm/agent/index.js";
 import { executeDeepSearch, type DeepSearchChunk, type DeepSearchConfig } from "./deep-search.js";
@@ -151,7 +144,7 @@ const pendingIntentSelections = new Map<string, {
 
 // Pending required input collection
 const pendingRequiredInputs = new Map<string, {
-  resolve: (payload: { doc_id: string } | null) => void;
+  resolve: (payload: Record<string, unknown> | null) => void;
   timeout: ReturnType<typeof setTimeout>;
 }>();
 
@@ -439,50 +432,6 @@ function cleanupAbortController(runId: string): void {
 // ============================================================================
 
 /**
- * Check if a skill requires confirmation before execution
- */
-function shouldRequireConfirmation(skill: SkillDefinition): boolean {
-  return skill.confirmation?.required === true;
-}
-
-/**
- * Create a pending tool call for confirmation
- */
-function createPendingToolCall(
-  skill: SkillDefinition,
-  args: Record<string, unknown>,
-): PendingToolCall {
-  const now = Date.now();
-  return {
-    id: uuidv4(),
-    skillName: skill.name,
-    skillDescription: skill.description,
-    args,
-    riskLevel: skill.confirmation?.riskLevel || "medium",
-    warningMessage: skill.confirmation?.warningMessage,
-    createdAt: now,
-    expiresAt: now + PENDING_TOOL_TTL,
-  };
-}
-
-function createPendingToolCallForAgent(
-  skill: AgentSkillDefinition,
-  args: Record<string, unknown>,
-): PendingToolCall {
-  const now = Date.now();
-  return {
-    id: uuidv4(),
-    skillName: skill.displayName,
-    skillDescription: skill.description,
-    args,
-    riskLevel: skill.risk.level as RiskLevel,
-    warningMessage: skill.risk.warningMessage,
-    createdAt: now,
-    expiresAt: now + PENDING_TOOL_TTL,
-  };
-}
-
-/**
  * Wait for user confirmation on a pending tool
  * Returns true if confirmed, false if rejected or timeout
  */
@@ -544,7 +493,7 @@ export function rejectTool(runId: string): boolean {
 /**
  * Wait for user to provide required input (e.g. doc scope)
  */
-async function waitForRequiredInput(runId: string): Promise<{ doc_id: string } | null> {
+async function waitForRequiredInput(runId: string): Promise<Record<string, unknown> | null> {
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
       pendingRequiredInputs.delete(runId);
@@ -558,7 +507,7 @@ async function waitForRequiredInput(runId: string): Promise<{ doc_id: string } |
 /**
  * Provide required input for a pending input clarification
  */
-export function provideRequiredInput(runId: string, payload: { doc_id: string }): boolean {
+export function provideRequiredInput(runId: string, payload: Record<string, unknown>): boolean {
   const run = activeRuns.get(runId);
   if (!run || run.status !== "awaiting_input") {
     return false;
@@ -785,7 +734,11 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
           return;
         }
 
-        const payload = provided || { doc_id: "" };
+        const payload: Record<string, unknown> =
+          provided
+          || (graphResult.pendingInput.kind === "doc_scope"
+            ? { doc_id: "" }
+            : { args: {} });
 
         run.status = "running";
         run.updatedAt = Date.now();
@@ -793,7 +746,10 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
         planSpan = traceManager.startSpan(traceContext, "chat-graph-plan-resume-input", {
           kind: graphResult.pendingInput.kind,
           skill: graphResult.pendingInput.skillName,
-          doc_id: payload.doc_id ? payload.doc_id : undefined,
+          doc_id:
+            typeof (payload as { doc_id?: unknown }).doc_id === "string"
+              ? (payload as { doc_id?: string }).doc_id
+              : undefined,
         });
 
         try {
@@ -1069,7 +1025,7 @@ async function* executeSkillPlan(
   traceContext: TraceContext,
   fullAccess = false,
 ): AsyncGenerator<ChatStreamChunk> {
-  // Map sourceIntent from graph format to AgentPlan format
+  // Map sourceIntent from graph format to the execution runner format
   const sourceIntent: "command" | "anthropic-keyword" | "tool" =
     plan.sourceIntent === "llm-tool"
       ? "tool"
@@ -1077,9 +1033,18 @@ async function* executeSkillPlan(
         ? "anthropic-keyword"
         : "command";
 
+  await agentSkillCatalog.initialize();
+  const skill = agentSkillCatalog.getById(plan.skillId);
+  if (!skill) {
+    run.status = "failed";
+    run.updatedAt = Date.now();
+    yield { type: "error", error: `Unknown skill: ${plan.skillId}` };
+    return;
+  }
+
   // Delegate to existing handler, but skip its internal policy check
   // and confirmation logic since the graph already handled those.
-  yield* executeSkillDirect(run, plan.skill, plan.args, plan.docIds, sourceIntent, userQuery, abortSignal, traceContext, fullAccess);
+  yield* executeSkillDirect(run, skill, plan.args, plan.docIds, sourceIntent, userQuery, abortSignal, traceContext, fullAccess);
 }
 
 /**
@@ -1098,10 +1063,22 @@ async function* executeSkillDirect(
   traceContext: TraceContext,
   fullAccess = false,
 ): AsyncGenerator<ChatStreamChunk> {
+  const normalized = normalizeAndValidateSkillArgs(skill, args, docIds);
+  if (!normalized.ok) {
+    run.status = "failed";
+    run.updatedAt = Date.now();
+    yield { type: "error", error: normalized.error.message };
+    return;
+  }
+
+  const normalizedArgs = normalized.args;
+  const normalizedDocIds = normalized.docIds;
+
   const skillSpan = traceManager.startSpan(traceContext, `agent:${skill.id}`, {
     source: skill.source,
     toolName: skill.toolName,
-    args,
+    args: normalizedArgs,
+    docIds: normalizedDocIds,
     sourceIntent,
     fullAccess,
   });
@@ -1115,7 +1092,7 @@ async function* executeSkillDirect(
 
   try {
     if (skill.source === "native") {
-      const intent = buildIntentFromAgentPlan(skill, args, userQuery, docIds);
+      const intent = buildIntentFromAgentPlan(skill, normalizedArgs, userQuery, normalizedDocIds);
       if (!intent) {
         throw new Error(`Missing legacy skill mapping for native skill: ${skill.id}`);
       }
@@ -1128,10 +1105,10 @@ async function* executeSkillDirect(
         const stream = runDraftRefinementLoop({
           skillLegacyName: intent.skill,
           userMessage: userQuery,
-          baseArgs: args,
+          baseArgs: normalizedArgs,
           maxAttempts: DOC_GUARD_MAX_ATTEMPTS,
           runAttempt: (attemptArgs) => {
-            const nextIntent = buildIntentFromAgentPlan(skill, attemptArgs, userQuery, docIds);
+            const nextIntent = buildIntentFromAgentPlan(skill, attemptArgs, userQuery, normalizedDocIds);
             if (!nextIntent) {
               throw new Error(`Missing legacy skill mapping for native skill: ${skill.id}`);
             }
@@ -1264,10 +1241,10 @@ async function* executeSkillDirect(
       }
     } else if (skill.source === "anthropic") {
       let context: string | undefined;
-      if (docIds && docIds.length > 0) {
+      if (normalizedDocIds && normalizedDocIds.length > 0) {
         try {
           const docs = await Promise.all(
-            docIds.slice(0, 3).map(async (docId) => {
+            normalizedDocIds.slice(0, 3).map(async (docId) => {
               const doc = await documentStore.get(run.userId, run.projectKey, docId);
               return `## ${doc.meta.title}\n${JSON.stringify(doc.body)}`;
             }),
@@ -1278,9 +1255,10 @@ async function* executeSkillDirect(
         }
       }
 
-      const userRequest = typeof args.request === "string" && args.request.trim()
-        ? args.request
-        : userQuery;
+      const request = typeof normalizedArgs.request === "string"
+        ? normalizedArgs.request.trim()
+        : "";
+      const userRequest = request ? request : userQuery;
 
       const anthropicSkill = skillRegistry.getAnthropicById(skill.id);
       if (!anthropicSkill) {
@@ -1313,7 +1291,7 @@ async function* executeSkillDirect(
       }
 
       yield { type: "thinking", content: `正在执行 MCP 工具: ${skill.displayName}...` };
-      const result = await mcpClientManager.executeTool(mcpToolId, args);
+      const result = await mcpClientManager.executeTool(mcpToolId, normalizedArgs);
       if (!result.success) {
         throw new Error(result.error || "MCP tool execution failed");
       }
@@ -1383,670 +1361,6 @@ function buildIntentFromAgentPlan(
     rawMessage,
     docIds,
   };
-}
-
-async function* handleAgentExecuteMode(
-  run: ChatRun,
-  plan: Extract<AgentPlan, { mode: "execute" }>,
-  userQuery: string,
-  abortSignal: AbortSignal,
-  traceContext: TraceContext,
-): AsyncGenerator<ChatStreamChunk> {
-  const skill = plan.skill;
-  const policyCheck = agentPolicyEngine.canUseSkill(skill);
-  if (!policyCheck.allowed) {
-    run.status = "failed";
-    run.updatedAt = Date.now();
-    yield { type: "error", error: policyCheck.reason || "Skill blocked by policy" };
-    return;
-  }
-
-  // Confirmation for medium/high risk skills
-  if (agentPolicyEngine.shouldRequireConfirmation(skill)) {
-    const pendingTool = createPendingToolCallForAgent(skill, plan.args);
-    run.status = "awaiting_confirmation";
-    run.pendingTool = pendingTool;
-    run.updatedAt = Date.now();
-    yield { type: "tool_pending", pendingTool };
-
-    const confirmed = await waitForConfirmation(run.id);
-    if (!confirmed) {
-      run.pendingTool = undefined;
-      run.status = "completed";
-      run.updatedAt = Date.now();
-      yield { type: "tool_rejected", message: "操作已取消" };
-      return;
-    }
-
-    run.pendingTool = undefined;
-    run.status = "running";
-    run.updatedAt = Date.now();
-  }
-
-  const skillSpan = traceManager.startSpan(traceContext, `agent:${skill.id}`, {
-    source: skill.source,
-    toolName: skill.toolName,
-    args: plan.args,
-    sourceIntent: plan.sourceIntent,
-  });
-
-  try {
-    if (skill.source === "native") {
-      const intent = buildIntentFromAgentPlan(skill, plan.args, userQuery, plan.docIds);
-      if (!intent) {
-        throw new Error(`Missing legacy skill mapping for native skill: ${skill.id}`);
-      }
-
-      for await (const chunk of executeSkillWithStream(run.userId, run.projectKey, intent, traceContext)) {
-        if (abortSignal.aborted) {
-          run.status = "cancelled";
-          run.updatedAt = Date.now();
-          traceManager.endSpan(skillSpan, { status: "cancelled" }, "WARNING");
-          return;
-        }
-        const mappedChunk = mapSkillChunkToChatChunk(chunk);
-        yield mappedChunk;
-        if (chunk.type === "draft") {
-          addDraftToHistory(run.sessionId, chunk.draft);
-        }
-      }
-    } else if (skill.source === "anthropic") {
-      let context: string | undefined;
-      if (plan.docIds && plan.docIds.length > 0) {
-        try {
-          const docs = await Promise.all(
-            plan.docIds.slice(0, 3).map(async (docId) => {
-              const doc = await documentStore.get(run.userId, run.projectKey, docId);
-              return `## ${doc.meta.title}\n${JSON.stringify(doc.body)}`;
-            }),
-          );
-          context = docs.join("\n\n---\n\n");
-        } catch {
-          // Ignore context loading failures
-        }
-      }
-
-      const userRequest = typeof plan.args.request === "string" && plan.args.request.trim()
-        ? plan.args.request
-        : userQuery;
-
-      const anthropicSkill = skillRegistry.getAnthropicById(skill.id);
-      if (!anthropicSkill) {
-        throw new Error(`Anthropic skill not found in registry: ${skill.id}`);
-      }
-
-      for await (const chunk of executeAnthropicSkillWithStream(
-        run.userId,
-        run.projectKey,
-        { ...anthropicSkill, enabled: true },
-        userRequest,
-        context,
-        traceContext,
-      )) {
-        if (abortSignal.aborted) {
-          run.status = "cancelled";
-          run.updatedAt = Date.now();
-          traceManager.endSpan(skillSpan, { status: "cancelled" }, "WARNING");
-          return;
-        }
-        yield mapSkillChunkToChatChunk(chunk);
-      }
-    } else {
-      const mcpToolId = typeof skill.metadata?.mcpToolId === "string"
-        ? skill.metadata.mcpToolId
-        : null;
-      if (!mcpToolId) {
-        throw new Error(`MCP skill metadata missing tool id for ${skill.id}`);
-      }
-
-      yield { type: "thinking", content: `正在执行 MCP 工具: ${skill.displayName}...` };
-      const result = await mcpClientManager.executeTool(mcpToolId, plan.args);
-      if (!result.success) {
-        throw new Error(result.error || "MCP tool execution failed");
-      }
-      if (result.output) {
-        yield { type: "delta", content: result.output };
-      }
-      yield { type: "done", message: `${skill.displayName} 执行完成` };
-    }
-
-    run.status = "completed";
-    run.updatedAt = Date.now();
-    traceManager.endSpan(skillSpan, { status: "completed" });
-  } catch (err) {
-    if (abortSignal.aborted) {
-      run.status = "cancelled";
-      run.updatedAt = Date.now();
-      traceManager.endSpan(skillSpan, { status: "cancelled" }, "WARNING");
-      return;
-    }
-    const errorMessage = err instanceof Error ? err.message : "Agent execution failed";
-    run.status = "failed";
-    run.updatedAt = Date.now();
-    traceManager.endSpan(skillSpan, { error: errorMessage }, "ERROR");
-    yield { type: "error", error: errorMessage };
-  }
-}
-
-/**
- * Handle command mode - direct skill execution (strong determinism)
- */
-async function* handleCommandMode(
-  run: ChatRun,
-  trigger: TriggerResult,
-  abortSignal: AbortSignal,
-  traceContext: TraceContext,
-): AsyncGenerator<ChatStreamChunk> {
-  if (!trigger.intent) {
-    yield { type: "error", error: "No skill intent detected" };
-    return;
-  }
-
-  console.log("[chat] Command mode, executing skill:", trigger.intent.skill);
-
-  // Create span for skill execution
-  const skillSpan = traceManager.startSpan(traceContext, `skill:${trigger.intent.skill}`, {
-    command: trigger.intent.command,
-    args: trigger.intent.args,
-  });
-
-  try {
-    for await (const chunk of executeSkillWithStream(run.userId, run.projectKey, trigger.intent, traceContext)) {
-      // Check if aborted
-      if (abortSignal.aborted) {
-        console.log("[chat] Command mode aborted");
-        run.status = "cancelled";
-        run.updatedAt = Date.now();
-        return;
-      }
-
-      const mappedChunk = mapSkillChunkToChatChunk(chunk);
-      yield mappedChunk;
-
-      // If it's a draft, add a summary to session history
-      if (chunk.type === "draft") {
-        addDraftToHistory(run.sessionId, chunk.draft);
-      }
-    }
-
-    // End skill span
-    traceManager.endSpan(skillSpan, { status: "completed" });
-
-    run.status = "completed";
-    run.updatedAt = Date.now();
-  } catch (err) {
-    // Check if it's an abort error
-    if (abortSignal.aborted) {
-      traceManager.endSpan(skillSpan, { status: "cancelled" }, "WARNING");
-      run.status = "cancelled";
-      run.updatedAt = Date.now();
-      return;
-    }
-
-    const errorMessage = err instanceof Error ? err.message : "Skill execution failed";
-    console.error("[chat] Command mode error:", errorMessage);
-
-    // End skill span with error
-    traceManager.endSpan(skillSpan, { error: errorMessage }, "ERROR");
-
-    run.status = "failed";
-    run.updatedAt = Date.now();
-
-    yield { type: "error", error: errorMessage };
-  }
-}
-
-/**
- * Handle Anthropic mode - execute Anthropic Skill (medium determinism)
- */
-async function* handleAnthropicMode(
-  run: ChatRun,
-  trigger: TriggerResult,
-  abortSignal: AbortSignal,
-  traceContext: TraceContext,
-): AsyncGenerator<ChatStreamChunk> {
-  if (!trigger.anthropicSkill || !trigger.userRequest) {
-    yield { type: "error", error: "No Anthropic skill matched" };
-    return;
-  }
-
-  const skill = trigger.anthropicSkill;
-  console.log("[chat] Anthropic mode, executing skill:", skill.name);
-
-  // Create span for anthropic skill
-  const skillSpan = traceManager.startSpan(traceContext, `anthropic:${skill.name}`, {
-    userRequest: trigger.userRequest,
-  });
-
-  try {
-    // Build context from referenced documents
-    let context: string | undefined;
-    if (run.docIds && run.docIds.length > 0) {
-      try {
-        const docs = await Promise.all(
-          run.docIds.slice(0, 3).map(async (docId) => {
-            const doc = await documentStore.get(run.userId, run.projectKey, docId);
-            return `## ${doc.meta.title}\n${JSON.stringify(doc.body)}`;
-          }),
-        );
-        context = docs.join("\n\n---\n\n");
-      } catch {
-        // Ignore errors loading context
-      }
-    }
-
-    // Execute Anthropic Skill
-    for await (const chunk of executeAnthropicSkillWithStream(
-      run.userId,
-      run.projectKey,
-      skill,
-      trigger.userRequest,
-      context,
-      traceContext,
-    )) {
-      // Check if aborted
-      if (abortSignal.aborted) {
-        console.log("[chat] Anthropic mode aborted");
-        traceManager.endSpan(skillSpan, { status: "cancelled" }, "WARNING");
-        run.status = "cancelled";
-        run.updatedAt = Date.now();
-        return;
-      }
-
-      const mappedChunk = mapSkillChunkToChatChunk(chunk);
-      yield mappedChunk;
-    }
-
-    traceManager.endSpan(skillSpan, { status: "completed" });
-    run.status = "completed";
-    run.updatedAt = Date.now();
-  } catch (err) {
-    // Check if it's an abort error
-    if (abortSignal.aborted) {
-      traceManager.endSpan(skillSpan, { status: "cancelled" }, "WARNING");
-      run.status = "cancelled";
-      run.updatedAt = Date.now();
-      return;
-    }
-
-    const errorMessage = err instanceof Error ? err.message : "Anthropic skill execution failed";
-    console.error("[chat] Anthropic mode error:", errorMessage);
-
-    traceManager.endSpan(skillSpan, { error: errorMessage }, "ERROR");
-    run.status = "failed";
-    run.updatedAt = Date.now();
-
-    yield { type: "error", error: errorMessage };
-  }
-}
-
-/**
- * Handle natural language mode - LLM selects tools
- */
-async function* handleNaturalMode(
-  run: ChatRun,
-  trigger: TriggerResult,
-  userQuery: string,
-  abortSignal: AbortSignal,
-  traceContext: TraceContext,
-): AsyncGenerator<ChatStreamChunk> {
-  const config = await getLLMConfig();
-  if (!config?.enabled || !config.defaultModel) {
-    // Fallback to chat mode if no LLM configured
-    console.log("[chat] No LLM configured, falling back to chat mode");
-    yield* handleChatMode(run, userQuery, abortSignal, traceContext);
-    return;
-  }
-
-  if (!trigger.tools || trigger.tools.length === 0) {
-    // No tools available, fallback to chat mode
-    console.log("[chat] No tools available, falling back to chat mode");
-    yield* handleChatMode(run, userQuery, abortSignal, traceContext);
-    return;
-  }
-
-  // Check if already aborted
-  if (abortSignal.aborted) {
-    run.status = "cancelled";
-    run.updatedAt = Date.now();
-    return;
-  }
-
-  console.log(
-    "[chat] Natural mode with tools:",
-    trigger.tools.map((t) => t.function.name),
-  );
-
-  // Create span for tool selection
-  const toolSelectionSpan = traceManager.startSpan(traceContext, "tool-selection", {
-    availableTools: trigger.tools.map((t) => t.function.name),
-  });
-
-  try {
-    // Build messages with tool-aware system prompt
-    const systemPrompt = trigger.toolSystemPrompt || buildDefaultToolPrompt();
-    const messages = [
-      { role: "system" as const, content: systemPrompt },
-      ...run.messages.map((m) => ({
-        role: m.role as "user" | "assistant" | "system",
-        content: m.content,
-      })),
-    ];
-
-    // Add context about mentioned documents
-    if (run.docIds && run.docIds.length > 0) {
-      const docContext = `用户通过 @ 提到的文档 ID: ${run.docIds.join(", ")}`;
-      messages.push({
-        role: "system",
-        content: docContext,
-      });
-    }
-
-    // Call LLM with tools
-    yield { type: "thinking", content: "正在分析请求..." };
-
-    const response = await llmGateway.chatWithTools({
-      provider: config.providerId,
-      model: config.defaultModel,
-      messages,
-      baseUrl: config.baseUrl,
-      apiKey: config.apiKey,
-      tools: trigger.tools,
-      tool_choice: "auto",
-      traceContext,
-    });
-
-    // Check if aborted after LLM call
-    if (abortSignal.aborted) {
-      run.status = "cancelled";
-      run.updatedAt = Date.now();
-      return;
-    }
-
-    // Check if LLM selected a tool
-    if (response.toolCalls && response.toolCalls.length > 0) {
-      const toolCall = response.toolCalls[0];
-      console.log("[chat] LLM selected tool:", toolCall.function.name);
-
-      // Parse arguments
-      let args: Record<string, unknown> = {};
-      try {
-        args = JSON.parse(toolCall.function.arguments);
-      } catch {
-        console.warn("[chat] Failed to parse tool arguments:", toolCall.function.arguments);
-      }
-
-      // Build intent from tool call
-      const intent: SkillIntent = {
-        skill: toolCall.function.name,
-        command: `/${toolCall.function.name}`,
-        args,
-        rawMessage: userQuery,
-        docIds: extractDocIdsFromArgs(args, run.docIds),
-      };
-
-      // Check if skill requires confirmation
-      const skill = skillRegistry.getNativeByName(toolCall.function.name);
-      if (skill && shouldRequireConfirmation(skill)) {
-        console.log("[chat] Skill requires confirmation:", skill.name);
-
-        // Create pending tool and pause for confirmation
-        const pendingTool = createPendingToolCall(skill, args);
-        run.status = "awaiting_confirmation";
-        run.pendingTool = pendingTool;
-        run.pendingIntent = intent;
-        run.updatedAt = Date.now();
-
-        // Yield pending tool event
-        yield { type: "tool_pending", pendingTool };
-
-        // Wait for user confirmation
-        const confirmed = await waitForConfirmation(run.id);
-
-        if (!confirmed) {
-          console.log("[chat] Tool execution rejected or timed out");
-          run.pendingTool = undefined;
-          run.pendingIntent = undefined;
-          run.status = "completed";
-          run.updatedAt = Date.now();
-          yield { type: "tool_rejected", message: "操作已取消" };
-          return;
-        }
-
-        console.log("[chat] Tool execution confirmed");
-        run.pendingTool = undefined;
-        run.pendingIntent = undefined;
-        run.status = "running";
-        run.updatedAt = Date.now();
-      }
-
-      yield { type: "thinking", content: `正在执行 ${toolCall.function.name}...` };
-
-      // End tool selection span before skill execution
-      traceManager.endSpan(toolSelectionSpan, { selectedTool: toolCall.function.name });
-
-      // Execute the selected skill
-      for await (const chunk of executeSkillWithStream(run.userId, run.projectKey, intent, traceContext)) {
-        // Check if aborted
-        if (abortSignal.aborted) {
-          console.log("[chat] Natural mode aborted during skill execution");
-          run.status = "cancelled";
-          run.updatedAt = Date.now();
-          return;
-        }
-
-        const mappedChunk = mapSkillChunkToChatChunk(chunk);
-        yield mappedChunk;
-
-        if (chunk.type === "draft") {
-          addDraftToHistory(run.sessionId, chunk.draft);
-        }
-      }
-    } else {
-      // LLM decided not to use any tool, return its text response
-      console.log("[chat] LLM did not select any tool, returning text response");
-      
-      // End tool selection span
-      traceManager.endSpan(toolSelectionSpan, { selectedTool: null });
-      
-      if (response.content) {
-        yield { type: "delta", content: response.content };
-        
-        // Add to history
-        const history = sessionMessages.get(run.sessionId);
-        if (history) {
-          history.push({ role: "assistant", content: response.content });
-        }
-      }
-      
-      yield { type: "done", message: response.content };
-    }
-
-    run.status = "completed";
-    run.updatedAt = Date.now();
-  } catch (err) {
-    // Check if it's an abort error
-    if (abortSignal.aborted) {
-      traceManager.endSpan(toolSelectionSpan, { status: "cancelled" }, "WARNING");
-      run.status = "cancelled";
-      run.updatedAt = Date.now();
-      return;
-    }
-
-    const errorMessage = err instanceof Error ? err.message : "Natural mode failed";
-    console.error("[chat] Natural mode error:", errorMessage);
-
-    traceManager.endSpan(toolSelectionSpan, { error: errorMessage }, "ERROR");
-
-    // Fallback to chat mode on error
-    console.log("[chat] Falling back to chat mode due to error");
-    yield* handleChatMode(run, userQuery, abortSignal, traceContext);
-  }
-}
-
-/**
- * Handle chat mode - regular RAG conversation
- */
-async function* handleChatMode(
-  run: ChatRun,
-  userQuery: string,
-  abortSignal: AbortSignal,
-  traceContext: TraceContext,
-): AsyncGenerator<ChatStreamChunk> {
-  const config = await getLLMConfig();
-  if (!config || !config.enabled) {
-    yield {
-      type: "error",
-      error: "No LLM provider configured. Please configure an LLM provider in settings.",
-    };
-    run.status = "failed";
-    run.updatedAt = Date.now();
-    return;
-  }
-
-  if (!config.defaultModel) {
-    yield { type: "error", error: "No default model configured for LLM provider." };
-    run.status = "failed";
-    run.updatedAt = Date.now();
-    return;
-  }
-
-  // Check if already aborted
-  if (abortSignal.aborted) {
-    run.status = "cancelled";
-    run.updatedAt = Date.now();
-    return;
-  }
-
-  // Create span for chat mode
-  const chatSpan = traceManager.startSpan(traceContext, "chat-rag", {
-    query: userQuery,
-    docIds: run.docIds,
-  });
-
-  // Track sources for RAG
-  let sources: SourceReference[] = [];
-
-  try {
-    // Search knowledge base for relevant context
-    let ragContext = "";
-    const searchSpan = traceManager.startSpan(traceContext, "knowledge-search", {
-      query: userQuery,
-      mode: "hybrid",
-    });
-    try {
-      const searchResults = await knowledgeSearch.search(
-        run.userId,
-        run.projectKey,
-        {
-          text: userQuery,
-          mode: "hybrid",
-          limit: 5,
-          doc_ids: run.docIds,
-        },
-      );
-
-      if (searchResults.length > 0) {
-        const contextData = await buildContextFromResults(run.userId, run.projectKey, searchResults);
-        ragContext = contextData.text;
-        sources = contextData.sources;
-      }
-      traceManager.endSpan(searchSpan, { resultCount: searchResults.length });
-    } catch (searchErr) {
-      console.warn("[chat] Knowledge search failed:", searchErr);
-      traceManager.endSpan(searchSpan, { error: String(searchErr) }, "WARNING");
-    }
-
-    // Check if aborted after search
-    if (abortSignal.aborted) {
-      traceManager.endSpan(chatSpan, { status: "cancelled" }, "WARNING");
-      run.status = "cancelled";
-      run.updatedAt = Date.now();
-      return;
-    }
-
-    // Build messages for the LLM
-    const llmMessages = run.messages.map((m) => ({
-      role: m.role as "user" | "assistant" | "system",
-      content: m.content,
-    }));
-
-    // Add system prompt with RAG context
-    const systemPrompt = buildSystemPromptWithContext(run.projectKey, ragContext);
-    const messagesWithSystem = [
-      { role: "system" as const, content: systemPrompt },
-      ...llmMessages,
-    ];
-
-    // Call LLM gateway with streaming and abort signal
-    const stream = await llmGateway.chatStream({
-      provider: config.providerId,
-      model: config.defaultModel,
-      messages: messagesWithSystem,
-      baseUrl: config.baseUrl,
-      apiKey: config.apiKey,
-      abortSignal,
-      traceContext,
-    });
-
-    let fullResponse = "";
-
-    // Stream the response
-    for await (const chunk of stream.textStream) {
-      // Check if aborted during streaming
-      if (abortSignal.aborted) {
-        console.log("[chat] Chat mode aborted during streaming");
-        traceManager.endSpan(chatSpan, { status: "cancelled", partialResponse: fullResponse.length }, "WARNING");
-        run.status = "cancelled";
-        run.updatedAt = Date.now();
-        
-        // Still save partial response to history if any
-        if (fullResponse) {
-          const history = sessionMessages.get(run.sessionId);
-          if (history) {
-            history.push({ role: "assistant", content: fullResponse + "\n\n[已停止]" });
-          }
-        }
-        return;
-      }
-
-      fullResponse += chunk;
-      yield { type: "delta", content: chunk };
-    }
-
-    // Add assistant response to session history
-    const history = sessionMessages.get(run.sessionId);
-    if (history) {
-      history.push({ role: "assistant", content: fullResponse });
-    }
-
-    // Update trace with output
-    traceManager.updateTrace(traceContext, { output: fullResponse });
-    traceManager.endSpan(chatSpan, { responseLength: fullResponse.length, sourceCount: sources.length });
-
-    run.status = "completed";
-    run.updatedAt = Date.now();
-
-    yield { type: "done", message: fullResponse, sources };
-  } catch (err) {
-    // Check if it's an abort error
-    if (abortSignal.aborted || (err instanceof Error && err.name === "AbortError")) {
-      console.log("[chat] Chat mode aborted");
-      traceManager.endSpan(chatSpan, { status: "cancelled" }, "WARNING");
-      run.status = "cancelled";
-      run.updatedAt = Date.now();
-      return;
-    }
-
-    const errorMessage = err instanceof Error ? err.message : "Chat failed";
-    console.error("[chat] Chat mode error:", errorMessage);
-
-    traceManager.endSpan(chatSpan, { error: errorMessage }, "ERROR");
-    run.status = "failed";
-    run.updatedAt = Date.now();
-
-    yield { type: "error", error: errorMessage };
-  }
 }
 
 /**
@@ -2200,88 +1514,6 @@ function addDraftToHistory(sessionId: string, draft: DocumentDraft): void {
       content: `已生成${draftType}文档「${draft.title}」的草稿，请查看并确认。`,
     });
   }
-}
-
-/**
- * Build default tool-aware system prompt
- */
-function buildDefaultToolPrompt(): string {
-  return `你是 Zeus 文档管理系统的智能助手。
-
-你可以使用工具帮助用户完成文档操作。
-当用户明确表达创建、编辑、读取、优化文档的意图时，选择合适的工具。
-如果用户只是提问或闲聊，直接回答，不要使用工具。`;
-}
-
-/**
- * Build context from search results
- */
-async function buildContextFromResults(
-  userId: string,
-  projectKey: string,
-  results: SearchResult[],
-): Promise<{ text: string; sources: SourceReference[] }> {
-  const sources: SourceReference[] = [];
-  const contextParts: string[] = [];
-
-  for (const result of results) {
-    let title = result.metadata?.title || "";
-    if (!title) {
-      try {
-        const doc = await documentStore.get(userId, projectKey, result.doc_id);
-        title = doc.meta.title || result.doc_id;
-      } catch {
-        title = result.doc_id;
-      }
-    }
-
-    sources.push({
-      docId: result.doc_id,
-      blockId: result.block_id,
-      title,
-      snippet: result.snippet,
-      score: result.score,
-    });
-
-    const locationHint = result.block_id ? ` (block: ${result.block_id.slice(0, 8)}...)` : "";
-    contextParts.push(`【${title}${locationHint}】\n${result.snippet}`);
-  }
-
-  return {
-    text: contextParts.join("\n\n---\n\n"),
-    sources,
-  };
-}
-
-/**
- * Build system prompt with RAG context
- */
-function buildSystemPromptWithContext(projectKey: string, context: string): string {
-  const basePrompt = `你是 Zeus 文档管理系统的智能助手。当前项目: ${projectKey}`;
-
-  if (!context) {
-    return `${basePrompt}
-
-你的职责:
-1. 帮助用户管理和编辑文档
-2. 回答关于项目内容的问题
-3. 提供文档写作建议
-
-请用中文回复，除非用户使用其他语言。保持回答简洁、专业。`;
-  }
-
-  return `${basePrompt}
-
-## 相关文档内容
-以下是与用户问题相关的文档片段，请基于这些内容回答：
-
-${context}
-
-## 回答要求
-1. 优先使用上述文档内容回答问题
-2. 如果文档内容不足以回答，可以结合通用知识补充
-3. 引用具体文档时说明来源
-4. 使用中文回答，保持专业简洁`;
 }
 
 /**

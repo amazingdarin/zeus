@@ -9,10 +9,11 @@
  *   START → detect_intent → (route by intent)
  *     ├── command     → resolve_command ─┐
  *     ├── skill       → plan_skill      ─┤
- *     │                                   ├→ check_policy → (route)
- *     │                                   │     ├── blocked         → END
- *     │                                   │     ├── no confirm      → END
- *     │                                   │     └── needs confirm   → await_confirmation → END
+ *     │                                   ├→ doc_agent → (route)
+ *     │                                   │     ├── needs input     → await_required_input → doc_agent (loop)
+ *     │                                   │     └── ok              → review_agent → (route)
+ *     │                                   │            ├── no confirm      → END
+ *     │                                   │            └── needs confirm   → await_confirmation → END
  *     ├── deep_search → prepare_deep_search → END
  *     └── chat        → rag_retrieve → build_response → END
  *
@@ -32,17 +33,14 @@ import { configStore, llmGateway } from "../llm/index.js";
 import type { ProviderConfigInternal } from "../llm/index.js";
 import {
   agentSkillCatalog,
-  agentPolicyEngine,
   projectSkillConfigStore,
-  type AgentSkillDefinition,
   type AgentRiskLevel,
 } from "../llm/agent/index.js";
-import { extractDocIdsFromArgs } from "../llm/skills/trigger.js";
-import { ragSearch } from "../knowledge/rag-graph.js";
-import { enrichResultsWithHierarchy } from "../knowledge/hierarchy.js";
-import { documentStore } from "../storage/document-store.js";
-import { ragTraceManager } from "../observability/index.js";
 import type { TraceContext } from "../observability/index.js";
+import { buildCommandArgs, runPlannerAgent } from "./agents/planner-agent.js";
+import { runRetrievalAgent } from "./agents/retrieval-agent.js";
+import { runDocAgent } from "./agents/doc-agent.js";
+import { runReviewAgent } from "./agents/review-agent.js";
 
 // ============================================================================
 // Types
@@ -80,12 +78,32 @@ export type PendingIntentInfo = {
 };
 
 /** Info sent to the caller when the graph interrupts for missing required input */
-export type PendingRequiredInputInfo = {
-  kind: "doc_scope";
-  message: string;
-  skillName: string;
-  skillDescription: string;
-};
+export type PendingRequiredInputInfo =
+  | {
+      kind: "doc_scope";
+      message: string;
+      skillName: string;
+      skillDescription: string;
+    }
+  | {
+      kind: "skill_args";
+      message: string;
+      skillName: string;
+      skillDescription: string;
+      /** Keys that are missing but required (if applicable). */
+      missing?: string[];
+      /** Zod validation issues (if applicable). */
+      issues?: Array<{ path: string; message: string }>;
+      /** Fields to collect from the user. */
+      fields: Array<{
+        key: string;
+        type: string;
+        description: string;
+        enum?: string[];
+      }>;
+      /** Optional: current args snapshot for UI defaults. */
+      currentArgs?: Record<string, unknown>;
+    };
 
 /** Source reference for RAG results */
 export type GraphSourceReference = {
@@ -116,7 +134,12 @@ export type ChatExecutionPlan =
     }
   | {
       action: "execute_skill";
-      skill: AgentSkillDefinition;
+      /**
+       * Resolved skill id (lookup via agentSkillCatalog). We avoid persisting the
+       * whole skill definition in graph state because it contains non-serializable
+       * objects (e.g. Zod schemas) and breaks LangGraph checkpointing.
+       */
+      skillId: string;
       args: Record<string, unknown>;
       docIds: string[];
       sourceIntent: "command" | "keyword" | "llm-tool";
@@ -162,7 +185,7 @@ const ChatGraphState = Annotation.Root({
   intentCandidates: Annotation<IntentOption[] | undefined>(lv<IntentOption[] | undefined>(() => undefined)),
 
   // ---- Skill resolution ----
-  matchedSkill: Annotation<AgentSkillDefinition | null>(lv<AgentSkillDefinition | null>(() => null)),
+  matchedSkill: Annotation<string | null>(lv<string | null>(() => null)),
   skillArgs: Annotation<Record<string, unknown>>(lv<Record<string, unknown>>(() => ({}))),
   skillDocIds: Annotation<string[]>(lv<string[]>(() => [])),
   sourceIntent: Annotation<"command" | "keyword" | "llm-tool">(lv<"command" | "keyword" | "llm-tool">(() => "command")),
@@ -172,6 +195,7 @@ const ChatGraphState = Annotation.Root({
 
   // ---- Policy ----
   needsConfirmation: Annotation<boolean>(lv(() => false)),
+  reviewWarningMessage: Annotation<string | undefined>(lv<string | undefined>(() => undefined)),
 
   // ---- RAG context ----
   ragContext: Annotation<string>(lv(() => "")),
@@ -541,38 +565,42 @@ async function awaitIntentSelection(state: GraphState): Promise<Partial<GraphSta
 }
 
 // ============================================================================
-// Node: validate_requirements / await_required_input
+// Node: doc_agent / await_required_input
 // ============================================================================
 
-function skillRequiresDocScope(skill: AgentSkillDefinition): boolean {
-  return Boolean((skill.metadata as Record<string, unknown> | undefined)?.requiresDocScope);
+async function docAgent(state: GraphState): Promise<Partial<GraphState>> {
+  const result = await runDocAgent({
+    matchedSkillId: state.matchedSkill,
+    skillArgs: state.skillArgs,
+    skillDocIds: state.skillDocIds,
+    sourceIntent: state.sourceIntent,
+    fullAccess: state.fullAccess,
+  });
+
+  return {
+    matchedSkill: result.matchedSkillId,
+    skillArgs: result.skillArgs,
+    skillDocIds: result.skillDocIds,
+    requiredInput: result.requiredInput as unknown as PendingRequiredInputInfo | null,
+    needsConfirmation: result.needsConfirmation,
+    ...(result.plan ? { plan: result.plan as unknown as ChatExecutionPlan } : {}),
+  };
 }
 
-function hasDocScope(
-  args: Record<string, unknown>,
-  docIds: string[],
-): boolean {
-  if (docIds.length > 0) return true;
-  const raw = args.doc_id;
-  return typeof raw === "string" && raw.trim().length > 0;
-}
+async function reviewAgent(state: GraphState): Promise<Partial<GraphState>> {
+  const result = await runReviewAgent({
+    matchedSkillId: state.matchedSkill,
+    skillArgs: state.skillArgs,
+    needsConfirmation: state.needsConfirmation,
+    planAction: state.plan?.action,
+  });
 
-async function validateRequirements(state: GraphState): Promise<Partial<GraphState>> {
-  const skill = state.matchedSkill;
-  if (!skill) return { requiredInput: null };
-
-  if (skillRequiresDocScope(skill) && !hasDocScope(state.skillArgs, state.skillDocIds)) {
-    return {
-      requiredInput: {
-        kind: "doc_scope",
-        message: "该操作需要指定文档。请选择要操作的文档后继续。",
-        skillName: skill.displayName,
-        skillDescription: skill.description,
-      },
-    };
-  }
-
-  return { requiredInput: null };
+  return {
+    matchedSkill: result.matchedSkillId,
+    needsConfirmation: result.needsConfirmation,
+    reviewWarningMessage: result.reviewWarningMessage,
+    ...(result.plan ? { plan: result.plan as unknown as ChatExecutionPlan } : {}),
+  };
 }
 
 async function awaitRequiredInput(state: GraphState): Promise<Partial<GraphState>> {
@@ -583,24 +611,66 @@ async function awaitRequiredInput(state: GraphState): Promise<Partial<GraphState
 
   const response = interrupt(req);
 
-  const selectedDocId =
-    typeof response === "object" && response !== null && "doc_id" in response
-      ? String((response as { doc_id?: unknown }).doc_id ?? "").trim()
-      : "";
+  if (req.kind === "doc_scope") {
+    const selectedDocId =
+      typeof response === "object" && response !== null && "doc_id" in response
+        ? String((response as { doc_id?: unknown }).doc_id ?? "").trim()
+        : "";
 
-  if (!selectedDocId) {
+    if (!selectedDocId) {
+      return {
+        requiredInput: null,
+        matchedSkill: null,
+        plan: { action: "respond_text", text: "未选择文档，已取消该操作。" },
+        intent: { type: "chat", confidence: 1.0, reasoning: "Missing required input cancelled" },
+      };
+    }
+
     return {
       requiredInput: null,
-      matchedSkill: null,
-      plan: { action: "respond_text", text: "未选择文档，已取消该操作。" },
-      intent: { type: "chat", confidence: 1.0, reasoning: "Missing required input cancelled" },
+      docIds: [selectedDocId],
+      skillDocIds: [selectedDocId],
     };
   }
 
+  // skill_args
+  let argsUpdate: Record<string, unknown> = {};
+  if (response && typeof response === "object" && response !== null) {
+    const obj = response as Record<string, unknown>;
+    const nested = obj.args;
+    if (nested && typeof nested === "object" && nested !== null && !Array.isArray(nested)) {
+      argsUpdate = nested as Record<string, unknown>;
+    } else {
+      argsUpdate = obj;
+    }
+  }
+
+  // Treat empty payload as cancellation.
+  if (Object.keys(argsUpdate).length === 0) {
+    return {
+      requiredInput: null,
+      matchedSkill: null,
+      plan: { action: "respond_text", text: "未提供必要参数，已取消该操作。" },
+      intent: { type: "chat", confidence: 1.0, reasoning: "Missing required args cancelled" },
+    };
+  }
+
+  const nextArgs: Record<string, unknown> = {
+    ...(state.skillArgs || {}),
+    ...argsUpdate,
+  };
+
+  const docId = typeof nextArgs.doc_id === "string" ? nextArgs.doc_id.trim() : "";
+
   return {
     requiredInput: null,
-    docIds: [selectedDocId],
-    skillDocIds: [selectedDocId],
+    skillArgs: nextArgs,
+    skillDocIds: docId
+      ? [docId]
+      : state.skillDocIds,
+    docIds: docId && (!state.docIds || state.docIds.length === 0)
+      ? [docId]
+      : state.docIds,
   };
 }
 
@@ -640,7 +710,7 @@ async function resolveCommand(state: GraphState): Promise<Partial<GraphState>> {
 
   const args = buildCommandArgs(skill, rest.trim(), state.docIds);
   return {
-    matchedSkill: skill,
+    matchedSkill: skill.id,
     skillArgs: args,
     skillDocIds: state.docIds || [],
     sourceIntent: "command",
@@ -652,199 +722,28 @@ async function resolveCommand(state: GraphState): Promise<Partial<GraphState>> {
 // ============================================================================
 
 async function planSkill(state: GraphState): Promise<Partial<GraphState>> {
-  await agentSkillCatalog.initialize();
-  const allSkills = agentSkillCatalog.getAllSkills();
-  const enabledIds = new Set(
-    await projectSkillConfigStore.getEnabledSkillIds(state.projectKey, allSkills),
-  );
+  const planned = await runPlannerAgent({
+    userQuery: state.userQuery,
+    messages: state.messages,
+    projectKey: state.projectKey,
+    docIds: state.docIds,
+    attachments: state.attachments,
+    skillHint: state.intent.skillHint,
+    llmConfig: state.llmConfig,
+    traceContext: state.traceContext,
+  });
 
-  // Step 0: Auto-detect parse skill from attachments + skill_hint
-  // When the user has file/image attachments and the intent hints at a parse
-  // skill, automatically fill in the asset_id from the first matching attachment.
-  if (state.intent.skillHint && state.attachments && state.attachments.length > 0) {
-    const autoResult = autoDetectParseSkill(
-      state.intent.skillHint,
-      state.attachments,
-      state.userQuery.trim(),
-      enabledIds,
-    );
-    if (autoResult) {
-      return {
-        matchedSkill: autoResult.skill,
-        skillArgs: autoResult.args,
-        skillDocIds: state.docIds || [],
-        sourceIntent: "llm-tool",
-      };
-    }
-  }
+  const nextDocIds = (!state.docIds || state.docIds.length === 0) && planned.skillDocIds.length > 0
+    ? planned.skillDocIds
+    : state.docIds;
 
-  // Step 1: Try keyword matching (fast, no LLM)
-  const keywordMatch = agentSkillCatalog.matchAnthropicByKeywords(
-    state.userQuery.trim(),
-    enabledIds,
-  );
-  if (keywordMatch) {
-    return {
-      matchedSkill: keywordMatch,
-      skillArgs: { request: state.userQuery.trim() },
-      skillDocIds: state.docIds || [],
-      sourceIntent: "keyword",
-    };
-  }
-
-  // Step 2: Try skill_hint from intent detection
-  if (state.intent.skillHint) {
-    const hintCommand = `/${state.intent.skillHint}`;
-    const hintSkill = agentSkillCatalog.getByCommand(hintCommand);
-    if (hintSkill && enabledIds.has(hintSkill.id)) {
-      const args = buildCommandArgs(hintSkill, state.userQuery.trim(), state.docIds);
-
-      // Enrich args with attachment asset_id for parse skills
-      if (isParseSkill(state.intent.skillHint) && state.attachments?.length) {
-        enrichParseArgsWithAttachment(args, state.intent.skillHint, state.attachments);
-      }
-
-      return {
-        matchedSkill: hintSkill,
-        skillArgs: args,
-        skillDocIds: state.docIds || [],
-        sourceIntent: "llm-tool",
-      };
-    }
-  }
-
-  // Step 3: LLM tool selection (if LLM available)
-  const config = state.llmConfig;
-  if (!config?.enabled || !config.defaultModel) {
-    return { matchedSkill: null };
-  }
-
-  const tools = agentSkillCatalog.toOpenAITools(enabledIds);
-  if (tools.length === 0) {
-    return { matchedSkill: null };
-  }
-
-  try {
-    const systemPrompt = buildToolSelectionPrompt(tools.map((t) => t.function.name));
-    const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-      { role: "system", content: systemPrompt },
-      ...state.messages.map((m) => ({
-        role: m.role as "user" | "assistant" | "system",
-        content: m.content,
-      })),
-    ];
-
-    if (state.docIds && state.docIds.length > 0) {
-      messages.push({
-        role: "system",
-        content: `用户关联的文档 ID: ${state.docIds.join(", ")}`,
-      });
-    }
-
-    if (state.attachments && state.attachments.length > 0) {
-      const lines = state.attachments
-        .slice(0, 10)
-        .map((a) => {
-          const name = a.name ? ` name=${a.name}` : "";
-          const mime = a.mimeType ? ` mime=${a.mimeType}` : "";
-          const size = typeof a.size === "number" ? ` size=${a.size}` : "";
-          const type = a.type ? ` type=${a.type}` : "";
-          return `- asset_id=${a.assetId}${name}${mime}${size}${type}`;
-        })
-        .join("\n");
-      messages.push({
-        role: "system",
-        content: `当前可用附件(可用于导入或解析):\n${lines}\n\n提示: 图片附件可用 image-analyze 解析; 文档附件(PDF/Word/HTML等)可用 file-parse 解析; URL 可用 url-extract 提取。`,
-      });
-    }
-
-    const response = await llmGateway.chatWithTools({
-      provider: config.providerId,
-      model: config.defaultModel,
-      baseUrl: config.baseUrl,
-      apiKey: config.apiKey,
-      messages,
-      tools,
-      tool_choice: "auto",
-      traceContext: state.traceContext,
-    });
-
-    if (response.toolCalls && response.toolCalls.length > 0) {
-      const firstCall = response.toolCalls[0];
-      const skill = agentSkillCatalog.getByToolName(firstCall.function.name);
-      if (skill) {
-        let args: Record<string, unknown> = {};
-        try {
-          args = JSON.parse(firstCall.function.arguments);
-        } catch {
-          args = {};
-        }
-        return {
-          matchedSkill: skill,
-          skillArgs: args,
-          skillDocIds: extractDocIdsFromArgs(args, state.docIds),
-          sourceIntent: "llm-tool",
-        };
-      }
-    }
-
-    // LLM chose to respond with text instead of a tool
-    if (response.content?.trim()) {
-      return {
-        matchedSkill: null,
-        plan: { action: "respond_text", text: response.content },
-      };
-    }
-  } catch (err) {
-    console.warn("[ChatGraph] LLM tool selection failed:", err);
-  }
-
-  return { matchedSkill: null };
-}
-
-// ============================================================================
-// Node: check_policy
-// ============================================================================
-
-async function checkPolicy(state: GraphState): Promise<Partial<GraphState>> {
-  const skill = state.matchedSkill;
-  if (!skill) {
-    return {
-      plan: { action: "respond_error", error: "No skill resolved in check_policy" },
-    };
-  }
-
-  const policyResult = agentPolicyEngine.canUseSkill(skill);
-  if (!policyResult.allowed) {
-    return {
-      plan: {
-        action: "respond_blocked",
-        reason: policyResult.reason || "操作被策略禁止",
-      },
-    };
-  }
-
-  // FullAccess mode: skip confirmation entirely
-  const needsConfirm = state.fullAccess
-    ? false
-    : agentPolicyEngine.shouldRequireConfirmation(skill);
-
-  if (needsConfirm) {
-    return {
-      needsConfirmation: true,
-    };
-  }
-
-  // Directly allowed — produce execute_skill plan
   return {
-    needsConfirmation: false,
-    plan: {
-      action: "execute_skill",
-      skill,
-      args: state.skillArgs,
-      docIds: state.skillDocIds,
-      sourceIntent: state.sourceIntent,
-    },
+    matchedSkill: planned.matchedSkillId,
+    skillArgs: planned.skillArgs,
+    skillDocIds: planned.skillDocIds,
+    sourceIntent: planned.sourceIntent,
+    ...(nextDocIds ? { docIds: nextDocIds } : {}),
+    ...(planned.respondText ? { plan: { action: "respond_text", text: planned.respondText } } : {}),
   };
 }
 
@@ -853,18 +752,37 @@ async function checkPolicy(state: GraphState): Promise<Partial<GraphState>> {
 // ============================================================================
 
 async function awaitConfirmation(state: GraphState): Promise<Partial<GraphState>> {
-  const skill = state.matchedSkill!;
+  const skillId = state.matchedSkill;
+  if (!skillId) {
+    return { plan: { action: "respond_error", error: "No skill resolved in await_confirmation" } };
+  }
+
+  await agentSkillCatalog.initialize();
+  const skill = agentSkillCatalog.getById(skillId);
+  if (!skill) {
+    return {
+      matchedSkill: null,
+      plan: { action: "respond_error", error: `Unknown skill: ${skillId}` },
+    };
+  }
 
   // interrupt() pauses graph execution.
   // The interrupt payload is surfaced to the caller via graph state inspection.
   // When the caller resumes with Command({ resume: { confirmed } }),
   // interrupt() returns that value.
+  const warnings = [
+    skill.risk.warningMessage,
+    state.reviewWarningMessage,
+  ].filter((w): w is string => typeof w === "string" && w.trim().length > 0);
+
+  const warningMessage = warnings.length > 0 ? warnings.join("\n") : undefined;
+
   const response = interrupt({
     skillName: skill.displayName,
     skillDescription: skill.description,
     args: state.skillArgs,
     riskLevel: skill.risk.level,
-    warningMessage: skill.risk.warningMessage,
+    warningMessage,
   } satisfies PendingToolInfo);
 
   const confirmed =
@@ -876,7 +794,7 @@ async function awaitConfirmation(state: GraphState): Promise<Partial<GraphState>
     return {
       plan: {
         action: "execute_skill",
-        skill,
+        skillId,
         args: state.skillArgs,
         docIds: state.skillDocIds,
         sourceIntent: state.sourceIntent,
@@ -894,81 +812,19 @@ async function awaitConfirmation(state: GraphState): Promise<Partial<GraphState>
 // ============================================================================
 
 async function ragRetrieve(state: GraphState): Promise<Partial<GraphState>> {
-  if (!state.userQuery.trim()) {
-    return { ragContext: "", ragSources: [] };
-  }
-
   try {
-    const tc = state.traceContext;
-
-    const results = await ragSearch(
-      state.userId,
-      state.projectKey,
-      state.userQuery,
-      {
-        docIds: state.docIds,
-        strategy: "adaptive",
-        enableSelfRAG: true,
-        enableReranking: true,
-        limit: 5,
-        traceContext: tc,
-      },
-    );
-
-    if (results.length === 0) {
-      return { ragContext: "", ragSources: [] };
-    }
-
-    // Load hierarchy context (populates document_summary_cache on demand)
-    let hierarchyPrefix = "";
-    const hierarchySpan = tc ? ragTraceManager.startHierarchySpan(tc, results.map((r) => r.doc_id)) : null;
-    try {
-      const { contextString } = await enrichResultsWithHierarchy(
-        state.userId,
-        state.projectKey,
-        results,
-      );
-      if (contextString) {
-        hierarchyPrefix = contextString + "\n\n";
-      }
-      if (hierarchySpan) {
-        ragTraceManager.endHierarchySpan(hierarchySpan, contextString ? contextString.split("\n").length : 0);
-      }
-    } catch (err) {
-      console.warn("[ChatGraph] Hierarchy context loading failed:", err);
-      if (hierarchySpan) {
-        ragTraceManager.endHierarchySpan(hierarchySpan, 0);
-      }
-    }
-
-    const sources: GraphSourceReference[] = [];
-    const contextParts: string[] = [];
-
-    for (const result of results) {
-      let title = result.metadata?.title || "";
-      if (!title) {
-        try {
-          const doc = await documentStore.get(state.userId, state.projectKey, result.doc_id);
-          title = doc.meta.title || result.doc_id;
-        } catch {
-          title = result.doc_id;
-        }
-      }
-
-      sources.push({
-        docId: result.doc_id,
-        blockId: result.block_id,
-        title,
-        snippet: result.content.slice(0, 200),
-        score: result.score ?? 0,
-      });
-
-      contextParts.push(`【${title}】\n${result.content}`);
-    }
+    const { ragContext, ragSources } = await runRetrievalAgent({
+      userQuery: state.userQuery,
+      userId: state.userId,
+      projectKey: state.projectKey,
+      docIds: state.docIds,
+      traceContext: state.traceContext,
+    });
 
     return {
-      ragContext: hierarchyPrefix + contextParts.join("\n\n---\n\n"),
-      ragSources: sources,
+      ragContext,
+      // RetrievalAgentSourceReference shape is compatible with GraphSourceReference.
+      ragSources: ragSources as unknown as GraphSourceReference[],
     };
   } catch (err) {
     console.warn("[ChatGraph] RAG retrieval failed:", err);
@@ -1045,40 +901,40 @@ function routeAfterIntentSelection(state: GraphState): string {
 function routeAfterResolveCommand(state: GraphState): string {
   // If plan already set (e.g. respond_blocked), go to END
   if (state.plan.action === "respond_blocked") return "__end__";
-  // If a skill was found, validate requirements first
-  if (state.matchedSkill) return "validate_requirements";
+  // If a skill was found, delegate validation + policy to DocAgent
+  if (state.matchedSkill) return "doc_agent";
   // No skill found — fallback to chat
   return "rag_retrieve";
 }
 
 function routeAfterPlanSkill(state: GraphState): string {
-  // If skill matched, validate requirements first
-  if (state.matchedSkill) return "validate_requirements";
+  // If skill matched, delegate validation + policy to DocAgent
+  if (state.matchedSkill) return "doc_agent";
   // If plan_skill explicitly produced a text response, go to END
   if (state.plan.action === "respond_text") return "__end__";
   // No skill matched and no explicit plan — fallback to chat (rag)
   return "rag_retrieve";
 }
 
-function routeAfterValidateRequirements(state: GraphState): string {
+function routeAfterDocAgent(state: GraphState): string {
   if (state.requiredInput) return "await_required_input";
-  return "check_policy";
+  return "review_agent";
+}
+
+function routeAfterReviewAgent(state: GraphState): string {
+  // Terminal text/block responses should always end, even if needsConfirmation is stale.
+  if (state.plan.action === "respond_text" || state.plan.action === "respond_blocked" || state.plan.action === "respond_rejected") {
+    return "__end__";
+  }
+
+  if (state.needsConfirmation) return "await_confirmation";
+  return "__end__";
 }
 
 function routeAfterAwaitRequiredInput(state: GraphState): string {
   // If user cancelled, we might have produced a text response.
   if (state.plan.action === "respond_text") return "__end__";
-  return "validate_requirements";
-}
-
-function routeAfterCheckPolicy(state: GraphState): string {
-  // If plan already set (blocked or execute_skill), go to END
-  if (state.plan.action === "respond_blocked" || state.plan.action === "execute_skill") {
-    return "__end__";
-  }
-  // Needs confirmation
-  if (state.needsConfirmation) return "await_confirmation";
-  return "__end__";
+  return "doc_agent";
 }
 
 // ============================================================================
@@ -1093,9 +949,9 @@ const chatGraph = new StateGraph(ChatGraphState)
   .addNode("await_intent_selection", awaitIntentSelection)
   .addNode("resolve_command", resolveCommand)
   .addNode("plan_skill", planSkill)
-  .addNode("validate_requirements", validateRequirements)
+  .addNode("doc_agent", docAgent)
+  .addNode("review_agent", reviewAgent)
   .addNode("await_required_input", awaitRequiredInput)
-  .addNode("check_policy", checkPolicy)
   .addNode("await_confirmation", awaitConfirmation)
   .addNode("rag_retrieve", ragRetrieve)
   .addNode("build_response", buildResponse)
@@ -1121,34 +977,34 @@ const chatGraph = new StateGraph(ChatGraphState)
     prepare_deep_search: "prepare_deep_search",
   })
 
-  // resolve_command → check_policy | rag_retrieve | END
+  // resolve_command → doc_agent | rag_retrieve | END
   .addConditionalEdges("resolve_command", routeAfterResolveCommand, {
-    validate_requirements: "validate_requirements",
+    doc_agent: "doc_agent",
     rag_retrieve: "rag_retrieve",
     __end__: END,
   })
 
-  // plan_skill → check_policy | rag_retrieve | END
+  // plan_skill → doc_agent | rag_retrieve | END
   .addConditionalEdges("plan_skill", routeAfterPlanSkill, {
-    validate_requirements: "validate_requirements",
+    doc_agent: "doc_agent",
     rag_retrieve: "rag_retrieve",
     __end__: END,
   })
 
-  // validate_requirements → await_required_input | check_policy
-  .addConditionalEdges("validate_requirements", routeAfterValidateRequirements, {
+  // doc_agent → await_required_input | review_agent
+  .addConditionalEdges("doc_agent", routeAfterDocAgent, {
     await_required_input: "await_required_input",
-    check_policy: "check_policy",
+    review_agent: "review_agent",
   })
 
-  // await_required_input → validate_requirements | END
+  // await_required_input → doc_agent | END
   .addConditionalEdges("await_required_input", routeAfterAwaitRequiredInput, {
-    validate_requirements: "validate_requirements",
+    doc_agent: "doc_agent",
     __end__: END,
   })
 
-  // check_policy → await_confirmation | END
-  .addConditionalEdges("check_policy", routeAfterCheckPolicy, {
+  // review_agent → await_confirmation | END
+  .addConditionalEdges("review_agent", routeAfterReviewAgent, {
     await_confirmation: "await_confirmation",
     __end__: END,
   })
@@ -1261,7 +1117,7 @@ export async function resumeChatGraphWithIntent(
  */
 export async function resumeChatGraphWithRequiredInput(
   runId: string,
-  input: { doc_id: string },
+  input: Record<string, unknown>,
 ): Promise<ChatGraphResult> {
   const config = { configurable: { thread_id: runId } };
 
@@ -1301,20 +1157,23 @@ async function classifyGraphResult(
         pendingInput: interruptPayload as PendingRequiredInputInfo,
         intent: result.intent as ChatIntent,
       };
-    }
-
-    // Otherwise it's a tool confirmation interrupt
-    return {
-      status: "awaiting_confirmation",
-      pendingTool: (interruptPayload as PendingToolInfo) || {
-        skillName: (result.matchedSkill as AgentSkillDefinition | null)?.displayName || "Unknown",
-        skillDescription: (result.matchedSkill as AgentSkillDefinition | null)?.description || "",
-        args: (result.skillArgs as Record<string, unknown>) || {},
-        riskLevel: (result.matchedSkill as AgentSkillDefinition | null)?.risk?.level || "medium",
-      },
-      intent: result.intent as ChatIntent,
-    };
-  }
+	    }
+	
+	    // Otherwise it's a tool confirmation interrupt
+	    const skillId = typeof result.matchedSkill === "string" ? result.matchedSkill : "";
+	    await agentSkillCatalog.initialize();
+	    const skill = skillId ? agentSkillCatalog.getById(skillId) : undefined;
+	    return {
+	      status: "awaiting_confirmation",
+	      pendingTool: (interruptPayload as PendingToolInfo) || {
+	        skillName: skill?.displayName || "Unknown",
+	        skillDescription: skill?.description || "",
+	        args: (result.skillArgs as Record<string, unknown>) || {},
+	        riskLevel: skill?.risk?.level || "medium",
+	      },
+	      intent: result.intent as ChatIntent,
+	    };
+	  }
 
   return {
     status: "complete",
@@ -1333,10 +1192,27 @@ function isIntentInterrupt(payload: unknown): payload is PendingIntentInfo {
 function isRequiredInputInterrupt(payload: unknown): payload is PendingRequiredInputInfo {
   if (!payload || typeof payload !== "object") return false;
   const obj = payload as Record<string, unknown>;
-  return obj.kind === "doc_scope"
+
+  if (
+    obj.kind === "doc_scope"
     && typeof obj.message === "string"
     && typeof obj.skillName === "string"
-    && typeof obj.skillDescription === "string";
+    && typeof obj.skillDescription === "string"
+  ) {
+    return true;
+  }
+
+  if (
+    obj.kind === "skill_args"
+    && typeof obj.message === "string"
+    && typeof obj.skillName === "string"
+    && typeof obj.skillDescription === "string"
+    && Array.isArray(obj.fields)
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 // ============================================================================
@@ -1365,170 +1241,6 @@ function extractInterruptValue(
     // ignore extraction errors
   }
   return null;
-}
-
-// ============================================================================
-// Parse skill auto-detection helpers
-// ============================================================================
-
-const PARSE_SKILL_NAMES = new Set(["file-parse", "image-analyze", "url-extract"]);
-
-const IMAGE_MIME_PREFIXES = ["image/"];
-const DOCUMENT_MIMES = new Set([
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "text/html",
-  "text/plain",
-  "text/markdown",
-  "text/csv",
-  "application/json",
-]);
-
-function isParseSkill(skillHint: string): boolean {
-  return PARSE_SKILL_NAMES.has(skillHint);
-}
-
-/**
- * Auto-detect which parse skill to use based on attachments.
- * Returns the matched skill + filled-in args, or null if no match.
- */
-function autoDetectParseSkill(
-  skillHint: string,
-  attachments: ChatGraphAttachment[],
-  userQuery: string,
-  enabledIds: Set<string>,
-): { skill: AgentSkillDefinition; args: Record<string, unknown> } | null {
-  if (!isParseSkill(skillHint)) return null;
-
-  const hintCommand = `/${skillHint}`;
-  const skill = agentSkillCatalog.getByCommand(hintCommand);
-  if (!skill || !enabledIds.has(skill.id)) return null;
-
-  const firstAttachment = attachments[0];
-  if (!firstAttachment) return null;
-
-  const mime = firstAttachment.mimeType?.toLowerCase() || "";
-  const isImg = IMAGE_MIME_PREFIXES.some((p) => mime.startsWith(p))
-    || firstAttachment.type === "image";
-  const isDoc = DOCUMENT_MIMES.has(mime) || firstAttachment.type === "file";
-
-  // Match skillHint to attachment type
-  if (skillHint === "image-analyze" && isImg) {
-    return {
-      skill,
-      args: { asset_id: firstAttachment.assetId, question: userQuery || undefined },
-    };
-  }
-
-  if (skillHint === "file-parse" && (isDoc || !isImg)) {
-    return {
-      skill,
-      args: { asset_id: firstAttachment.assetId },
-    };
-  }
-
-  // url-extract doesn't use attachments, skip auto-detect
-  return null;
-}
-
-/**
- * Enrich args with asset_id from attachments when user didn't explicitly
- * provide one (e.g. via skill_hint + attachment auto-detection).
- */
-function enrichParseArgsWithAttachment(
-  args: Record<string, unknown>,
-  skillHint: string,
-  attachments: ChatGraphAttachment[],
-): void {
-  if (!attachments.length) return;
-
-  const first = attachments[0];
-
-  if ((skillHint === "file-parse" || skillHint === "image-analyze") && !args.asset_id) {
-    args.asset_id = first.assetId;
-  }
-
-  // For image-analyze, if the user query isn't the asset_id itself, keep it as question
-  if (skillHint === "image-analyze" && !args.question && typeof args.asset_id === "string") {
-    // args already have asset_id filled; leave question for the executor
-  }
-}
-
-/**
- * Build args for a command-style skill invocation.
- * Migrated from orchestrator.ts buildCommandArgs.
- */
-function buildCommandArgs(
-  skill: AgentSkillDefinition,
-  rest: string,
-  docIds?: string[],
-): Record<string, unknown> {
-  const trimmed = rest.trim();
-  const firstDocId = docIds && docIds.length > 0 ? docIds[0] : undefined;
-  const legacy =
-    typeof skill.metadata?.legacySkillName === "string"
-      ? skill.metadata.legacySkillName
-      : "";
-
-  switch (legacy) {
-    case "doc-create":
-      return { title: trimmed || "新文档", description: trimmed, parent_id: firstDocId || null };
-    case "doc-edit":
-      return { instructions: trimmed };
-    case "doc-read":
-    case "doc-summary":
-      return {};
-    case "doc-optimize-format":
-    case "doc-optimize-content":
-    case "doc-optimize-full":
-    case "doc-optimize-ppt":
-      return trimmed ? { instructions: trimmed } : {};
-    case "doc-optimize-style": {
-      const [style, ...parts] = trimmed.split(/\s+/).filter(Boolean);
-      return {
-        style: style || "professional",
-        ...(parts.length > 0 ? { instructions: parts.join(" ") } : {}),
-      };
-    }
-    case "doc-delete":
-      return { doc_id: firstDocId, recursive: /\brecursive\b|\b递归\b/.test(trimmed) };
-    case "doc-move":
-      return { doc_id: firstDocId, target_parent_id: trimmed || "root" };
-    case "kb-search":
-      return { query: trimmed };
-    case "doc-fetch-url":
-      return { url: trimmed };
-    case "doc-import-git":
-      return { repo_url: trimmed };
-    case "doc-smart-import":
-      return { asset_id: trimmed };
-    case "doc-organize":
-      return {};
-    case "doc-convert":
-      return { content: trimmed, from: "txt", to: "markdown" };
-    case "file-parse":
-      return { asset_id: trimmed };
-    case "image-analyze":
-      return { asset_id: trimmed };
-    case "url-extract":
-      return { url: trimmed };
-    default:
-      if (skill.source === "anthropic") return { request: trimmed || rest };
-      return { input: trimmed };
-  }
-}
-
-function buildToolSelectionPrompt(toolNames: string[]): string {
-  return `你是 Zeus System Agent。根据用户请求选择最匹配的技能。
-
-可用技能: ${toolNames.join(", ")}
-
-规则:
-1. 只有在任务明确时才调用技能
-2. 参数尽量从用户消息中完整提取
-3. 如果没有合适技能，直接回答文本`;
 }
 
 function buildChatSystemPrompt(projectKey: string, ragContext: string): string {

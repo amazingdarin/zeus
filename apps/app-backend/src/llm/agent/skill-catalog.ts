@@ -2,9 +2,11 @@ import { documentSkills } from "../skills/document-skills.js";
 import { skillRegistry, type OpenAITool } from "../skills/registry.js";
 import type { SkillDefinition } from "../skills/types.js";
 import type { UnifiedSkillDefinition } from "../skills/adapters/types.js";
+import { z } from "zod";
 import { mcpClientManager } from "./mcp-client-manager.js";
 import { mcpToolToAgentSkill } from "./mcp-skill-adapter.js";
 import type { AgentSkillDefinition } from "./types.js";
+import { zodObjectHasRequiredKey, zodObjectToOpenAIParameters } from "../zod.js";
 
 function normalizeToolName(source: string, name: string): string {
   const raw = `${source}_${name}`.toLowerCase();
@@ -20,11 +22,7 @@ function nativeToAgentSkill(skill: SkillDefinition): AgentSkillDefinition {
     description: skill.description,
     category: skill.category,
     command: skill.command,
-    inputSchema: {
-      type: "object",
-      properties: skill.parameters.properties,
-      required: skill.parameters.required,
-    },
+    inputSchema: skill.inputSchema,
     triggers: {
       command: skill.command,
       keywords: skill.description
@@ -46,27 +44,16 @@ function nativeToAgentSkill(skill: SkillDefinition): AgentSkillDefinition {
       legacySkillName: skill.name,
       legacyCommand: skill.command,
       legacySource: "native",
-      requiresDocScope: skill.parameters.required.includes("doc_id"),
+      requiresDocScope: zodObjectHasRequiredKey(skill.inputSchema, "doc_id"),
     },
   };
 }
 
 function anthropicToAgentSkill(skill: UnifiedSkillDefinition): AgentSkillDefinition {
-  const params = skill.parameters || {
-    type: "object" as const,
-    properties: {
-      request: {
-        type: "string",
-        description: "User request for this skill",
-      },
-      context: {
-        type: "string",
-        description: "Optional context for this skill",
-        optional: true,
-      },
-    },
-    required: ["request"],
-  };
+  const inputSchema = skill.inputSchema || z.object({
+    request: z.string().describe("User request for this skill"),
+    context: z.string().describe("Optional context for this skill").optional(),
+  });
 
   const hasScript = (skill.resources || []).some((r) => r.type === "script");
 
@@ -78,11 +65,7 @@ function anthropicToAgentSkill(skill: UnifiedSkillDefinition): AgentSkillDefinit
     description: skill.description,
     category: skill.category || "general",
     command: skill.triggers.command,
-    inputSchema: {
-      type: "object",
-      properties: params.properties,
-      required: params.required,
-    },
+    inputSchema,
     triggers: {
       command: skill.triggers.command,
       keywords: skill.triggers.keywords || [],
@@ -103,6 +86,7 @@ function anthropicToAgentSkill(skill: UnifiedSkillDefinition): AgentSkillDefinit
       legacySkillId: skill.id,
       legacySkillName: skill.name,
       sourcePath: skill.sourcePath,
+      requiresDocScope: zodObjectHasRequiredKey(inputSchema, "doc_id"),
     },
   };
 }
@@ -204,25 +188,13 @@ class AgentSkillCatalog {
     const tools: OpenAITool[] = [];
     for (const skill of this.byId.values()) {
       if (enabledSkillIds && !enabledSkillIds.has(skill.id)) continue;
+      const parameters = zodObjectToOpenAIParameters(skill.inputSchema);
       tools.push({
         type: "function",
         function: {
           name: skill.toolName,
           description: skill.description,
-          parameters: {
-            type: "object",
-            properties: Object.fromEntries(
-              Object.entries(skill.inputSchema.properties).map(([k, v]) => [
-                k,
-                {
-                  type: v.type,
-                  description: v.description,
-                  ...(v.enum ? { enum: v.enum } : {}),
-                },
-              ]),
-            ),
-            required: skill.inputSchema.required,
-          },
+          parameters,
         },
       });
     }
