@@ -1,28 +1,24 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useSearchParams } from "react-router-dom";
-import {
-  DownOutlined,
-  FileTextOutlined,
-  MenuFoldOutlined,
-  ReloadOutlined,
-  RightOutlined,
-} from "@ant-design/icons";
+import { ReloadOutlined } from "@ant-design/icons";
 import { Select, Tooltip } from "antd";
+import type { JSONContent } from "@tiptap/react";
 
-import KnowledgeBaseLayout, { useToggleTree } from "../components/KnowledgeBaseLayout";
-import Markdown from "../components/Markdown";
+import { ensureBlockIds } from "@zeus/doc-editor";
+import { markdownToTiptapJson } from "@zeus/shared";
+
+import KnowledgeBaseLayout from "../components/KnowledgeBaseLayout";
+import KnowledgeBaseSideNav, {
+  type KnowledgeBaseDocument,
+  type KnowledgeBaseMoveRequest,
+} from "../components/KnowledgeBaseSideNav";
+import RichTextViewer from "../components/RichTextViewer";
 import {
   buildSystemDocAssetUrl,
   fetchSystemDocContent,
   fetchSystemDocsTree,
   type SystemDocTreeItem,
 } from "../api/system-docs";
-
-type HrefParts = {
-  pathPart: string;
-  query: string;
-  hash: string;
-};
 
 const DEFAULT_LANGUAGE = "en";
 const LANGUAGE_TAG_PATTERN = /^[a-z]{2}(?:-[a-z0-9]{2,8})*$/i;
@@ -76,28 +72,17 @@ function sortLanguageTags(codes: Iterable<string>): string[] {
     });
 }
 
-function splitHref(rawHref: string): HrefParts {
+function getHrefPathPart(rawHref: string): string {
   let pathPart = rawHref;
-  let hash = "";
-  let query = "";
-
   const hashIndex = pathPart.indexOf("#");
   if (hashIndex >= 0) {
-    hash = pathPart.slice(hashIndex);
     pathPart = pathPart.slice(0, hashIndex);
   }
-
   const queryIndex = pathPart.indexOf("?");
   if (queryIndex >= 0) {
-    query = pathPart.slice(queryIndex);
     pathPart = pathPart.slice(0, queryIndex);
   }
-
-  return {
-    pathPart,
-    query,
-    hash,
-  };
+  return pathPart;
 }
 
 function isExternalHref(href: string): boolean {
@@ -195,143 +180,63 @@ function collectLanguageTags(items: SystemDocTreeItem[], out: Set<string>): void
   }
 }
 
-type SystemDocsSideNavProps = {
-  tree: SystemDocTreeItem[];
-  expanded: Record<string, boolean>;
-  selectedPath: string;
-  activePath: string;
-  treeLoading: boolean;
-  treeError: string | null;
-  onToggleDir: (dirPath: string) => void;
-  onSelectFile: (filePath: string) => void;
-  onRefresh: () => void;
+type KnowledgeBaseTreeModel = {
+  rootDocuments: KnowledgeBaseDocument[];
+  childrenByParent: Record<string, KnowledgeBaseDocument[]>;
 };
 
-function SystemDocsSideNav({
-  tree,
-  expanded,
-  selectedPath,
-  activePath,
-  treeLoading,
-  treeError,
-  onToggleDir,
-  onSelectFile,
-  onRefresh,
-}: SystemDocsSideNavProps) {
-  const { toggleTree } = useToggleTree();
+function toKnowledgeBaseTree(items: SystemDocTreeItem[]): KnowledgeBaseTreeModel {
+  const childrenByParent: Record<string, KnowledgeBaseDocument[]> = {};
 
-  const renderTree = useCallback(
-    (items: SystemDocTreeItem[], depth: number) => {
-      return (
-        <div className="kb-doc-group">
-          {items.map((item) => {
-            const isDir = item.type === "dir";
-            const rowPaddingLeft = `${8 + depth * 14}px`;
+  const mapItems = (nodes: SystemDocTreeItem[], parentId: string): KnowledgeBaseDocument[] => {
+    return nodes.map((node, index) => {
+      const children = node.type === "dir" ? node.children ?? [] : [];
+      const hasChild = children.length > 0;
+      const doc: KnowledgeBaseDocument = {
+        id: node.path,
+        title: node.name,
+        type: node.type,
+        parentId,
+        kind: node.type,
+        hasChild,
+        order: index,
+        storageObjectId: "",
+      };
 
-            if (isDir) {
-              const isExpanded = expanded[item.path] !== false;
-              return (
-                <div key={item.path} className="kb-doc-node">
-                  <div className="kb-doc-row">
-                    <div
-                      className="kb-doc-control system-docs-doc-control-dir"
-                      style={{ paddingLeft: rowPaddingLeft }}
-                    >
-                      <span className="kb-doc-action">
-                        <button
-                          type="button"
-                          className="kb-doc-toggle"
-                          onClick={() => onToggleDir(item.path)}
-                          aria-label={isExpanded ? "折叠目录" : "展开目录"}
-                        >
-                          {isExpanded ? <DownOutlined /> : <RightOutlined />}
-                        </button>
-                      </span>
-                      <button
-                        type="button"
-                        className="kb-doc-item system-docs-doc-item-dir"
-                        onClick={() => onToggleDir(item.path)}
-                        title={item.path}
-                      >
-                        {item.name}
-                      </button>
-                    </div>
-                  </div>
-                  {isExpanded && item.children && item.children.length > 0 ? (
-                    <div className="kb-doc-children">{renderTree(item.children, depth + 1)}</div>
-                  ) : null}
-                </div>
-              );
-            }
+      if (hasChild) {
+        childrenByParent[doc.id] = mapItems(children, doc.id);
+      }
 
-            const selected = (activePath || selectedPath) === item.path;
-            return (
-              <div key={item.path} className="kb-doc-node">
-                <div className="kb-doc-row">
-                  <div
-                    className={`kb-doc-control${selected ? " active" : ""}`}
-                    style={{ paddingLeft: rowPaddingLeft }}
-                  >
-                    <span className="kb-doc-action">
-                      <FileTextOutlined className="system-docs-file-icon" />
-                    </span>
-                    <button
-                      type="button"
-                      className="kb-doc-item"
-                      onClick={() => onSelectFile(item.path)}
-                      title={item.path}
-                    >
-                      {item.name}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      );
-    },
-    [activePath, expanded, onSelectFile, onToggleDir, selectedPath],
-  );
+      return doc;
+    });
+  };
 
-  return (
-    <aside className="kb-sidebar">
-      <div className="kb-sidebar-toolbar">
-        <div className="system-docs-tree-title">教程说明</div>
-        <div className="kb-sidebar-toolbar-spacer" />
-        <Tooltip title="刷新目录">
-          <button
-            className="kb-sidebar-toolbar-btn"
-            type="button"
-            onClick={onRefresh}
-            disabled={treeLoading}
-          >
-            <ReloadOutlined spin={treeLoading} />
-          </button>
-        </Tooltip>
-        <Tooltip title="隐藏文档树">
-          <button
-            className="kb-sidebar-toolbar-btn"
-            type="button"
-            onClick={toggleTree}
-          >
-            <MenuFoldOutlined />
-          </button>
-        </Tooltip>
-      </div>
-      <div className="kb-sidebar-content">
-        {treeLoading ? (
-          <div className="kb-doc-loading">加载目录中...</div>
-        ) : treeError ? (
-          <div className="system-docs-tree-error">{treeError}</div>
-        ) : tree.length === 0 ? (
-          <div className="kb-doc-empty">未发现可浏览的 Markdown 文档</div>
-        ) : (
-          renderTree(tree, 0)
-        )}
-      </div>
-    </aside>
-  );
+  const rootDocuments = mapItems(items, "");
+  return { rootDocuments, childrenByParent };
+}
+
+function rewriteImageSources(node: JSONContent, currentDocPath: string): JSONContent {
+  const nextNode: JSONContent = { ...node };
+
+  if ((nextNode.type === "image" || nextNode.type === "imageUpload") && nextNode.attrs) {
+    const attrs = nextNode.attrs as Record<string, unknown>;
+    const rawSrc = typeof attrs.src === "string" ? attrs.src : "";
+    if (rawSrc && !isExternalHref(rawSrc) && !isInlineAssetHref(rawSrc)) {
+      const resolvedPath = resolveRelativePath(currentDocPath, getHrefPathPart(rawSrc));
+      if (resolvedPath) {
+        nextNode.attrs = {
+          ...attrs,
+          src: buildSystemDocAssetUrl(resolvedPath),
+        };
+      }
+    }
+  }
+
+  if (Array.isArray(nextNode.content) && nextNode.content.length > 0) {
+    nextNode.content = nextNode.content.map((child) => rewriteImageSources(child, currentDocPath));
+  }
+
+  return nextNode;
 }
 
 function SystemDocsPage() {
@@ -349,17 +254,22 @@ function SystemDocsPage() {
   const [contentLoading, setContentLoading] = useState(false);
   const [contentError, setContentError] = useState<string | null>(null);
 
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
+  const [outlineMode, setOutlineMode] = useState(false);
 
   const contentRequestRef = useRef(0);
+  const emptyLoadingIds = useMemo<Record<string, boolean>>(() => ({}), []);
 
   const firstMarkdownPath = useMemo(() => findFirstMarkdownPath(tree), [tree]);
   const currentDocPath = activePath || selectedPath;
+  const activeDocId = currentDocPath || null;
+
   const availableLanguages = useMemo(() => {
     const langSet = new Set<string>([DEFAULT_LANGUAGE, selectedLanguage]);
     collectLanguageTags(tree, langSet);
     return sortLanguageTags(langSet);
   }, [selectedLanguage, tree]);
+
   const languageOptions = useMemo(
     () =>
       availableLanguages.map((language) => ({
@@ -368,6 +278,8 @@ function SystemDocsPage() {
       })),
     [availableLanguages],
   );
+
+  const { rootDocuments, childrenByParent } = useMemo(() => toKnowledgeBaseTree(tree), [tree]);
 
   const updatePathQuery = useCallback(
     (nextPath: string, replace = false) => {
@@ -387,43 +299,46 @@ function SystemDocsPage() {
       setTree(result);
       const expandedMap: Record<string, boolean> = {};
       collectDirectoryPaths(result, expandedMap);
-      setExpanded(expandedMap);
+      setExpandedIds(expandedMap);
     } catch (err) {
       const message = err instanceof Error ? err.message : "加载系统文档目录失败";
       setTreeError(message);
       setTree([]);
-      setExpanded({});
+      setExpandedIds({});
     } finally {
       setTreeLoading(false);
     }
   }, [selectedLanguage]);
 
-  const loadContent = useCallback(async (docPath: string) => {
-    const requestId = ++contentRequestRef.current;
-    setContentLoading(true);
-    setContentError(null);
+  const loadContent = useCallback(
+    async (docPath: string) => {
+      const requestId = ++contentRequestRef.current;
+      setContentLoading(true);
+      setContentError(null);
 
-    try {
-      const data = await fetchSystemDocContent(docPath, selectedLanguage);
-      if (requestId !== contentRequestRef.current) {
-        return;
+      try {
+        const data = await fetchSystemDocContent(docPath, selectedLanguage);
+        if (requestId !== contentRequestRef.current) {
+          return;
+        }
+        setContent(data.content);
+        setActivePath(data.path);
+      } catch (err) {
+        if (requestId !== contentRequestRef.current) {
+          return;
+        }
+        const message = err instanceof Error ? err.message : "加载系统文档失败";
+        setContentError(message);
+        setContent("");
+        setActivePath(docPath);
+      } finally {
+        if (requestId === contentRequestRef.current) {
+          setContentLoading(false);
+        }
       }
-      setContent(data.content);
-      setActivePath(data.path);
-    } catch (err) {
-      if (requestId !== contentRequestRef.current) {
-        return;
-      }
-      const message = err instanceof Error ? err.message : "加载系统文档失败";
-      setContentError(message);
-      setContent("");
-      setActivePath(docPath);
-    } finally {
-      if (requestId === contentRequestRef.current) {
-        setContentLoading(false);
-      }
-    }
-  }, [selectedLanguage]);
+    },
+    [selectedLanguage],
+  );
 
   useEffect(() => {
     if (rawLanguage === selectedLanguage) {
@@ -462,18 +377,25 @@ function SystemDocsPage() {
     }
   }, [loadContent, loadTree, selectedPath]);
 
-  const handleToggleDir = useCallback((dirPath: string) => {
-    setExpanded((prev) => ({
+  const handleToggleDoc = useCallback((doc: KnowledgeBaseDocument) => {
+    if (!doc.hasChild) {
+      return;
+    }
+    setExpandedIds((prev) => ({
       ...prev,
-      [dirPath]: !prev[dirPath],
+      [doc.id]: !prev[doc.id],
     }));
   }, []);
 
-  const handleSelectFile = useCallback(
-    (filePath: string) => {
-      updatePathQuery(filePath);
+  const handleSelectDoc = useCallback(
+    (doc: KnowledgeBaseDocument) => {
+      if (doc.hasChild) {
+        handleToggleDoc(doc);
+        return;
+      }
+      updatePathQuery(doc.id);
     },
-    [updatePathQuery],
+    [handleToggleDoc, updatePathQuery],
   );
 
   const handleLanguageChange = useCallback(
@@ -488,74 +410,105 @@ function SystemDocsPage() {
     [firstMarkdownPath, searchParams, setSearchParams],
   );
 
-  const resolveHref = useCallback(
-    (href: string): string => {
-      if (!href || isExternalHref(href) || href.startsWith("#")) {
-        return href;
-      }
-      const parts = splitHref(href);
-      const resolvedPath = resolveRelativePath(currentDocPath, parts.pathPart);
-      if (!resolvedPath) {
-        return href;
-      }
-      if (isMarkdownPath(resolvedPath)) {
-        return `#/system-docs?lang=${encodeURIComponent(selectedLanguage)}&path=${encodeURIComponent(resolvedPath)}`;
-      }
-      return buildSystemDocAssetUrl(resolvedPath);
-    },
-    [currentDocPath, selectedLanguage],
-  );
+  const viewerContent = useMemo<JSONContent | null>(() => {
+    if (!content) {
+      return null;
+    }
 
-  const resolveSrc = useCallback(
-    (src: string): string => {
-      if (!src || isExternalHref(src) || isInlineAssetHref(src)) {
-        return src;
-      }
-      const parts = splitHref(src);
-      const resolvedPath = resolveRelativePath(currentDocPath, parts.pathPart);
-      if (!resolvedPath) {
-        return src;
-      }
-      return buildSystemDocAssetUrl(resolvedPath);
-    },
-    [currentDocPath],
-  );
+    try {
+      const parsed = markdownToTiptapJson(content);
+      const rewritten = rewriteImageSources(parsed, currentDocPath);
+      return ensureBlockIds(rewritten);
+    } catch (err) {
+      console.error("[SystemDocsPage] markdown parse failed:", err);
+      return null;
+    }
+  }, [content, currentDocPath]);
 
-  const onLinkClick = useCallback(
-    (href: string, _event: MouseEvent): boolean => {
-      if (!href || isExternalHref(href) || href.startsWith("#")) {
-        return false;
+  const handleViewerLinkClickCapture = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      const target = event.target as HTMLElement | null;
+      const anchor = target?.closest("a");
+      if (!anchor) {
+        return;
       }
-      const parts = splitHref(href);
-      const resolvedPath = resolveRelativePath(currentDocPath, parts.pathPart);
+
+      const href = anchor.getAttribute("href") ?? "";
+      if (!href) {
+        return;
+      }
+
+      if (isExternalHref(href)) {
+        event.preventDefault();
+        event.stopPropagation();
+        window.open(href, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      if (href.startsWith("#/system-docs")) {
+        event.preventDefault();
+        event.stopPropagation();
+        const query = href.includes("?") ? href.slice(href.indexOf("?") + 1) : "";
+        const next = new URLSearchParams(query);
+        const nextPath = String(next.get("path") ?? "").trim();
+        const nextLang = normalizeLanguageTag(String(next.get("lang") ?? selectedLanguage));
+        const merged = new URLSearchParams(searchParams);
+        merged.set("lang", nextLang);
+        if (nextPath) {
+          merged.set("path", nextPath);
+        }
+        setSearchParams(merged);
+        return;
+      }
+
+      if (href.startsWith("#")) {
+        return;
+      }
+
+      const resolvedPath = resolveRelativePath(currentDocPath, getHrefPathPart(href));
       if (!resolvedPath) {
-        return true;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
       }
+
+      event.preventDefault();
+      event.stopPropagation();
 
       if (isMarkdownPath(resolvedPath)) {
         updatePathQuery(resolvedPath);
-        return true;
+        return;
       }
 
       window.open(buildSystemDocAssetUrl(resolvedPath), "_blank", "noopener,noreferrer");
-      return true;
     },
-    [currentDocPath, updatePathQuery],
+    [currentDocPath, searchParams, selectedLanguage, setSearchParams, updatePathQuery],
   );
+
+  const handleMoveNoop = useCallback((_request: KnowledgeBaseMoveRequest) => {
+    // System docs are read-only.
+  }, []);
 
   return (
     <KnowledgeBaseLayout
       sideNav={
-        <SystemDocsSideNav
-          tree={tree}
-          expanded={expanded}
-          selectedPath={selectedPath}
-          activePath={activePath}
-          treeLoading={treeLoading}
-          treeError={treeError}
-          onToggleDir={handleToggleDir}
-          onSelectFile={handleSelectFile}
+        <KnowledgeBaseSideNav
+          documents={rootDocuments}
+          childrenByParent={childrenByParent}
+          expandedIds={expandedIds}
+          activeId={activeDocId}
+          loadingIds={emptyLoadingIds}
+          rootLoading={treeLoading}
+          onSelect={handleSelectDoc}
+          onToggle={handleToggleDoc}
+          onMove={handleMoveNoop}
           onRefresh={handleRefresh}
+          outlineMode={outlineMode}
+          onToggleOutline={() => setOutlineMode((prev) => !prev)}
+          documentContent={viewerContent}
+          errorMessage={treeError}
+          emptyMessage="未发现可浏览的 Markdown 文档"
+          emptyClickable={false}
         />
       }
     >
@@ -592,16 +545,12 @@ function SystemDocsPage() {
             <div className="doc-viewer-state">加载文档中...</div>
           ) : contentError ? (
             <div className="doc-viewer-error">{contentError}</div>
-          ) : content ? (
-            <div className="doc-page-body system-docs-doc-body">
-              <Markdown
-                content={content}
-                className="system-docs-markdown"
-                resolveHref={resolveHref}
-                resolveSrc={resolveSrc}
-                onLinkClick={onLinkClick}
-              />
+          ) : viewerContent ? (
+            <div className="doc-page-body system-docs-doc-body" onClickCapture={handleViewerLinkClickCapture}>
+              <RichTextViewer content={viewerContent} />
             </div>
+          ) : content ? (
+            <div className="doc-viewer-error">文档解析失败，请检查 Markdown 语法。</div>
           ) : (
             <div className="doc-viewer-state">请选择文档</div>
           )}

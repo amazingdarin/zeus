@@ -67,6 +67,9 @@ type KnowledgeBaseSideNavProps = {
   outlineMode?: boolean;
   onToggleOutline?: () => void;
   documentContent?: JSONContent | null;
+  errorMessage?: string | null;
+  emptyMessage?: string;
+  emptyClickable?: boolean;
 };
 
 const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
@@ -94,6 +97,9 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
   outlineMode,
   onToggleOutline,
   documentContent,
+  errorMessage,
+  emptyMessage = "点击添加文档",
+  emptyClickable = true,
 }: KnowledgeBaseSideNavProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{
@@ -565,13 +571,19 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
           <DocumentOutlineContent content={documentContent} />
         ) : rootLoading ? (
           <div className="kb-doc-loading">加载中...</div>
+        ) : errorMessage ? (
+          <div className="kb-doc-error">{errorMessage}</div>
         ) : documents.length === 0 ? (
-          <div 
-            className="kb-doc-empty kb-doc-empty-clickable"
-            onClick={() => onAddDocument?.()}
-          >
-            点击添加文档
-          </div>
+          emptyClickable ? (
+            <div 
+              className="kb-doc-empty kb-doc-empty-clickable"
+              onClick={() => onAddDocument?.()}
+            >
+              {emptyMessage}
+            </div>
+          ) : (
+            <div className="kb-doc-empty">{emptyMessage}</div>
+          )
         ) : (
           <>
             {renderFavoriteList()}

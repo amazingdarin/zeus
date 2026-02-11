@@ -37,19 +37,19 @@ export function useMusic({
   }, [hasExtension, hideWhenUnavailable])
 
   const canInsert = useMemo(() => {
-    if (!editor || !hasExtension) return false
-    return editor.can().insertMusic({ abc: "", display: false })
+    if (!editor || !editor.isEditable || !hasExtension) return false
+    return true
   }, [editor, hasExtension])
 
   const handleInsertInline = useCallback(() => {
     if (!editor || !hasExtension) return
-    editor.commands.insertMusic({ abc: "", display: false })
+    editor.chain().focus().insertMusic({ abc: "", display: false }).run()
     onInserted?.()
   }, [editor, hasExtension, onInserted])
 
   const handleInsertBlock = useCallback(() => {
     if (!editor || !hasExtension) return
-    editor.commands.insertMusic({ abc: "", display: true })
+    editor.chain().focus().insertMusic({ abc: "", display: true }).run()
     onInserted?.()
   }, [editor, hasExtension, onInserted])
 

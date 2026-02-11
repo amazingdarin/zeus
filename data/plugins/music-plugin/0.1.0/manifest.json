@@ -1,0 +1,36 @@
+{
+  "id": "music-plugin",
+  "version": "0.1.0",
+  "displayName": "Music Plugin",
+  "description": "Enable music block editing/rendering as an installable doc-editor plugin.",
+  "pluginApiVersion": 2,
+  "engines": {
+    "zeusAppBackend": ">=0.1.0",
+    "zeusWeb": ">=0.1.0"
+  },
+  "capabilities": [
+    "docs.block.register"
+  ],
+  "activation": {
+    "commands": [],
+    "routes": [],
+    "tools": [],
+    "documentEvents": []
+  },
+  "frontend": {
+    "entry": "frontend/index.mjs"
+  },
+  "contributes": {
+    "blocks": [
+      {
+        "blockType": "music",
+        "requiresBlockId": false
+      }
+    ]
+  },
+  "permissions": {
+    "allowedHttpHosts": [],
+    "maxExecutionMs": 5000,
+    "maxHookExecutionMs": 2000
+  }
+}

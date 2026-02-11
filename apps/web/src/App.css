@@ -2183,6 +2183,16 @@ body {
   padding: 6px 10px;
 }
 
+.kb-doc-error {
+  margin: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(190, 30, 45, 0.25);
+  background: rgba(190, 30, 45, 0.1);
+  color: #a50f1f;
+  font-size: 12px;
+}
+
 .kb-doc-empty-clickable {
   cursor: pointer;
   padding: 20px;
@@ -2244,6 +2254,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
 }
 
 .kb-rebuild-button {
@@ -9362,4 +9373,35 @@ body {
 .system-docs-markdown img {
   max-width: 100%;
   height: auto;
+}
+
+.system-docs-markdown :not(pre) > code {
+  background: rgba(31, 35, 40, 0.08);
+  color: var(--ink);
+  border: 1px solid rgba(31, 35, 40, 0.16);
+  border-radius: 6px;
+  padding: 0.1em 0.3em;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.9em;
+  line-height: 1.4;
+}
+
+.system-docs-markdown pre {
+  margin: 12px 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(31, 35, 40, 0.08);
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+.system-docs-markdown pre code {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  color: inherit;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
 }

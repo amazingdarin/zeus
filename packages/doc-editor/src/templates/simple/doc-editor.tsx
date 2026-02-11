@@ -153,7 +153,7 @@ const MainToolbarContent = ({
 }) => {
   return (
     <>
-      <Spacer />
+      {!isMobile && <Spacer />}
 
       <ToolbarGroup>
         <UndoRedoButton action="undo" />
@@ -212,8 +212,6 @@ const MainToolbarContent = ({
         <TextAlignButton align="justify" />
       </ToolbarGroup>
 
-      <Spacer />
-
       {pluginToolbarItems.length > 0 ? (
         <>
           <ToolbarSeparator />
@@ -226,6 +224,8 @@ const MainToolbarContent = ({
           </ToolbarGroup>
         </>
       ) : null}
+
+      {!isMobile && <Spacer />}
 
       {isMobile && <ToolbarSeparator />}
 
@@ -291,6 +291,14 @@ export function DocEditor({
     () => collectExtensionNames([...(extensions || []), ...(extraExtensions || [])]),
     [extensions, extraExtensions]
   )
+  const extensionSignature = useMemo(
+    () => knownExtensionNodeTypes.join("|"),
+    [knownExtensionNodeTypes]
+  )
+  const pluginBlockIdSignature = useMemo(
+    () => pluginBlockIdTypes.join("|"),
+    [pluginBlockIdTypes]
+  )
 
   const initialContent = useMemo(
     () =>
@@ -303,81 +311,84 @@ export function DocEditor({
     [content, knownExtensionNodeTypes, pluginBlockIdTypes]
   )
 
-  const editor = useEditor({
-    immediatelyRender: false,
-    editorProps: {
-      attributes: {
-        autocomplete: "off",
-        autocorrect: "off",
-        autocapitalize: "off",
-        "aria-label": "Main content area, start typing to enter text.",
-        class: "doc-editor",
-      },
-      handlePaste(view, event) {
-        const text = event.clipboardData?.getData("text/plain")
-        if (!text) {
-          return false
-        }
-        const { tr } = view.state
-        view.dispatch(tr.insertText(text))
-        return true
-      },
-    },
-    extensions: [
-      BlockIdExtension.configure({
-        extraNodeTypes: pluginBlockIdTypes,
-      }),
-      UnsupportedPluginBlock,
-      HeadingCollapseExtension,
-      StarterKit.configure({
-        horizontalRule: false,
-        codeBlock: false,
-        link: {
-          openOnClick: false,
-          enableClickSelection: true,
+  const editor = useEditor(
+    {
+      immediatelyRender: false,
+      editorProps: {
+        attributes: {
+          autocomplete: "off",
+          autocorrect: "off",
+          autocapitalize: "off",
+          "aria-label": "Main content area, start typing to enter text.",
+          class: "doc-editor",
         },
-      }),
-      CodeBlockNode,
-      HorizontalRule,
-      TextAlign.configure({ types: ["heading", "paragraph"] }),
-      TaskList,
-      TaskItem.configure({
-        nested: true,
-        onReadOnlyChecked: (node, checked) => {
-          const blockId = node.attrs?.id as string | undefined
-          if (blockId && taskCheckChangeRef.current) {
-            taskCheckChangeRef.current(blockId, checked)
+        handlePaste(view, event) {
+          const text = event.clipboardData?.getData("text/plain")
+          if (!text) {
+            return false
           }
-          return true // Allow visual update
+          const { tr } = view.state
+          view.dispatch(tr.insertText(text))
+          return true
         },
-      }),
-      Highlight.configure({ multicolor: true }),
-      Image,
-      Typography,
-      Superscript,
-      Subscript,
-      Selection,
-      ImageUploadNode.configure({
-        accept: "image/*",
-        maxSize: MAX_FILE_SIZE,
-        limit: 3,
-        upload: handleImageUpload,
-        onError: (error) => console.error("Upload failed:", error),
-      }),
-      LinkPreviewNode.configure({
-        fetchHtml: linkPreviewFetchHtml,
-      }),
-      TocNode,
-      MathNode,
-      ChartNode,
-      MindmapNode,
-      ...createTableExtensions(),
-      ...extensions,
-      ...extraExtensions,
-    ],
-    content: initialContent,
-    editable: isEditable,
-  })
+      },
+      extensions: [
+        BlockIdExtension.configure({
+          extraNodeTypes: pluginBlockIdTypes,
+        }),
+        UnsupportedPluginBlock,
+        HeadingCollapseExtension,
+        StarterKit.configure({
+          horizontalRule: false,
+          codeBlock: false,
+          link: {
+            openOnClick: false,
+            enableClickSelection: true,
+          },
+        }),
+        CodeBlockNode,
+        HorizontalRule,
+        TextAlign.configure({ types: ["heading", "paragraph"] }),
+        TaskList,
+        TaskItem.configure({
+          nested: true,
+          onReadOnlyChecked: (node, checked) => {
+            const blockId = node.attrs?.id as string | undefined
+            if (blockId && taskCheckChangeRef.current) {
+              taskCheckChangeRef.current(blockId, checked)
+            }
+            return true // Allow visual update
+          },
+        }),
+        Highlight.configure({ multicolor: true }),
+        Image,
+        Typography,
+        Superscript,
+        Subscript,
+        Selection,
+        ImageUploadNode.configure({
+          accept: "image/*",
+          maxSize: MAX_FILE_SIZE,
+          limit: 3,
+          upload: handleImageUpload,
+          onError: (error) => console.error("Upload failed:", error),
+        }),
+        LinkPreviewNode.configure({
+          fetchHtml: linkPreviewFetchHtml,
+        }),
+        TocNode,
+        MathNode,
+        ChartNode,
+        MindmapNode,
+        ...createTableExtensions(),
+        ...extensions,
+        ...extraExtensions,
+      ],
+      content: initialContent,
+      editable: isEditable,
+    },
+    [extensionSignature, pluginBlockIdSignature]
+  )
 
   useEffect(() => {
     onEditorReady?.(editor)

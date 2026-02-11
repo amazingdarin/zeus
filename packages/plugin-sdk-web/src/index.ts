@@ -14,6 +14,29 @@ import type {
 export type WebExtension = unknown;
 export type WebReactNode = unknown;
 
+export type DocEditorBuiltinModule = Record<string, unknown>;
+
+export type DocEditorRuntimeSdk = {
+  builtins: {
+    list: () => string[];
+  };
+  loadBuiltinModule: (name: string) => Promise<DocEditorBuiltinModule>;
+  resolveAssetUrl: (relativePath: string) => string;
+  loadStyle: (relativePath: string) => string;
+  react: {
+    createElement: unknown;
+    Fragment: unknown;
+  };
+  tiptap: {
+    Node: unknown;
+    Mark: unknown;
+    Extension: unknown;
+    InputRule: unknown;
+    mergeAttributes: unknown;
+    ReactNodeViewRenderer: unknown;
+  };
+};
+
 export type EditorBlockContribution = {
   id: string;
   blockType: string;
@@ -75,6 +98,7 @@ export type WebPluginContext = {
     input?: Record<string, unknown>,
     projectRef?: string,
   ) => Promise<Record<string, unknown>>;
+  docEditor?: DocEditorRuntimeSdk;
 };
 
 export type ZeusWebPlugin = {

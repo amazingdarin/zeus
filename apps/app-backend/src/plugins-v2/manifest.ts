@@ -380,6 +380,9 @@ export function validatePluginManifestV2(
     "contributes.blocks",
     blocks.length,
   );
+  if (blocks.length > 0 && !manifest.frontend?.entry) {
+    throw new Error(`Plugin ${manifest.id} contributes blocks but frontend.entry is missing`);
+  }
   for (const block of blocks) {
     if (!block.blockType || !IDENTIFIER_REGEX.test(block.blockType)) {
       throw new Error(`Plugin ${manifest.id} has invalid block type: ${block.blockType || "<empty>"}`);

@@ -48,6 +48,7 @@ import { useProjectContext } from "../context/ProjectContext";
 import { usePluginRuntime } from "../context/PluginRuntimeContext";
 import {
   CodeBlockNode,
+  ensureBlockIds,
   FileBlockNode,
   HorizontalRule,
   OpenApiNode,
@@ -76,6 +77,7 @@ type DocumentData = {
   title: string;
   docType: string;
   parentId: string;
+  bodyFormat: "tiptap" | "markdown" | "unknown";
   content: JSONContent | null;
   hierarchy: Array<{ id: string; name: string }>;
 };
@@ -246,6 +248,9 @@ function DocumentPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const proposalId = (searchParams.get("proposal_id") || "").trim();
   const blockIdParam = (searchParams.get("block") || "").trim() || null;
+  const showBreadcrumb = parseDisplayBoolean(searchParams.get("show_breadcrumb"), true);
+  const showHeaderActions = parseDisplayBoolean(searchParams.get("show_header_actions"), true);
+  const showDocumentTitle = parseDisplayBoolean(searchParams.get("show_title"), true);
   const refreshKey = (() => {
     const state = location.state as { refreshToken?: number | string } | null;
     if (!state?.refreshToken) {
@@ -1118,7 +1123,9 @@ function DocumentPage() {
     if (!promise) {
       promise = (async () => {
         const detail = await fetchDocument(resolvedProjectKey, resolvedDocumentId);
-        const mapped = mapDocumentDetail(detail, resolvedDocumentId);
+        const mapped = mapDocumentDetail(detail, resolvedDocumentId, {
+          markdownExtensions,
+        });
         const cachedHierarchy = documentHierarchyCache.get(requestKey);
         if (cachedHierarchy) {
           mapped.hierarchy = cachedHierarchy;
@@ -1271,7 +1278,9 @@ function DocumentPage() {
       
       // Fetch fresh document
       const detail = await fetchDocument(resolvedProjectKey, resolvedDocumentId);
-      const mapped = mapDocumentDetail(detail, resolvedDocumentId);
+      const mapped = mapDocumentDetail(detail, resolvedDocumentId, {
+        markdownExtensions,
+      });
       
       // Update cache and state
       documentCache.set(requestKey, mapped);
@@ -1500,7 +1509,9 @@ function DocumentPage() {
     setDiffError(null);
     try {
       const data = await applyProposal(resolvedProjectKey, resolvedDocumentId, proposalId);
-      const updated = mapDocumentDetail(data, resolvedDocumentId);
+      const updated = mapDocumentDetail(data, resolvedDocumentId, {
+        markdownExtensions,
+      });
       setDocument(updated);
       touchRecentEditInState(updated.id, updated.title);
       scheduleRecentEditsRefresh(resolvedProjectKey);
@@ -2041,7 +2052,7 @@ function DocumentPage() {
     }
     return (
       <div className="doc-page-body">
-        <div className="doc-page-title">{activeDocument.title}</div>
+        {showDocumentTitle ? <div className="doc-page-title">{activeDocument.title}</div> : null}
         {hasProposal ? (
           <div className="doc-diff-panel">
             <div className="doc-diff-header">
@@ -2095,7 +2106,9 @@ function DocumentPage() {
             content={activeDocument.content}
             projectKey={resolvedProjectKey}
             onEditorReady={(editor) => setViewerReady(!!editor)}
-            onTaskCheckChange={handleTaskCheckChange}
+            onTaskCheckChange={
+              activeDocument.bodyFormat === "tiptap" ? handleTaskCheckChange : undefined
+            }
           />
         ) : (
           <div className="doc-viewer-state">No document content</div>
@@ -2136,31 +2149,35 @@ function DocumentPage() {
       }
     >
       <>
-        <DocumentHeader
-          breadcrumbItems={breadcrumbItems}
-          mode="view"
-          allowChildActions={allowChildActions}
-          allowEdit={Boolean(activeDocument)}
-          allowDelete={Boolean(activeDocument)}
-          allowOptimize={Boolean(activeDocument)}
-          allowRefresh={Boolean(activeDocument)}
-          favorited={activeDocumentFavorited}
-          favoriteLoading={activeFavoriteLoading}
-          deleting={deleting}
-          refreshing={refreshingDocument}
-          onEdit={handleEdit}
-          onSave={() => { }}
-          onCancel={() => { }}
-          onNew={handleOpenNew}
-          onImport={() => handleOpenImportWithMode("file")}
-          onDelete={handleDelete}
-          onExport={activeDocument ? handleExport : undefined}
-          onExportPPT={activeDocument ? handleOpenExportPPT : undefined}
-          onOptimize={activeDocument ? handleOpenOptimize : undefined}
-          onRefresh={activeDocument ? handleRefreshDocument : undefined}
-          onFavorite={activeDocument ? handleFavoriteCurrentDocument : undefined}
-          pluginMenuItems={pluginMenuItems}
-        />
+        {showBreadcrumb || showHeaderActions ? (
+          <DocumentHeader
+            breadcrumbItems={breadcrumbItems}
+            mode="view"
+            showBreadcrumb={showBreadcrumb}
+            showActions={showHeaderActions}
+            allowChildActions={allowChildActions}
+            allowEdit={Boolean(activeDocument)}
+            allowDelete={Boolean(activeDocument)}
+            allowOptimize={Boolean(activeDocument)}
+            allowRefresh={Boolean(activeDocument)}
+            favorited={activeDocumentFavorited}
+            favoriteLoading={activeFavoriteLoading}
+            deleting={deleting}
+            refreshing={refreshingDocument}
+            onEdit={handleEdit}
+            onSave={() => { }}
+            onCancel={() => { }}
+            onNew={handleOpenNew}
+            onImport={() => handleOpenImportWithMode("file")}
+            onDelete={handleDelete}
+            onExport={activeDocument ? handleExport : undefined}
+            onExportPPT={activeDocument ? handleOpenExportPPT : undefined}
+            onOptimize={activeDocument ? handleOpenOptimize : undefined}
+            onRefresh={activeDocument ? handleRefreshDocument : undefined}
+            onFavorite={activeDocument ? handleFavoriteCurrentDocument : undefined}
+            pluginMenuItems={pluginMenuItems}
+          />
+        ) : null}
         <div className="doc-viewer-page">{bodyContent()}</div>
         {importModalOpen ? (
           <div className="modal-overlay" role="presentation">
@@ -2691,53 +2708,75 @@ function mapDocumentMeta(data: DocumentDetail | undefined | null, fallbackId: st
   };
 }
 
-function mapDocumentDetail(data: DocumentDetail | undefined | null, fallbackId: string): DocumentData {
+function mapDocumentDetail(
+  data: DocumentDetail | undefined | null,
+  fallbackId: string,
+  options?: { markdownExtensions?: Extensions },
+): DocumentData {
   const meta = mapDocumentMeta(data, fallbackId);
-  const body = data?.body;
+  const body = (data?.body ?? null) as { type?: unknown; content?: unknown } | null;
   let content: JSONContent | null = null;
-  
-  // Try to extract JSONContent from various body formats
-  if (body && typeof body === "object") {
-    // Case 1: body is directly { type: "doc", content: [...] }
-    if ("type" in body && (body as { type?: string }).type === "doc" && "content" in body) {
-      content = body as JSONContent;
+  let bodyFormat: "tiptap" | "markdown" | "unknown" = "unknown";
+  const markdownExtensions = options?.markdownExtensions;
+
+  const parseMarkdown = (raw: unknown): JSONContent | null => {
+    const markdown = extractMarkdownString(raw);
+    if (markdown == null) {
+      return null;
     }
-    // Case 2: body is { type: "tiptap", content: { type: "doc", content: [...] } }
-    // or { type: "tiptap", content: { meta: ..., content: { type: "doc", ... } } }
-    else if ("type" in body && (body as { type?: string }).type === "tiptap" && "content" in body) {
-      const bodyContent = (body as { content?: unknown }).content;
-      if (bodyContent && typeof bodyContent === "object") {
-        // First check: bodyContent itself is { type: "doc", content: [...] }
-        if ("type" in bodyContent && (bodyContent as { type?: string }).type === "doc" && "content" in bodyContent) {
-          content = bodyContent as JSONContent;
-        }
-        // Second check: nested { meta, content: { type: "doc", ... } } format from exportContentJson
-        else if ("content" in bodyContent) {
-          const nestedContent = (bodyContent as { content?: unknown }).content;
-          if (nestedContent && typeof nestedContent === "object" && "type" in nestedContent) {
-            if ((nestedContent as { type?: string }).type === "doc") {
-              content = nestedContent as JSONContent;
-            }
-          }
-        }
-      }
+    try {
+      return ensureBlockIds(
+        markdownToTiptapJson(
+          markdown,
+          markdownExtensions ? { extensions: markdownExtensions } : undefined,
+        ),
+      );
+    } catch (err) {
+      console.error("[DocumentPage] failed to parse markdown content:", err);
+      return null;
     }
-    // Case 3: body has content field that is JSONContent
-    else if ("content" in body) {
-      const bodyContent = (body as { content?: unknown }).content;
-      if (bodyContent && typeof bodyContent === "object" && "type" in bodyContent) {
-        content = bodyContent as JSONContent;
-      }
+  };
+
+  if (typeof body?.type === "string" && body.type === "markdown") {
+    content = parseMarkdown(body.content);
+    if (content) {
+      bodyFormat = "markdown";
     }
   }
-  
-  // Fallback: try data.content directly
-  if (!content && data?.content && typeof data.content === "object") {
-    if ("type" in data.content && "content" in data.content) {
-      content = data.content as JSONContent;
+
+  if (!content) {
+    content = extractDocJsonContent(body);
+    if (content) {
+      bodyFormat = "tiptap";
     }
   }
-  
+
+  // Backward-compatible fallback: markdown may be stored without explicit type.
+  if (!content) {
+    content = parseMarkdown(body?.content);
+    if (content) {
+      bodyFormat = "markdown";
+    }
+  }
+
+  if (!content) {
+    content = extractDocJsonContent(data?.content);
+    if (content) {
+      bodyFormat = "tiptap";
+    }
+  }
+
+  if (!content) {
+    content = parseMarkdown(data?.content);
+    if (content) {
+      bodyFormat = "markdown";
+    }
+  }
+
+  if (content && bodyFormat === "unknown") {
+    bodyFormat = "tiptap";
+  }
+
   const hierarchyData = data?.hierarchy ?? [];
   const hierarchy = hierarchyData
     .map((item) => ({
@@ -2748,9 +2787,76 @@ function mapDocumentDetail(data: DocumentDetail | undefined | null, fallbackId: 
 
   return {
     ...meta,
+    bodyFormat,
     content,
     hierarchy,
   };
+}
+
+function extractDocJsonContent(raw: unknown, depth = 0): JSONContent | null {
+  if (!raw || typeof raw !== "object" || depth > 4) {
+    return null;
+  }
+
+  if (
+    "type" in raw
+    && (raw as { type?: string }).type === "doc"
+    && "content" in raw
+    && Array.isArray((raw as { content?: unknown }).content)
+  ) {
+    return raw as JSONContent;
+  }
+
+  if ("content" in raw) {
+    const nested = (raw as { content?: unknown }).content;
+    if (nested && typeof nested === "object") {
+      const direct = extractDocJsonContent(nested, depth + 1);
+      if (direct) {
+        return direct;
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractMarkdownString(raw: unknown): string | null {
+  if (typeof raw === "string") {
+    return raw;
+  }
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const record = raw as Record<string, unknown>;
+  if (typeof record.markdown === "string") {
+    return record.markdown;
+  }
+  if (typeof record.content === "string") {
+    return record.content;
+  }
+  if (typeof record.text === "string") {
+    return record.text;
+  }
+
+  return null;
+}
+
+function parseDisplayBoolean(value: string | null, defaultValue: boolean): boolean {
+  if (value == null) {
+    return defaultValue;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return defaultValue;
+  }
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") {
+    return true;
+  }
+  if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") {
+    return false;
+  }
+  return defaultValue;
 }
 
 function isRootDocumentId(value: string): boolean {

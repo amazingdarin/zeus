@@ -7,6 +7,12 @@
 
 当前系统仅支持 **pluginApiVersion=2**。
 
+## Doc-Editor 第三方插件
+
+doc-editor 插件开发与加载方案见：
+
+- `/Users/darin/mine/code/zeus/docs/doc-editor-plugin-development.md`
+
 ## 1. 插件能力总览
 
 插件通过 `capabilities` 声明能力，可同时声明多类能力：
@@ -309,4 +315,3 @@ ${ZEUS_DATA_ROOT}/users/{userId}/.plugin/
 ```
 
 详见：`docs/user-data-directory.md`
-

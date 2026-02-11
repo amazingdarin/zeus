@@ -1,4 +1,6 @@
 import {
+  Fragment,
+  createElement,
   createContext,
   useCallback,
   useContext,
@@ -7,16 +9,26 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Extensions } from "@tiptap/core";
+import {
+  Extension,
+  InputRule,
+  Mark,
+  Node,
+  mergeAttributes,
+  type Extensions,
+} from "@tiptap/core";
+import { ReactNodeViewRenderer } from "@tiptap/react";
 import type {
   PluginRegisteredCommandV2,
   PluginRuntimeItemV2,
 } from "@zeus/plugin-sdk-shared";
 import type {
+  DocEditorRuntimeSdk,
   EditorBlockContribution,
   MenuContribution,
   RouteContribution,
   WebPluginModule,
+  WebPluginContext,
   WebPluginModuleV2,
   ZeusWebPlugin,
   ZeusWebPluginV2,
@@ -32,13 +44,10 @@ import {
 const LAST_PROJECT_REF_STORAGE_KEY = "zeus.lastProjectRef";
 
 type RuntimeWebPluginModule = WebPluginModule | WebPluginModuleV2;
-
-const BUILTIN_PLUGIN_MODULE_LOADERS: Record<string, () => Promise<RuntimeWebPluginModule>> = {
-  "music-plugin": async () => {
-    const mod = await import("../plugins/music-plugin");
-    return mod as unknown as RuntimeWebPluginModule;
-  },
+const DOC_EDITOR_BUILTIN_MODULE_LOADERS: Record<string, () => Promise<Record<string, unknown>>> = {
+  "music": async () => (await import("../plugins/builtins/music-runtime")) as unknown as Record<string, unknown>,
 };
+const LOADED_PLUGIN_STYLE_URLS = new Set<string>();
 
 type PluginMenuPlacement = "sidebar" | "document_header" | "settings";
 
@@ -99,6 +108,76 @@ type PluginRuntimeContextValue = {
 };
 
 const PluginRuntimeContext = createContext<PluginRuntimeContextValue | undefined>(undefined);
+
+function normalizePluginAssetPath(relativePath: string): string {
+  const raw = String(relativePath || "").trim().replace(/^\/+/, "");
+  if (!raw) {
+    throw new Error("Plugin asset path is required");
+  }
+  const parts = raw.split("/").map((item) => item.trim()).filter(Boolean);
+  if (parts.length === 0 || parts.some((item) => item === "." || item === "..")) {
+    throw new Error(`Invalid plugin asset path: ${relativePath}`);
+  }
+  return parts.join("/");
+}
+
+function resolvePluginAssetUrl(frontendEntryUrl: string | undefined, relativePath: string): string {
+  const entry = String(frontendEntryUrl || "").trim();
+  if (!entry) {
+    throw new Error("Plugin frontend entry URL is missing");
+  }
+  const normalized = normalizePluginAssetPath(relativePath);
+  const base = new URL(entry, window.location.origin);
+  const basePath = base.pathname.includes("/")
+    ? base.pathname.slice(0, base.pathname.lastIndexOf("/") + 1)
+    : "/";
+  return `${base.origin}${basePath}${normalized}`;
+}
+
+function createDocEditorRuntimeSdk(
+  pluginId: string,
+  frontendEntryUrl?: string,
+): DocEditorRuntimeSdk {
+  return {
+    builtins: {
+      list: () => Object.keys(DOC_EDITOR_BUILTIN_MODULE_LOADERS),
+    },
+    loadBuiltinModule: async (name: string) => {
+      const normalized = String(name || "").trim().toLowerCase();
+      const loader = DOC_EDITOR_BUILTIN_MODULE_LOADERS[normalized];
+      if (!loader) {
+        throw new Error(`Unknown doc-editor builtin module: ${name}`);
+      }
+      return loader();
+    },
+    resolveAssetUrl: (relativePath: string) => resolvePluginAssetUrl(frontendEntryUrl, relativePath),
+    loadStyle: (relativePath: string) => {
+      const href = resolvePluginAssetUrl(frontendEntryUrl, relativePath);
+      if (LOADED_PLUGIN_STYLE_URLS.has(href)) {
+        return href;
+      }
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = href;
+      link.dataset.zeusPluginId = pluginId;
+      document.head.appendChild(link);
+      LOADED_PLUGIN_STYLE_URLS.add(href);
+      return href;
+    },
+    react: {
+      createElement,
+      Fragment,
+    },
+    tiptap: {
+      Node,
+      Mark,
+      Extension,
+      InputRule,
+      mergeAttributes,
+      ReactNodeViewRenderer,
+    },
+  };
+}
 
 function resolveProjectRef(projectRefOverride?: string): string {
   const fromArg = String(projectRefOverride || "").trim();
@@ -444,26 +523,18 @@ export function PluginRuntimeProvider({ children }: { children: ReactNode }) {
           }
 
           const frontendEntry = String(runtimeItem.frontendEntryUrl || "").trim();
-          let loaded: RuntimeWebPluginModule | null = null;
+          if (!frontendEntry) {
+            continue;
+          }
           try {
-            if (frontendEntry) {
-              loaded = await import(/* @vite-ignore */ frontendEntry) as RuntimeWebPluginModule;
-            } else {
-              const builtinLoader = BUILTIN_PLUGIN_MODULE_LOADERS[pluginId];
-              if (builtinLoader) {
-                loaded = await builtinLoader();
-              }
-            }
-            if (!loaded) {
-              continue;
-            }
+            const loaded = await import(/* @vite-ignore */ frontendEntry) as RuntimeWebPluginModule;
             const plugin = (loaded.default || loaded.plugin) as ZeusWebPlugin | ZeusWebPluginV2 | undefined;
             if (!plugin || typeof plugin.register !== "function") {
               continue;
             }
 
             const projectRefFromStorage = localStorage.getItem(LAST_PROJECT_REF_STORAGE_KEY) || undefined;
-            const pluginContext = {
+            const pluginContext: WebPluginContext = {
               pluginId,
               projectKey: projectRefFromStorage,
               userId: undefined,
@@ -480,6 +551,7 @@ export function PluginRuntimeProvider({ children }: { children: ReactNode }) {
                 input?: Record<string, unknown>,
                 projectRef?: string,
               ) => invokeOperation(targetPluginId, operationId, input || {}, projectRef),
+              docEditor: createDocEditorRuntimeSdk(pluginId, frontendEntry),
             };
 
             const contributions = await plugin.register(pluginContext);
@@ -531,11 +603,7 @@ export function PluginRuntimeProvider({ children }: { children: ReactNode }) {
               }
             }
           } catch (moduleError) {
-            if (frontendEntry) {
-              console.warn(`[plugin-runtime] Failed to load frontend module for ${pluginId}:`, moduleError);
-            } else {
-              console.warn(`[plugin-runtime] Failed to load builtin frontend module for ${pluginId}:`, moduleError);
-            }
+            console.warn(`[plugin-runtime] Failed to load frontend module for ${pluginId}:`, moduleError);
           }
         }
 
