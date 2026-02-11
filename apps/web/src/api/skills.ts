@@ -4,7 +4,7 @@
  * API client for managing AI skill configurations.
  */
 
-import { apiFetch } from "../config/api";
+import { apiFetch, encodeProjectRef } from "../config/api";
 
 /**
  * Legacy skill configuration (global)
@@ -59,7 +59,7 @@ export type ProjectSkillItem = {
   toolName: string;
   name: string;
   description: string;
-  source: "native" | "anthropic" | "mcp";
+  source: "native" | "anthropic" | "mcp" | "plugin";
   enabled: boolean;
   priority: number;
   riskLevel: "low" | "medium" | "high";
@@ -83,7 +83,7 @@ export type ProjectEnabledCommand = {
   name: string;
   description: string;
   category: string;
-  source: "native" | "anthropic" | "mcp";
+  source: "native" | "anthropic" | "mcp" | "plugin";
   requiresDocScope: boolean;
 };
 
@@ -153,7 +153,7 @@ export async function listProjectSkills(
   projectKey: string,
 ): Promise<{ categories: ProjectSkillCategoryInfo[] }> {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/skills`,
+    `/api/projects/${encodeProjectRef(projectKey)}/skills`,
   );
   if (!response.ok) {
     throw new Error("Failed to fetch project skills");
@@ -171,7 +171,7 @@ export async function updateProjectSkillEnabled(
   enabled: boolean,
 ): Promise<void> {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/skills/${encodeURIComponent(skillId)}`,
+    `/api/projects/${encodeProjectRef(projectKey)}/skills/${encodeURIComponent(skillId)}`,
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -191,7 +191,7 @@ export async function batchUpdateProjectSkillEnabled(
   updates: Array<{ skillId: string; enabled: boolean }>,
 ): Promise<void> {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/skills`,
+    `/api/projects/${encodeProjectRef(projectKey)}/skills`,
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -211,7 +211,7 @@ export async function getProjectEnabledCommands(
   projectKey: string,
 ): Promise<{ commands: ProjectEnabledCommand[] }> {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/skills/enabled-commands`,
+    `/api/projects/${encodeProjectRef(projectKey)}/skills/enabled-commands`,
   );
   if (!response.ok) {
     throw new Error("Failed to fetch project enabled commands");
@@ -225,7 +225,7 @@ export async function getProjectEnabledCommands(
       name: String(item.name || item.command || ""),
       description: String(item.description || ""),
       category: String(item.category || "system"),
-      source: (item.source as "native" | "anthropic" | "mcp") || "native",
+      source: (item.source as "native" | "anthropic" | "mcp" | "plugin") || "native",
       requiresDocScope: Boolean(item.requires_doc_scope),
     }))
     : [];

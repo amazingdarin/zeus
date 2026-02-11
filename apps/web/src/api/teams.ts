@@ -54,6 +54,30 @@ export interface InviteMemberRequest {
   role: 'admin' | 'member' | 'viewer';
 }
 
+export interface CreateTeamJoinLinkRequest {
+  role?: 'admin' | 'member' | 'viewer';
+}
+
+export interface TeamJoinLink {
+  id: string;
+  token: string;
+  team_slug: string;
+  role: 'admin' | 'member' | 'viewer';
+  expires_at: string;
+}
+
+export interface TeamJoinLinkPreview {
+  team_name: string;
+  team_slug: string;
+  role: 'admin' | 'member' | 'viewer';
+  expires_at: string;
+}
+
+export interface TeamJoinResult {
+  team_slug: string;
+  team_name: string;
+}
+
 async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
   const response = await fetch(url, {
     ...options,
@@ -192,4 +216,45 @@ export async function acceptInvitation(invitationId: string): Promise<void> {
     const error = await response.json();
     throw new Error(error.message || 'Failed to accept invitation');
   }
+}
+
+function toApiError(payload: unknown, fallback: string): Error {
+  const data = (payload ?? {}) as { code?: string; message?: string };
+  const error = new Error(data.message || fallback) as Error & { code?: string };
+  if (data.code) {
+    error.code = data.code;
+  }
+  return error;
+}
+
+export async function createTeamJoinLink(slug: string, data: CreateTeamJoinLinkRequest): Promise<TeamJoinLink> {
+  const response = await fetchWithAuth(`${getServerUrl()}/api/teams/${slug}/join-links`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw toApiError(error, 'Failed to create join link');
+  }
+  return response.json();
+}
+
+export async function getInviteLinkPreview(token: string): Promise<TeamJoinLinkPreview> {
+  const response = await fetchWithAuth(`${getServerUrl()}/api/invite-links/${token}`);
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw toApiError(error, 'Failed to fetch invite link');
+  }
+  return response.json();
+}
+
+export async function joinTeamByInviteLink(token: string): Promise<TeamJoinResult> {
+  const response = await fetchWithAuth(`${getServerUrl()}/api/invite-links/${token}/join`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw toApiError(error, 'Failed to join team');
+  }
+  return response.json();
 }

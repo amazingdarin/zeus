@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Tabs, Form, Input, Button, Table, Tag, Space, Modal, Select, message, Popconfirm, Typography, Avatar } from 'antd';
-import { UserOutlined, MailOutlined, DeleteOutlined, TeamOutlined } from '@ant-design/icons';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Card, Tabs, Form, Input, Button, Table, Tag, Space, Modal, Select, message, Popconfirm, Typography, Avatar, QRCode } from 'antd';
+import { UserOutlined, MailOutlined, DeleteOutlined, TeamOutlined, LinkOutlined, CopyOutlined, ArrowLeftOutlined } from '@ant-design/icons';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { 
-  Team, TeamMember, TeamInvitation,
+  Team, TeamMember, TeamInvitation, TeamJoinLink,
   getTeam, updateTeam, deleteTeam,
   listTeamMembers, updateMemberRole, removeMember,
-  listInvitations, inviteMember,
+  listInvitations, inviteMember, createTeamJoinLink,
   UpdateTeamRequest, InviteMemberRequest
 } from '../api/teams';
 import { useAuth } from '../context/AuthContext';
@@ -16,6 +16,7 @@ const { Title, Text } = Typography;
 export function TeamSettingsPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   
   const [team, setTeam] = useState<Team | null>(null);
@@ -24,21 +25,35 @@ export function TeamSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [inviteModalVisible, setInviteModalVisible] = useState(false);
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteTab, setInviteTab] = useState<'email' | 'link'>('email');
+  const [joinLinkRole, setJoinLinkRole] = useState<'admin' | 'member' | 'viewer'>('member');
+  const [joinLinkLoading, setJoinLinkLoading] = useState(false);
+  const [joinLink, setJoinLink] = useState<TeamJoinLink | null>(null);
   const [form] = Form.useForm();
   const [inviteForm] = Form.useForm();
 
   const isOwner = team?.owner_id === user?.id;
   const currentMember = members.find(m => m.user_id === user?.id);
   const canManage = currentMember?.role === 'owner' || currentMember?.role === 'admin';
+  const isSettingsRoute = location.pathname.endsWith('/settings');
+
+  const inviteLinkUrl = useMemo(() => {
+    if (!joinLink) {
+      return '';
+    }
+    return `${window.location.origin}${window.location.pathname}${window.location.search}#/invite/${encodeURIComponent(joinLink.token)}`;
+  }, [joinLink]);
 
   const fetchData = async () => {
     if (!slug) return;
     try {
-      const [teamData, membersData, invitationsData] = await Promise.all([
+      const [teamData, membersData] = await Promise.all([
         getTeam(slug),
         listTeamMembers(slug),
-        canManage ? listInvitations(slug) : Promise.resolve([]),
       ]);
+      const member = membersData.find(m => m.user_id === user?.id);
+      const canManageMembers = member?.role === 'owner' || member?.role === 'admin';
+      const invitationsData = canManageMembers ? await listInvitations(slug) : [];
       setTeam(teamData);
       setMembers(membersData);
       setInvitations(invitationsData);
@@ -55,7 +70,7 @@ export function TeamSettingsPage() {
 
   useEffect(() => {
     fetchData();
-  }, [slug]);
+  }, [slug, user?.id]);
 
   const handleUpdateTeam = async (values: UpdateTeamRequest) => {
     if (!slug) return;
@@ -109,12 +124,57 @@ export function TeamSettingsPage() {
       message.success('邀请已发送');
       setInviteModalVisible(false);
       inviteForm.resetFields();
+      inviteForm.setFieldValue('role', 'member');
       fetchData();
     } catch (error) {
       message.error(error instanceof Error ? error.message : '邀请失败');
     } finally {
       setInviteLoading(false);
     }
+  };
+
+  const handleCreateJoinLink = async () => {
+    if (!slug) return;
+    setJoinLinkLoading(true);
+    try {
+      const link = await createTeamJoinLink(slug, { role: joinLinkRole });
+      setJoinLink(link);
+      message.success('邀请链接已生成');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '生成邀请链接失败');
+    } finally {
+      setJoinLinkLoading(false);
+    }
+  };
+
+  const handleCopyJoinLink = async () => {
+    if (!inviteLinkUrl) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(inviteLinkUrl);
+      message.success('邀请链接已复制');
+    } catch {
+      message.error('复制失败，请手动复制');
+    }
+  };
+
+  const openInviteModal = () => {
+    setInviteModalVisible(true);
+    setInviteTab('email');
+    setJoinLinkRole('member');
+    setJoinLink(null);
+    inviteForm.resetFields();
+    inviteForm.setFieldValue('role', 'member');
+  };
+
+  const closeInviteModal = () => {
+    setInviteModalVisible(false);
+    setInviteTab('email');
+    setJoinLinkRole('member');
+    setJoinLink(null);
+    inviteForm.resetFields();
+    inviteForm.setFieldValue('role', 'member');
   };
 
   const memberColumns = [
@@ -135,11 +195,11 @@ export function TeamSettingsPage() {
       title: '角色',
       key: 'role',
       render: (_: unknown, record: TeamMember) => {
-        const roleColors: Record<string, string> = {
-          owner: 'gold',
-          admin: 'blue',
-          member: 'green',
-          viewer: 'default',
+        const roleClassNames: Record<string, string> = {
+          owner: 'team-role-tag-owner',
+          admin: 'team-role-tag-admin',
+          member: 'team-role-tag-member',
+          viewer: 'team-role-tag-viewer',
         };
         const roleLabels: Record<string, string> = {
           owner: '所有者',
@@ -148,7 +208,8 @@ export function TeamSettingsPage() {
           viewer: '访客',
         };
         if (!canManage || record.role === 'owner') {
-          return <Tag color={roleColors[record.role]}>{roleLabels[record.role]}</Tag>;
+          const roleClassName = roleClassNames[record.role] || 'team-role-tag-viewer';
+          return <Tag className={`team-role-tag ${roleClassName}`}>{roleLabels[record.role] || record.role}</Tag>;
         }
         return (
           <Select
@@ -211,11 +272,11 @@ export function TeamSettingsPage() {
       dataIndex: 'status',
       key: 'status',
       render: (status: string) => {
-        const colors: Record<string, string> = {
-          pending: 'processing',
-          accepted: 'success',
-          expired: 'default',
-          cancelled: 'error',
+        const statusClassNames: Record<string, string> = {
+          pending: 'team-status-tag-pending',
+          accepted: 'team-status-tag-accepted',
+          expired: 'team-status-tag-expired',
+          cancelled: 'team-status-tag-cancelled',
         };
         const labels: Record<string, string> = {
           pending: '待接受',
@@ -223,7 +284,8 @@ export function TeamSettingsPage() {
           expired: '已过期',
           cancelled: '已取消',
         };
-        return <Tag color={colors[status]}>{labels[status]}</Tag>;
+        const statusClassName = statusClassNames[status] || 'team-status-tag-expired';
+        return <Tag className={`team-status-tag ${statusClassName}`}>{labels[status] || status}</Tag>;
       },
     },
     {
@@ -235,26 +297,45 @@ export function TeamSettingsPage() {
   ];
 
   if (loading) {
-    return <div style={{ padding: 24 }}>加载中...</div>;
+    return (
+      <div className="team-settings-page">
+        <div className="team-settings-status">加载中...</div>
+      </div>
+    );
   }
 
   if (!team) {
-    return <div style={{ padding: 24 }}>团队不存在</div>;
+    return (
+      <div className="team-settings-page">
+        <div className="team-settings-status">团队不存在</div>
+      </div>
+    );
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 1000, margin: '0 auto' }}>
-      <div style={{ marginBottom: 24 }}>
+    <div className="team-settings-page">
+      <div className="team-settings-header">
+        <Button
+          type="text"
+          icon={<ArrowLeftOutlined />}
+          className="team-settings-back-btn"
+          onClick={() => navigate('/teams')}
+        >
+          返回团队列表
+        </Button>
         <Space align="center">
           <Avatar icon={<TeamOutlined />} src={team.avatar_url} size={48} />
           <div>
-            <Title level={3} style={{ margin: 0 }}>{team.name}</Title>
-            <Text type="secondary">@{team.slug}</Text>
+            <Title level={3} style={{ margin: 0 }} className="team-settings-name">{team.name}</Title>
+            <Text type="secondary" className="team-settings-slug">@{team.slug}</Text>
           </div>
         </Space>
       </div>
 
       <Tabs
+        key={isSettingsRoute ? 'settings' : 'detail'}
+        defaultActiveKey={isSettingsRoute ? 'general' : 'members'}
+        className="team-settings-tabs"
         items={[
           {
             key: 'general',
@@ -298,7 +379,7 @@ export function TeamSettingsPage() {
               <Card
                 title="团队成员"
                 extra={canManage && (
-                  <Button type="primary" icon={<MailOutlined />} onClick={() => setInviteModalVisible(true)}>
+                  <Button type="primary" icon={<MailOutlined />} onClick={openInviteModal}>
                     邀请成员
                   </Button>
                 )}
@@ -312,7 +393,7 @@ export function TeamSettingsPage() {
                 
                 {canManage && invitations.length > 0 && (
                   <>
-                    <Title level={5} style={{ marginTop: 24 }}>待处理邀请</Title>
+                    <Title level={5} className="team-settings-subsection-title">待处理邀请</Title>
                     <Table
                       dataSource={invitations.filter(i => i.status === 'pending')}
                       columns={invitationColumns}
@@ -330,7 +411,7 @@ export function TeamSettingsPage() {
             children: (
               <Card>
                 <div style={{ marginBottom: 16 }}>
-                  <Title level={5} style={{ color: '#ff4d4f' }}>删除团队</Title>
+                  <Title level={5} className="team-settings-danger-title">删除团队</Title>
                   <Text type="secondary">
                     删除团队后，所有团队项目和数据将被永久删除，此操作不可恢复。
                   </Text>
@@ -351,57 +432,130 @@ export function TeamSettingsPage() {
       />
 
       <Modal
+        className="team-invite-modal"
         title="邀请成员"
         open={inviteModalVisible}
-        onCancel={() => {
-          setInviteModalVisible(false);
-          inviteForm.resetFields();
-        }}
+        onCancel={closeInviteModal}
         footer={null}
       >
-        <Form
-          form={inviteForm}
-          layout="vertical"
-          onFinish={handleInvite}
-        >
-          <Form.Item
-            name="email"
-            label="邮箱地址"
-            rules={[
-              { required: true, message: '请输入邮箱' },
-              { type: 'email', message: '请输入有效的邮箱地址' }
-            ]}
-          >
-            <Input placeholder="member@example.com" />
-          </Form.Item>
-          <Form.Item
-            name="role"
-            label="角色"
-            initialValue="member"
-            rules={[{ required: true, message: '请选择角色' }]}
-          >
-            <Select
-              options={[
-                { value: 'admin', label: '管理员 - 可管理成员和项目' },
-                { value: 'member', label: '成员 - 可创建和编辑项目' },
-                { value: 'viewer', label: '访客 - 只读访问' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
-            <Space>
-              <Button onClick={() => {
-                setInviteModalVisible(false);
-                inviteForm.resetFields();
-              }}>
-                取消
-              </Button>
-              <Button type="primary" htmlType="submit" loading={inviteLoading}>
-                发送邀请
-              </Button>
-            </Space>
-          </Form.Item>
-        </Form>
+        <Tabs
+          activeKey={inviteTab}
+          onChange={(key) => setInviteTab(key as 'email' | 'link')}
+          items={[
+            {
+              key: 'email',
+              label: '邮箱邀请',
+              children: (
+                <Form
+                  form={inviteForm}
+                  layout="vertical"
+                  onFinish={handleInvite}
+                  initialValues={{ role: 'member' }}
+                >
+                  <Form.Item
+                    name="email"
+                    label="邮箱地址"
+                    rules={[
+                      { required: true, message: '请输入邮箱' },
+                      { type: 'email', message: '请输入有效的邮箱地址' }
+                    ]}
+                  >
+                    <Input placeholder="member@example.com" />
+                  </Form.Item>
+                  <Form.Item
+                    name="role"
+                    label="角色"
+                    rules={[{ required: true, message: '请选择角色' }]}
+                  >
+                    <Select
+                      className="team-invite-role-select"
+                      popupClassName="team-invite-select-dropdown"
+                      options={[
+                        { value: 'admin', label: '管理员 - 可管理成员和项目' },
+                        { value: 'member', label: '成员 - 可创建和编辑项目' },
+                        { value: 'viewer', label: '访客 - 只读访问' },
+                      ]}
+                    />
+                  </Form.Item>
+                  <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+                    <Space>
+                      <Button onClick={closeInviteModal}>取消</Button>
+                      <Button type="primary" htmlType="submit" loading={inviteLoading}>
+                        发送邀请
+                      </Button>
+                    </Space>
+                  </Form.Item>
+                </Form>
+              ),
+            },
+            {
+              key: 'link',
+              label: '链接邀请',
+              children: (
+                <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                  <Form layout="vertical">
+                    <Form.Item label="加入角色">
+                      <Select
+                        className="team-invite-role-select"
+                        popupClassName="team-invite-select-dropdown"
+                        value={joinLinkRole}
+                        onChange={(value) => setJoinLinkRole(value as 'admin' | 'member' | 'viewer')}
+                        options={[
+                          { value: 'admin', label: '管理员 - 可管理成员和项目' },
+                          { value: 'member', label: '成员 - 可创建和编辑项目' },
+                          { value: 'viewer', label: '访客 - 只读访问' },
+                        ]}
+                      />
+                    </Form.Item>
+                  </Form>
+
+                  <Space>
+                    <Button
+                      type="primary"
+                      icon={<LinkOutlined />}
+                      loading={joinLinkLoading}
+                      onClick={handleCreateJoinLink}
+                    >
+                      {joinLink ? '重新生成链接' : '生成邀请链接'}
+                    </Button>
+                    <Text type="secondary" className="team-invite-link-hint">7 天有效；重新生成后旧链接会失效</Text>
+                  </Space>
+
+                  {joinLink ? (
+                    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                      <Input
+                        value={inviteLinkUrl}
+                        readOnly
+                        addonAfter={
+                          <Button type="text" icon={<CopyOutlined />} onClick={handleCopyJoinLink}>
+                            复制
+                          </Button>
+                        }
+                      />
+                      <Space align="start" size={20}>
+                        <div className="team-invite-qr">
+                          <QRCode value={inviteLinkUrl} size={160} />
+                        </div>
+                        <div>
+                          <Text className="team-invite-qr-title" style={{ display: 'block' }}>
+                            扫码可加入团队（需先登录）
+                          </Text>
+                          <Text type="secondary" className="team-invite-qr-expire">
+                            过期时间：{new Date(joinLink.expires_at).toLocaleString()}
+                          </Text>
+                        </div>
+                      </Space>
+                    </Space>
+                  ) : null}
+
+                  <div style={{ textAlign: 'right' }}>
+                    <Button onClick={closeInviteModal}>关闭</Button>
+                  </div>
+                </Space>
+              ),
+            },
+          ]}
+        />
       </Modal>
     </div>
   );

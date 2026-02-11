@@ -1,4 +1,4 @@
-import { apiFetch } from "../config/api";
+import { apiFetch, encodeProjectRef } from "../config/api";
 
 /**
  * PPT Generation API Client
@@ -103,7 +103,7 @@ export const exportToPPT = async (
   request?: ExportPPTRequest
 ): Promise<ExportPPTResponse> => {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(docId)}/export-ppt`,
+    `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(docId)}/export-ppt`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -128,7 +128,7 @@ export const getPPTTaskStatus = async (
   taskId: string
 ): Promise<PPTTaskStatus> => {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/ppt-tasks/${encodeURIComponent(taskId)}`
+    `/api/projects/${encodeProjectRef(projectKey)}/ppt-tasks/${encodeURIComponent(taskId)}`
   );
 
   if (!response.ok) {
@@ -149,7 +149,7 @@ export const downloadPPTX = async (
   filename?: string
 ): Promise<void> => {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/ppt-tasks/${encodeURIComponent(taskId)}/download`
+    `/api/projects/${encodeProjectRef(projectKey)}/ppt-tasks/${encodeURIComponent(taskId)}/download`
   );
 
   if (!response.ok) {
@@ -177,7 +177,7 @@ export const getPPTPreview = async (
   taskId: string
 ): Promise<string[]> => {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/ppt-tasks/${encodeURIComponent(taskId)}/previews`
+    `/api/projects/${encodeProjectRef(projectKey)}/ppt-tasks/${encodeURIComponent(taskId)}/previews`
   );
 
   if (!response.ok) {
@@ -198,7 +198,7 @@ export const modifySlide = async (
   instruction: string
 ): Promise<ExportPPTResponse> => {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/ppt-tasks/${encodeURIComponent(taskId)}/modify`,
+    `/api/projects/${encodeProjectRef(projectKey)}/ppt-tasks/${encodeURIComponent(taskId)}/modify`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -236,7 +236,7 @@ export const getAllTemplates = async (
   projectKey: string
 ): Promise<AllTemplatesResponse> => {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/ppt-templates`
+    `/api/projects/${encodeProjectRef(projectKey)}/ppt-templates`
   );
 
   if (!response.ok) {
@@ -267,7 +267,7 @@ export const createCustomTemplate = async (
   }
 ): Promise<CustomTemplate> => {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/ppt-templates`,
+    `/api/projects/${encodeProjectRef(projectKey)}/ppt-templates`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -292,7 +292,7 @@ export const deleteCustomTemplate = async (
   templateId: string
 ): Promise<void> => {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/ppt-templates/${encodeURIComponent(templateId)}`,
+    `/api/projects/${encodeProjectRef(projectKey)}/ppt-templates/${encodeURIComponent(templateId)}`,
     { method: "DELETE" }
   );
 

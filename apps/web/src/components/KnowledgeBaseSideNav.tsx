@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState, memo, type DragEvent } from "react";
 import type { JSONContent } from "@tiptap/react";
 import { DownOutlined, RightOutlined, ReloadOutlined, DatabaseOutlined, MenuFoldOutlined, UnorderedListOutlined, ApartmentOutlined } from "@ant-design/icons";
-import { Tooltip } from "antd";
+import { Popconfirm, Tooltip } from "antd";
 import { useToggleTree } from "./KnowledgeBaseLayout";
 
 export type KnowledgeBaseDocument = {
@@ -13,6 +13,18 @@ export type KnowledgeBaseDocument = {
   hasChild: boolean;
   order: number;
   storageObjectId: string;
+};
+
+export type FavoriteSideNavItem = {
+  docId: string;
+  title: string;
+  favoritedAt: string;
+};
+
+export type RecentEditSideNavItem = {
+  docId: string;
+  title: string;
+  editedAt: string;
 };
 
 export type KnowledgeBaseMoveRequest = {
@@ -33,6 +45,11 @@ type RebuildProgress = {
 type KnowledgeBaseSideNavProps = {
   documents: KnowledgeBaseDocument[];
   childrenByParent: Record<string, KnowledgeBaseDocument[]>;
+  favorites?: FavoriteSideNavItem[];
+  favoritesLoading?: boolean;
+  favoritePendingIds?: Record<string, boolean>;
+  recentEdits?: RecentEditSideNavItem[];
+  recentEditsLoading?: boolean;
   expandedIds: Record<string, boolean>;
   activeId: string | null;
   loadingIds: Record<string, boolean>;
@@ -44,6 +61,7 @@ type KnowledgeBaseSideNavProps = {
   onMove: (request: KnowledgeBaseMoveRequest) => void;
   onRefresh?: () => void;
   onRebuildIndex?: () => void;
+  onUnfavorite?: (docId: string) => void;
   onEmptyAreaClick?: () => void;
   onAddDocument?: () => void;
   outlineMode?: boolean;
@@ -54,6 +72,11 @@ type KnowledgeBaseSideNavProps = {
 const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
   documents,
   childrenByParent,
+  favorites = [],
+  favoritesLoading = false,
+  favoritePendingIds = {},
+  recentEdits = [],
+  recentEditsLoading = false,
   expandedIds,
   activeId,
   loadingIds,
@@ -65,6 +88,7 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
   onMove,
   onRefresh,
   onRebuildIndex,
+  onUnfavorite,
   onEmptyAreaClick,
   onAddDocument,
   outlineMode,
@@ -76,6 +100,8 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
     id: string;
     position: "before" | "after" | "inside";
   } | null>(null);
+  const [favoritesCollapsed, setFavoritesCollapsed] = useState(true);
+  const [recentCollapsed, setRecentCollapsed] = useState(true);
 
   const docMap = useMemo(() => {
     const map = new Map<string, KnowledgeBaseDocument>();
@@ -312,6 +338,156 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
 
   const { toggleTree } = useToggleTree();
 
+  const favoriteDocs = useMemo(
+    () => favorites.filter((item) => docMap.has(item.docId)),
+    [docMap, favorites],
+  );
+  const recentEditDocs = useMemo(
+    () => recentEdits.filter((item) => docMap.has(item.docId)),
+    [docMap, recentEdits],
+  );
+  const hasFavoriteSection = favoritesLoading || favorites.length > 0;
+  const hasRecentSection = recentEditsLoading || recentEdits.length > 0;
+  const showFavoritesDivider = hasFavoriteSection || hasRecentSection;
+
+  const renderFavoriteList = () => {
+    if (!hasFavoriteSection) {
+      return null;
+    }
+
+    return (
+      <div className="kb-favorites-section">
+        <button
+          className="kb-favorites-header"
+          type="button"
+          onClick={() => setFavoritesCollapsed((prev) => !prev)}
+          aria-expanded={!favoritesCollapsed}
+          aria-label={favoritesCollapsed ? "展开收藏" : "收起收藏"}
+        >
+          <span className="kb-favorites-title">收藏</span>
+          <span className="kb-favorites-toggle" aria-hidden="true">
+            {favoritesCollapsed ? <RightOutlined /> : <DownOutlined />}
+          </span>
+        </button>
+        {!favoritesCollapsed ? (
+          favoritesLoading ? (
+            <div className="kb-favorites-loading">加载收藏中...</div>
+          ) : (
+            <div className="kb-favorites-list">
+              {favoriteDocs.map((favorite) => {
+                const doc = docMap.get(favorite.docId);
+                if (!doc) {
+                  return null;
+                }
+                const pending = Boolean(favoritePendingIds[favorite.docId]);
+                return (
+                  <div
+                    key={favorite.docId}
+                    className={`kb-favorite-item${activeId === favorite.docId ? " active" : ""}`}
+                    onClick={() => onSelect(doc)}
+                  >
+                    <button
+                      className="kb-favorite-item-title"
+                      type="button"
+                      title={favorite.title || doc.title || "Untitled"}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onSelect(doc);
+                      }}
+                    >
+                      {favorite.title || doc.title || "Untitled"}
+                    </button>
+                    {onUnfavorite ? (
+                      <Popconfirm
+                        title="取消收藏"
+                        description="确定取消收藏该文档吗？"
+                        onConfirm={(event) => {
+                          event?.stopPropagation();
+                          onUnfavorite(favorite.docId);
+                        }}
+                        okText="取消收藏"
+                        cancelText="保留"
+                        okButtonProps={{ danger: true }}
+                      >
+                        <button
+                          type="button"
+                          className="kb-favorite-unstar-btn"
+                          disabled={pending}
+                          aria-label="取消收藏"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                          }}
+                        >
+                          ★
+                        </button>
+                      </Popconfirm>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderRecentEditList = () => {
+    if (!hasRecentSection) {
+      return null;
+    }
+
+    return (
+      <div className="kb-recent-section">
+        <button
+          className="kb-recent-header"
+          type="button"
+          onClick={() => setRecentCollapsed((prev) => !prev)}
+          aria-expanded={!recentCollapsed}
+          aria-label={recentCollapsed ? "展开最近编辑" : "收起最近编辑"}
+        >
+          <span className="kb-recent-title">最近编辑</span>
+          <span className="kb-recent-toggle" aria-hidden="true">
+            {recentCollapsed ? <RightOutlined /> : <DownOutlined />}
+          </span>
+        </button>
+        {!recentCollapsed ? (
+          recentEditsLoading ? (
+            <div className="kb-recent-loading">加载最近编辑中...</div>
+          ) : (
+            <div className="kb-recent-list">
+              {recentEditDocs.map((recentEdit) => {
+                const doc = docMap.get(recentEdit.docId);
+                if (!doc) {
+                  return null;
+                }
+                return (
+                  <div
+                    key={recentEdit.docId}
+                    className={`kb-recent-item${activeId === recentEdit.docId ? " active" : ""}`}
+                    onClick={() => onSelect(doc)}
+                  >
+                    <button
+                      className="kb-recent-item-title"
+                      type="button"
+                      title={recentEdit.title || doc.title || "Untitled"}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onSelect(doc);
+                      }}
+                    >
+                      {recentEdit.title || doc.title || "Untitled"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : null}
+      </div>
+    );
+  };
+
   return (
     <aside
       className="kb-sidebar"
@@ -398,6 +574,9 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
           </div>
         ) : (
           <>
+            {renderFavoriteList()}
+            {renderRecentEditList()}
+            {showFavoritesDivider ? <div className="kb-favorites-divider" aria-hidden="true" /> : null}
             {renderTree(documents, 0)}
             {/* Clickable empty area at the bottom */}
             <div 

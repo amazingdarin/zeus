@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { message, Tooltip } from "antd";
+import { Input, message, Tooltip } from "antd";
 import {
   MenuUnfoldOutlined,
   SendOutlined,
@@ -32,10 +32,12 @@ import MentionDropdown from "../components/MentionDropdown";
 import DraftPreviewModal from "../components/DraftPreviewModal";
 import SettingsModal from "../components/SettingsModal";
 import IntentSelectDialog from "../components/IntentSelectDialog";
+import PreflightInputDialog from "../components/PreflightInputDialog";
 import RequiredInputDialog from "../components/RequiredInputDialog";
 import ToolConfirmDialog from "../components/ToolConfirmDialog";
 import SessionSidebar from "../components/SessionSidebar";
 import ChatAttachmentTags from "../components/ChatAttachmentTags";
+import ThinkingTimeline from "../components/ThinkingTimeline";
 import { useProjectContext } from "../context/ProjectContext";
 import {
   listSessions,
@@ -54,7 +56,7 @@ function ChatPage() {
   const prevIsGeneratingRef = useRef(false);
 
   const { currentProject } = useProjectContext();
-  const chatProjectKey = currentProject?.key ?? "";
+  const chatProjectKey = currentProject?.projectRef ?? "";
 
   // Load sessions on mount / project change
   const loadSessions = useCallback(async (options?: { silent?: boolean }) => {
@@ -155,6 +157,7 @@ function ChatPage() {
     deepSearchEnabled,
     error,
     assistantBuffer,
+    thinkingSteps,
     llmConfig,
     mentions,
     mentionState,
@@ -189,9 +192,11 @@ function ChatPage() {
     handleConfirmTool,
     handleRejectTool,
     handleSelectIntent,
+    handleProvidePreflightInput,
     handleProvideRequiredInput,
     pendingTool,
     pendingIntentInfo,
+    pendingPreflightInfo,
     pendingRequiredInput,
     toggleSourcesExpanded,
     // Attachments
@@ -220,6 +225,8 @@ function ChatPage() {
   }, [isGenerating, loadSessions]);
 
   // Focus input on mount
+  const mutableInputRef = inputRef as { current: HTMLTextAreaElement | null };
+
   useEffect(() => {
     if (inputRef.current) {
       setTimeout(() => inputRef.current?.focus(), 100);
@@ -471,6 +478,13 @@ function ChatPage() {
         onSubmit={handleProvideRequiredInput}
       />
 
+      <PreflightInputDialog
+        visible={!!pendingPreflightInfo}
+        projectKey={projectKey}
+        pendingPreflight={pendingPreflightInfo}
+        onSubmit={handleProvidePreflightInput}
+      />
+
       {/* Tool Confirmation Dialog */}
       <ToolConfirmDialog
         visible={!!pendingTool}
@@ -561,14 +575,14 @@ function ChatPage() {
 
       {/* Messages */}
       <div className="chat-page-messages" ref={messagesRef}>
-        {messages.length === 0 && !assistantBuffer ? (
+        {messages.length === 0 && !assistantBuffer && thinkingSteps.length === 0 ? (
           <div className="chat-page-empty">
             <div className="chat-page-empty-icon">
               <RobotOutlined />
             </div>
             <div className="chat-page-empty-text">有什么可以帮助你的？</div>
             <div className="chat-page-empty-hint">
-              {projectKey ? `当前项目: ${projectKey}` : "请先选择一个项目"}
+              {currentProject?.name ? `当前项目: ${currentProject.name}` : "请先选择一个项目"}
             </div>
           </div>
         ) : (
@@ -612,7 +626,7 @@ function ChatPage() {
             ))}
 
             {/* Streaming message */}
-            {assistantBuffer && (
+            {(assistantBuffer || thinkingSteps.length > 0) && (
               <div className="chat-msg chat-msg-assistant">
                 <div className="chat-msg-avatar">
                   <RobotOutlined />
@@ -621,18 +635,25 @@ function ChatPage() {
                   <div className="chat-msg-header">
                     <span className="chat-msg-role">AI</span>
                     <span className="chat-msg-time">
-                      <LoadingOutlined spin /> 思考中...
+                      {isGenerating ? <><LoadingOutlined spin /> 思考中...</> : "已完成"}
                     </span>
                   </div>
-                  <div className="chat-msg-text">
-                    {renderMarkdown(assistantBuffer)}
+                  <div className="chat-msg-text chat-stream-content">
+                    {thinkingSteps.length > 0 && (
+                      <ThinkingTimeline steps={thinkingSteps} loading={isGenerating} />
+                    )}
+                    {assistantBuffer ? (
+                      <div className="chat-stream-answer">
+                        {renderMarkdown(assistantBuffer)}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </div>
             )}
 
             {/* Generating indicator */}
-            {isGenerating && !assistantBuffer && (
+            {isGenerating && !assistantBuffer && thinkingSteps.length === 0 && (
               <div className="chat-msg chat-msg-assistant">
                 <div className="chat-msg-avatar">
                   <RobotOutlined />
@@ -737,8 +758,10 @@ function ChatPage() {
               <span className="chat-command-tag-text">{selectedCommand.command}</span>
             </span>
           )}
-          <textarea
-            ref={inputRef}
+          <Input.TextArea
+            ref={(instance) => {
+              mutableInputRef.current = instance?.resizableTextArea?.textArea ?? null;
+            }}
             className={`chat-page-textarea ${selectedCommand ? "with-command" : ""}`}
             placeholder={
               selectedCommand
@@ -752,7 +775,7 @@ function ChatPage() {
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             disabled={!projectKey || isGenerating}
-            rows={1}
+            autoSize={{ minRows: 1, maxRows: 8 }}
           />
           <button
             type="button"

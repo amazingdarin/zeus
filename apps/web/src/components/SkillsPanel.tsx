@@ -18,7 +18,7 @@ import { useProjectContext } from "../context/ProjectContext";
 
 function SkillsPanel() {
   const { currentProject } = useProjectContext();
-  const projectKey = currentProject?.key ?? "";
+  const projectKey = currentProject?.projectRef ?? "";
 
   const [categories, setCategories] = useState<ProjectSkillCategoryInfo[]>([]);
   const [loading, setLoading] = useState(true);

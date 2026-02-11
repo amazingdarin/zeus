@@ -76,10 +76,26 @@ export const documentCommands: SlashCommand[] = [
   },
   {
     command: "/doc-optimize-ppt",
-    name: "PPT 化",
-    description: "把文档重组为类 PPT（每页 Heading 1 + 分割线分页），需先用 @ 指定文档",
+    name: "PPT 化（兼容）",
+    description: "兼容入口：自动执行“类 PPT 说明文档生成 + HTML 演示稿注入”，需先用 @ 指定文档",
     category: "doc",
     icon: "📊",
+    requiresDocScope: true,
+  },
+  {
+    command: "/doc-optimize-ppt-outline",
+    name: "PPT 结构化说明",
+    description: "步骤1：生成结构化类 PPT 说明文档（封面字段/视觉建议/讲解备注），需先用 @ 指定文档",
+    category: "doc",
+    icon: "🧩",
+    requiresDocScope: true,
+  },
+  {
+    command: "/doc-render-ppt-html",
+    name: "PPT HTML 注入",
+    description: "步骤2：根据结构化类 PPT 文档生成静态 HTML，并注入文档顶部 file_block，需先用 @ 指定文档",
+    category: "doc",
+    icon: "🖼️",
     requiresDocScope: true,
   },
   {

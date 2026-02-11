@@ -57,7 +57,9 @@ export default function RequiredInputDialog({
       setQuery("");
       setOptions([]);
       setSelectedDocId("");
-      form.resetFields();
+      if (pendingInput?.kind === "skill_args") {
+        form.resetFields();
+      }
     }
   }, [visible, form]);
 
@@ -112,6 +114,7 @@ export default function RequiredInputDialog({
         initialValues[f.key] = v;
       }
     }
+    form.resetFields();
     form.setFieldsValue(initialValues);
   }, [visible, pendingInput, form]);
 
@@ -235,7 +238,10 @@ export default function RequiredInputDialog({
           </Paragraph>
         </div>
 
-        <Text>{pendingInput.message || "请选择文档后继续。"}</Text>
+        <Text>
+          {pendingInput.message ||
+            (pendingInput.kind === "doc_scope" ? "请选择文档后继续。" : "请补充所需参数后继续。")}
+        </Text>
 
         {pendingInput.kind === "doc_scope" && (
           <Select

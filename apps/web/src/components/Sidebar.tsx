@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { SettingOutlined, FileTextOutlined, LogoutOutlined } from "@ant-design/icons";
+import { SettingOutlined, FileTextOutlined, LogoutOutlined, TeamOutlined } from "@ant-design/icons";
 import { Tooltip, Avatar, Dropdown, Typography } from "antd";
 import type { MenuProps } from "antd";
 import type { ReactNode } from "react";
@@ -12,6 +12,7 @@ type SidebarItem = {
   label: string;
   to?: string;
   icon: ReactNode;
+  onClick?: () => void;
 };
 
 type UserInfo = {
@@ -25,7 +26,9 @@ type SidebarProps = {
   items: SidebarItem[];
   activeIndex?: number;
   settingsActive?: boolean;
+  onTeamsClick?: () => void;
   onSettingsClick?: () => void;
+  onTutorialDocsClick?: () => void;
   user?: UserInfo | null;
   onLogout?: () => void;
 };
@@ -34,7 +37,9 @@ function Sidebar({
   items,
   activeIndex = 0,
   settingsActive = false,
+  onTeamsClick,
   onSettingsClick,
+  onTutorialDocsClick,
   user,
   onLogout,
 }: SidebarProps) {
@@ -67,10 +72,22 @@ function Sidebar({
         },
         { type: "divider" as const },
         {
+          key: "teams",
+          icon: <TeamOutlined />,
+          label: "团队",
+          onClick: onTeamsClick,
+        },
+        {
           key: "settings",
           icon: <SettingOutlined />,
           label: "设置",
           onClick: onSettingsClick,
+        },
+        {
+          key: "tutorial-docs",
+          icon: <FileTextOutlined />,
+          label: "教程说明",
+          onClick: onTutorialDocsClick,
         },
         {
           key: "logout",
@@ -102,7 +119,7 @@ function Sidebar({
 
           return (
             <Tooltip key={item.label} title={item.label} placement="right" mouseEnterDelay={0.3}>
-              <button className={className} type="button">
+              <button className={className} type="button" onClick={item.onClick}>
                 {item.icon}
               </button>
             </Tooltip>

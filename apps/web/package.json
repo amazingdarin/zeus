@@ -34,6 +34,8 @@
     "@vue-office/pdf": "^2.0.10",
     "@vue-office/pptx": "^1.0.1",
     "@zeus/doc-editor": "workspace:*",
+    "@zeus/plugin-sdk-shared": "workspace:*",
+    "@zeus/plugin-sdk-web": "workspace:*",
     "@zeus/shared": "workspace:*",
     "antd": "^6.1.4",
     "lodash.throttle": "^4.1.1",

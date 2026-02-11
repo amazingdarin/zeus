@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Card, List, Button, Typography, Modal, Form, Input, message, Empty, Avatar, Tag, Space } from 'antd';
 import { PlusOutlined, TeamOutlined, SettingOutlined } from '@ant-design/icons';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Team, listTeams, createTeam, CreateTeamRequest } from '../api/teams';
+import { useProjectContext } from '../context/ProjectContext';
 
 const { Title, Text } = Typography;
 
@@ -13,11 +14,13 @@ export function TeamsPage() {
   const [createLoading, setCreateLoading] = useState(false);
   const [form] = Form.useForm();
   const navigate = useNavigate();
+  const { reloadProjects } = useProjectContext();
 
   const fetchTeams = async () => {
     try {
       const data = await listTeams();
       setTeams(data);
+      void reloadProjects().catch(() => undefined);
     } catch (error) {
       message.error('获取团队列表失败');
     } finally {
@@ -53,9 +56,9 @@ export function TeamsPage() {
   };
 
   return (
-    <div style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <Title level={2} style={{ margin: 0 }}>我的团队</Title>
+    <div className="teams-page">
+      <div className="teams-page-header">
+        <Title level={2} style={{ margin: 0 }} className="teams-page-title">我的团队</Title>
         <Button 
           type="primary" 
           icon={<PlusOutlined />}
@@ -78,16 +81,19 @@ export function TeamsPage() {
         </Card>
       ) : (
         <List
+          className="teams-page-list"
           loading={loading}
-          grid={{ gutter: 16, xs: 1, sm: 2, md: 2, lg: 3, xl: 3, xxl: 4 }}
+          grid={{ gutter: 16, xs: 1, sm: 1, md: 1, lg: 2, xl: 2, xxl: 3 }}
           dataSource={teams}
           renderItem={(team) => (
-            <List.Item>
+            <List.Item className="teams-page-list-item">
               <Card
+                className="teams-page-card"
                 hoverable
                 onClick={() => navigate(`/teams/${team.slug}`)}
                 actions={[
                   <Button 
+                    className="teams-page-settings-btn"
                     type="text" 
                     icon={<SettingOutlined />}
                     onClick={(e) => {
@@ -95,7 +101,7 @@ export function TeamsPage() {
                       navigate(`/teams/${team.slug}/settings`);
                     }}
                   >
-                    设置
+                    管理设置
                   </Button>
                 ]}
               >

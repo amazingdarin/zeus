@@ -7,6 +7,7 @@ import type { JSONContent } from "@tiptap/react";
 import { Image } from "@tiptap/extension-image";
 import { StarterKit } from "@tiptap/starter-kit";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Input, message } from "antd";
 
 import DocumentHeader from "../components/DocumentHeader";
 import KnowledgeBaseLayout from "../components/KnowledgeBaseLayout";
@@ -21,6 +22,10 @@ import {
   fetchDocument,
   fetchDocumentHierarchy,
   fetchDocumentTree,
+  fetchFavoriteDocuments,
+  fetchRecentEditedDocuments,
+  favoriteDocument,
+  unfavoriteDocument,
   fetchProposalDiff,
   applyProposal,
   moveDocument,
@@ -32,12 +37,15 @@ import {
   updateBlockAttrs,
   type DocumentDetail,
   type DocumentTreeItem,
+  type FavoriteDocumentItem,
+  type RecentEditedDocumentItem,
 } from "../api/documents";
 import { rebuildDocumentRag, rebuildProjectRag, getRebuildStatus } from "../api/projects";
 import { uploadAsset } from "../api/assets";
-import { apiFetch } from "../config/api";
+import { apiFetch, encodeProjectRef } from "../config/api";
 import { sanitizeFileName } from "../utils/fileName";
 import { useProjectContext } from "../context/ProjectContext";
+import { usePluginRuntime } from "../context/PluginRuntimeContext";
 import {
   CodeBlockNode,
   FileBlockNode,
@@ -79,7 +87,17 @@ type DocumentMetaInfo = {
   parentId: string;
 };
 
+type FavoriteDocument = {
+  docId: string;
+  title: string;
+  favoritedAt: string;
+};
 
+type RecentEditedDocument = {
+  docId: string;
+  title: string;
+  editedAt: string;
+};
 
 const documentCache = new Map<string, DocumentData>();
 const documentPromiseCache = new Map<string, Promise<DocumentData>>();
@@ -219,8 +237,9 @@ const buildMarkdownExtensions = (projectKey: string): Extensions => [
 
 function DocumentPage() {
   const { currentProject } = useProjectContext();
+  const { documentHeaderMenus, runMenuAction } = usePluginRuntime();
   const params = useParams<{ documentId?: string }>();
-  const resolvedProjectKey = (currentProject?.key ?? "").trim();
+  const resolvedProjectKey = (currentProject?.projectRef ?? "").trim();
   const resolvedDocumentId = (params.documentId || "").trim();
   const navigate = useNavigate();
   const location = useLocation();
@@ -293,11 +312,17 @@ function DocumentPage() {
   const [childrenByParent, setChildrenByParent] = useState<
     Record<string, KnowledgeBaseDocument[]>
   >({});
+  const [favorites, setFavorites] = useState<FavoriteDocument[]>([]);
+  const [favoritesLoading, setFavoritesLoading] = useState(false);
+  const [favoritePendingIds, setFavoritePendingIds] = useState<Record<string, boolean>>({});
+  const [recentEdits, setRecentEdits] = useState<RecentEditedDocument[]>([]);
+  const [recentEditsLoading, setRecentEditsLoading] = useState(false);
   const childrenByParentRef = useRef<Record<string, KnowledgeBaseDocument[]>>({});
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
   const [loadingIds, setLoadingIds] = useState<Record<string, boolean>>({});
   const [rootLoading, setRootLoading] = useState(false);
   const [outlineMode, setOutlineMode] = useState(false);
+
   const [rebuildingIndex, setRebuildingIndex] = useState(false);
   const [rebuildProgress, setRebuildProgress] = useState<{
     total: number;
@@ -308,6 +333,7 @@ function DocumentPage() {
   const projectKeyRef = useRef<string | null>(null);
   const loadingIdsRef = useRef<Record<string, boolean>>({});
   const rootLoadAttemptRef = useRef<string | null>(null);
+  const recentEditsRefreshTimerRef = useRef<number | null>(null);
 
   const docParentMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -486,8 +512,103 @@ function DocumentPage() {
     [flattenTree],
   );
 
-  // Keep loadRootDocuments as alias for backward compatibility
-  const loadRootDocuments = loadFullTree;
+  const loadFavorites = useCallback(async (projectKey: string) => {
+    setFavoritesLoading(true);
+    try {
+      const items = await fetchFavoriteDocuments(projectKey);
+      if (projectKeyRef.current !== projectKey) {
+        return;
+      }
+      setFavorites(mapFavoriteDocuments(items));
+    } catch (err) {
+      if (projectKeyRef.current !== projectKey) {
+        return;
+      }
+      console.error("Load favorites failed:", err);
+      setFavorites([]);
+    } finally {
+      if (projectKeyRef.current === projectKey) {
+        setFavoritesLoading(false);
+      }
+    }
+  }, []);
+
+  const loadRecentEdits = useCallback(async (projectKey: string) => {
+    setRecentEditsLoading(true);
+    try {
+      const items = await fetchRecentEditedDocuments(projectKey);
+      if (projectKeyRef.current !== projectKey) {
+        return;
+      }
+      setRecentEdits(mapRecentEditedDocuments(items));
+    } catch (err) {
+      if (projectKeyRef.current !== projectKey) {
+        return;
+      }
+      console.error("Load recent edits failed:", err);
+      setRecentEdits([]);
+    } finally {
+      if (projectKeyRef.current === projectKey) {
+        setRecentEditsLoading(false);
+      }
+    }
+  }, []);
+
+  const touchRecentEditInState = useCallback((docId: string, title: string) => {
+    const normalizedDocId = docId.trim();
+    if (!normalizedDocId) {
+      return;
+    }
+
+    setRecentEdits((prev) => {
+      const existing = prev.find((item) => item.docId === normalizedDocId);
+      const normalizedTitle = title.trim() || existing?.title || "Untitled";
+      const next: RecentEditedDocument[] = [
+        {
+          docId: normalizedDocId,
+          title: normalizedTitle,
+          editedAt: new Date().toISOString(),
+        },
+        ...prev.filter((item) => item.docId !== normalizedDocId),
+      ];
+      return next.slice(0, 10);
+    });
+  }, []);
+
+  const removeRecentEditsInState = useCallback((docIds: string[]) => {
+    const normalizedIds = new Set(
+      docIds
+        .map((docId) => String(docId ?? "").trim())
+        .filter(Boolean),
+    );
+
+    if (normalizedIds.size === 0) {
+      return;
+    }
+
+    setRecentEdits((prev) => prev.filter((item) => !normalizedIds.has(item.docId)));
+  }, []);
+
+  const scheduleRecentEditsRefresh = useCallback(
+    (projectKey: string, delayMs = 350) => {
+      if (!projectKey) {
+        return;
+      }
+
+      if (recentEditsRefreshTimerRef.current !== null) {
+        window.clearTimeout(recentEditsRefreshTimerRef.current);
+      }
+
+      recentEditsRefreshTimerRef.current = window.setTimeout(() => {
+        recentEditsRefreshTimerRef.current = null;
+        if (projectKeyRef.current !== projectKey) {
+          return;
+        }
+        void loadRecentEdits(projectKey);
+      }, delayMs);
+    },
+    [loadRecentEdits],
+  );
 
   // Use ref to store latest loadFullTree to avoid effect dependency issues
   const loadFullTreeRef = useRef(loadFullTree);
@@ -574,12 +695,21 @@ function DocumentPage() {
       // Reset tree state
       setRootDocuments([]);
       setChildrenByParent({});
+      setFavorites([]);
+      setFavoritesLoading(false);
+      setFavoritePendingIds({});
+      setRecentEdits([]);
+      setRecentEditsLoading(false);
       childrenByParentRef.current = {};
       setExpandedIds({});
       setLoadingIds({});
       loadingIdsRef.current = {};
       rootLoadAttemptRef.current = null;  // Reset so tree will reload
       setRootLoading(false);
+      if (recentEditsRefreshTimerRef.current !== null) {
+        window.clearTimeout(recentEditsRefreshTimerRef.current);
+        recentEditsRefreshTimerRef.current = null;
+      }
       
       // Clear current document state
       setDocument(null);
@@ -595,6 +725,19 @@ function DocumentPage() {
   // Auto-redirect to first document removed - main page will be displayed at /documents
 
   // Load tree once when entering the page or switching projects
+  useEffect(() => {
+    const projectKey = resolvedProjectKey || null;
+    if (!projectKey) {
+      setFavorites([]);
+      setFavoritesLoading(false);
+      setRecentEdits([]);
+      setRecentEditsLoading(false);
+      return;
+    }
+    void loadFavorites(projectKey);
+    void loadRecentEdits(projectKey);
+  }, [loadFavorites, loadRecentEdits, resolvedProjectKey]);
+
   useEffect(() => {
     const projectKey = resolvedProjectKey || null;
     if (!projectKey) {
@@ -764,10 +907,14 @@ function DocumentPage() {
     }
   }, [resolvedProjectKey, rebuildingIndex, pollRebuildStatus]);
 
-  // Cleanup polling on unmount or project change
+  // Cleanup polling and scheduled refresh on unmount or project change
   useEffect(() => {
     return () => {
       stopRebuildPolling();
+      if (recentEditsRefreshTimerRef.current !== null) {
+        window.clearTimeout(recentEditsRefreshTimerRef.current);
+        recentEditsRefreshTimerRef.current = null;
+      }
     };
   }, [stopRebuildPolling]);
 
@@ -783,8 +930,9 @@ function DocumentPage() {
       if (normalizedParent && !isRootDocumentId(normalizedParent)) {
         setExpandedIds((prev) => ({ ...prev, [normalizedParent]: true }));
       }
+      scheduleRecentEditsRefresh(resolvedProjectKey, 0);
     },
-    [loadFullTree, resolvedProjectKey],
+    [loadFullTree, resolvedProjectKey, scheduleRecentEditsRefresh],
   );
 
   const refreshParent = useCallback(
@@ -833,8 +981,99 @@ function DocumentPage() {
   );
 
   const activeDocument = document;
+
+  const handleFavoriteMutation = useCallback(
+    async (docId: string, action: "favorite" | "unfavorite") => {
+      if (!resolvedProjectKey || !docId || favoritePendingIds[docId]) {
+        return;
+      }
+
+      setFavoritePendingIds((prev) => ({ ...prev, [docId]: true }));
+
+      try {
+        const result = action === "favorite"
+          ? await favoriteDocument(resolvedProjectKey, docId)
+          : await unfavoriteDocument(resolvedProjectKey, docId);
+        setFavorites(mapFavoriteDocuments(result));
+      } catch (err) {
+        console.error(`${action} document failed:`, err);
+        alert(err instanceof Error ? err.message : "收藏操作失败");
+      } finally {
+        setFavoritePendingIds((prev) => {
+          const next = { ...prev };
+          delete next[docId];
+          return next;
+        });
+      }
+    },
+    [favoritePendingIds, resolvedProjectKey],
+  );
+
+  const handleFavoriteCurrentDocument = useCallback(() => {
+    if (!activeDocument?.id) {
+      return;
+    }
+    void handleFavoriteMutation(activeDocument.id, "favorite");
+  }, [activeDocument?.id, handleFavoriteMutation]);
+
+  const handleUnfavoriteDocument = useCallback(
+    (docId: string) => {
+      if (!docId) {
+        return;
+      }
+      void handleFavoriteMutation(docId, "unfavorite");
+    },
+    [handleFavoriteMutation],
+  );
+
+  const favoriteIdSet = useMemo(() => {
+    const idSet = new Set<string>();
+    favorites.forEach((item) => {
+      if (item.docId) {
+        idSet.add(item.docId);
+      }
+    });
+    return idSet;
+  }, [favorites]);
+
+  const activeDocumentFavorited = activeDocument ? favoriteIdSet.has(activeDocument.id) : false;
+  const activeFavoriteLoading = activeDocument ? Boolean(favoritePendingIds[activeDocument.id]) : false;
   const allowChildActions = activeDocument ? activeDocument.docType !== "overview" : true;
   const hasProposal = Boolean(proposalId);
+
+  const pluginMenuItems = useMemo(() => {
+    return documentHeaderMenus.map((item) => ({
+      id: `${item.pluginId}:${item.id}`,
+      title: item.title,
+      onClick: () => {
+        if (item.route) {
+          navigate(item.route);
+          return;
+        }
+
+        const input = activeDocument ? { doc_id: activeDocument.id } : {};
+        const projectRef = (currentProject?.projectRef || resolvedProjectKey || "").trim();
+        void runMenuAction(item, input, projectRef)
+          .then((result) => {
+            const msg = typeof result?.message === "string" ? result.message.trim() : "";
+            if (msg) {
+              message.success(msg);
+            }
+          })
+          .catch((err) => {
+            const msg = err instanceof Error ? err.message : "插件菜单执行失败";
+            message.error(msg);
+          });
+      },
+    }));
+  }, [
+    documentHeaderMenus,
+    navigate,
+    runMenuAction,
+    activeDocument,
+    currentProject?.projectRef,
+    resolvedProjectKey,
+  ]);
 
   useEffect(() => {
     if (!resolvedProjectKey || !resolvedDocumentId) {
@@ -1052,34 +1291,87 @@ function DocumentPage() {
       if (!resolvedProjectKey || !activeDocument) {
         return;
       }
+
+      const findTaskChecked = (content: JSONContent): boolean | undefined => {
+        if (content.attrs?.id === blockId) {
+          const current = content.attrs?.checked;
+          return typeof current === "boolean" ? current : undefined;
+        }
+        if (!content.content || !Array.isArray(content.content)) {
+          return undefined;
+        }
+        for (const child of content.content) {
+          const value = findTaskChecked(child);
+          if (value !== undefined) {
+            return value;
+          }
+        }
+        return undefined;
+      };
+
+      const currentChecked = activeDocument.content
+        ? findTaskChecked(activeDocument.content)
+        : undefined;
+      if (currentChecked === checked) {
+        return;
+      }
+
       try {
         // Call API to persist the change
         await updateBlockAttrs(resolvedProjectKey, activeDocument.id, blockId, { checked });
+        touchRecentEditInState(activeDocument.id, activeDocument.title);
+        scheduleRecentEditsRefresh(resolvedProjectKey);
 
         // Optimistically update local content state
         if (activeDocument.content) {
-          const updateBlockInContent = (content: JSONContent): JSONContent => {
+          const updateBlockInContent = (
+            content: JSONContent,
+          ): { next: JSONContent; changed: boolean } => {
             if (content.attrs?.id === blockId) {
               return {
-                ...content,
-                attrs: { ...content.attrs, checked },
+                next: {
+                  ...content,
+                  attrs: { ...content.attrs, checked },
+                },
+                changed: true,
               };
             }
-            if (content.content && Array.isArray(content.content)) {
-              return {
-                ...content,
-                content: content.content.map(updateBlockInContent),
-              };
+            if (!content.content || !Array.isArray(content.content)) {
+              return { next: content, changed: false };
             }
-            return content;
+
+            let changed = false;
+            const nextChildren = content.content.map((child) => {
+              const updated = updateBlockInContent(child);
+              if (updated.changed) {
+                changed = true;
+              }
+              return updated.next;
+            });
+
+            if (!changed) {
+              return { next: content, changed: false };
+            }
+
+            return {
+              next: {
+                ...content,
+                content: nextChildren,
+              },
+              changed: true,
+            };
           };
 
-          const updatedContent = updateBlockInContent(activeDocument.content);
+          const updated = updateBlockInContent(activeDocument.content);
+          if (!updated.changed) {
+            return;
+          }
+
           setDocument((prev) =>
             prev
               ? {
                   ...prev,
-                  content: updatedContent,
+                  content: updated.next,
                 }
               : null,
           );
@@ -1090,7 +1382,7 @@ function DocumentPage() {
           if (cached) {
             documentCache.set(requestKey, {
               ...cached,
-              content: updatedContent,
+              content: updated.next,
             });
           }
         }
@@ -1098,7 +1390,12 @@ function DocumentPage() {
         console.error("Failed to update task check state:", err);
       }
     },
-    [resolvedProjectKey, activeDocument],
+    [
+      resolvedProjectKey,
+      activeDocument,
+      scheduleRecentEditsRefresh,
+      touchRecentEditInState,
+    ],
   );
 
   const handleExport = useCallback(() => {
@@ -1134,7 +1431,7 @@ function DocumentPage() {
       try {
         // Update the document with the optimized content
         const response = await apiFetch(
-          `/api/projects/${encodeURIComponent(resolvedProjectKey)}/documents/${encodeURIComponent(activeDocument.id)}`,
+          `/api/projects/${encodeProjectRef(resolvedProjectKey)}/documents/${encodeURIComponent(activeDocument.id)}`,
           {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -1156,6 +1453,8 @@ function DocumentPage() {
             ? { ...prev, content: updatedContent }
             : null,
         );
+        touchRecentEditInState(activeDocument.id, activeDocument.title);
+        scheduleRecentEditsRefresh(resolvedProjectKey);
         // Trigger index rebuild for the updated document
         try {
           await rebuildDocumentRag(resolvedProjectKey, activeDocument.id);
@@ -1167,7 +1466,12 @@ function DocumentPage() {
         alert("保存优化后的文档失败");
       }
     },
-    [resolvedProjectKey, activeDocument],
+    [
+      resolvedProjectKey,
+      activeDocument,
+      scheduleRecentEditsRefresh,
+      touchRecentEditInState,
+    ],
   );
 
   const clearProposalParam = () => {
@@ -1198,6 +1502,8 @@ function DocumentPage() {
       const data = await applyProposal(resolvedProjectKey, resolvedDocumentId, proposalId);
       const updated = mapDocumentDetail(data, resolvedDocumentId);
       setDocument(updated);
+      touchRecentEditInState(updated.id, updated.title);
+      scheduleRecentEditsRefresh(resolvedProjectKey);
       await handleDocumentsChanged(updated.parentId || "");
       clearProposalParam();
       setDiffData(null);
@@ -1261,6 +1567,20 @@ function DocumentPage() {
     try {
       const result = await deleteDocument(resolvedProjectKey, activeDocument.id, true);
       console.log("Document deleted:", result);
+      setFavorites((prev) => {
+        const removed = new Set(result.deleted_ids);
+        return prev.filter((item) => !removed.has(item.docId));
+      });
+      removeRecentEditsInState(result.deleted_ids);
+      void loadFavorites(resolvedProjectKey);
+      scheduleRecentEditsRefresh(resolvedProjectKey, 0);
+      setFavoritePendingIds((prev) => {
+        const next = { ...prev };
+        for (const deletedId of result.deleted_ids) {
+          delete next[deletedId];
+        }
+        return next;
+      });
       // Clear caches for deleted documents
       for (const deletedId of result.deleted_ids) {
         const cacheKey = `${resolvedProjectKey}:${deletedId}`;
@@ -1299,7 +1619,16 @@ function DocumentPage() {
     } finally {
       setDeleting(false);
     }
-  }, [resolvedProjectKey, activeDocument, deleting, navigate, loadFullTree]);
+  }, [
+    resolvedProjectKey,
+    activeDocument,
+    deleting,
+    navigate,
+    loadFavorites,
+    loadFullTree,
+    removeRecentEditsInState,
+    scheduleRecentEditsRefresh,
+  ]);
 
   const handleOpenNew = () => {
     if (!allowChildActions) {
@@ -1781,6 +2110,11 @@ function DocumentPage() {
         <KnowledgeBaseSideNav
           documents={rootDocuments}
           childrenByParent={childrenByParent}
+          favorites={favorites}
+          favoritesLoading={favoritesLoading}
+          favoritePendingIds={favoritePendingIds}
+          recentEdits={recentEdits}
+          recentEditsLoading={recentEditsLoading}
           expandedIds={expandedIds}
           activeId={resolvedDocumentId || null}
           loadingIds={loadingIds}
@@ -1792,6 +2126,7 @@ function DocumentPage() {
           onMove={handleMove}
           onRefresh={handleRefresh}
           onRebuildIndex={handleRebuildIndex}
+          onUnfavorite={handleUnfavoriteDocument}
           onEmptyAreaClick={() => navigate("/documents")}
           onAddDocument={() => navigate("/documents/new")}
           outlineMode={outlineMode}
@@ -1809,6 +2144,8 @@ function DocumentPage() {
           allowDelete={Boolean(activeDocument)}
           allowOptimize={Boolean(activeDocument)}
           allowRefresh={Boolean(activeDocument)}
+          favorited={activeDocumentFavorited}
+          favoriteLoading={activeFavoriteLoading}
           deleting={deleting}
           refreshing={refreshingDocument}
           onEdit={handleEdit}
@@ -1821,6 +2158,8 @@ function DocumentPage() {
           onExportPPT={activeDocument ? handleOpenExportPPT : undefined}
           onOptimize={activeDocument ? handleOpenOptimize : undefined}
           onRefresh={activeDocument ? handleRefreshDocument : undefined}
+          onFavorite={activeDocument ? handleFavoriteCurrentDocument : undefined}
+          pluginMenuItems={pluginMenuItems}
         />
         <div className="doc-viewer-page">{bodyContent()}</div>
         {importModalOpen ? (
@@ -2042,7 +2381,7 @@ function DocumentPage() {
                       粘贴网址，自动抓取并转换页面内容
                     </div>
                     <div className="kb-import-url-fields">
-                      <input
+                      <Input
                         className="kb-import-url-input"
                         type="url"
                         placeholder="https://example.com/article"
@@ -2050,9 +2389,8 @@ function DocumentPage() {
                         onChange={(event) => setImportUrl(event.target.value)}
                         disabled={uploading}
                       />
-                      <input
+                      <Input
                         className="kb-import-url-input"
-                        type="text"
                         placeholder="标题（可选）"
                         value={importUrlTitle}
                         onChange={(event) => setImportUrlTitle(event.target.value)}
@@ -2099,7 +2437,7 @@ function DocumentPage() {
                       克隆公开仓库，按目录结构创建文档
                     </div>
                     <div className="kb-import-url-fields">
-                      <input
+                      <Input
                         className="kb-import-url-input"
                         type="url"
                         placeholder="https://github.com/org/repo.git"
@@ -2107,17 +2445,15 @@ function DocumentPage() {
                         onChange={(event) => setGitRepoUrl(event.target.value)}
                         disabled={uploading}
                       />
-                      <input
+                      <Input
                         className="kb-import-url-input"
-                        type="text"
                         placeholder="分支（默认: main）"
                         value={gitBranch}
                         onChange={(event) => setGitBranch(event.target.value)}
                         disabled={uploading}
                       />
-                      <input
+                      <Input
                         className="kb-import-url-input"
-                        type="text"
                         placeholder="子目录（可选）"
                         value={gitSubdir}
                         onChange={(event) => setGitSubdir(event.target.value)}
@@ -2421,6 +2757,34 @@ function isRootDocumentId(value: string): boolean {
   return value.trim().toLowerCase() === "root";
 }
 
+function mapFavoriteDocuments(items: FavoriteDocumentItem[]): FavoriteDocument[] {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items
+    .map((item) => ({
+      docId: String(item.doc_id ?? "").trim(),
+      title: String(item.title ?? "").trim() || "Untitled",
+      favoritedAt: String(item.favorited_at ?? "").trim(),
+    }))
+    .filter((item) => item.docId);
+}
+
+function mapRecentEditedDocuments(items: RecentEditedDocumentItem[]): RecentEditedDocument[] {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items
+    .map((item) => ({
+      docId: String(item.doc_id ?? "").trim(),
+      title: String(item.title ?? "").trim() || "Untitled",
+      editedAt: String(item.edited_at ?? "").trim(),
+    }))
+    .filter((item) => item.docId);
+}
+
 async function uploadSingleFile(
   projectKey: string,
   file: File,
@@ -2528,7 +2892,7 @@ function buildAssetContentUrl(projectKey: string, assetId: string): string {
   if (!projectKey) {
     return normalized;
   }
-  return `/api/projects/${encodeURIComponent(projectKey)}/assets/${encodeURIComponent(
+  return `/api/projects/${encodeProjectRef(projectKey)}/assets/${encodeURIComponent(
     normalized,
   )}/content`;
 }

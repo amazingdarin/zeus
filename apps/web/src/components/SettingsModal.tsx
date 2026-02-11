@@ -1,16 +1,25 @@
-import { useState, useEffect } from "react";
-import { RobotOutlined, SettingOutlined, CloseOutlined, BgColorsOutlined, ThunderboltOutlined, GlobalOutlined } from "@ant-design/icons";
+import { useEffect, useState } from "react";
+import { Modal, Tabs, type TabsProps } from "antd";
+import {
+  RobotOutlined,
+  SettingOutlined,
+  CloseOutlined,
+  BgColorsOutlined,
+  ThunderboltOutlined,
+  GlobalOutlined,
+  AppstoreOutlined,
+} from "@ant-design/icons";
 
-import SettingsMenu, { type SettingsMenuItem } from "./SettingsMenu";
 import AIProviderPanel from "./AIProviderPanel";
 import AppearancePanel from "./AppearancePanel";
+import PluginMarketPanel from "./PluginMarketPanel";
 import SkillsPanel from "./SkillsPanel";
 import WebSearchPanel from "./WebSearchPanel";
 
 /**
  * Settings menu items
  */
-const SETTINGS_MENU_ITEMS: SettingsMenuItem[] = [
+const SETTINGS_MENU_ITEMS: Array<{ key: string; label: string; icon: React.ReactNode }> = [
   {
     key: "ai-providers",
     label: "AI 提供商",
@@ -27,11 +36,18 @@ const SETTINGS_MENU_ITEMS: SettingsMenuItem[] = [
     icon: <ThunderboltOutlined />,
   },
   {
+    key: "plugin-market",
+    label: "插件市场",
+    icon: <AppstoreOutlined />,
+  },
+  {
     key: "appearance",
     label: "外观",
     icon: <BgColorsOutlined />,
   },
 ];
+
+const SETTINGS_MODAL_BODY_HEIGHT = "min(680px, calc(100vh - 64px))";
 
 type SettingsModalProps = {
   isOpen: boolean;
@@ -43,6 +59,12 @@ type SettingsModalProps = {
  */
 function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [activeKey, setActiveKey] = useState("ai-providers");
+  const [tabPosition, setTabPosition] = useState<TabsProps["tabPosition"]>(() => {
+    if (typeof window !== "undefined" && window.innerWidth <= 768) {
+      return "top";
+    }
+    return "left";
+  });
 
   // Close on escape key
   useEffect(() => {
@@ -58,64 +80,93 @@ function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
 
-  // Prevent body scroll when modal is open
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
+    if (!isOpen) {
+      return;
     }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
     return () => {
-      document.body.style.overflow = "";
+      document.body.style.overflow = previousOverflow;
     };
   }, [isOpen]);
 
+  useEffect(() => {
+    const handleResize = () => {
+      setTabPosition(window.innerWidth <= 768 ? "top" : "left");
+    };
+
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   if (!isOpen) return null;
 
-  /**
-   * Render the content panel based on active menu key
-   */
-  const renderContent = () => {
-    switch (activeKey) {
-      case "ai-providers":
-        return <AIProviderPanel />;
-      case "web-search":
-        return <WebSearchPanel />;
-      case "skills":
-        return <SkillsPanel />;
-      case "appearance":
-        return <AppearancePanel />;
-      default:
-        return (
-          <div className="settings-empty">
-            <SettingOutlined style={{ fontSize: 48, opacity: 0.3 }} />
-            <p>选择一个设置类别</p>
-          </div>
-        );
+  const items: TabsProps["items"] = SETTINGS_MENU_ITEMS.map((item) => {
+    let content: React.ReactNode;
+    if (item.key === "ai-providers") {
+      content = <AIProviderPanel />;
+    } else if (item.key === "web-search") {
+      content = <WebSearchPanel />;
+    } else if (item.key === "skills") {
+      content = <SkillsPanel />;
+    } else if (item.key === "plugin-market") {
+      content = <PluginMarketPanel />;
+    } else if (item.key === "appearance") {
+      content = <AppearancePanel />;
+    } else {
+      content = (
+        <div className="settings-empty">
+          <SettingOutlined style={{ fontSize: 48, opacity: 0.3 }} />
+          <p>选择一个设置类别</p>
+        </div>
+      );
     }
-  };
+
+    return {
+      key: item.key,
+      label: (
+        <span className="settings-tab-label">
+          {item.icon}
+          <span>{item.label}</span>
+        </span>
+      ),
+      children: <div className="settings-tab-pane">{content}</div>,
+    };
+  });
 
   return (
-    <div className="settings-modal-overlay" onClick={onClose}>
-      <div className="settings-modal-container" onClick={(e) => e.stopPropagation()}>
-        <div className="settings-modal-header">
-          <h2 className="settings-modal-title">设置</h2>
-          <button className="settings-modal-close" onClick={onClose} title="关闭">
-            <CloseOutlined />
-          </button>
-        </div>
-        <div className="settings-modal-body">
-          <SettingsMenu
-            items={SETTINGS_MENU_ITEMS}
-            activeKey={activeKey}
-            onSelect={setActiveKey}
-          />
-          <div className="settings-modal-content">
-            {renderContent()}
-          </div>
-        </div>
-      </div>
-    </div>
+    <Modal
+      open={isOpen}
+      onCancel={onClose}
+      className="settings-modal"
+      title="设置"
+      centered
+      destroyOnHidden
+      footer={null}
+      width={1100}
+      style={{ maxWidth: "calc(100vw - 32px)" }}
+      styles={{
+        body: {
+          padding: 0,
+          height: SETTINGS_MODAL_BODY_HEIGHT,
+          maxHeight: SETTINGS_MODAL_BODY_HEIGHT,
+          overflow: "hidden",
+        },
+      }}
+      closeIcon={<CloseOutlined />}
+    >
+      <Tabs
+        className="settings-tabs"
+        activeKey={activeKey}
+        onChange={setActiveKey}
+        items={items}
+        tabPosition={tabPosition}
+      />
+    </Modal>
   );
 }
 

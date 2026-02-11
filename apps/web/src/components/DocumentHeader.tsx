@@ -30,6 +30,8 @@ type DocumentHeaderProps = {
   allowDelete?: boolean;
   allowOptimize?: boolean;
   allowRefresh?: boolean;
+  favorited?: boolean;
+  favoriteLoading?: boolean;
   deleting?: boolean;
   refreshing?: boolean;
   onEdit: () => void;
@@ -42,6 +44,13 @@ type DocumentHeaderProps = {
   onExportPPT?: () => void;
   onOptimize?: () => void;
   onRefresh?: () => void;
+  onFavorite?: () => void;
+  pluginMenuItems?: Array<{
+    id: string;
+    title: string;
+    disabled?: boolean;
+    onClick: () => void;
+  }>;
 };
 
 function DocumentHeader({
@@ -52,6 +61,8 @@ function DocumentHeader({
   allowDelete = false,
   allowOptimize = false,
   allowRefresh = false,
+  favorited = false,
+  favoriteLoading = false,
   deleting = false,
   refreshing = false,
   onEdit,
@@ -64,6 +75,8 @@ function DocumentHeader({
   onExportPPT,
   onOptimize,
   onRefresh,
+  onFavorite,
+  pluginMenuItems = [],
 }: DocumentHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -132,6 +145,11 @@ function DocumentHeader({
     onOptimize();
   };
 
+  const handlePluginMenuClick = (action: () => void) => {
+    handleCloseMenu();
+    action();
+  };
+
   return (
     <div className="kb-main-header">
       <div className="kb-breadcrumb">
@@ -151,6 +169,20 @@ function DocumentHeader({
         ))}
       </div>
       <div className="kb-header-menu">
+        {mode === "view" && onFavorite ? (
+          <button
+            className={`kb-favorite-button${favorited ? " active" : ""}`}
+            type="button"
+            aria-label={favorited ? "已收藏" : "收藏文档"}
+            onClick={onFavorite}
+            disabled={favoriteLoading || favorited}
+            title={favorited ? "已收藏（请在左侧列表取消）" : "收藏文档"}
+          >
+            <span className="kb-favorite-icon" aria-hidden="true">
+              {favorited ? "★" : "☆"}
+            </span>
+          </button>
+        ) : null}
         {allowRefresh && onRefresh ? (
           <button
             className="kb-refresh-button"
@@ -238,6 +270,17 @@ function DocumentHeader({
                     {deleting ? "删除中..." : "删除"}
                   </button>
                 ) : null}
+                {pluginMenuItems.map((item) => (
+                  <button
+                    key={item.id}
+                    className="kb-menu-item"
+                    type="button"
+                    onClick={() => handlePluginMenuClick(item.onClick)}
+                    disabled={item.disabled}
+                  >
+                    {item.title}
+                  </button>
+                ))}
               </>
             )}
           </div>

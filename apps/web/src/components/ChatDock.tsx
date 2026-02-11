@@ -184,7 +184,7 @@ const buildPromptMessage = (message: string, prompt?: PromptTemplate) => {
 
 function ChatDock() {
   const { currentProject } = useProjectContext();
-  const projectKey = currentProject?.key ?? "";
+  const projectKey = currentProject?.projectRef ?? "";
   const navigate = useNavigate();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputState, dispatchInput] = useReducer(inputReducer, initialInputState);

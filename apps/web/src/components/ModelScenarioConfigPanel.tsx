@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { Select } from "antd";
+import { Alert, Button, Form, Input, Select, Spin, Switch } from "antd";
+import { ReloadOutlined } from "@ant-design/icons";
 
 export type ScenarioKey = "chat" | "embedding" | "multimodal";
 
@@ -63,92 +64,70 @@ function ModelScenarioConfigPanel({
         <h3>{title}</h3>
         {disabled ? <span className="model-pill">即将推出</span> : null}
       </div>
-      <label className="model-field">
-        <span>显示名称</span>
-        <input
-          type="text"
-          value={draft.name}
-          onChange={(event) => onChange({ name: event.target.value })}
-          placeholder="运行时名称"
-          disabled={disabled}
-        />
-      </label>
-      <label className="model-field">
-        <span>接口地址</span>
-        <input
-          type="text"
-          value={draft.baseUrl}
-          onChange={(event) => onChange({ baseUrl: event.target.value })}
-          placeholder="https://api.openai.com"
-          disabled={disabled}
-        />
-      </label>
-      <label className="model-field">
-        <span>API 密钥</span>
-        <input
-          type="password"
-          value={draft.apiKey}
-          onChange={(event) => onChange({ apiKey: event.target.value })}
-          placeholder="可选"
-          disabled={disabled}
-        />
-      </label>
-      <label className="model-field">
-        <span>模型名称</span>
-        <div className="model-input-row">
-          <Select
-            className="model-select"
-            value={draft.modelName || undefined}
-            placeholder="选择模型"
-            disabled={disabled}
-            onChange={(value) => onChange({ modelName: value })}
-            options={modelOptions.map((model) => ({ label: model, value: model }))}
+      <Form layout="vertical" disabled={disabled}>
+        <Form.Item label="显示名称">
+          <Input
+            value={draft.name}
+            onChange={(event) => onChange({ name: event.target.value })}
+            placeholder="运行时名称"
           />
-          <button
-            className="model-icon-button"
-            type="button"
-            onClick={handleRefresh}
-            disabled={disabled || refreshing}
-            aria-label="刷新模型列表"
-            title="刷新模型列表"
-          >
-            {refreshing ? (
-              <span className="model-refresh-spinner" />
-            ) : (
-              <svg
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-                aria-hidden="true"
-                focusable="false"
-              >
-                <path
-                  d="M20 6v6h-6M4 18v-6h6M19 12a7 7 0 0 0-12-4M5 12a7 7 0 0 0 12 4"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            )}
-          </button>
-        </div>
-      </label>
-      {refreshing ? <div className="model-hint">正在刷新模型列表...</div> : null}
-      <details className="model-params" open>
-        <summary>参数</summary>
-        <textarea
-          value={draft.parametersText}
-          onChange={(event) => onChange({ parametersText: event.target.value })}
-          placeholder='{"temperature": 0.7}'
-          disabled={disabled}
-        />
+        </Form.Item>
+        <Form.Item label="接口地址">
+          <Input
+            value={draft.baseUrl}
+            onChange={(event) => onChange({ baseUrl: event.target.value })}
+            placeholder="https://api.openai.com"
+          />
+        </Form.Item>
+        <Form.Item label="API 密钥">
+          <Input.Password
+            value={draft.apiKey}
+            onChange={(event) => onChange({ apiKey: event.target.value })}
+            placeholder="可选"
+          />
+        </Form.Item>
+        <Form.Item label="模型名称">
+          <Input.Group compact>
+            <Select
+              className="model-select"
+              value={draft.modelName || undefined}
+              placeholder="选择模型"
+              style={{ width: "calc(100% - 40px)" }}
+              onChange={(value) => onChange({ modelName: value })}
+              options={modelOptions.map((model) => ({ label: model, value: model }))}
+              showSearch
+              optionFilterProp="label"
+            />
+            <Button
+              icon={refreshing ? <Spin size="small" /> : <ReloadOutlined />}
+              aria-label="刷新模型列表"
+              title="刷新模型列表"
+              onClick={handleRefresh}
+              disabled={disabled || refreshing}
+            />
+          </Input.Group>
+        </Form.Item>
+        {refreshing ? <div className="model-hint">正在刷新模型列表...</div> : null}
+        <Form.Item label="参数">
+          <Input.TextArea
+            rows={6}
+            value={draft.parametersText}
+            onChange={(event) => onChange({ parametersText: event.target.value })}
+            placeholder='{"temperature": 0.7}'
+          />
+        </Form.Item>
         {scenario === "embedding" ? (
           <div className="model-hint">Embedding 模型会忽略 temperature 参数。</div>
         ) : null}
-      </details>
-      {error ? <div className="model-error">{error}</div> : null}
+        <Form.Item label="启用" style={{ marginBottom: 12 }}>
+          <Switch
+            checked={draft.isActive}
+            onChange={(checked) => onChange({ isActive: checked })}
+            disabled={disabled}
+          />
+        </Form.Item>
+      </Form>
+      {error ? <Alert type="error" message={error} showIcon /> : null}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSONContent } from "@tiptap/react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Modal } from "antd";
+import { Input, Modal } from "antd";
 
 import RichTextEditor from "../components/RichTextEditor";
 import RichTextViewer from "../components/RichTextViewer";
@@ -149,11 +149,11 @@ function NewDocumentPage() {
   }, [contentPayload, jsonMode]);
 
   const handleLoadDocument = useCallback(async (id: string) => {
-    if (!currentProject?.key) return { type: "doc", content: [] };
+    if (!currentProject?.projectRef) return { type: "doc", content: [] };
 
     setLoadingDocument(true);
     try {
-      const detail = await fetchDocument(currentProject.key, id);
+      const detail = await fetchDocument(currentProject.projectRef, id);
 
       const metaValue = detail?.meta;
       let contentToReturn: JSONContent | null = null;
@@ -235,7 +235,7 @@ function NewDocumentPage() {
           // We create a one-off controller just for this fetch
           const controller = new AbortController();
           const downloadInfo = await fetchStorageObjectDownload(
-            currentProject.key,
+            currentProject.projectRef,
             storageId,
             controller.signal
           );
@@ -265,7 +265,7 @@ function NewDocumentPage() {
     } finally {
       setLoadingDocument(false);
     }
-  }, [currentProject?.key]);
+  }, [currentProject?.projectRef]);
 
   useEffect(() => {
     setDocumentId(documentIdParam);
@@ -283,7 +283,7 @@ function NewDocumentPage() {
 
   const handleSave = async () => {
 
-    const projectKey = currentProject?.key ?? "";
+    const projectKey = currentProject?.projectRef ?? "";
     if (!projectKey) {
       setSaveError("Project is required before saving.");
       return;
@@ -523,9 +523,8 @@ function NewDocumentPage() {
       ) : null}
       {diffContentError ? <div className="doc-viewer-error">{diffContentError}</div> : null}
       <div className="new-doc-metadata">
-        <input
+        <Input
           className="kb-title-input new-doc-title-input"
-          type="text"
           value={title}
           placeholder="无标题文档"
           onChange={(event) => setTitle(event.target.value)}
@@ -578,7 +577,7 @@ function NewDocumentPage() {
                       {originalDoc ? (
                         <RichTextViewer
                           content={originalDoc as JSONContent}
-                          projectKey={currentProject?.key ?? ""}
+                          projectKey={currentProject?.projectRef ?? ""}
                         />
                       ) : (
                         <div className="doc-viewer-state">No content</div>
@@ -617,7 +616,7 @@ function NewDocumentPage() {
                                 </div>
                                 <RichTextViewer
                                   content={originalDoc as JSONContent}
-                                  projectKey={currentProject?.key ?? ""}
+                                  projectKey={currentProject?.projectRef ?? ""}
                                 />
                               </div>
                             )}
@@ -637,7 +636,7 @@ function NewDocumentPage() {
                                 </div>
                                 <RichTextViewer
                                   content={editedDoc as JSONContent}
-                                  projectKey={currentProject?.key ?? ""}
+                                  projectKey={currentProject?.projectRef ?? ""}
                                 />
                               </div>
                             )}
@@ -649,7 +648,7 @@ function NewDocumentPage() {
                               <div className="doc-diff-change-item">
                                 <RichTextViewer
                                   content={originalDoc as JSONContent}
-                                  projectKey={currentProject?.key ?? ""}
+                                  projectKey={currentProject?.projectRef ?? ""}
                                 />
                               </div>
                             )}
@@ -657,7 +656,7 @@ function NewDocumentPage() {
                               <div className="doc-diff-change-item">
                                 <RichTextViewer
                                   content={editedDoc as JSONContent}
-                                  projectKey={currentProject?.key ?? ""}
+                                  projectKey={currentProject?.projectRef ?? ""}
                                 />
                               </div>
                             )}
@@ -694,11 +693,12 @@ function NewDocumentPage() {
         ) : jsonMode ? (
           <div className="new-doc-json">
             <div className="new-doc-json-title">Document JSON</div>
-            <textarea
+            <Input.TextArea
               className="new-doc-json-editor"
               value={jsonDraft}
               onChange={(event) => setJsonDraft(event.target.value)}
               spellCheck={false}
+              autoSize={{ minRows: 18, maxRows: 36 }}
             />
             {jsonError ? <div className="doc-viewer-error">{jsonError}</div> : null}
           </div>
@@ -707,7 +707,7 @@ function NewDocumentPage() {
             <RichTextEditor
               content={content}
               onChange={setContent}
-              projectKey={currentProject?.key ?? ""}
+              projectKey={currentProject?.projectRef ?? ""}
               docId={documentIdParam || undefined}
               onLoadDocument={handleLoadDocument}
               onEditorReady={(editor) => setEditorReady(!!editor)}

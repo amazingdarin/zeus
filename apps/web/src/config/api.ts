@@ -3,6 +3,16 @@ const appBackendUrl = (import.meta.env.VITE_APP_BACKEND_URL ?? "http://localhost
 const serverUrl = (import.meta.env.VITE_SERVER_URL ?? "http://localhost:8080").trim();
 const useProxy = Boolean(import.meta.env.DEV);
 
+const PROJECT_REF_SEPARATOR = "::";
+
+export type ProjectRefOwnerType = "personal" | "team";
+
+export type ParsedProjectRef = {
+  ownerType: ProjectRefOwnerType;
+  ownerKey: string;
+  projectKey: string;
+};
+
 /**
  * Get the Go server URL for auth and management APIs
  */
@@ -13,55 +23,71 @@ export const getServerUrl = (): string => {
   return serverUrl;
 };
 
+export const buildProjectRef = (parts: ParsedProjectRef): string => {
+  const ownerType = parts.ownerType === "team" ? "team" : "personal";
+  const ownerKey = String(parts.ownerKey ?? "").trim() || "me";
+  const projectKey = String(parts.projectKey ?? "").trim();
+  return `${ownerType}${PROJECT_REF_SEPARATOR}${ownerKey}${PROJECT_REF_SEPARATOR}${projectKey}`;
+};
+
+export const parseProjectRef = (projectRef: string): ParsedProjectRef => {
+  const raw = String(projectRef ?? "").trim();
+  if (!raw) {
+    return { ownerType: "personal", ownerKey: "me", projectKey: "" };
+  }
+
+  const parts = raw.split(PROJECT_REF_SEPARATOR);
+  if (parts.length === 3) {
+    const ownerType = String(parts[0] ?? "").trim().toLowerCase() === "team" ? "team" : "personal";
+    const ownerKey = String(parts[1] ?? "").trim() || (ownerType === "personal" ? "me" : "");
+    const projectKey = String(parts[2] ?? "").trim();
+    return { ownerType, ownerKey, projectKey };
+  }
+
+  return { ownerType: "personal", ownerKey: "me", projectKey: raw };
+};
+
+export const encodeProjectRef = (projectRef: string): string => {
+  const parsed = parseProjectRef(projectRef);
+  return `${encodeURIComponent(parsed.ownerType)}/${encodeURIComponent(parsed.ownerKey)}/${encodeURIComponent(parsed.projectKey)}`;
+};
+
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, "");
 const trimLeadingSlash = (value: string) => value.replace(/^\/+/, "");
+
+const isScopedProjectPath = (path: string): boolean => {
+  return /^\/api\/projects\/[^/]+\/[^/]+\/[^/]+(?:\/|$)/.test(path);
+};
 
 /**
  * Check if a path should be routed to app-backend
  */
 const isAppBackendPath = (path: string): boolean => {
-  // Explicit app-backend prefix
   if (path.startsWith("/api/app")) return true;
-  // Document operations now handled by app-backend
-  if (path.match(/^\/api\/projects\/[^/]+\/documents/)) return true;
-  // Knowledge search
-  if (path.match(/^\/api\/projects\/[^/]+\/knowledge/)) return true;
-  // Asset operations
-  if (path.match(/^\/api\/projects\/[^/]+\/assets/)) return true;
-  // Skills configuration (project-scoped)
-  if (path.match(/^\/api\/projects\/[^/]+\/skills/)) return true;
-  // Chat and runs
-  if (path.match(/^\/api\/projects\/[^/]+\/chat/)) return true;
-  if (path.match(/^\/api\/projects\/[^/]+\/runs/)) return true;
-  // Convert, fetch-url, import-git
-  if (path.match(/^\/api\/projects\/[^/]+\/convert/)) return true;
-  // PPT export
-  if (path.match(/^\/api\/projects\/[^/]+\/ppt/)) return true;
-  // Global skills configuration
+
+  if (isScopedProjectPath(path)) return true;
+  if (path.startsWith("/api/system-docs")) return true;
+
+  if (path.startsWith("/api/plugins")) return true;
   if (path.startsWith("/api/skills")) return true;
-  // LLM configuration
   if (path.startsWith("/api/llm/")) return true;
-  // Settings (web-search, etc.)
   if (path.startsWith("/api/settings/")) return true;
   return false;
 };
 
 export const buildApiUrl = (path: string) => {
   const normalizedPath = `/${trimLeadingSlash(path)}`;
-  
+
   if (isAppBackendPath(normalizedPath)) {
-    // Route to app-backend
     const appPath = normalizedPath.startsWith("/api/app")
       ? normalizedPath.replace("/api/app", "/api")
       : normalizedPath;
     if (useProxy) {
-      // In dev mode with proxy, use relative path
       return appPath;
     }
     return `${trimTrailingSlash(appBackendUrl)}${appPath}`;
   }
-  
-  // Route to Go server (projects, system, etc.)
+
   if (useProxy || !apiBaseUrl) {
     return normalizedPath;
   }
@@ -69,22 +95,21 @@ export const buildApiUrl = (path: string) => {
 };
 
 const getAccessToken = (): string | null => {
-  return localStorage.getItem('zeus_access_token');
+  return localStorage.getItem("zeus_access_token");
 };
 
 const fetchWithCredentials = (path: string, init: RequestInit = {}) => {
   const token = getAccessToken();
   const headers = new Headers(init.headers);
-  
-  // Add Authorization header if we have a token
-  if (token && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${token}`);
+
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
   }
-  
-  return fetch(buildApiUrl(path), { 
-    ...init, 
+
+  return fetch(buildApiUrl(path), {
+    ...init,
     headers,
-    credentials: "include" 
+    credentials: "include",
   });
 };
 

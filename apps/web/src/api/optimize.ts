@@ -2,7 +2,7 @@
  * Document Optimization API Client
  */
 
-import { apiFetch, buildApiUrl } from "../config/api";
+import { apiFetch, buildApiUrl, encodeProjectRef } from "../config/api";
 import type { JSONContent } from "@tiptap/react";
 
 // ============================================================================
@@ -48,7 +48,7 @@ export const startOptimize = async (
   options: OptimizeOptions,
 ): Promise<{ taskId: string }> => {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(docId)}/optimize`,
+    `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(docId)}/optimize`,
     {
       method: "POST",
       headers: {
@@ -74,7 +74,7 @@ export const getOptimizeStatus = async (
   taskId: string,
 ): Promise<OptimizeTask> => {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(docId)}/optimize/${encodeURIComponent(taskId)}`,
+    `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(docId)}/optimize/${encodeURIComponent(taskId)}`,
   );
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
@@ -101,7 +101,7 @@ export const buildOptimizeStreamUrl = (
   docId: string,
   taskId: string,
 ): string => {
-  return buildApiUrl(`/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(docId)}/optimize/${encodeURIComponent(taskId)}/stream`);
+  return buildApiUrl(`/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(docId)}/optimize/${encodeURIComponent(taskId)}/stream`);
 };
 
 /**

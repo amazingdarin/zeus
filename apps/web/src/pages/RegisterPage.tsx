@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Form, Input, Button, Card, Typography, message, Divider } from 'antd';
 import { UserOutlined, LockOutlined, MailOutlined } from '@ant-design/icons';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const { Title, Text } = Typography;
@@ -18,6 +18,8 @@ export function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const { register } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const from = (location.state as { from?: string })?.from || '/';
 
   const onFinish = async (values: RegisterFormValues) => {
     setLoading(true);
@@ -29,7 +31,7 @@ export function RegisterPage() {
         display_name: values.display_name,
       });
       message.success('注册成功');
-      navigate('/', { replace: true });
+      navigate(from, { replace: true });
     } catch (error) {
       message.error(error instanceof Error ? error.message : '注册失败');
     } finally {
@@ -133,7 +135,7 @@ export function RegisterPage() {
         
         <div style={{ textAlign: 'center' }}>
           <Text>已有账号？</Text>
-          <Link to="/login"> 立即登录</Link>
+          <Link to="/login" state={{ from }}> 立即登录</Link>
         </div>
       </Card>
     </div>

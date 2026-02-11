@@ -1,4 +1,4 @@
-import { apiFetch } from "../config/api";
+import { apiFetch, encodeProjectRef } from "../config/api";
 import type { JSONContent } from "@tiptap/react";
 
 export type DocumentListItem = {
@@ -96,7 +96,7 @@ export const fetchDocumentList = async (projectKey: string, parentId: string): P
         params.set("parent_id", parentId);
     }
     const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents?${params.toString()}`,
+        `/api/projects/${encodeProjectRef(projectKey)}/documents?${params.toString()}`,
     );
     if (!response.ok) {
         throw new Error("Failed to load documents");
@@ -113,9 +113,21 @@ export type DocumentTreeItem = {
     children?: DocumentTreeItem[];
 };
 
+export type FavoriteDocumentItem = {
+    doc_id: string;
+    title: string;
+    favorited_at: string;
+};
+
+export type RecentEditedDocumentItem = {
+    doc_id: string;
+    title: string;
+    edited_at: string;
+};
+
 export const fetchDocumentTree = async (projectKey: string): Promise<DocumentTreeItem[]> => {
     const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents/tree`,
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/tree`,
     );
     if (!response.ok) {
         throw new Error("Failed to load document tree");
@@ -124,9 +136,71 @@ export const fetchDocumentTree = async (projectKey: string): Promise<DocumentTre
     return Array.isArray(payload?.data) ? payload.data : [];
 };
 
+export const fetchFavoriteDocuments = async (
+    projectKey: string,
+): Promise<FavoriteDocumentItem[]> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/favorites`,
+    );
+    if (!response.ok) {
+        throw new Error("Failed to load favorite documents");
+    }
+    const payload = await response.json();
+    return Array.isArray(payload?.data) ? payload.data : [];
+};
+
+export const fetchRecentEditedDocuments = async (
+    projectKey: string,
+): Promise<RecentEditedDocumentItem[]> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/recent-edits`,
+    );
+    if (!response.ok) {
+        throw new Error("Failed to load recent edited documents");
+    }
+    const payload = await response.json();
+    return Array.isArray(payload?.data) ? payload.data : [];
+};
+
+export const favoriteDocument = async (
+    projectKey: string,
+    docId: string,
+): Promise<FavoriteDocumentItem[]> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(docId)}/favorite`,
+        {
+            method: "PUT",
+        },
+    );
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.message || "Failed to favorite document");
+    }
+    const payload = await response.json();
+    return Array.isArray(payload?.data) ? payload.data : [];
+};
+
+export const unfavoriteDocument = async (
+    projectKey: string,
+    docId: string,
+): Promise<FavoriteDocumentItem[]> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(docId)}/favorite`,
+        {
+            method: "DELETE",
+        },
+    );
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.message || "Failed to unfavorite document");
+    }
+    const payload = await response.json();
+    return Array.isArray(payload?.data) ? payload.data : [];
+};
+
 export const fetchDocument = async (projectKey: string, documentId: string): Promise<DocumentDetail> => {
     const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(
             documentId,
         )}`,
     );
@@ -142,7 +216,7 @@ export const fetchDocumentHierarchy = async (
     documentId: string,
 ): Promise<DocumentHierarchyItem[]> => {
     const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(
             documentId,
         )}/hierarchy`,
     );
@@ -159,7 +233,7 @@ export const createDocument = async (
     body: CreateDocumentBody,
 ): Promise<DocumentDetail> => {
     const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents`,
+        `/api/projects/${encodeProjectRef(projectKey)}/documents`,
         {
             method: "POST",
             headers: {
@@ -184,7 +258,7 @@ export const moveDocument = async (
     input: MoveDocumentInput,
 ): Promise<void> => {
     const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(docId)}/move`,
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(docId)}/move`,
         {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
@@ -211,7 +285,7 @@ export const deleteDocument = async (
         params.set("recursive", "true");
     }
     const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(docId)}?${params.toString()}`,
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(docId)}?${params.toString()}`,
         {
             method: "DELETE",
         },
@@ -234,7 +308,7 @@ export const uploadDocument = async (
         params.set("parent_id", parentId);
     }
     const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents/upload?${params.toString()}`,
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/upload?${params.toString()}`,
         {
             method: "POST",
             body: formData,
@@ -251,7 +325,7 @@ export const importDocument = async (
   formData: FormData,
 ): Promise<void> => {
     const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents/import`,
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/import`,
         {
             method: "POST",
             body: formData,
@@ -307,7 +381,7 @@ export const importFileAsDocument = async (
   form.append("enable_format_optimize", req.enable_format_optimize ? "true" : "false");
 
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/documents/import-file`,
+    `/api/projects/${encodeProjectRef(projectKey)}/documents/import-file`,
     {
       method: "POST",
       body: form,
@@ -353,7 +427,7 @@ export const importGit = async (
   payload: ImportGitRequest,
 ): Promise<ImportGitResult> => {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/documents/import-git`,
+    `/api/projects/${encodeProjectRef(projectKey)}/documents/import-git`,
     {
       method: "POST",
       headers: {
@@ -388,7 +462,7 @@ export const fetchUrlHtml = async (
   url: string,
 ): Promise<FetchUrlResult> => {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/documents/fetch-url`,
+    `/api/projects/${encodeProjectRef(projectKey)}/documents/fetch-url`,
     {
       method: "POST",
       headers: {
@@ -421,7 +495,7 @@ export const fetchProposalDiff = async (
     proposalId: string,
 ): Promise<ProposalDiff> => {
     const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(
             documentId,
         )}/proposals/${encodeURIComponent(proposalId)}/diff`,
     );
@@ -442,7 +516,7 @@ export const applyProposal = async (
     proposalId: string,
 ): Promise<DocumentDetail> => {
     const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(
             documentId,
         )}/proposals/${encodeURIComponent(proposalId)}/apply`,
         { method: "POST" },
@@ -460,7 +534,7 @@ export const rejectProposal = async (
     proposalId: string,
 ): Promise<void> => {
     const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(
             documentId,
         )}/proposals/${encodeURIComponent(proposalId)}/reject`,
         { method: "POST" },
@@ -484,7 +558,7 @@ export const optimizeFormat = async (
     markdown: string,
 ): Promise<OptimizeFormatResult> => {
     const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents/optimize-format`,
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/optimize-format`,
         {
             method: "POST",
             headers: {
@@ -533,7 +607,7 @@ export const suggestDocuments = async (
         params.set("parentId", parentId);
     }
     const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents/suggest?${params.toString()}`,
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/suggest?${params.toString()}`,
     );
     if (!response.ok) {
         console.warn("Document suggest failed");
@@ -560,7 +634,7 @@ export const updateBlockAttrs = async (
     attrs: Record<string, unknown>,
 ): Promise<void> => {
     const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(docId)}/blocks/${encodeURIComponent(blockId)}`,
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(docId)}/blocks/${encodeURIComponent(blockId)}`,
         {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },

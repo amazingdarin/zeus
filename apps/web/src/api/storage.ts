@@ -1,4 +1,4 @@
-import { apiFetch } from "../config/api";
+import { apiFetch, encodeProjectRef } from "../config/api";
 
 export type StorageDownloadPayload = {
     mime_type?: string;
@@ -13,7 +13,7 @@ export const fetchStorageObjectDownload = async (
     signal?: AbortSignal,
 ): Promise<StorageDownloadPayload> => {
     const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/storage-objects/${encodeURIComponent(
+        `/api/projects/${encodeProjectRef(projectKey)}/storage-objects/${encodeURIComponent(
             storageObjectId,
         )}`,
         { signal },

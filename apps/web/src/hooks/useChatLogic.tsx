@@ -22,10 +22,13 @@ import {
   rejectTool,
   selectIntent,
   provideRequiredInput,
+  providePreflightInput,
   type DocumentScope,
   type PendingToolCall,
   type PendingIntentInfo,
+  type PendingPreflightInfo,
   type PendingRequiredInputInfo,
+  type ProvidePreflightInputPayload,
   type ProvideRequiredInputPayload,
   type IntentOption,
 } from "../api/chat";
@@ -89,6 +92,17 @@ export type ChatMessage = {
   timestamp: number;
 };
 
+export type ThinkingStep = {
+  id: string;
+  kind: "thinking" | "search_start" | "search_result";
+  content: string;
+  phase?: string;
+  subQueries?: string[];
+  searchQuery?: string;
+  resultCount?: number;
+  timestamp: number;
+};
+
 // Helpers
 export const createId = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -131,6 +145,37 @@ const normalizeDonePayload = (
   return { message, artifacts, sources };
 };
 
+const normalizeThinkingPayload = (payload: unknown) => {
+  const data = payload && typeof payload === "object"
+    ? (payload as Record<string, unknown>)
+    : {};
+  const content = typeof data.content === "string"
+    ? data.content
+    : typeof payload === "string"
+      ? payload
+      : "";
+  const phase = typeof data.phase === "string" ? data.phase : "";
+  const searchQuery = typeof data.searchQuery === "string" ? data.searchQuery : "";
+  const resultRaw = data.resultCount;
+  const resultValue = resultRaw === undefined || resultRaw === null
+    ? undefined
+    : Number(resultRaw);
+  const resultCount = Number.isFinite(resultValue) ? resultValue : undefined;
+  const subQueries = Array.isArray(data.subQueries)
+    ? data.subQueries
+      .map((item) => String(item ?? "").trim())
+      .filter(Boolean)
+    : undefined;
+
+  return {
+    content: content.trim(),
+    phase: phase.trim(),
+    searchQuery: searchQuery.trim(),
+    resultCount,
+    subQueries: subQueries && subQueries.length > 0 ? subQueries : undefined,
+  };
+};
+
 // Markdown rendering for assistant messages
 export function renderMarkdown(content: string): React.ReactNode {
   return <Markdown content={content} variant="chat" />;
@@ -155,12 +200,14 @@ export type UseChatLogicReturn = {
   deepSearchEnabled: boolean;
   error: string | null;
   assistantBuffer: string;
+  thinkingSteps: ThinkingStep[];
   llmConfig: ProviderConfig | null;
   mentions: MentionItem[];
   mentionState: MentionState;
   pendingDraft: DocumentDraft | null;
   pendingTool: PendingToolCall | null;
   pendingIntentInfo: PendingIntentInfo | null;
+  pendingPreflightInfo: PendingPreflightInfo | null;
   pendingRequiredInput: PendingRequiredInputInfo | null;
   slashActive: boolean;
   slashQuery: string;
@@ -203,6 +250,7 @@ export type UseChatLogicReturn = {
   handleConfirmTool: () => Promise<void>;
   handleRejectTool: () => Promise<void>;
   handleSelectIntent: (option: IntentOption) => Promise<void>;
+  handleProvidePreflightInput: (payload: ProvidePreflightInputPayload) => Promise<void>;
   handleProvideRequiredInput: (payload: ProvideRequiredInputPayload) => Promise<void>;
   toggleSourcesExpanded: (messageId: string) => void;
   handlePaste: (e: React.ClipboardEvent) => void;
@@ -222,7 +270,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     onSessionChange,
   } = options;
   const { currentProject } = useProjectContext();
-  const projectKey = currentProject?.key ?? "";
+  const projectKey = currentProject?.projectRef ?? "";
   const navigate = useNavigate();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -253,6 +301,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     }
   }, [onDeepSearchChange]);
   const [assistantBuffer, setAssistantBuffer] = useState("");
+  const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([]);
   const [llmConfig, setLlmConfig] = useState<ProviderConfig | null>(null);
   const [internalSessionId, setInternalSessionId] = useState<string>(() => `session-${createId()}`);
 
@@ -303,6 +352,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   // Pending tool confirmation state
   const [pendingTool, setPendingTool] = useState<PendingToolCall | null>(null);
   const [pendingIntentInfo, setPendingIntentInfo] = useState<PendingIntentInfo | null>(null);
+  const [pendingPreflightInfo, setPendingPreflightInfo] = useState<PendingPreflightInfo | null>(null);
   const [pendingRequiredInput, setPendingRequiredInput] = useState<PendingRequiredInputInfo | null>(null);
   const currentRunIdRef = useRef<string | null>(null);
 
@@ -502,7 +552,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       container.scrollTop = container.scrollHeight;
     });
     return () => cancelAnimationFrame(handle);
-  }, [messages, assistantBuffer, autoScrollEnabled]);
+  }, [messages, assistantBuffer, thinkingSteps, autoScrollEnabled]);
 
   const closeStream = useCallback(() => {
     if (eventSourceRef.current) {
@@ -534,6 +584,47 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   const resetAssistantBuffer = useCallback(() => {
     assistantBufferRef.current = "";
     setAssistantBuffer("");
+  }, []);
+
+  const resetThinkingSteps = useCallback(() => {
+    setThinkingSteps([]);
+  }, []);
+
+  const appendThinkingStep = useCallback((step: Omit<ThinkingStep, "id" | "timestamp">) => {
+    const fallbackContent = step.kind === "search_start"
+      ? "开始检索"
+      : step.kind === "search_result"
+        ? "检索结果已返回"
+        : "正在思考";
+
+    const normalized: ThinkingStep = {
+      id: createId(),
+      kind: step.kind,
+      content: step.content?.trim() || fallbackContent,
+      phase: step.phase?.trim() || undefined,
+      searchQuery: step.searchQuery?.trim() || undefined,
+      resultCount: typeof step.resultCount === "number" && Number.isFinite(step.resultCount)
+        ? step.resultCount
+        : undefined,
+      subQueries: step.subQueries && step.subQueries.length > 0 ? step.subQueries : undefined,
+      timestamp: Date.now(),
+    };
+
+    setThinkingSteps((prev) => {
+      const last = prev[prev.length - 1];
+      if (
+        last
+        && last.kind === normalized.kind
+        && last.content === normalized.content
+        && (last.phase ?? "") === (normalized.phase ?? "")
+        && (last.searchQuery ?? "") === (normalized.searchQuery ?? "")
+        && (last.resultCount ?? -1) === (normalized.resultCount ?? -1)
+        && (last.subQueries ?? []).join("\n") === (normalized.subQueries ?? []).join("\n")
+      ) {
+        return prev;
+      }
+      return [...prev, normalized];
+    });
   }, []);
 
   const handleDelta = useCallback((delta: string) => {
@@ -631,6 +722,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     setMentionState({ active: false, query: "", startPos: 0 });
     setError(null);
     setPendingIntentInfo(null);
+    setPendingPreflightInfo(null);
     setPendingRequiredInput(null);
     clearAttachments();
 
@@ -644,6 +736,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     appendMessage("user", mentionInfo + attachmentInfo + message);
     setIsGenerating(true);
     resetAssistantBuffer();
+    resetThinkingSteps();
     closeStream();
 
     try {
@@ -702,12 +795,43 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       source.addEventListener("assistant.thinking", (event) => {
         hasCustomEventsRef.current = true;
         const payload = parsePayload((event as MessageEvent).data);
-        const content = typeof payload === "object" && payload !== null
-          ? String((payload as { content?: string }).content ?? "")
-          : String(payload ?? "");
-        if (content) {
-          setAssistantBuffer(`*${content}*\n`);
-        }
+        const thinking = normalizeThinkingPayload(payload);
+        appendThinkingStep({
+          kind: "thinking",
+          content: thinking.content,
+          phase: thinking.phase,
+          searchQuery: thinking.searchQuery,
+          resultCount: thinking.resultCount,
+          subQueries: thinking.subQueries,
+        });
+      });
+
+      source.addEventListener("assistant.search_start", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        const thinking = normalizeThinkingPayload(payload);
+        appendThinkingStep({
+          kind: "search_start",
+          content: thinking.content,
+          phase: thinking.phase,
+          searchQuery: thinking.searchQuery,
+          resultCount: thinking.resultCount,
+          subQueries: thinking.subQueries,
+        });
+      });
+
+      source.addEventListener("assistant.search_result", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        const thinking = normalizeThinkingPayload(payload);
+        appendThinkingStep({
+          kind: "search_result",
+          content: thinking.content,
+          phase: thinking.phase,
+          searchQuery: thinking.searchQuery,
+          resultCount: thinking.resultCount,
+          subQueries: thinking.subQueries,
+        });
       });
 
       source.addEventListener("assistant.draft", (event) => {
@@ -722,7 +846,18 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         hasCustomEventsRef.current = true;
         const payload = parsePayload((event as MessageEvent).data);
         if (payload && typeof payload === "object" && payload !== null) {
+          setPendingPreflightInfo(null);
           setPendingIntentInfo(payload as PendingIntentInfo);
+        }
+      });
+
+      source.addEventListener("assistant.preflight_pending", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        if (payload && typeof payload === "object" && payload !== null) {
+          setPendingIntentInfo(null);
+          setPendingRequiredInput(null);
+          setPendingPreflightInfo(payload as PendingPreflightInfo);
         }
       });
 
@@ -730,6 +865,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         hasCustomEventsRef.current = true;
         const payload = parsePayload((event as MessageEvent).data);
         if (payload && typeof payload === "object" && payload !== null) {
+          setPendingPreflightInfo(null);
           setPendingRequiredInput(payload as PendingRequiredInputInfo);
         }
       });
@@ -739,6 +875,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         const payload = parsePayload((event as MessageEvent).data);
         if (payload && typeof payload === "object") {
           setPendingIntentInfo(null);
+          setPendingPreflightInfo(null);
           setPendingRequiredInput(null);
           setPendingTool(payload as PendingToolCall);
         }
@@ -753,8 +890,10 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         appendMessage("system", msg);
         setPendingTool(null);
         setPendingIntentInfo(null);
+        setPendingPreflightInfo(null);
         setPendingRequiredInput(null);
         setIsGenerating(false);
+        resetThinkingSteps();
         closeStream();
       });
 
@@ -764,6 +903,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         const { message: doneMessage, artifacts, sources } = normalizeDonePayload(payload);
         setIsGenerating(false);
         setPendingIntentInfo(null);
+        setPendingPreflightInfo(null);
         setPendingRequiredInput(null);
         commitAssistantBuffer(artifacts, doneMessage, sources);
         closeStream();
@@ -780,7 +920,9 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         appendMessage("system", `错误: ${errMsg}`);
         setIsGenerating(false);
         setPendingIntentInfo(null);
+        setPendingPreflightInfo(null);
         setPendingRequiredInput(null);
+        resetThinkingSteps();
         resetAssistantBuffer();
         closeStream();
       });
@@ -790,6 +932,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         const payload = parsePayload(event.data);
         if (payload === null || payload === "null") {
           setIsGenerating(false);
+          resetThinkingSteps();
           closeStream();
           return;
         }
@@ -798,6 +941,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
           setError(errMsg);
           appendMessage("system", `错误: ${errMsg}`);
           setIsGenerating(false);
+          resetThinkingSteps();
           closeStream();
           return;
         }
@@ -817,7 +961,9 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         appendMessage("system", "错误: 连接中断");
         setIsGenerating(false);
         setPendingIntentInfo(null);
+        setPendingPreflightInfo(null);
         setPendingRequiredInput(null);
+        resetThinkingSteps();
         resetAssistantBuffer();
         closeStream();
       };
@@ -826,11 +972,13 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       setError(errMsg);
       appendMessage("system", `错误: ${errMsg}`);
       setIsGenerating(false);
+      resetThinkingSteps();
       resetAssistantBuffer();
       closeStream();
     }
   }, [
     appendMessage,
+    appendThinkingStep,
     canSend,
     closeStream,
     commitAssistantBuffer,
@@ -838,6 +986,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     input,
     projectKey,
     resetAssistantBuffer,
+    resetThinkingSteps,
     sessionId,
     mentions,
     selectedCommand,
@@ -858,6 +1007,8 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     setCommandHistory([]);
     setHistoryIndex(-1);
     currentInputRef.current = null;
+    resetAssistantBuffer();
+    resetThinkingSteps();
 
     try {
       await clearChatSession(projectKey, sessionId);
@@ -867,7 +1018,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       setMessages([]);
       setSessionId(`session-${createId()}`);
     }
-  }, [projectKey, sessionId, setSessionId, historyKey]);
+  }, [historyKey, projectKey, resetAssistantBuffer, resetThinkingSteps, sessionId, setSessionId]);
 
   const handleNewSession = useCallback(async () => {
     if (!projectKey) return;
@@ -878,6 +1029,8 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     setCommandHistory([]);
     setHistoryIndex(-1);
     currentInputRef.current = null;
+    resetAssistantBuffer();
+    resetThinkingSteps();
 
     try {
       const { createSession } = await import("../api/chat-sessions");
@@ -889,7 +1042,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       setMessages([]);
       setSessionId(`session-${createId()}`);
     }
-  }, [projectKey, setSessionId]);
+  }, [projectKey, resetAssistantBuffer, resetThinkingSteps, setSessionId]);
 
   /**
    * Stop the current generation
@@ -899,8 +1052,10 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     // Close the stream connection
     closeStream();
     setPendingIntentInfo(null);
+    setPendingPreflightInfo(null);
     setPendingRequiredInput(null);
-    
+    resetThinkingSteps();
+
     // If there's a partial response in the buffer, save it
     if (assistantBufferRef.current) {
       appendMessage("assistant", assistantBufferRef.current + "\n\n[已停止]");
@@ -908,7 +1063,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     }
     
     setIsGenerating(false);
-  }, [closeStream, appendMessage, resetAssistantBuffer]);
+  }, [appendMessage, closeStream, resetAssistantBuffer, resetThinkingSteps]);
 
   const handleDraftApplied = useCallback((docId: string, isNew: boolean) => {
     setPendingDraft(null);
@@ -949,6 +1104,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       setPendingTool(null);
       appendMessage("system", "操作已取消");
       setIsGenerating(false);
+      resetThinkingSteps();
       closeStream();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "取消失败";
@@ -956,7 +1112,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       setPendingTool(null);
       setIsGenerating(false);
     }
-  }, [projectKey, appendMessage, closeStream]);
+  }, [projectKey, appendMessage, closeStream, resetThinkingSteps]);
 
   const handleSelectIntent = useCallback(async (option: IntentOption) => {
     const runId = currentRunIdRef.current;
@@ -973,6 +1129,26 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       const msg = err instanceof Error ? err.message : "选择失败";
       appendMessage("system", `错误: ${msg}`);
       setPendingIntentInfo(null);
+      setIsGenerating(false);
+      closeStream();
+    }
+  }, [projectKey, appendMessage, closeStream]);
+
+  const handleProvidePreflightInput = useCallback(async (payload: ProvidePreflightInputPayload) => {
+    const runId = currentRunIdRef.current;
+    if (!projectKey || !runId) {
+      setPendingPreflightInfo(null);
+      return;
+    }
+
+    try {
+      await providePreflightInput(projectKey, runId, payload);
+      setPendingPreflightInfo(null);
+      // SSE stream will continue after providing preflight input.
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "提交失败";
+      appendMessage("system", `错误: ${msg}`);
+      setPendingPreflightInfo(null);
       setIsGenerating(false);
       closeStream();
     }
@@ -1250,12 +1426,14 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     deepSearchEnabled,
     error,
     assistantBuffer,
+    thinkingSteps,
     llmConfig,
     mentions,
     mentionState,
     pendingDraft,
     pendingTool,
     pendingIntentInfo,
+    pendingPreflightInfo,
     pendingRequiredInput,
     slashActive,
     slashQuery,
@@ -1298,6 +1476,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     handleConfirmTool,
     handleRejectTool,
     handleSelectIntent,
+    handleProvidePreflightInput,
     handleProvideRequiredInput,
     toggleSourcesExpanded,
     handlePaste,

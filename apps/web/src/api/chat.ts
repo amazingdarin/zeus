@@ -1,4 +1,4 @@
-import { apiFetch, buildApiUrl } from "../config/api";
+import { apiFetch, buildApiUrl, encodeProjectRef } from "../config/api";
 
 export type DocumentScope = {
   docId: string;
@@ -39,7 +39,7 @@ export const createChatRun = async (
     type: a.type,
   }));
 
-  const response = await apiFetch(`/api/projects/${projectKey}/chat/runs`, {
+  const response = await apiFetch(`/api/projects/${encodeProjectRef(projectKey)}/chat/runs`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -65,7 +65,7 @@ export const createChatRun = async (
 };
 
 export const buildChatStreamUrl = (projectKey: string, runId: string): string => {
-  return buildApiUrl(`/api/projects/${projectKey}/chat/runs/${runId}/stream`);
+  return buildApiUrl(`/api/projects/${encodeProjectRef(projectKey)}/chat/runs/${runId}/stream`);
 };
 
 export const clearChatSession = async (
@@ -73,7 +73,7 @@ export const clearChatSession = async (
   sessionId: string,
 ): Promise<void> => {
   const response = await apiFetch(
-    `/api/projects/${projectKey}/chat/sessions/${encodeURIComponent(sessionId)}`,
+    `/api/projects/${encodeProjectRef(projectKey)}/chat/sessions/${encodeURIComponent(sessionId)}`,
     { method: "DELETE" },
   );
   if (!response.ok) {
@@ -130,9 +130,48 @@ export type PendingRequiredInputInfo =
       currentArgs?: Record<string, unknown>;
     };
 
+export type PreflightTaskInfo = {
+  taskId: string;
+  title: string;
+  subagentId: string;
+  subagentName: string;
+  status: "ready" | "missing_input" | "blocked" | "waiting_dependency";
+  reason?: string;
+};
+
+export type PreflightMissingInput = {
+  taskId: string;
+  kind: "doc_scope" | "skill_args";
+  skillName: string;
+  message: string;
+  fields?: Array<{
+    key: string;
+    type: string;
+    description: string;
+    enum?: string[];
+  }>;
+  missing?: string[];
+  issues?: Array<{ path: string; message: string }>;
+  currentArgs?: Record<string, unknown>;
+};
+
+export type PendingPreflightInfo = {
+  message: string;
+  tasks: PreflightTaskInfo[];
+  missingInputs: PreflightMissingInput[];
+};
+
 export type ProvideRequiredInputPayload =
   | { doc_id: string }
   | { args: Record<string, unknown> };
+
+export type ProvidePreflightInputPayload = {
+  taskInputs: Array<{
+    taskId: string;
+    doc_id?: string;
+    args?: Record<string, unknown>;
+  }>;
+};
 
 /**
  * Confirm a pending tool execution
@@ -142,7 +181,7 @@ export const confirmTool = async (
   runId: string,
 ): Promise<void> => {
   const response = await apiFetch(
-    `/api/projects/${projectKey}/chat/runs/${encodeURIComponent(runId)}/confirm-tool`,
+    `/api/projects/${encodeProjectRef(projectKey)}/chat/runs/${encodeURIComponent(runId)}/confirm-tool`,
     { method: "POST" },
   );
   if (!response.ok) {
@@ -159,7 +198,7 @@ export const rejectTool = async (
   runId: string,
 ): Promise<void> => {
   const response = await apiFetch(
-    `/api/projects/${projectKey}/chat/runs/${encodeURIComponent(runId)}/reject-tool`,
+    `/api/projects/${encodeProjectRef(projectKey)}/chat/runs/${encodeURIComponent(runId)}/reject-tool`,
     { method: "POST" },
   );
   if (!response.ok) {
@@ -177,7 +216,7 @@ export const selectIntent = async (
   option: IntentOption,
 ): Promise<void> => {
   const response = await apiFetch(
-    `/api/projects/${projectKey}/chat/runs/${encodeURIComponent(runId)}/select-intent`,
+    `/api/projects/${encodeProjectRef(projectKey)}/chat/runs/${encodeURIComponent(runId)}/select-intent`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -199,7 +238,7 @@ export const provideRequiredInput = async (
   payload: ProvideRequiredInputPayload,
 ): Promise<void> => {
   const response = await apiFetch(
-    `/api/projects/${projectKey}/chat/runs/${encodeURIComponent(runId)}/provide-input`,
+    `/api/projects/${encodeProjectRef(projectKey)}/chat/runs/${encodeURIComponent(runId)}/provide-input`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -209,5 +248,27 @@ export const provideRequiredInput = async (
   if (!response.ok) {
     const data = await response.json().catch(() => null);
     throw new Error(data?.message || "Failed to provide input");
+  }
+};
+
+/**
+ * Provide preflight input for pending preflight clarification.
+ */
+export const providePreflightInput = async (
+  projectKey: string,
+  runId: string,
+  payload: ProvidePreflightInputPayload,
+): Promise<void> => {
+  const response = await apiFetch(
+    `/api/projects/${encodeProjectRef(projectKey)}/chat/runs/${encodeURIComponent(runId)}/provide-preflight-input`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.message || "Failed to provide preflight input");
   }
 };

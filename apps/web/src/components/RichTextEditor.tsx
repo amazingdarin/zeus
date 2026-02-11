@@ -12,6 +12,7 @@ import {
 
 import { apiFetch } from "../config/api";
 import { fetchUrlHtml } from "../api/documents";
+import { usePluginRuntime } from "../context/PluginRuntimeContext";
 import BlockRefPicker from "./BlockRefPicker";
 
 interface RichTextEditorProps {
@@ -46,6 +47,7 @@ function RichTextEditor({
   onLoadDocument,
   onEditorReady: onEditorReadyProp,
 }: RichTextEditorProps) {
+  const { editorContributions } = usePluginRuntime();
   const editorRef = useRef<Editor | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [triggerRange, setTriggerRange] = useState<Range | null>(null);
@@ -123,6 +125,7 @@ function RichTextEditor({
         onChange={onChange}
         content={content}
         extensions={extensions}
+        pluginContributions={editorContributions}
         mode="edit"
         docId={docId}
         onLoadDocument={onLoadDocument}

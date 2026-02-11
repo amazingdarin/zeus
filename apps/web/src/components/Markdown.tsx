@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type MouseEvent as ReactMouseEvent } from "react";
 import MarkdownIt from "markdown-it";
 
 type MarkdownVariant = "default" | "chat";
@@ -7,11 +7,24 @@ type MarkdownProps = {
   content: string;
   variant?: MarkdownVariant;
   className?: string;
+  resolveHref?: (href: string) => string;
+  resolveSrc?: (src: string) => string;
+  onLinkClick?: (href: string, event: MouseEvent) => boolean;
 };
 
 const isExternalHref = (href: string) => href.startsWith("http://") || href.startsWith("https://");
 
-const createMarkdownRenderer = (breaks: boolean) => {
+type RendererOptions = {
+  breaks: boolean;
+  resolveHref?: (href: string) => string;
+  resolveSrc?: (src: string) => string;
+};
+
+const createMarkdownRenderer = ({
+  breaks,
+  resolveHref,
+  resolveSrc,
+}: RendererOptions) => {
   const md = new MarkdownIt("default", {
     html: false,
     linkify: true,
@@ -24,12 +37,26 @@ const createMarkdownRenderer = (breaks: boolean) => {
     ((tokens: any[], idx: number, options: any, env: any, self: any) => self.renderToken(tokens, idx, options));
   md.renderer.rules.link_open = (tokens: any[], idx: number, options: any, env: any, self: any) => {
     const token = tokens[idx];
-    const href = token.attrGet("href") ?? "";
-    if (isExternalHref(href)) {
+    const rawHref = token.attrGet("href") ?? "";
+    const resolvedHref = resolveHref ? resolveHref(rawHref) : rawHref;
+    token.attrSet("href", resolvedHref);
+    if (isExternalHref(resolvedHref)) {
       token.attrSet("target", "_blank");
       token.attrSet("rel", "noopener noreferrer");
     }
     return defaultLinkOpen(tokens, idx, options, env, self);
+  };
+
+  // Resolve image sources if caller provides a resolver.
+  const defaultImage =
+    md.renderer.rules.image ??
+    ((tokens: any[], idx: number, options: any, env: any, self: any) => self.renderToken(tokens, idx, options));
+  md.renderer.rules.image = (tokens: any[], idx: number, options: any, env: any, self: any) => {
+    const token = tokens[idx];
+    const rawSrc = token.attrGet("src") ?? "";
+    const resolvedSrc = resolveSrc ? resolveSrc(rawSrc) : rawSrc;
+    token.attrSet("src", resolvedSrc);
+    return defaultImage(tokens, idx, options, env, self);
   };
 
   // Wrap tables so they can scroll horizontally on narrow viewports.
@@ -57,10 +84,14 @@ const createMarkdownRenderer = (breaks: boolean) => {
   return md;
 };
 
-const mdDefault = createMarkdownRenderer(false);
-const mdChat = createMarkdownRenderer(true);
-
-export default function Markdown({ content, variant = "default", className }: MarkdownProps) {
+export default function Markdown({
+  content,
+  variant = "default",
+  className,
+  resolveHref,
+  resolveSrc,
+  onLinkClick,
+}: MarkdownProps) {
   const isChat = variant === "chat";
   const wrapperClassName = [
     "zeus-markdown",
@@ -70,14 +101,42 @@ export default function Markdown({ content, variant = "default", className }: Ma
     .filter(Boolean)
     .join(" ");
 
+  const renderer = useMemo(
+    () => createMarkdownRenderer({ breaks: isChat, resolveHref, resolveSrc }),
+    [isChat, resolveHref, resolveSrc],
+  );
+
   const html = useMemo(() => {
-    const renderer = isChat ? mdChat : mdDefault;
     return renderer.render(content);
-  }, [content, isChat]);
+  }, [content, renderer]);
+
+  const handleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!onLinkClick) {
+      return;
+    }
+
+    const element = event.target as HTMLElement | null;
+    const anchor = element?.closest("a");
+    if (!anchor) {
+      return;
+    }
+
+    const href = anchor.getAttribute("href") ?? "";
+    if (!href) {
+      return;
+    }
+
+    const handled = onLinkClick(href, event.nativeEvent);
+    if (handled) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
 
   return (
     <div
       className={wrapperClassName}
+      onClick={handleClick}
       // MarkdownIt is configured with `html: false`.
       dangerouslySetInnerHTML={{ __html: html }}
     />

@@ -5,7 +5,7 @@
  */
 
 import type { JSONContent } from "@tiptap/react";
-import { apiFetch } from "../config/api";
+import { apiFetch, encodeProjectRef } from "../config/api";
 
 /**
  * Document draft from the backend
@@ -43,7 +43,7 @@ export async function getDraft(
   draftId: string,
 ): Promise<DocumentDraft> {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/drafts/${encodeURIComponent(draftId)}`,
+    `/api/projects/${encodeProjectRef(projectKey)}/drafts/${encodeURIComponent(draftId)}`,
   );
 
   if (!response.ok) {
@@ -88,7 +88,7 @@ export async function applyDraft(
   }
 
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/drafts/${encodeURIComponent(draftId)}/apply`,
+    `/api/projects/${encodeProjectRef(projectKey)}/drafts/${encodeURIComponent(draftId)}/apply`,
     {
       method: "POST",
       headers: {
@@ -115,7 +115,7 @@ export async function rejectDraft(
   draftId: string,
 ): Promise<void> {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/drafts/${encodeURIComponent(draftId)}`,
+    `/api/projects/${encodeProjectRef(projectKey)}/drafts/${encodeURIComponent(draftId)}`,
     {
       method: "DELETE",
     },
@@ -134,7 +134,7 @@ export async function listPendingDrafts(
   projectKey: string,
 ): Promise<DocumentDraft[]> {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/drafts`,
+    `/api/projects/${encodeProjectRef(projectKey)}/drafts`,
   );
 
   if (!response.ok) {

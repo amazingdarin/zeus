@@ -11,6 +11,7 @@ import {
 
 import { apiFetch } from "../config/api";
 import { fetchUrlHtml } from "../api/documents";
+import { usePluginRuntime } from "../context/PluginRuntimeContext";
 
 interface RichTextViewerProps {
   content: JSONContent;
@@ -36,13 +37,15 @@ const openApiExtensions = (projectKey?: string): Extensions => [
 ];
 
 function RichTextViewer({ content, projectKey, onEditorReady, onTaskCheckChange }: RichTextViewerProps) {
+  const { editorContributions } = usePluginRuntime();
   const openapi = openApiExtensions(projectKey);
+  const viewerExtensions: Extensions = [...openapi, ...editorContributions.extraExtensions];
   const extensions: Extensions = [
-    ...openapi,
+    ...viewerExtensions,
     BlockRefNode.configure({
       projectKey,
       fetcher: apiFetch,
-      viewerExtensions: openapi,
+      viewerExtensions,
     }),
   ];
 

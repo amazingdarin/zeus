@@ -2,7 +2,7 @@
  * Chat Sessions API Client
  */
 
-import { apiFetch } from "../config/api";
+import { apiFetch, encodeProjectRef } from "../config/api";
 import type { SourceReference, ChatArtifact } from "../hooks/useChatLogic";
 
 export type ChatSessionInfo = {
@@ -31,7 +31,7 @@ export async function listSessions(
   offset = 0,
 ): Promise<ChatSessionInfo[]> {
   const res = await apiFetch(
-    `/api/projects/${projectKey}/chat/sessions?limit=${limit}&offset=${offset}`,
+    `/api/projects/${encodeProjectRef(projectKey)}/chat/sessions?limit=${limit}&offset=${offset}`,
   );
   if (!res.ok) throw new Error("Failed to list sessions");
   const json = await res.json();
@@ -45,7 +45,7 @@ export async function createSession(
   projectKey: string,
   title?: string,
 ): Promise<ChatSessionInfo> {
-  const res = await apiFetch(`/api/projects/${projectKey}/chat/sessions`, {
+  const res = await apiFetch(`/api/projects/${encodeProjectRef(projectKey)}/chat/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(title ? { title } : {}),
@@ -63,7 +63,7 @@ export async function getSessionMessages(
   sessionId: string,
 ): Promise<ChatMessageInfo[]> {
   const res = await apiFetch(
-    `/api/projects/${projectKey}/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
+    `/api/projects/${encodeProjectRef(projectKey)}/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
   );
   if (!res.ok) throw new Error("Failed to get session messages");
   const json = await res.json();
@@ -79,7 +79,7 @@ export async function renameSession(
   title: string,
 ): Promise<ChatSessionInfo> {
   const res = await apiFetch(
-    `/api/projects/${projectKey}/chat/sessions/${encodeURIComponent(sessionId)}`,
+    `/api/projects/${encodeProjectRef(projectKey)}/chat/sessions/${encodeURIComponent(sessionId)}`,
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -99,7 +99,7 @@ export async function deleteSession(
   sessionId: string,
 ): Promise<void> {
   const res = await apiFetch(
-    `/api/projects/${projectKey}/chat/sessions/${encodeURIComponent(sessionId)}`,
+    `/api/projects/${encodeProjectRef(projectKey)}/chat/sessions/${encodeURIComponent(sessionId)}`,
     { method: "DELETE" },
   );
   if (!res.ok) throw new Error("Failed to delete session");

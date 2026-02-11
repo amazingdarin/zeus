@@ -1,18 +1,20 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { FileTextOutlined, RobotOutlined } from "@ant-design/icons";
+import { AppstoreOutlined, FileTextOutlined, RobotOutlined } from "@ant-design/icons";
 import { message } from "antd";
 
 import Sidebar from "../components/Sidebar";
 import SettingsModal from "../components/SettingsModal";
 import ChatPanel from "../components/ChatPanel";
+import CommandPalette from "../components/CommandPalette";
 import { useAuth } from "../context/AuthContext";
+import { usePluginRuntime } from "../context/PluginRuntimeContext";
 
 type AppShellProps = {
   children: ReactNode;
 };
 
-const navItems = [
+const coreNavItems = [
   { label: "AI 助手", to: "/chat", icon: <RobotOutlined /> },
   { label: "文档", to: "/documents", icon: <FileTextOutlined /> },
 ];
@@ -22,6 +24,25 @@ function AppShell({ children }: AppShellProps) {
   const navigate = useNavigate();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { user, isAuthenticated, logout } = useAuth();
+  const { sidebarMenus, runMenuAction } = usePluginRuntime();
+
+  const navItems = useMemo(() => {
+    const pluginItems = sidebarMenus.map((menuItem) => ({
+      label: menuItem.title,
+      to: menuItem.route,
+      icon: <AppstoreOutlined />,
+      onClick: menuItem.route
+        ? undefined
+        : () => {
+            void runMenuAction(menuItem).catch((err) => {
+              const msg = err instanceof Error ? err.message : "插件菜单执行失败";
+              message.error(msg);
+            });
+          },
+    }));
+
+    return [...coreNavItems, ...pluginItems];
+  }, [sidebarMenus, runMenuAction]);
 
   const activeIndex = useMemo(() => {
     const path = location.pathname;
@@ -35,10 +56,10 @@ function AppShell({ children }: AppShellProps) {
   const handleLogout = async () => {
     try {
       await logout();
-      message.success('已退出登录');
-      navigate('/login');
+      message.success("已退出登录");
+      navigate("/login");
     } catch (error) {
-      message.error('退出登录失败');
+      message.error("退出登录失败");
     }
   };
 
@@ -53,7 +74,15 @@ function AppShell({ children }: AppShellProps) {
           items={navItems}
           activeIndex={activeIndex}
           settingsActive={settingsOpen}
+          onTeamsClick={() => {
+            setSettingsOpen(false);
+            navigate("/teams");
+          }}
           onSettingsClick={() => setSettingsOpen(true)}
+          onTutorialDocsClick={() => {
+            setSettingsOpen(false);
+            navigate("/system-docs");
+          }}
           user={isAuthenticated ? user : null}
           onLogout={handleLogout}
         />
@@ -67,6 +96,7 @@ function AppShell({ children }: AppShellProps) {
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
       />
+      <CommandPalette />
     </div>
   );
 }

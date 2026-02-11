@@ -100,7 +100,7 @@ function KnowledgeBaseLayout({ sideNav, children }: KnowledgeBaseLayoutProps) {
   }, [sidebarWidth]);
 
   const activeWidth = treeCollapsed ? COLLAPSED_WIDTH : sidebarWidth;
-  const showCollapsed = treeCollapsed && !isAnimating;
+  const showCollapsed = treeCollapsed;
 
   return (
     <ToggleTreeContext.Provider value={{ treeCollapsed, toggleTree }}>

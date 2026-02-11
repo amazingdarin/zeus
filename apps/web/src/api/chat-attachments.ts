@@ -2,7 +2,7 @@
  * Chat attachments API client
  */
 
-import { apiFetch } from "../config/api";
+import { apiFetch, encodeProjectRef } from "../config/api";
 import type { AttachmentUploadResponse } from "../types/chat-attachment";
 
 /**
@@ -16,7 +16,7 @@ export async function uploadFileAttachment(
   formData.append("file", file);
 
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/chat/attachments`,
+    `/api/projects/${encodeProjectRef(projectKey)}/chat/attachments`,
     {
       method: "POST",
       body: formData,
@@ -50,7 +50,7 @@ export async function fetchUrlAttachment(
   url: string
 ): Promise<AttachmentUploadResponse> {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/chat/attachments`,
+    `/api/projects/${encodeProjectRef(projectKey)}/chat/attachments`,
     {
       method: "POST",
       headers: {

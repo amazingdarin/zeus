@@ -11,31 +11,30 @@ import {
   type SetStateAction,
 } from "react";
 
-import { fetchProjects } from "../api/projects";
+import {
+  fetchProjects,
+  type Project as ApiProject,
+  type ProjectOwnerContext,
+} from "../api/projects";
 import { useAuth } from "./AuthContext";
 
-export type Project = {
-  id: string;
-  key: string;
-  name: string;
-  description?: string;
-  status?: string;
-  createdAt?: string;
-};
+export type Project = ApiProject;
+export type { ProjectOwnerContext };
 
 export type ProjectContextValue = {
   projects: Project[];
+  ownerContexts: ProjectOwnerContext[];
   currentProject: Project | null;
   loading: boolean;
   setProjects: Dispatch<SetStateAction<Project[]>>;
-  setCurrentProject: (key: string) => void;
+  setCurrentProject: (projectRef: string) => void;
   setLoading: (loading: boolean) => void;
   reloadProjects: () => Promise<void>;
 };
 
 const ProjectContext = createContext<ProjectContextValue | undefined>(undefined);
 
-const lastProjectKeyStorageKey = "zeus.lastProjectKey";
+const lastProjectRefStorageKey = "zeus.lastProjectRef";
 
 type ProjectProviderProps = {
   children: ReactNode;
@@ -44,7 +43,8 @@ type ProjectProviderProps = {
 function ProjectProvider({ children }: ProjectProviderProps) {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
-  const [currentProjectKey, setCurrentProjectKey] = useState<string | null>(null);
+  const [ownerContexts, setOwnerContexts] = useState<ProjectOwnerContext[]>([]);
+  const [currentProjectRef, setCurrentProjectRef] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const mountedRef = useRef(true);
   const hasLoadedRef = useRef(false);
@@ -57,34 +57,36 @@ function ProjectProvider({ children }: ProjectProviderProps) {
   }, []);
 
   const reloadProjects = useCallback(async () => {
-    // Don't load if not authenticated
     if (!isAuthenticated) {
       setProjects([]);
-      setCurrentProjectKey(null);
+      setOwnerContexts([]);
+      setCurrentProjectRef(null);
       return;
     }
 
     setLoading(true);
     try {
-      const items = await fetchProjects();
-      const mapped = items;
+      const result = await fetchProjects();
       if (!mountedRef.current) {
         return;
       }
-      setProjects(mapped);
-      const storedKey = localStorage.getItem(lastProjectKeyStorageKey);
-      const hasStored = storedKey
-        ? mapped.some((project) => project.key === storedKey)
+      setProjects(result.projects);
+      setOwnerContexts(result.contexts);
+
+      const storedRef = localStorage.getItem(lastProjectRefStorageKey);
+      const hasStored = storedRef
+        ? result.projects.some((project) => project.projectRef === storedRef)
         : false;
+
       if (hasStored) {
-        setCurrentProjectKey(storedKey);
+        setCurrentProjectRef(storedRef);
       } else {
-        const fallbackKey = mapped[0]?.key ?? null;
-        setCurrentProjectKey(fallbackKey);
-        if (fallbackKey) {
-          localStorage.setItem(lastProjectKeyStorageKey, fallbackKey);
+        const fallbackRef = result.projects[0]?.projectRef ?? null;
+        setCurrentProjectRef(fallbackRef);
+        if (fallbackRef) {
+          localStorage.setItem(lastProjectRefStorageKey, fallbackRef);
         } else {
-          localStorage.removeItem(lastProjectKeyStorageKey);
+          localStorage.removeItem(lastProjectRefStorageKey);
         }
       }
     } catch (error) {
@@ -93,6 +95,7 @@ function ProjectProvider({ children }: ProjectProviderProps) {
       }
       console.error("Failed to load projects:", error);
       setProjects([]);
+      setOwnerContexts([]);
     } finally {
       if (mountedRef.current) {
         setLoading(false);
@@ -100,22 +103,18 @@ function ProjectProvider({ children }: ProjectProviderProps) {
     }
   }, [isAuthenticated]);
 
-  // Load projects when auth state changes (after auth loading completes)
   useEffect(() => {
-    // Wait for auth to finish loading
     if (authLoading) {
       return;
     }
 
-    // Only load if authenticated
     if (isAuthenticated) {
-      // Reload projects when user becomes authenticated
       reloadProjects();
       hasLoadedRef.current = true;
     } else {
-      // Clear projects when user logs out
       setProjects([]);
-      setCurrentProjectKey(null);
+      setOwnerContexts([]);
+      setCurrentProjectRef(null);
       hasLoadedRef.current = false;
     }
   }, [isAuthenticated, authLoading, reloadProjects]);
@@ -124,37 +123,38 @@ function ProjectProvider({ children }: ProjectProviderProps) {
     if (projects.length === 0) {
       return;
     }
-    if (currentProjectKey && projects.some((project) => project.key === currentProjectKey)) {
+    if (currentProjectRef && projects.some((project) => project.projectRef === currentProjectRef)) {
       return;
     }
-    const fallbackKey = projects[0]?.key ?? null;
-    setCurrentProjectKey(fallbackKey);
-    if (fallbackKey) {
-      localStorage.setItem(lastProjectKeyStorageKey, fallbackKey);
+    const fallbackRef = projects[0]?.projectRef ?? null;
+    setCurrentProjectRef(fallbackRef);
+    if (fallbackRef) {
+      localStorage.setItem(lastProjectRefStorageKey, fallbackRef);
     } else {
-      localStorage.removeItem(lastProjectKeyStorageKey);
+      localStorage.removeItem(lastProjectRefStorageKey);
     }
-  }, [projects, currentProjectKey]);
+  }, [projects, currentProjectRef]);
 
   const currentProject = useMemo(
-    () => projects.find((project) => project.key === currentProjectKey) ?? null,
-    [projects, currentProjectKey],
+    () => projects.find((project) => project.projectRef === currentProjectRef) ?? null,
+    [projects, currentProjectRef],
   );
 
-  const setCurrentProject = (key: string) => {
-    const trimmed = key.trim();
+  const setCurrentProject = (projectRef: string) => {
+    const trimmed = String(projectRef ?? "").trim();
     if (!trimmed) {
-      setCurrentProjectKey(null);
-      localStorage.removeItem(lastProjectKeyStorageKey);
+      setCurrentProjectRef(null);
+      localStorage.removeItem(lastProjectRefStorageKey);
       return;
     }
-    setCurrentProjectKey(trimmed);
-    localStorage.setItem(lastProjectKeyStorageKey, trimmed);
+    setCurrentProjectRef(trimmed);
+    localStorage.setItem(lastProjectRefStorageKey, trimmed);
   };
 
   const value = useMemo(
     () => ({
       projects,
+      ownerContexts,
       currentProject,
       loading,
       setProjects,
@@ -162,7 +162,7 @@ function ProjectProvider({ children }: ProjectProviderProps) {
       setLoading,
       reloadProjects,
     }),
-    [projects, currentProject, loading, reloadProjects],
+    [projects, ownerContexts, currentProject, loading, reloadProjects],
   );
 
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>;

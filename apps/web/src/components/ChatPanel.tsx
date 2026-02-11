@@ -5,6 +5,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { Input } from "antd";
 import {
   DeleteOutlined,
   SendOutlined,
@@ -32,9 +33,11 @@ import {
 import MentionDropdown from "./MentionDropdown";
 import DraftPreviewModal from "./DraftPreviewModal";
 import IntentSelectDialog from "./IntentSelectDialog";
+import PreflightInputDialog from "./PreflightInputDialog";
 import RequiredInputDialog from "./RequiredInputDialog";
 import ToolConfirmDialog from "./ToolConfirmDialog";
 import ChatAttachmentTags from "./ChatAttachmentTags";
+import ThinkingTimeline from "./ThinkingTimeline";
 
 type ChatPanelProps = {
   onOpenSettings?: () => void;
@@ -53,6 +56,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     isGenerating,
     error,
     assistantBuffer,
+    thinkingSteps,
     llmConfig,
     mentions,
     mentionState,
@@ -84,9 +88,11 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     handleConfirmTool,
     handleRejectTool,
     handleSelectIntent,
+    handleProvidePreflightInput,
     handleProvideRequiredInput,
     pendingTool,
     pendingIntentInfo,
+    pendingPreflightInfo,
     pendingRequiredInput,
     toggleSourcesExpanded,
     // Attachments
@@ -94,6 +100,8 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     handlePaste,
     removeAttachment,
   } = useChatLogic({ autoScrollEnabled: isExpanded });
+
+  const mutableInputRef = inputRef as { current: HTMLTextAreaElement | null };
 
   // Focus input when panel opens
   useEffect(() => {
@@ -436,6 +444,13 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
         onSubmit={handleProvideRequiredInput}
       />
 
+      <PreflightInputDialog
+        visible={!!pendingPreflightInfo}
+        projectKey={projectKey}
+        pendingPreflight={pendingPreflightInfo}
+        onSubmit={handleProvidePreflightInput}
+      />
+
       {/* Expanded Panel (animated open/close) */}
       <div
         className={`chat-dock-panel${isExpanded ? " is-expanded" : " is-collapsed"}${isResizing ? " is-resizing" : ""}`}
@@ -500,7 +515,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
 
           {/* Messages */}
           <div className="chat-dock-messages" ref={messagesRef}>
-            {messages.length === 0 && !assistantBuffer ? (
+            {messages.length === 0 && !assistantBuffer && thinkingSteps.length === 0 ? (
               <div className="chat-dock-empty">
                 <div className="chat-dock-empty-icon">
                   <RobotOutlined />
@@ -551,7 +566,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
                 ))}
 
                 {/* Streaming message */}
-                {assistantBuffer && (
+                {(assistantBuffer || thinkingSteps.length > 0) && (
                   <div className="chat-msg chat-msg-assistant">
                     <div className="chat-msg-avatar">
                       <RobotOutlined />
@@ -560,18 +575,25 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
                       <div className="chat-msg-header">
                         <span className="chat-msg-role">AI</span>
                         <span className="chat-msg-time">
-                          <LoadingOutlined spin /> 思考中...
+                          {isGenerating ? <><LoadingOutlined spin /> 思考中...</> : "已完成"}
                         </span>
                       </div>
-                      <div className="chat-msg-text">
-                        {renderMarkdown(assistantBuffer)}
+                      <div className="chat-msg-text chat-stream-content">
+                        {thinkingSteps.length > 0 && (
+                          <ThinkingTimeline steps={thinkingSteps} loading={isGenerating} />
+                        )}
+                        {assistantBuffer ? (
+                          <div className="chat-stream-answer">
+                            {renderMarkdown(assistantBuffer)}
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   </div>
                 )}
 
                 {/* Generating indicator */}
-                {isGenerating && !assistantBuffer && (
+                {isGenerating && !assistantBuffer && thinkingSteps.length === 0 && (
                   <div className="chat-msg chat-msg-assistant">
                     <div className="chat-msg-avatar">
                       <RobotOutlined />
@@ -677,8 +699,10 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
               <span className="chat-command-tag-text">{selectedCommand.command}</span>
             </span>
           )}
-          <textarea
-            ref={inputRef}
+          <Input.TextArea
+            ref={(instance) => {
+              mutableInputRef.current = instance?.resizableTextArea?.textArea ?? null;
+            }}
             className={`chat-dock-textarea ${selectedCommand ? "with-command" : ""}`}
             placeholder={
               selectedCommand
@@ -692,7 +716,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             disabled={!projectKey || isGenerating}
-            rows={1}
+            autoSize={{ minRows: 1, maxRows: 8 }}
           />
           <div className="chat-dock-bar-actions">
             {isGenerating ? (
