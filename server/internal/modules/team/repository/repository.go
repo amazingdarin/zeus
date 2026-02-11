@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"zeus/internal/domain"
 )
@@ -32,4 +33,10 @@ type TeamRepository interface {
 	UpdateInvitationStatus(ctx context.Context, id string, status domain.InvitationStatus) error
 	ListInvitations(ctx context.Context, teamID string) ([]*domain.TeamInvitation, error)
 	ListPendingInvitationsByEmail(ctx context.Context, email string) ([]*domain.TeamInvitation, error)
+
+	// Join-link operations
+	CreateJoinLink(ctx context.Context, link *domain.TeamJoinLink) error
+	GetJoinLinkByTokenHash(ctx context.Context, tokenHash string) (*domain.TeamJoinLink, error)
+	RevokeActiveJoinLinksByRole(ctx context.Context, teamID string, role domain.TeamRole, now time.Time) error
+	TouchJoinLinkUsage(ctx context.Context, id string, usedAt time.Time) error
 }

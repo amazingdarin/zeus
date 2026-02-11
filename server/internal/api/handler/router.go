@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"context"
-
 	"github.com/gin-gonic/gin"
 
 	coremiddleware "zeus/internal/core/middleware"
@@ -17,26 +15,6 @@ import (
 	usersvc "zeus/internal/modules/user/service"
 )
 
-// teamIDsGetterAdapter adapts TeamService to implement TeamIDsGetter
-type teamIDsGetterAdapter struct {
-	teamSvc *teamsvc.TeamService
-}
-
-func (a *teamIDsGetterAdapter) GetTeamIDsForUser(userID string) []string {
-	if a.teamSvc == nil {
-		return nil
-	}
-	teams, err := a.teamSvc.ListByUser(context.Background(), userID)
-	if err != nil {
-		return nil
-	}
-	ids := make([]string, 0, len(teams))
-	for _, t := range teams {
-		ids = append(ids, t.ID)
-	}
-	return ids
-}
-
 // Services contains all service dependencies for route handlers
 type Services struct {
 	ProjectSvc projectservice.ProjectService
@@ -50,8 +28,7 @@ func RegisterRoutes(
 	r *gin.Engine,
 	services Services,
 ) {
-	teamIDsGetter := &teamIDsGetterAdapter{teamSvc: services.TeamSvc}
-	projectHandler := projectapi.NewProjectHandler(services.ProjectSvc, teamIDsGetter)
+	projectHandler := projectapi.NewProjectHandler(services.ProjectSvc, services.TeamSvc)
 	systemHandler := projectapi.NewSystemHandler()
 	authHandler := authapi.NewAuthHandler(services.AuthSvc)
 	userHandler := userapi.NewUserHandler(services.UserSvc)
@@ -107,6 +84,18 @@ func RegisterRoutes(
 		teams.DELETE("/:slug/members/:userId", teamHandler.RemoveMember)
 		teams.GET("/:slug/invitations", teamHandler.ListInvitations)
 		teams.POST("/:slug/invitations", teamHandler.InviteMember)
+		teams.POST("/:slug/join-links", teamHandler.CreateJoinLink)
+	}
+
+	inviteLinks := api.Group("/invite-links")
+	{
+		inviteLinks.GET("/:token", teamHandler.GetJoinLinkPreview)
+	}
+
+	inviteLinksProtected := api.Group("/invite-links")
+	inviteLinksProtected.Use(coremiddleware.AuthMiddleware(services.JWTManager))
+	{
+		inviteLinksProtected.POST("/:token/join", teamHandler.JoinByLink)
 	}
 
 	// Invitation routes (protected)

@@ -224,6 +224,7 @@ DATABASE_URL=postgres://...    # PostgreSQL 连接字符串
 EMBEDDING_API_URL=http://...   # Embedding API 地址
 EMBEDDING_MODEL=nomic-embed-text # Embedding 模型名
 REPO_ROOT=./data/repos         # 文档存储根目录
+SYSTEM_DOCS_DIR=./docs         # 系统文档目录（可选，默认自动探测仓库 docs/）
 ```
 
 ## OPENSPEC 规范

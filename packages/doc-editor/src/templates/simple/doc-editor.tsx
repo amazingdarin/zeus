@@ -1,8 +1,7 @@
 "use client"
 
-"use client"
-
 import { useEffect, useMemo, useRef, useState } from "react"
+import type { ReactNode } from "react"
 import type { Editor, JSONContent } from "@tiptap/react"
 import { EditorContent, EditorContext, useEditor } from "@tiptap/react"
 import type { Extensions } from "@tiptap/core"
@@ -34,7 +33,6 @@ import { CodeBlockNode } from "../../nodes/code-block-node/code-block-node-exten
 import { LinkPreviewNode } from "../../nodes/link-preview-node/link-preview-node-extension"
 import { TocNode } from "../../nodes/toc-node/toc-node-extension"
 import { MathNode } from "../../nodes/math-node/math-node-extension"
-import { MusicNode } from "../../nodes/music-node/music-node-extension"
 import { ChartNode } from "../../nodes/chart-node/chart-node-extension"
 import { MindmapNode } from "../../nodes/mindmap-node/mindmap-node-extension"
 import { createTableExtensions } from "../../nodes/table-node/table-node-extension"
@@ -49,11 +47,9 @@ import "../../nodes/link-preview-node/link-preview-node.scss"
 import "../../nodes/toc-node/toc-node.scss"
 import "../../nodes/table-node/table-node.scss"
 import "../../nodes/math-node/math-node.scss"
-import "../../nodes/music-node/music-node.scss"
 import "../../nodes/chart-node/chart-node.scss"
 import "../../nodes/mindmap-node/mindmap-node.scss"
 import "../../ui/table-button/table-menu.scss"
-import "../../ui/music-button/music-button.scss"
 import "../../ui/chart-button/chart-button.scss"
 
 // --- Tiptap UI ---
@@ -68,7 +64,6 @@ import { CodeBlockButton } from "../../ui/code-block-button"
 import { TocButton } from "../../ui/toc-button"
 import { TableMenu } from "../../ui/table-button"
 import { MathButton } from "../../ui/math-button"
-import { MusicButton } from "../../ui/music-button"
 import { ChartButton } from "../../ui/chart-button"
 import { MindmapButton } from "../../ui/mindmap-button"
 import {
@@ -97,6 +92,10 @@ import {
   BlockIdExtension,
   ensureBlockIds,
 } from "../../extensions/BlockIdExtension"
+import {
+  UnsupportedPluginBlock,
+  normalizeUnsupportedPluginBlocks,
+} from "../../extensions/UnsupportedPluginBlockExtension"
 import { HeadingCollapseExtension } from "../../extensions/HeadingCollapseExtension"
 
 // --- Styles ---
@@ -113,6 +112,25 @@ type DocEditorProps = {
   linkPreviewFetchHtml?: (url: string) => Promise<string>
   /** Callback when a task item checkbox is toggled in view mode */
   onTaskCheckChange?: (blockId: string, checked: boolean) => void
+  pluginContributions?: {
+    extraExtensions?: Extensions
+    toolbarItems?: ReactNode[]
+    blockIdNodeTypes?: string[]
+  }
+}
+
+function collectExtensionNames(extensions: Extensions): string[] {
+  const names = new Set<string>()
+  for (const extension of extensions) {
+    if (!extension || typeof extension !== "object") {
+      continue
+    }
+    const name = "name" in extension ? String((extension as { name?: unknown }).name || "").trim() : ""
+    if (name) {
+      names.add(name)
+    }
+  }
+  return Array.from(names)
 }
 
 const defaultContent: JSONContent = {
@@ -127,9 +145,11 @@ const defaultContent: JSONContent = {
 const MainToolbarContent = ({
   onHighlighterClick,
   isMobile,
+  pluginToolbarItems,
 }: {
   onHighlighterClick: () => void
   isMobile: boolean
+  pluginToolbarItems: ReactNode[]
 }) => {
   return (
     <>
@@ -152,7 +172,6 @@ const MainToolbarContent = ({
         <HorizontalRuleButton />
         <CodeBlockButton />
         <MathButton />
-        <MusicButton />
         <ChartButton />
         <MindmapButton />
         <TableMenu />
@@ -195,6 +214,19 @@ const MainToolbarContent = ({
 
       <Spacer />
 
+      {pluginToolbarItems.length > 0 ? (
+        <>
+          <ToolbarSeparator />
+          <ToolbarGroup>
+            {pluginToolbarItems.map((item, index) => (
+              <span key={`plugin-toolbar-item-${index}`} className="doc-editor-plugin-toolbar-item">
+                {item}
+              </span>
+            ))}
+          </ToolbarGroup>
+        </>
+      ) : null}
+
       {isMobile && <ToolbarSeparator />}
 
     </>
@@ -230,6 +262,7 @@ export function DocEditor({
   onEditorReady,
   linkPreviewFetchHtml,
   onTaskCheckChange,
+  pluginContributions,
 }: DocEditorProps) {
   const isEditable = mode === "edit"
   const isMobile = useIsBreakpoint()
@@ -242,9 +275,32 @@ export function DocEditor({
   const taskCheckChangeRef = useRef(onTaskCheckChange)
   taskCheckChangeRef.current = onTaskCheckChange
 
+  const extraExtensions = useMemo<Extensions>(
+    () => pluginContributions?.extraExtensions || [],
+    [pluginContributions?.extraExtensions]
+  )
+  const pluginToolbarItems = useMemo<ReactNode[]>(
+    () => pluginContributions?.toolbarItems || [],
+    [pluginContributions?.toolbarItems]
+  )
+  const pluginBlockIdTypes = useMemo<string[]>(
+    () => pluginContributions?.blockIdNodeTypes || [],
+    [pluginContributions?.blockIdNodeTypes]
+  )
+  const knownExtensionNodeTypes = useMemo<string[]>(
+    () => collectExtensionNames([...(extensions || []), ...(extraExtensions || [])]),
+    [extensions, extraExtensions]
+  )
+
   const initialContent = useMemo(
-    () => ensureBlockIds(content ?? defaultContent),
-    [content]
+    () =>
+      ensureBlockIds(
+        normalizeUnsupportedPluginBlocks(content ?? defaultContent, {
+          knownNodeTypes: knownExtensionNodeTypes,
+        }),
+        { extraNodeTypes: pluginBlockIdTypes }
+      ),
+    [content, knownExtensionNodeTypes, pluginBlockIdTypes]
   )
 
   const editor = useEditor({
@@ -268,7 +324,10 @@ export function DocEditor({
       },
     },
     extensions: [
-      BlockIdExtension,
+      BlockIdExtension.configure({
+        extraNodeTypes: pluginBlockIdTypes,
+      }),
+      UnsupportedPluginBlock,
       HeadingCollapseExtension,
       StarterKit.configure({
         horizontalRule: false,
@@ -310,11 +369,11 @@ export function DocEditor({
       }),
       TocNode,
       MathNode,
-      MusicNode,
       ChartNode,
       MindmapNode,
       ...createTableExtensions(),
       ...extensions,
+      ...extraExtensions,
     ],
     content: initialContent,
     editable: isEditable,
@@ -359,15 +418,20 @@ export function DocEditor({
     if (!editor || !content) {
       return
     }
-    
-    const nextContent = ensureBlockIds(content)
+
+    const nextContent = ensureBlockIds(
+      normalizeUnsupportedPluginBlocks(content, {
+        knownNodeTypes: knownExtensionNodeTypes,
+      }),
+      { extraNodeTypes: pluginBlockIdTypes }
+    )
     const serialized = JSON.stringify(nextContent)
     if (serialized === lastContentRef.current) {
       return
     }
     editor.commands.setContent(nextContent)
     lastContentRef.current = serialized
-  }, [content, editor])
+  }, [content, editor, knownExtensionNodeTypes, pluginBlockIdTypes])
 
   // Store onChange in a ref to avoid it as a dependency
   const onChangeRef = useRef(onChange)
@@ -385,7 +449,12 @@ export function DocEditor({
       try {
         const loadedContent = await onLoadDocument(docId)
         if (isMounted && loadedContent) {
-          const nextContent = ensureBlockIds(loadedContent)
+          const nextContent = ensureBlockIds(
+            normalizeUnsupportedPluginBlocks(loadedContent, {
+              knownNodeTypes: knownExtensionNodeTypes,
+            }),
+            { extraNodeTypes: pluginBlockIdTypes }
+          )
           editor.commands.setContent(nextContent)
           lastContentRef.current = JSON.stringify(nextContent)
           // Notify parent of the loaded content using ref
@@ -400,7 +469,7 @@ export function DocEditor({
     return () => {
       isMounted = false
     }
-  }, [docId, onLoadDocument, editor])
+  }, [docId, onLoadDocument, editor, knownExtensionNodeTypes, pluginBlockIdTypes])
 
   return (
     <div className="doc-editor-wrapper">
@@ -420,6 +489,7 @@ export function DocEditor({
               <MainToolbarContent
                 onHighlighterClick={() => setMobileView("highlighter")}
                 isMobile={isMobile}
+                pluginToolbarItems={pluginToolbarItems}
               />
             ) : (
               <MobileToolbarContent onBack={() => setMobileView("main")} />

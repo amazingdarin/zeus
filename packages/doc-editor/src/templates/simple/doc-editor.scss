@@ -27,6 +27,16 @@
   color: var(--ink);
 }
 
+.doc-editor-content .unsupported-plugin-block {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--border);
+  background: #fff7e6;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 @media screen and (max-width: 480px) {
   .doc-editor-content .tiptap.ProseMirror.doc-editor {
     padding: 12px 12px 12px 24px; // Extra left padding for heading collapse buttons

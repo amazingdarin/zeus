@@ -2,6 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"time"
 
@@ -24,7 +28,11 @@ var (
 	ErrInvitationNotFound = errors.New("invitation not found")
 	ErrInvitationExpired  = errors.New("invitation has expired")
 	ErrUserNotFound       = errors.New("user not found")
+	ErrJoinLinkNotFound   = errors.New("join link not found")
+	ErrJoinLinkExpired    = errors.New("join link has expired")
 )
+
+const joinLinkTTL = 7 * 24 * time.Hour
 
 // TeamService handles team operations
 type TeamService struct {
@@ -562,4 +570,157 @@ func (s *TeamService) IsMember(ctx context.Context, teamSlug, userID string) (bo
 		return false, err
 	}
 	return s.teamRepo.IsMember(ctx, team.ID, userID)
+}
+
+type CreateJoinLinkInput struct {
+	Role domain.TeamRole
+}
+
+type JoinLinkResult struct {
+	Link     *domain.TeamJoinLink
+	Token    string
+	TeamSlug string
+}
+
+func (s *TeamService) CreateJoinLink(ctx context.Context, actorID, teamSlug string, input CreateJoinLinkInput) (*JoinLinkResult, error) {
+	team, err := s.teamRepo.GetBySlug(ctx, teamSlug)
+	if err != nil {
+		if errors.Is(err, teampostgres.ErrTeamNotFound) {
+			return nil, ErrTeamNotFound
+		}
+		return nil, err
+	}
+
+	member, err := s.teamRepo.GetMember(ctx, team.ID, actorID)
+	if err != nil {
+		if errors.Is(err, teampostgres.ErrMemberNotFound) {
+			return nil, ErrNotTeamMember
+		}
+		return nil, err
+	}
+	if !member.Role.CanManageMembers() {
+		return nil, ErrNotAuthorized
+	}
+
+	role := input.Role
+	if role == "" {
+		role = domain.TeamRoleMember
+	}
+	if role == domain.TeamRoleOwner || !role.IsValid() {
+		return nil, ErrNotAuthorized
+	}
+
+	now := time.Now()
+	if err := s.teamRepo.RevokeActiveJoinLinksByRole(ctx, team.ID, role, now); err != nil {
+		return nil, err
+	}
+
+	token, err := newJoinToken()
+	if err != nil {
+		return nil, err
+	}
+	link := &domain.TeamJoinLink{
+		ID:        uuid.New().String(),
+		TeamID:    team.ID,
+		TokenHash: hashJoinToken(token),
+		Role:      role,
+		CreatedBy: actorID,
+		ExpiresAt: now.Add(joinLinkTTL),
+		CreatedAt: now,
+	}
+	if err := link.Validate(); err != nil {
+		return nil, err
+	}
+	if err := s.teamRepo.CreateJoinLink(ctx, link); err != nil {
+		return nil, err
+	}
+
+	return &JoinLinkResult{Link: link, Token: token, TeamSlug: team.Slug}, nil
+}
+
+type JoinLinkPreview struct {
+	TeamName  string
+	TeamSlug  string
+	Role      domain.TeamRole
+	ExpiresAt time.Time
+}
+
+func (s *TeamService) GetJoinLinkPreview(ctx context.Context, token string) (*JoinLinkPreview, error) {
+	link, team, err := s.resolveJoinLink(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	return &JoinLinkPreview{
+		TeamName:  team.Name,
+		TeamSlug:  team.Slug,
+		Role:      link.Role,
+		ExpiresAt: link.ExpiresAt,
+	}, nil
+}
+
+func (s *TeamService) JoinByLink(ctx context.Context, userID, token string) (*domain.Team, error) {
+	link, team, err := s.resolveJoinLink(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	member := &domain.TeamMember{
+		ID:        uuid.New().String(),
+		TeamID:    team.ID,
+		UserID:    userID,
+		Role:      link.Role,
+		JoinedAt:  now,
+		CreatedAt: now,
+	}
+	if err := s.teamRepo.AddMember(ctx, member); err != nil {
+		if !errors.Is(err, teampostgres.ErrMemberExists) {
+			return nil, err
+		}
+	}
+
+	if err := s.teamRepo.TouchJoinLinkUsage(ctx, link.ID, now); err != nil && !errors.Is(err, teampostgres.ErrJoinLinkNotFound) {
+		return nil, err
+	}
+
+	return team, nil
+}
+
+func (s *TeamService) resolveJoinLink(ctx context.Context, token string) (*domain.TeamJoinLink, *domain.Team, error) {
+	tokenHash := hashJoinToken(token)
+	link, err := s.teamRepo.GetJoinLinkByTokenHash(ctx, tokenHash)
+	if err != nil {
+		if errors.Is(err, teampostgres.ErrJoinLinkNotFound) {
+			return nil, nil, ErrJoinLinkNotFound
+		}
+		return nil, nil, err
+	}
+	if link.RevokedAt != nil || link.IsExpired() {
+		return nil, nil, ErrJoinLinkExpired
+	}
+
+	team, err := s.teamRepo.GetByID(ctx, link.TeamID)
+	if err != nil {
+		if errors.Is(err, teampostgres.ErrTeamNotFound) {
+			return nil, nil, ErrTeamNotFound
+		}
+		return nil, nil, err
+	}
+	if team.Status != domain.TeamStatusActive {
+		return nil, nil, ErrTeamNotFound
+	}
+	return link, team, nil
+}
+
+func newJoinToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+func hashJoinToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }

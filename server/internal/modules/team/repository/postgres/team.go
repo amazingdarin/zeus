@@ -3,7 +3,10 @@ package postgres
 import (
 	"context"
 	"errors"
+	"strings"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
 	"zeus/internal/domain"
@@ -12,11 +15,12 @@ import (
 )
 
 var (
-	ErrTeamNotFound      = errors.New("team not found")
-	ErrTeamAlreadyExists = errors.New("team slug already exists")
-	ErrMemberNotFound    = errors.New("team member not found")
-	ErrMemberExists      = errors.New("user is already a member")
+	ErrTeamNotFound       = errors.New("team not found")
+	ErrTeamAlreadyExists  = errors.New("team slug already exists")
+	ErrMemberNotFound     = errors.New("team member not found")
+	ErrMemberExists       = errors.New("user is already a member")
 	ErrInvitationNotFound = errors.New("invitation not found")
+	ErrJoinLinkNotFound   = errors.New("join link not found")
 )
 
 type TeamRepository struct {
@@ -27,11 +31,27 @@ func NewTeamRepository(db *gorm.DB) *TeamRepository {
 	return &TeamRepository{db: db}
 }
 
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "sqlstate 23505") ||
+		strings.Contains(msg, "duplicate key value violates unique constraint")
+}
+
 func (r *TeamRepository) Create(ctx context.Context, team *domain.Team) error {
 	m := mapper.TeamToModel(team)
 	result := r.db.WithContext(ctx).Create(m)
 	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrDuplicatedKey) {
+		if isUniqueViolation(result.Error) {
 			return ErrTeamAlreadyExists
 		}
 		return result.Error
@@ -104,7 +124,7 @@ func (r *TeamRepository) AddMember(ctx context.Context, member *domain.TeamMembe
 	m := mapper.TeamMemberToModel(member)
 	result := r.db.WithContext(ctx).Create(m)
 	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrDuplicatedKey) {
+		if isUniqueViolation(result.Error) {
 			return ErrMemberExists
 		}
 		return result.Error
@@ -242,4 +262,45 @@ func (r *TeamRepository) ListPendingInvitationsByEmail(ctx context.Context, emai
 		domainInvitations[i] = mapper.InvitationToDomain(&inv)
 	}
 	return domainInvitations, nil
+}
+
+func (r *TeamRepository) CreateJoinLink(ctx context.Context, link *domain.TeamJoinLink) error {
+	m := mapper.JoinLinkToModel(link)
+	return r.db.WithContext(ctx).Create(m).Error
+}
+
+func (r *TeamRepository) GetJoinLinkByTokenHash(ctx context.Context, tokenHash string) (*domain.TeamJoinLink, error) {
+	var m model.TeamJoinLink
+	result := r.db.WithContext(ctx).
+		Where("token_hash = ?", tokenHash).
+		First(&m)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrJoinLinkNotFound
+		}
+		return nil, result.Error
+	}
+	return mapper.JoinLinkToDomain(&m), nil
+}
+
+func (r *TeamRepository) RevokeActiveJoinLinksByRole(ctx context.Context, teamID string, role domain.TeamRole, now time.Time) error {
+	result := r.db.WithContext(ctx).
+		Model(&model.TeamJoinLink{}).
+		Where("team_id = ? AND role = ? AND revoked_at IS NULL AND expires_at > ?", teamID, string(role), now).
+		Update("revoked_at", now)
+	return result.Error
+}
+
+func (r *TeamRepository) TouchJoinLinkUsage(ctx context.Context, id string, usedAt time.Time) error {
+	result := r.db.WithContext(ctx).
+		Model(&model.TeamJoinLink{}).
+		Where("id = ?", id).
+		Update("last_used_at", usedAt)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrJoinLinkNotFound
+	}
+	return nil
 }

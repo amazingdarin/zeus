@@ -98,3 +98,37 @@ func InvitationToModel(d *domain.TeamInvitation) *model.TeamInvitation {
 		CreatedAt: d.CreatedAt,
 	}
 }
+
+func JoinLinkToDomain(m *model.TeamJoinLink) *domain.TeamJoinLink {
+	if m == nil {
+		return nil
+	}
+	return &domain.TeamJoinLink{
+		ID:         m.ID,
+		TeamID:     m.TeamID,
+		TokenHash:  m.TokenHash,
+		Role:       domain.TeamRole(m.Role),
+		CreatedBy:  m.CreatedBy,
+		ExpiresAt:  m.ExpiresAt,
+		RevokedAt:  m.RevokedAt,
+		LastUsedAt: m.LastUsedAt,
+		CreatedAt:  m.CreatedAt,
+	}
+}
+
+func JoinLinkToModel(d *domain.TeamJoinLink) *model.TeamJoinLink {
+	if d == nil {
+		return nil
+	}
+	return &model.TeamJoinLink{
+		ID:         d.ID,
+		TeamID:     d.TeamID,
+		TokenHash:  d.TokenHash,
+		Role:       string(d.Role),
+		CreatedBy:  d.CreatedBy,
+		ExpiresAt:  d.ExpiresAt,
+		RevokedAt:  d.RevokedAt,
+		LastUsedAt: d.LastUsedAt,
+		CreatedAt:  d.CreatedAt,
+	}
+}

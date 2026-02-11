@@ -74,11 +74,22 @@ func (r *ProjectRepository) FindByKey(ctx context.Context, key string) (*domain.
 	if key == "" {
 		return nil, fmt.Errorf("key is required")
 	}
-	var modelObj model.Project
-	if err := r.db.WithContext(ctx).First(&modelObj, "key = ?", key).Error; err != nil {
+
+	var models []model.Project
+	if err := r.db.WithContext(ctx).
+		Where("key = ?", key).
+		Order("created_at DESC").
+		Limit(2).
+		Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("find project: %w", err)
 	}
-	return mapper.ProjectToDomain(&modelObj), nil
+	if len(models) == 0 {
+		return nil, nil
+	}
+	if len(models) > 1 {
+		return nil, fmt.Errorf("multiple projects found for key %q; owner scope is required", key)
+	}
+	return mapper.ProjectToDomain(&models[0]), nil
 }
 
 func (r *ProjectRepository) List(
@@ -91,16 +102,16 @@ func (r *ProjectRepository) List(
 	}
 
 	query := r.db.WithContext(ctx).Model(&model.Project{})
-	
+
 	if filter.Status != "" {
 		query = query.Where("status = ?", string(filter.Status))
 	}
-	
+
 	// Filter by specific owner
 	if filter.OwnerType != "" && filter.OwnerID != "" {
 		query = query.Where("owner_type = ? AND owner_id = ?", string(filter.OwnerType), filter.OwnerID)
 	}
-	
+
 	// Filter by user access (user's own projects OR team projects)
 	if filter.UserID != "" {
 		if len(filter.TeamIDs) > 0 {

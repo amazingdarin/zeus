@@ -45,3 +45,19 @@ type TeamInvitation struct {
 func (TeamInvitation) TableName() string {
 	return "team_invitation"
 }
+
+type TeamJoinLink struct {
+	ID         string     `gorm:"column:id;primaryKey"`
+	TeamID     string     `gorm:"column:team_id;not null"`
+	TokenHash  string     `gorm:"column:token_hash;not null"`
+	Role       string     `gorm:"column:role;not null;default:member"`
+	CreatedBy  string     `gorm:"column:created_by;not null"`
+	ExpiresAt  time.Time  `gorm:"column:expires_at;not null"`
+	RevokedAt  *time.Time `gorm:"column:revoked_at"`
+	LastUsedAt *time.Time `gorm:"column:last_used_at"`
+	CreatedAt  time.Time  `gorm:"column:created_at;autoCreateTime"`
+}
+
+func (TeamJoinLink) TableName() string {
+	return "team_join_link"
+}

@@ -41,12 +41,12 @@ type UpdateMemberRoleRequest struct {
 
 // TeamMemberResponse represents team member in response
 type TeamMemberResponse struct {
-	ID          string            `json:"id"`
-	TeamID      string            `json:"team_id"`
-	UserID      string            `json:"user_id"`
-	Role        string            `json:"role"`
-	JoinedAt    time.Time         `json:"joined_at"`
-	User        *UserInfoResponse `json:"user,omitempty"`
+	ID       string            `json:"id"`
+	TeamID   string            `json:"team_id"`
+	UserID   string            `json:"user_id"`
+	Role     string            `json:"role"`
+	JoinedAt time.Time         `json:"joined_at"`
+	User     *UserInfoResponse `json:"user,omitempty"`
 }
 
 // UserInfoResponse represents user info in member response
@@ -73,4 +73,28 @@ type InvitationResponse struct {
 	Status    string    `json:"status"`
 	ExpiresAt time.Time `json:"expires_at"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type CreateJoinLinkRequest struct {
+	Role string `json:"role" binding:"omitempty,oneof=admin member viewer"`
+}
+
+type CreateJoinLinkResponse struct {
+	ID        string    `json:"id"`
+	Token     string    `json:"token"`
+	TeamSlug  string    `json:"team_slug"`
+	Role      string    `json:"role"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+type JoinLinkPreviewResponse struct {
+	TeamName  string    `json:"team_name"`
+	TeamSlug  string    `json:"team_slug"`
+	Role      string    `json:"role"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+type JoinLinkJoinResponse struct {
+	TeamSlug string `json:"team_slug"`
+	TeamName string `json:"team_name"`
 }

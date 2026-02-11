@@ -208,3 +208,47 @@ func (i TeamInvitation) Validate() error {
 func (i TeamInvitation) IsExpired() bool {
 	return time.Now().After(i.ExpiresAt)
 }
+
+type TeamJoinLink struct {
+	ID         string
+	TeamID     string
+	TokenHash  string
+	Role       TeamRole
+	CreatedBy  string
+	ExpiresAt  time.Time
+	RevokedAt  *time.Time
+	LastUsedAt *time.Time
+	CreatedAt  time.Time
+}
+
+func (l TeamJoinLink) Validate() error {
+	if strings.TrimSpace(l.ID) == "" {
+		return fmt.Errorf("join link id is required")
+	}
+	if strings.TrimSpace(l.TeamID) == "" {
+		return fmt.Errorf("team id is required")
+	}
+	if strings.TrimSpace(l.TokenHash) == "" {
+		return fmt.Errorf("token hash is required")
+	}
+	if l.Role == "" {
+		return fmt.Errorf("role is required")
+	}
+	if !l.Role.IsValid() {
+		return fmt.Errorf("invalid team role: %s", l.Role)
+	}
+	if l.Role == TeamRoleOwner {
+		return fmt.Errorf("cannot invite as owner")
+	}
+	if strings.TrimSpace(l.CreatedBy) == "" {
+		return fmt.Errorf("created by is required")
+	}
+	if l.ExpiresAt.IsZero() {
+		return fmt.Errorf("expires at is required")
+	}
+	return nil
+}
+
+func (l TeamJoinLink) IsExpired() bool {
+	return time.Now().After(l.ExpiresAt)
+}

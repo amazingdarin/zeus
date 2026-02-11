@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -336,6 +337,90 @@ func (h *TeamHandler) GetPendingInvitations(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// CreateJoinLink creates a reusable team join link
+// POST /api/teams/:slug/join-links
+func (h *TeamHandler) CreateJoinLink(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "not authenticated"})
+		return
+	}
+
+	slug := c.Param("slug")
+
+	var req CreateJoinLinkRequest
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": err.Error()})
+		return
+	}
+
+	result, err := h.teamService.CreateJoinLink(c.Request.Context(), userID, slug, teamsvc.CreateJoinLinkInput{
+		Role: domain.TeamRole(req.Role),
+	})
+	if err != nil {
+		handleTeamError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, CreateJoinLinkResponse{
+		ID:        result.Link.ID,
+		Token:     result.Token,
+		TeamSlug:  result.TeamSlug,
+		Role:      string(result.Link.Role),
+		ExpiresAt: result.Link.ExpiresAt,
+	})
+}
+
+// GetJoinLinkPreview returns public join link info
+// GET /api/invite-links/:token
+func (h *TeamHandler) GetJoinLinkPreview(c *gin.Context) {
+	token := c.Param("token")
+	if token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": "missing token"})
+		return
+	}
+
+	preview, err := h.teamService.GetJoinLinkPreview(c.Request.Context(), token)
+	if err != nil {
+		handleTeamError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, JoinLinkPreviewResponse{
+		TeamName:  preview.TeamName,
+		TeamSlug:  preview.TeamSlug,
+		Role:      string(preview.Role),
+		ExpiresAt: preview.ExpiresAt,
+	})
+}
+
+// JoinByLink joins current user to team by invite token
+// POST /api/invite-links/:token/join
+func (h *TeamHandler) JoinByLink(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "not authenticated"})
+		return
+	}
+
+	token := c.Param("token")
+	if token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": "missing token"})
+		return
+	}
+
+	team, err := h.teamService.JoinByLink(c.Request.Context(), userID, token)
+	if err != nil {
+		handleTeamError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, JoinLinkJoinResponse{
+		TeamSlug: team.Slug,
+		TeamName: team.Name,
+	})
+}
+
 func toTeamResponse(team *domain.Team) TeamResponse {
 	return TeamResponse{
 		ID:          team.ID,
@@ -399,6 +484,10 @@ func handleTeamError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "INVITATION_NOT_FOUND", "message": "invitation not found"})
 	case errors.Is(err, teamsvc.ErrInvitationExpired):
 		c.JSON(http.StatusGone, gin.H{"code": "INVITATION_EXPIRED", "message": "invitation has expired"})
+	case errors.Is(err, teamsvc.ErrJoinLinkNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "INVITE_LINK_NOT_FOUND", "message": "invite link not found"})
+	case errors.Is(err, teamsvc.ErrJoinLinkExpired):
+		c.JSON(http.StatusGone, gin.H{"code": "INVITE_LINK_EXPIRED", "message": "invite link has expired"})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL_ERROR", "message": "internal error"})
 	}
