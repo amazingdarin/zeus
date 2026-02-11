@@ -4,6 +4,7 @@ import type { JSONContent } from "@tiptap/core";
 
 import { convertDocument } from "./convert.js";
 import type { SmartImportType } from "./smart-import-types.js";
+import { buildScopedProjectPath } from "../project-scope.js";
 
 export function stripExtension(filename: string): string {
   const base = filename.trim();
@@ -120,7 +121,7 @@ export function resolveFileKind(
 }
 
 export function buildAssetContentUrl(projectKey: string, assetId: string): string {
-  return `/api/projects/${encodeURIComponent(projectKey)}/assets/${encodeURIComponent(assetId)}/content`;
+  return `/api/projects/${buildScopedProjectPath(projectKey)}/assets/${encodeURIComponent(assetId)}/content`;
 }
 
 export function buildFileBlockNode(assetMeta: {

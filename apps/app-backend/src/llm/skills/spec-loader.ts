@@ -258,38 +258,86 @@ ${spec}
 }
 
 /**
- * Build system prompt for PPT-style deck generation skill
+ * Build system prompt for Step 1:
+ * Generate a structured PPT-outline document in Tiptap JSON.
  */
-export function buildPptOptimizeDocumentPrompt(): string {
+export function buildPptOutlineDocumentPrompt(): string {
   const spec = loadDocumentSpec();
-  return `你是 Zeus 文档助手。你的任务：把“源文档”改写为“类 PPT 演示稿”格式，并输出 Zeus 支持的 Tiptap JSON 文档正文（body）。
+  return `你是 Zeus 文档助手。你的任务：把“源文档”改写为“结构化类 PPT 说明文档”，并输出 Zeus 支持的 Tiptap JSON 文档正文（body）。
 
 ${spec}
 
 重要：只输出 JSON（一个对象，必须是 {"type":"doc","content":[...]} 结构），不要输出任何解释文字，不要用 \`\`\` 包裹。
 
-## 类 PPT 结构规则（强制）
-1. 每一页必须以 Heading 1 开始：{"type":"heading","attrs":{"level":1,...},...}
-2. 页与页之间用 horizontalRule 分隔。规则：每页内容结束后输出一个 {"type":"horizontalRule",...}；最后一页可以不输出分割线。
-3. 除了每页开头的那个 Heading 1，页内不要再出现 level=1 的 heading（避免分页歧义）。
-4. 优先使用：table / bulletList / orderedList / chart（仅在有明确数字对比时）。
-5. 避免长段落：尽量把内容拆成要点或表格。单段落尽量 <= 80 字；单页要点尽量 <= 6 条；单页表格行数尽量 <= 8 行。
-6. 不要编造源文档没有的事实、数字或结论；不确定就用“待补充/未知”占位。
+## 强制结构规则
+1. 每一页必须以 Heading 1 开始，格式："幻灯片 N：<页面标题>"。
+2. 每页紧跟一个 table，用于描述页面设计说明。
+3. 每页可选一个 bulletList，最多 6 条关键点，每条短句。
+4. 页与页之间必须使用 horizontalRule 分隔；最后一页可不加分割线。
+5. 除页首 Heading 1 外，页内不得出现 level=1 的 heading。
 
-## 封面页规则（第 1 页，强制）
-- 只允许包含：1 个 Heading 1（整套演示稿标题） + 关键信息区块（推荐用 table 展示：报告人/时间/版本/项目等）。
-- 封面页不要包含任何正文要点（不要 bulletList/orderedList/taskList，不要 codeBlock，不要长段落）。
-- 关键信息不足时，使用占位符（例如“报告人：待填写”）。
+## table 字段规范（强制）
+- 封面页（幻灯片1）table 至少包含行：
+  - 标题（居中）
+  - 副标题
+  - 视觉元素
+  - 补充信息（报告人、报告时间）
+- 内容页 table 至少包含行：
+  - 页面目标
+  - 核心要点
+  - 视觉建议
+  - 版式建议
+  - 讲解备注
 
-## 表格使用要求（强烈建议）
-当你要表达“对比、清单、状态、步骤、指标”时，优先用 table：
-- table -> tableRow -> tableHeader/tableCell -> paragraph -> text
-- tableHeader/tableCell 推荐带 attrs：{"colspan":1,"rowspan":1,"colwidth":null}
+## 内容约束
+- 不要编造源文档没有的事实、数字或结论；不确定时用“待补充/未知”占位。
+- 单页内容保持简洁，避免超长段落。
+- 输出应便于下游 HTML 渲染器稳定解析。
 
-## 图标/符号要求（强烈建议）
-在要点前添加易读的符号前缀（例如：📌 ✅ ⚠️ 🧩 ⏱️ 💡），用于强调类别（重点/结果/风险/组件/时间/建议）。
+你的输出风格应像“可直接用于演讲准备的结构化脚本”。`;
+}
 
-你的输出应当让人一眼像在看演示稿：标题清晰、信息密度高、结构分块明显。`;
+/**
+ * Backward-compatible alias prompt for doc-optimize-ppt.
+ */
+export function buildPptOptimizeDocumentPrompt(): string {
+  return buildPptOutlineDocumentPrompt();
+}
+
+/**
+ * Build system prompt for Step 2:
+ * Convert PPT-outline document to a normalized JSON model for HTML rendering.
+ */
+export function buildPptHtmlModelPrompt(): string {
+  return `你是 Zeus 演示稿渲染助手。请将输入的“结构化类 PPT 文档”转换为严格 JSON 模型。
+
+只输出 JSON，不要输出解释。
+
+输出结构（严格）：
+{
+  "deckTitle": "string",
+  "subtitle": "string (optional)",
+  "presenter": "string (optional)",
+  "reportTime": "string (optional)",
+  "slides": [
+    {
+      "title": "string",
+      "subtitle": "string (optional)",
+      "goal": "string (optional)",
+      "bullets": ["string", "..."],
+      "visualHint": "string (optional)",
+      "layoutHint": "string (optional)",
+      "speakerNotes": "string (optional)"
+    }
+  ]
+}
+
+规则：
+1. 不要输出 HTML。
+2. slides 至少 1 页。
+3. bullets 最多 8 条，每条简短。
+4. 缺失信息用“待补充”。
+5. 不允许输出额外字段。`;
 }
 
 /**

@@ -6,6 +6,7 @@
 
 import type { JSONContent } from "@tiptap/core";
 import { v4 as uuidv4 } from "uuid";
+import { getRegisteredPluginBlockTypes } from "../../plugins/block-registry.js";
 
 /**
  * Valid block node types
@@ -31,7 +32,15 @@ const BLOCK_TYPES = new Set([
   "tableHeader",
   "toc",
   "chart",      // ECharts 图表
+  "unsupportedPluginBlock",
 ]);
+
+function isKnownBlockType(type: string): boolean {
+  if (BLOCK_TYPES.has(type)) {
+    return true;
+  }
+  return getRegisteredPluginBlockTypes().includes(type);
+}
 
 /**
  * Valid inline node types
@@ -140,12 +149,12 @@ function validateBlock(
   }
 
   // Check if type is valid
-  if (!BLOCK_TYPES.has(node.type) && !INLINE_TYPES.has(node.type)) {
+  if (!isKnownBlockType(node.type) && !INLINE_TYPES.has(node.type)) {
     warnings.push(`${path}: Unknown node type "${node.type}"`);
   }
 
   // Check block ID
-  if (BLOCK_TYPES.has(node.type)) {
+  if (isKnownBlockType(node.type)) {
     const attrs = node.attrs as Record<string, unknown> | undefined;
     if (!attrs?.id) {
       warnings.push(`${path}: Block "${node.type}" should have an id attribute`);
@@ -263,7 +272,7 @@ function fixBlock(block: JSONContent): JSONContent {
   const fixed = { ...block };
 
   // Ensure block has attrs with id
-  if (BLOCK_TYPES.has(fixed.type || "")) {
+  if (isKnownBlockType(fixed.type || "")) {
     fixed.attrs = {
       ...(fixed.attrs as Record<string, unknown> || {}),
     };
@@ -331,7 +340,7 @@ export function ensureBlockIds(content: JSONContent[]): JSONContent[] {
   return content.map((block) => {
     const fixed = { ...block };
 
-    if (BLOCK_TYPES.has(fixed.type || "")) {
+    if (isKnownBlockType(fixed.type || "")) {
       fixed.attrs = {
         ...(fixed.attrs as Record<string, unknown> || {}),
       };

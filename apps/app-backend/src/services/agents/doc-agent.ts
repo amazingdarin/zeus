@@ -49,6 +49,7 @@ export type DocAgentPlan =
   | { action: "respond_error"; error: string };
 
 export type DocAgentInput = {
+  userId: string;
   matchedSkillId: string | null;
   skillArgs: Record<string, unknown>;
   skillDocIds: string[];
@@ -71,6 +72,7 @@ function lv<T>(defaultFn: () => T) {
 }
 
 const DocAgentGraphState = Annotation.Root({
+  userId: Annotation<string>,
   matchedSkillId: Annotation<string | null>(lv<string | null>(() => null)),
   skillArgs: Annotation<Record<string, unknown>>(lv<Record<string, unknown>>(() => ({}))),
   skillDocIds: Annotation<string[]>(lv<string[]>(() => [])),
@@ -109,7 +111,7 @@ async function validate(state: DocAgentState): Promise<Partial<DocAgentState>> {
   }
 
   await agentSkillCatalog.initialize();
-  const skill = agentSkillCatalog.getById(skillId);
+  const skill = agentSkillCatalog.getById(skillId, state.userId);
   if (!skill) {
     return {
       matchedSkillId: null,
@@ -216,7 +218,7 @@ async function policy(state: DocAgentState): Promise<Partial<DocAgentState>> {
   }
 
   await agentSkillCatalog.initialize();
-  const skill = agentSkillCatalog.getById(skillId);
+  const skill = agentSkillCatalog.getById(skillId, state.userId);
   if (!skill) {
     return {
       matchedSkillId: null,
@@ -270,6 +272,7 @@ export const docAgentGraph = new StateGraph(DocAgentGraphState)
 export async function runDocAgent(input: DocAgentInput): Promise<DocAgentOutput> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LangGraph invoke typing requires exact match
   const result = await docAgentGraph.invoke({
+    userId: input.userId,
     matchedSkillId: input.matchedSkillId,
     skillArgs: input.skillArgs,
     skillDocIds: input.skillDocIds,
@@ -310,4 +313,3 @@ export type DocAgentRiskAssessment = {
   level: AgentRiskLevel;
   warningMessage?: string;
 };
-

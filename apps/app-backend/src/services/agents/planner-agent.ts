@@ -25,6 +25,7 @@ export type PlannerAgentInput = {
   userQuery: string;
   messages: Array<{ role: string; content: string }>;
   projectKey: string;
+  userId: string;
   docIds?: string[];
   attachments?: PlannerAgentAttachment[];
   /** From intent detection (optional hint about which skill to use). */
@@ -53,6 +54,7 @@ const PlannerGraphState = Annotation.Root({
   userQuery: Annotation<string>,
   messages: Annotation<Array<{ role: string; content: string }>>,
   projectKey: Annotation<string>,
+  userId: Annotation<string>,
   docIds: Annotation<string[] | undefined>(lv<string[] | undefined>(() => undefined)),
   attachments: Annotation<PlannerAgentAttachment[] | undefined>(lv<PlannerAgentAttachment[] | undefined>(() => undefined)),
   skillHint: Annotation<string | undefined>(lv<string | undefined>(() => undefined)),
@@ -261,11 +263,12 @@ function domainFromCategory(category: string | undefined): PlannerDomain {
 function filterEnabledSkillIdsByDomain(
   enabledSkillIds: string[],
   domain: PlannerDomain,
+  userId: string,
 ): string[] {
   if (domain === "all") return enabledSkillIds;
 
   const enabled = new Set(enabledSkillIds);
-  const all = agentSkillCatalog.getAllSkills().filter((s) => enabled.has(s.id));
+  const all = agentSkillCatalog.getAllSkills(userId).filter((s) => enabled.has(s.id));
 
   return all
     .filter((s) => domainFromCategory(s.category) === domain)
@@ -281,11 +284,12 @@ function autoDetectParseSkill(
   attachments: PlannerAgentAttachment[],
   userQuery: string,
   enabledIds: Set<string>,
+  userId: string,
 ): { skill: AgentSkillDefinition; args: Record<string, unknown> } | null {
   if (!isParseSkill(skillHint)) return null;
 
   const hintCommand = `/${skillHint}`;
-  const skill = agentSkillCatalog.getByCommand(hintCommand);
+  const skill = agentSkillCatalog.getByCommand(hintCommand, userId);
   if (!skill || !enabledIds.has(skill.id)) return null;
 
   const firstAttachment = attachments[0];
@@ -359,6 +363,7 @@ export function buildCommandArgs(
     case "doc-optimize-content":
     case "doc-optimize-full":
     case "doc-optimize-ppt":
+    case "doc-optimize-ppt-outline":
       return trimmed ? { instructions: trimmed } : {};
     case "doc-optimize-style": {
       const [style, ...parts] = trimmed.split(/\s+/).filter(Boolean);
@@ -379,6 +384,13 @@ export function buildCommandArgs(
       return { repo_url: trimmed };
     case "doc-smart-import":
       return { asset_id: trimmed };
+    case "doc-render-ppt-html":
+      return {
+        ...(firstDocId ? { doc_id: firstDocId } : {}),
+        ...(trimmed ? { theme: trimmed } : {}),
+      };
+    case "doc-export-ppt":
+      return firstDocId ? { doc_id: firstDocId } : {};
     case "doc-organize":
       return {};
     case "doc-convert":
@@ -401,7 +413,7 @@ export function buildCommandArgs(
 
 async function initEnabledSkills(state: PlannerState): Promise<Partial<PlannerState>> {
   await agentSkillCatalog.initialize();
-  const allSkills = agentSkillCatalog.getAllSkills();
+  const allSkills = agentSkillCatalog.getAllSkills(state.userId);
   const enabledSkillIds = await projectSkillConfigStore.getEnabledSkillIds(state.projectKey, allSkills);
   return { enabledSkillIds, candidateSkillIds: enabledSkillIds };
 }
@@ -412,7 +424,7 @@ async function selectDomain(state: PlannerState): Promise<Partial<PlannerState>>
 
   // 1) Prefer intent skillHint when it maps to an enabled skill.
   if (hint) {
-    const hinted = agentSkillCatalog.getByCommand(`/${hint}`);
+    const hinted = agentSkillCatalog.getByCommand(`/${hint}`, state.userId);
     if (hinted && enabled.has(hinted.id)) {
       const domain = domainFromCategory(hinted.category);
       return {
@@ -447,6 +459,7 @@ async function autoParseFromAttachments(state: PlannerState): Promise<Partial<Pl
     atts,
     state.userQuery.trim(),
     enabledIds,
+    state.userId,
   );
   if (!autoResult) return {};
 
@@ -466,6 +479,7 @@ async function keywordMatch(state: PlannerState): Promise<Partial<PlannerState>>
   const keywordMatch = agentSkillCatalog.matchAnthropicByKeywords(
     state.userQuery.trim(),
     enabledIds,
+    state.userId,
   );
   if (!keywordMatch) return {};
 
@@ -485,7 +499,7 @@ async function hintMatch(state: PlannerState): Promise<Partial<PlannerState>> {
 
   const enabledIds = new Set(state.enabledSkillIds);
   const hintCommand = `/${hint}`;
-  const hintSkill = agentSkillCatalog.getByCommand(hintCommand);
+  const hintSkill = agentSkillCatalog.getByCommand(hintCommand, state.userId);
   if (!hintSkill || !enabledIds.has(hintSkill.id)) return {};
 
   const args = buildCommandArgs(hintSkill, state.userQuery.trim(), state.docIds);
@@ -513,7 +527,7 @@ async function llmToolSelect(state: PlannerState): Promise<Partial<PlannerState>
 
   const enabledIds = new Set(state.candidateSkillIds);
   if (enabledIds.size === 0) return {};
-  const tools = agentSkillCatalog.toOpenAITools(enabledIds);
+  const tools = agentSkillCatalog.toOpenAITools(enabledIds, state.userId);
   if (tools.length === 0) return {};
 
   try {
@@ -563,7 +577,7 @@ async function llmToolSelect(state: PlannerState): Promise<Partial<PlannerState>
 
     if (response.toolCalls && response.toolCalls.length > 0) {
       const firstCall = response.toolCalls[0];
-      const skill = agentSkillCatalog.getByToolName(firstCall.function.name);
+      const skill = agentSkillCatalog.getByToolName(firstCall.function.name, state.userId);
       if (skill) {
         let args: Record<string, unknown> = {};
         try {
@@ -596,7 +610,7 @@ async function llmToolSelect(state: PlannerState): Promise<Partial<PlannerState>
 
 function createDomainPlannerSubgraph(name: string, domain: PlannerDomain) {
   const setCandidates = async (state: PlannerState): Promise<Partial<PlannerState>> => {
-    const candidateSkillIds = filterEnabledSkillIdsByDomain(state.enabledSkillIds, domain);
+    const candidateSkillIds = filterEnabledSkillIdsByDomain(state.enabledSkillIds, domain, state.userId);
     return {
       plannerDomain: domain,
       candidateSkillIds,
@@ -715,6 +729,7 @@ export async function runPlannerAgent(input: PlannerAgentInput): Promise<Planner
     userQuery: input.userQuery,
     messages: input.messages,
     projectKey: input.projectKey,
+    userId: input.userId,
     docIds: input.docIds,
     attachments: input.attachments,
     skillHint: input.skillHint,

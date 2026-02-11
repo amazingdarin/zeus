@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { v4 as uuidv4 } from "uuid";
-import { getAssetsRoot } from "./paths.js";
+import { getScopedAssetsRoot } from "./paths.js";
 
 export type AssetMeta = {
   id: string;
@@ -13,7 +13,7 @@ export type AssetMeta = {
 
 export class AssetStore {
   private getAssetDir(userId: string, projectKey: string): string {
-    return getAssetsRoot(userId, "personal", projectKey);
+    return getScopedAssetsRoot(userId, projectKey);
   }
 
   private getAssetPath(userId: string, projectKey: string, assetId: string, ext: string): string {

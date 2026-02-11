@@ -1,4 +1,8 @@
 import type { Document, BlockChunk } from "../storage/types.js";
+import {
+  getPluginTextExtractor,
+  getRegisteredPluginBlockTypes,
+} from "../plugins/block-registry.js";
 
 const DEFAULT_CHUNK_SIZE = 800;
 const DEFAULT_OVERLAP = 100;
@@ -84,7 +88,18 @@ function collectBlocks(node: unknown, blocks: BlockText[]): void {
   const nodeObj = node as Record<string, unknown>;
 
   if (isBlockNode(nodeObj)) {
-    const text = collectText(nodeObj).trim();
+    let text = collectText(nodeObj).trim();
+    if (!text && typeof nodeObj.type === "string") {
+      if (nodeObj.type === "unsupportedPluginBlock") {
+        const attrs = nodeObj.attrs as Record<string, unknown> | undefined;
+        const originalType = typeof attrs?.originalType === "string" ? attrs.originalType.trim() : "unknown";
+        text = `Unsupported plugin block: ${originalType}`;
+      }
+      const extractor = getPluginTextExtractor(nodeObj.type);
+      if (extractor) {
+        text = String(extractor(nodeObj) || "").trim();
+      }
+    }
     if (text) {
       blocks.push({
         id: getNodeAttrId(nodeObj),
@@ -105,9 +120,20 @@ function collectBlocks(node: unknown, blocks: BlockText[]): void {
 function isBlockNode(node: Record<string, unknown>): boolean {
   if (!node || !node.type) return false;
   const nodeType = node.type as string;
-  return ["paragraph", "heading", "codeBlock", "blockquote", "listItem", "taskItem"].includes(
-    nodeType,
-  );
+  const baseTypes = [
+    "paragraph",
+    "heading",
+    "codeBlock",
+    "blockquote",
+    "listItem",
+    "taskItem",
+    "unsupportedPluginBlock",
+  ];
+  if (baseTypes.includes(nodeType)) {
+    return true;
+  }
+  const pluginTypes = getRegisteredPluginBlockTypes();
+  return pluginTypes.includes(nodeType);
 }
 
 /**

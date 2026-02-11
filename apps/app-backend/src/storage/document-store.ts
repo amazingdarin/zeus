@@ -3,8 +3,9 @@ import path from "node:path";
 import { v4 as uuidv4 } from "uuid";
 
 import { indexManager } from "./index-manager.js";
-import { getDocsRoot, buildCacheKey } from "./paths.js";
+import { getScopedDocsRoot, buildCacheKey } from "./paths.js";
 import type { Document, DocumentMeta, TreeItem, CachedDoc } from "./types.js";
+import { documentRecentEditStore } from "../services/document-recent-edit-store.js";
 
 export class DocumentNotFoundError extends Error {
   constructor(docId: string) {
@@ -24,7 +25,7 @@ export class BlockNotFoundError extends Error {
  * Get the docs root path for a user's project
  */
 function docsRoot(userId: string, projectKey: string): string {
-  return getDocsRoot(userId, "personal", projectKey);
+  return getScopedDocsRoot(userId, projectKey);
 }
 
 /**
@@ -257,6 +258,10 @@ export const documentStore = {
       path: relPath,
       title: doc.meta.title,
       parentId: doc.meta.parent_id || "",
+    });
+
+    documentRecentEditStore.touch(userId, projectKey, doc.meta.id).catch((err) => {
+      console.error("Touch recent edit failed:", err);
     });
 
     return doc;

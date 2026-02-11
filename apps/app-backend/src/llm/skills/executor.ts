@@ -10,11 +10,14 @@ import { v4 as uuidv4 } from "uuid";
 import { llmGateway } from "../gateway.js";
 import { configStore } from "../config-store.js";
 import { documentStore } from "../../storage/document-store.js";
+import { assetStore } from "../../storage/asset-store.js";
 import { draftService } from "../../services/draft.js";
 import {
   buildCreateDocumentPrompt,
   buildEditDocumentPrompt,
   buildPptOptimizeDocumentPrompt,
+  buildPptOutlineDocumentPrompt,
+  buildPptHtmlModelPrompt,
 } from "./spec-loader.js";
 import type {
   SkillIntent,
@@ -50,6 +53,14 @@ import {
   executeDocSmartImport,
   executeDocConvert,
 } from "./native/integration-skills.js";
+import { pptService } from "../../services/ppt/index.js";
+import {
+  normalizePptHtmlModel,
+  renderPptHtmlFromModel,
+  sanitizePptHtml,
+  type PptHtmlModel,
+} from "../../services/ppt/html-render.js";
+import { buildFileBlockNode } from "../../services/smart-import-shared.js";
 
 // Maximum retries for LLM content generation
 const MAX_RETRIES = 2;
@@ -152,12 +163,44 @@ export function detectSkillIntent(
     };
   }
 
+  if (trimmed.startsWith("/doc-optimize-ppt-outline")) {
+    const rest = trimmed.slice("/doc-optimize-ppt-outline".length).trim();
+    return {
+      skill: "doc-optimize-ppt-outline",
+      command: "/doc-optimize-ppt-outline",
+      args: rest ? { instructions: rest } : {},
+      rawMessage: message,
+      docIds,
+    };
+  }
+
+  if (trimmed.startsWith("/doc-render-ppt-html")) {
+    const rest = trimmed.slice("/doc-render-ppt-html".length).trim();
+    return {
+      skill: "doc-render-ppt-html",
+      command: "/doc-render-ppt-html",
+      args: rest ? { theme: rest } : {},
+      rawMessage: message,
+      docIds,
+    };
+  }
+
   if (trimmed.startsWith("/doc-optimize-ppt")) {
     const rest = trimmed.slice("/doc-optimize-ppt".length).trim();
     return {
       skill: "doc-optimize-ppt",
       command: "/doc-optimize-ppt",
       args: rest ? { instructions: rest } : {},
+      rawMessage: message,
+      docIds,
+    };
+  }
+
+  if (trimmed.startsWith("/doc-export-ppt")) {
+    return {
+      skill: "doc-export-ppt",
+      command: "/doc-export-ppt",
+      args: {},
       rawMessage: message,
       docIds,
     };
@@ -383,8 +426,17 @@ export async function* executeSkillWithStream(
       case "doc-optimize-full":
         yield* executeDocOptimizeFull(userId, projectKey, intent, traceContext);
         break;
+      case "doc-optimize-ppt-outline":
+        yield* executeDocOptimizePptOutline(userId, projectKey, intent, traceContext);
+        break;
+      case "doc-render-ppt-html":
+        yield* executeDocRenderPptHtml(userId, projectKey, intent, traceContext);
+        break;
       case "doc-optimize-ppt":
         yield* executeDocOptimizePpt(userId, projectKey, intent, traceContext);
+        break;
+      case "doc-export-ppt":
+        yield* executeDocExportPpt(userId, projectKey, intent, traceContext);
         break;
       case "doc-summary":
         yield* executeDocSummary(userId, projectKey, intent, traceContext);
@@ -830,9 +882,7 @@ function normalizeDeckTitle(raw: string): string {
 }
 
 /**
- * Execute doc-optimize-ppt skill
- *
- * Generates a new PPT-style deck document draft (does not overwrite the source doc).
+ * Execute doc-optimize-ppt (compat alias)
  */
 async function* executeDocOptimizePpt(
   userId: string,
@@ -840,12 +890,51 @@ async function* executeDocOptimizePpt(
   intent: SkillIntent,
   traceContext?: TraceContext,
 ): AsyncGenerator<SkillStreamChunk> {
-  if (!intent.docIds || intent.docIds.length === 0) {
+  yield* executeDocOptimizePptOutlineCore(
+    userId,
+    projectKey,
+    intent,
+    traceContext,
+    buildPptOptimizeDocumentPrompt,
+    "演示稿草稿已生成",
+  );
+}
+
+/**
+ * Execute doc-optimize-ppt-outline (Step 1)
+ */
+async function* executeDocOptimizePptOutline(
+  userId: string,
+  projectKey: string,
+  intent: SkillIntent,
+  traceContext?: TraceContext,
+): AsyncGenerator<SkillStreamChunk> {
+  yield* executeDocOptimizePptOutlineCore(
+    userId,
+    projectKey,
+    intent,
+    traceContext,
+    buildPptOutlineDocumentPrompt,
+    "结构化类 PPT 文档草稿已生成",
+  );
+}
+
+async function* executeDocOptimizePptOutlineCore(
+  userId: string,
+  projectKey: string,
+  intent: SkillIntent,
+  traceContext: TraceContext | undefined,
+  promptBuilder: () => string,
+  doneMessage: string,
+): AsyncGenerator<SkillStreamChunk> {
+  const explicitDocId = typeof intent.args.doc_id === "string" ? intent.args.doc_id.trim() : "";
+  const scopedDocId = intent.docIds && intent.docIds.length > 0 ? intent.docIds[0] : "";
+  const docId = explicitDocId || scopedDocId;
+
+  if (!docId) {
     yield { type: "error", error: "请使用 @ 指定要生成演示稿的文档" };
     return;
   }
-
-  const docId = intent.docIds[0];
 
   yield { type: "thinking", content: "正在读取源文档..." };
 
@@ -856,7 +945,9 @@ async function* executeDocOptimizePpt(
       : extractTiptapDoc(doc.body);
     const originalMarkdownFull = tiptapJsonToMarkdown(originalContent);
     const originalMarkdown = originalMarkdownFull.length > PPT_SOURCE_MARKDOWN_MAX_LEN
-      ? `${originalMarkdownFull.slice(0, PPT_SOURCE_MARKDOWN_MAX_LEN)}\n\n[内容已截断]`
+      ? `${originalMarkdownFull.slice(0, PPT_SOURCE_MARKDOWN_MAX_LEN)}
+
+[内容已截断]`
       : originalMarkdownFull;
 
     const args = intent.args || {};
@@ -885,16 +976,15 @@ async function* executeDocOptimizePpt(
         ? args.input.trim()
         : "";
 
-    // Get LLM config
     const llmConfig = await configStore.getInternalByType("llm");
     if (!llmConfig) {
       yield { type: "error", error: "LLM 未配置，请先在设置中配置对话模型" };
       return;
     }
 
-    yield { type: "thinking", content: "正在生成演示稿草稿..." };
+    yield { type: "thinking", content: "正在生成结构化类 PPT 文档草稿..." };
 
-    const systemPrompt = buildPptOptimizeDocumentPrompt();
+    const systemPrompt = promptBuilder();
     const userPrompt = `源文档标题: ${doc.meta.title}
 
 演示稿参数:
@@ -913,7 +1003,7 @@ ${extraInstructions || "无"}
 ${originalMarkdown}
 \`\`\`
 
-请输出“类 PPT 演示稿”的完整文档正文（Tiptap JSON，type=doc）。`;
+请输出“结构化类 PPT 说明文档”的完整文档正文（Tiptap JSON，type=doc）。`;
 
     let fullContent = "";
     const stream = await llmGateway.chatStream({
@@ -925,7 +1015,7 @@ ${originalMarkdown}
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      temperature: 0.45,
+      temperature: 0.35,
       traceContext,
     });
 
@@ -949,7 +1039,7 @@ ${originalMarkdown}
     const draft = draftService.create({
       userId,
       projectKey,
-      docId: null, // new document
+      docId: null,
       parentId: doc.meta.parent_id || null,
       title: deckTitle,
       originalContent: null,
@@ -957,11 +1047,276 @@ ${originalMarkdown}
     });
 
     yield { type: "draft", draft };
-    yield { type: "done", message: "演示稿草稿已生成" };
+    yield { type: "done", message: doneMessage };
   } catch (err) {
     yield {
       type: "error",
       error: `生成演示稿失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+const PPT_HTML_SOURCE_MARKDOWN_MAX_LEN = 40_000;
+
+function parseJsonObjectFromText(raw: string): Record<string, unknown> | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
+  } catch {
+    // ignore
+  }
+
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    try {
+      const parsed = JSON.parse(fenced[1].trim());
+      return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
+    } catch {
+      // ignore
+    }
+  }
+
+  const startIdx = trimmed.indexOf("{");
+  const endIdx = trimmed.lastIndexOf("}");
+  if (startIdx !== -1 && endIdx > startIdx) {
+    try {
+      const parsed = JSON.parse(trimmed.slice(startIdx, endIdx + 1));
+      return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function parsePptHtmlModelResponse(raw: string): { model?: PptHtmlModel; error?: string } {
+  const parsed = parseJsonObjectFromText(raw);
+  if (!parsed) {
+    return { error: "无法解析 PPT HTML 模型 JSON" };
+  }
+
+  const model = normalizePptHtmlModel(parsed);
+  if (!model.slides || model.slides.length === 0) {
+    return { error: "PPT HTML 模型缺少有效 slides" };
+  }
+
+  return { model };
+}
+
+function sanitizeHtmlFilename(rawTitle: string): string {
+  const base = rawTitle
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9一-龥_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 40);
+  return base || "presentation";
+}
+
+function isAutoGeneratedPptHtmlFileBlock(node: JSONContent): boolean {
+  if (!node || node.type !== "file_block") return false;
+  const attrs = node.attrs as Record<string, unknown> | undefined;
+  if (!attrs) return false;
+
+  const mime = typeof attrs.mime === "string" ? attrs.mime.toLowerCase() : "";
+  const fileName = typeof attrs.file_name === "string" ? attrs.file_name.toLowerCase() : "";
+  return mime === "text/html" && fileName.startsWith("ppt-preview-");
+}
+
+function injectPptHtmlFileBlockAtTop(original: JSONContent, fileBlock: JSONContent): JSONContent {
+  const content = Array.isArray(original.content) ? original.content : [];
+  const filtered = content.filter((node) => !isAutoGeneratedPptHtmlFileBlock(node));
+
+  return ensureBlockIds({
+    type: "doc",
+    content: [fileBlock, ...filtered],
+  } as unknown as JSONContent) as JSONContent;
+}
+
+/**
+ * Execute doc-render-ppt-html skill (Step 2)
+ */
+async function* executeDocRenderPptHtml(
+  userId: string,
+  projectKey: string,
+  intent: SkillIntent,
+  traceContext?: TraceContext,
+): AsyncGenerator<SkillStreamChunk> {
+  const explicitDocId = typeof intent.args.doc_id === "string" ? intent.args.doc_id.trim() : "";
+  const scopedDocId = intent.docIds && intent.docIds.length > 0 ? intent.docIds[0] : "";
+  const docId = explicitDocId || scopedDocId;
+
+  if (!docId) {
+    yield { type: "error", error: "请使用 @ 指定目标文档，或提供 doc_id" };
+    return;
+  }
+
+  const themeRaw = typeof intent.args.theme === "string" ? intent.args.theme.trim().toLowerCase() : "";
+  const theme = ["modern", "business", "minimal", "dark"].includes(themeRaw)
+    ? themeRaw
+    : "modern";
+
+  yield { type: "thinking", content: "正在读取结构化类 PPT 文档..." };
+
+  try {
+    const doc = await documentStore.get(userId, projectKey, docId);
+    const originalDoc = extractTiptapDoc(doc.body);
+    const markdownFull = tiptapJsonToMarkdown(originalDoc);
+    const markdown = markdownFull.length > PPT_HTML_SOURCE_MARKDOWN_MAX_LEN
+      ? `${markdownFull.slice(0, PPT_HTML_SOURCE_MARKDOWN_MAX_LEN)}
+
+[内容已截断]`
+      : markdownFull;
+
+    const llmConfig = await configStore.getInternalByType("llm");
+    if (!llmConfig) {
+      yield { type: "error", error: "LLM 未配置，请先在设置中配置对话模型" };
+      return;
+    }
+
+    yield { type: "thinking", content: "正在生成 HTML 演示稿模型..." };
+
+    const modelResponse = await llmGateway.chat({
+      provider: llmConfig.providerId,
+      model: llmConfig.defaultModel || "gpt-4o",
+      apiKey: llmConfig.apiKey,
+      baseUrl: llmConfig.baseUrl,
+      messages: [
+        { role: "system", content: buildPptHtmlModelPrompt() },
+        {
+          role: "user",
+          content: `请根据以下结构化类 PPT 文档，生成渲染模型 JSON。
+
+文档标题: ${doc.meta.title}
+
+文档内容（Markdown）:
+\`\`\`markdown
+${markdown}
+\`\`\``,
+        },
+      ],
+      temperature: 0.2,
+      maxTokens: 2000,
+      traceContext,
+    });
+
+    const { model, error: modelError } = parsePptHtmlModelResponse(modelResponse.content || "");
+    if (!model || modelError) {
+      yield { type: "error", error: modelError || "PPT HTML 模型生成失败" };
+      return;
+    }
+
+    yield { type: "thinking", content: "正在渲染静态 HTML 并注入 file_block..." };
+
+    const html = sanitizePptHtml(renderPptHtmlFromModel(model, { theme }));
+    const filename = `ppt-preview-${sanitizeHtmlFilename(doc.meta.title)}-${Date.now()}.html`;
+
+    const assetMeta = await assetStore.save(
+      userId,
+      projectKey,
+      filename,
+      "text/html",
+      Buffer.from(html, "utf-8"),
+    );
+
+    const htmlFileBlock = buildFileBlockNode({
+      id: assetMeta.id,
+      filename: assetMeta.filename,
+      mime: assetMeta.mime,
+      size: assetMeta.size,
+    });
+
+    const proposedContent = injectPptHtmlFileBlockAtTop(originalDoc, htmlFileBlock);
+
+    const draft = draftService.create({
+      userId,
+      projectKey,
+      docId: doc.meta.id,
+      parentId: doc.meta.parent_id || null,
+      title: doc.meta.title,
+      originalContent: originalDoc,
+      proposedContent,
+    });
+
+    yield { type: "draft", draft };
+    yield {
+      type: "done",
+      message: `HTML 演示稿已生成并注入文档顶部（doc_id=${doc.meta.id}, asset_id=${assetMeta.id}）。`,
+    };
+  } catch (err) {
+    yield {
+      type: "error",
+      error: `生成 HTML 演示稿失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Execute doc-export-ppt skill
+ *
+ * Triggers async PPT generation and returns task id/status for follow-up polling/downloading.
+ */
+async function* executeDocExportPpt(
+  userId: string,
+  projectKey: string,
+  intent: SkillIntent,
+  traceContext?: TraceContext,
+): AsyncGenerator<SkillStreamChunk> {
+  const explicitDocId = typeof intent.args.doc_id === "string" ? intent.args.doc_id.trim() : "";
+  const scopeDocId = intent.docIds && intent.docIds.length > 0 ? intent.docIds[0] : "";
+  const docId = explicitDocId || scopeDocId;
+
+  if (!docId) {
+    yield { type: "error", error: "请使用 @ 指定要导出的文档，或提供 doc_id" };
+    return;
+  }
+
+  yield { type: "thinking", content: "正在准备导出 PPT 任务..." };
+
+  try {
+    const doc = await documentStore.get(userId, projectKey, docId);
+    const body = extractTiptapDoc(doc.body);
+
+    const available = await pptService.isAvailable();
+    if (!available) {
+      yield { type: "error", error: "PPT 导出服务暂不可用，请稍后重试" };
+      return;
+    }
+
+    const style = intent.args.style && typeof intent.args.style === "object"
+      ? intent.args.style as Record<string, unknown>
+      : undefined;
+
+    const options = intent.args.options && typeof intent.args.options === "object"
+      ? intent.args.options as Record<string, unknown>
+      : undefined;
+
+    const result = await pptService.generateFromDocument(
+      body,
+      style as {
+        description?: string;
+        templateId?: string;
+        templateImages?: string[];
+      } | undefined,
+      options as {
+        aspectRatio?: "16:9" | "4:3";
+        language?: string;
+      } | undefined,
+    );
+
+    yield {
+      type: "done",
+      message: `PPT 导出任务已创建（doc_id=${docId}, task_id=${result.taskId}, status=${result.status}）。可稍后查询任务状态并下载。`,
+    };
+  } catch (err) {
+    yield {
+      type: "error",
+      error: `导出 PPT 失败: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 }

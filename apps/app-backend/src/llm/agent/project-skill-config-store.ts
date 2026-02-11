@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { query } from "../../db/postgres.js";
+import { resolveProjectScope } from "../../project-scope.js";
 import { zodObjectHasRequiredKey } from "../zod.js";
 import type {
   AgentRiskLevel,
@@ -11,6 +12,8 @@ import type {
 
 type ProjectSkillConfigRow = {
   id: string;
+  owner_type: string;
+  owner_id: string;
   project_key: string;
   skill_id: string;
   source: AgentSkillSource;
@@ -39,6 +42,7 @@ const CATEGORY_META: Record<string, CategoryMeta> = {
   code: { name: "代码", description: "代码分析与处理", icon: "💻" },
   img: { name: "图像", description: "图像相关处理", icon: "🖼️" },
   mcp: { name: "MCP", description: "第三方 MCP 工具技能", icon: "🧩" },
+  plugin: { name: "插件", description: "插件扩展操作", icon: "🔌" },
   general: { name: "通用", description: "通用扩展技能", icon: "🔧" },
 };
 
@@ -91,6 +95,8 @@ async function loadLegacyConfigMap(): Promise<Map<string, LegacySkillConfigRow>>
 }
 
 function defaultConfigForSkill(
+  ownerType: string,
+  ownerId: string,
   projectKey: string,
   skill: AgentSkillDefinition,
   legacyMap: Map<string, LegacySkillConfigRow>,
@@ -99,6 +105,8 @@ function defaultConfigForSkill(
   const legacy = legacyKey ? legacyMap.get(legacyKey) : undefined;
   return {
     id: uuidv4(),
+    owner_type: ownerType,
+    owner_id: ownerId,
     project_key: projectKey,
     skill_id: skill.id,
     source: skill.source,
@@ -110,10 +118,13 @@ function defaultConfigForSkill(
 
 export const projectSkillConfigStore = {
   async list(projectKey: string): Promise<ProjectSkillConfig[]> {
+    const scope = resolveProjectScope("", projectKey);
     try {
       const result = await query<ProjectSkillConfigRow>(
-        `SELECT * FROM project_skill_config WHERE project_key = $1 ORDER BY priority ASC, skill_id ASC`,
-        [projectKey],
+        `SELECT * FROM project_skill_config
+         WHERE owner_type = $1 AND owner_id = $2 AND project_key = $3
+         ORDER BY priority ASC, skill_id ASC`,
+        [scope.ownerType, scope.ownerId, scope.projectKey],
       );
       return result.rows.map(mapRow);
     } catch (err) {
@@ -133,16 +144,19 @@ export const projectSkillConfigStore = {
 
     for (const skill of skills) {
       if (existingIds.has(skill.id)) continue;
-      const seed = defaultConfigForSkill(projectKey, skill, legacyMap);
+      const scope = resolveProjectScope("", projectKey);
+      const seed = defaultConfigForSkill(scope.ownerType, scope.ownerId, scope.projectKey, skill, legacyMap);
       try {
         await query(
           `INSERT INTO project_skill_config
-            (id, project_key, skill_id, source, enabled, priority, risk_override, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-           ON CONFLICT (project_key, skill_id) DO UPDATE
+            (id, owner_type, owner_id, project_key, skill_id, source, enabled, priority, risk_override, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+           ON CONFLICT (owner_type, owner_id, project_key, skill_id) DO UPDATE
              SET source = EXCLUDED.source`,
           [
             seed.id,
+            seed.owner_type,
+            seed.owner_id,
             seed.project_key,
             seed.skill_id,
             seed.source,
@@ -189,9 +203,11 @@ export const projectSkillConfigStore = {
     defaultEnabled = true,
   ): Promise<boolean> {
     try {
+      const scope = resolveProjectScope("", projectKey);
       const result = await query<{ enabled: boolean }>(
-        `SELECT enabled FROM project_skill_config WHERE project_key = $1 AND skill_id = $2`,
-        [projectKey, skillId],
+        `SELECT enabled FROM project_skill_config
+         WHERE owner_type = $1 AND owner_id = $2 AND project_key = $3 AND skill_id = $4`,
+        [scope.ownerType, scope.ownerId, scope.projectKey, skillId],
       );
       if (result.rows.length === 0) {
         return defaultEnabled;
@@ -211,15 +227,18 @@ export const projectSkillConfigStore = {
     enabled: boolean,
   ): Promise<ProjectSkillConfig> {
     try {
+      const scope = resolveProjectScope("", projectKey);
       await query(
         `INSERT INTO project_skill_config
-          (id, project_key, skill_id, source, enabled, priority, risk_override, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-         ON CONFLICT (project_key, skill_id) DO UPDATE
+          (id, owner_type, owner_id, project_key, skill_id, source, enabled, priority, risk_override, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+         ON CONFLICT (owner_type, owner_id, project_key, skill_id) DO UPDATE
            SET enabled = EXCLUDED.enabled, source = EXCLUDED.source, priority = EXCLUDED.priority, updated_at = NOW()`,
         [
           uuidv4(),
-          projectKey,
+          scope.ownerType,
+          scope.ownerId,
+          scope.projectKey,
           skill.id,
           skill.source,
           enabled,
@@ -228,8 +247,9 @@ export const projectSkillConfigStore = {
         ],
       );
       const result = await query<ProjectSkillConfigRow>(
-        `SELECT * FROM project_skill_config WHERE project_key = $1 AND skill_id = $2`,
-        [projectKey, skill.id],
+        `SELECT * FROM project_skill_config
+         WHERE owner_type = $1 AND owner_id = $2 AND project_key = $3 AND skill_id = $4`,
+        [scope.ownerType, scope.ownerId, scope.projectKey, skill.id],
       );
       if (result.rows.length === 0) {
         throw new Error(`Failed to update skill config for ${skill.id}`);

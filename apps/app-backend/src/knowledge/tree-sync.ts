@@ -12,6 +12,7 @@
 import { query } from "../db/postgres.js";
 import { documentStore } from "../storage/document-store.js";
 import { clearSummaryCache } from "./hierarchy.js";
+import { resolveProjectScope } from "../project-scope.js";
 
 // ============================================================
 // Configuration
@@ -105,7 +106,7 @@ class TreeSyncManager {
     }
 
     // Clear summary cache
-    await clearSummaryCache(event.docId);
+    await clearSummaryCache(event.userId, event.projectKey, event.docId);
   }
 
   /**
@@ -260,14 +261,20 @@ class TreeSyncManager {
       const docTitle = hierarchy[hierarchy.length - 1]?.title || "";
 
       // Preserve any in-document suffix (doc title + headings) if present.
+      const scope = resolveProjectScope(userId, projectKey);
+
       const rows = await query<{
         id: string;
         metadata: Record<string, unknown>;
       }>(
         `SELECT id, metadata
          FROM knowledge_index
-         WHERE doc_id = $1 AND user_id = $2 AND project_key = $3`,
-        [docId, userId, projectKey],
+         WHERE doc_id = $1
+           AND user_id = $2
+           AND owner_type = $3
+           AND owner_id = $4
+           AND project_key = $5`,
+        [docId, userId, scope.ownerType, scope.ownerId, scope.projectKey],
       );
 
       for (const row of rows.rows) {
@@ -292,13 +299,17 @@ class TreeSyncManager {
           `UPDATE knowledge_index
            SET metadata = $1::jsonb,
                updated_at = NOW()
-           WHERE id = $2 AND user_id = $3 AND project_key = $4`,
-          [JSON.stringify(nextMetadata), row.id, userId, projectKey],
+           WHERE id = $2
+             AND user_id = $3
+             AND owner_type = $4
+             AND owner_id = $5
+             AND project_key = $6`,
+          [JSON.stringify(nextMetadata), row.id, userId, scope.ownerType, scope.ownerId, scope.projectKey],
         );
       }
 
       // Clear summary cache as content context may have changed
-      await clearSummaryCache(docId);
+      await clearSummaryCache(userId, projectKey, docId);
     } catch (err) {
       // Document might have been deleted
       console.warn(`[TreeSync] Document ${docId} not found, skipping path update`);
@@ -310,10 +321,15 @@ class TreeSyncManager {
     projectKey: string,
     docId: string,
   ): Promise<void> {
+    const scope = resolveProjectScope(userId, projectKey);
     await query(
       `DELETE FROM knowledge_index
-       WHERE doc_id = $1 AND user_id = $2 AND project_key = $3`,
-      [docId, userId, projectKey],
+       WHERE doc_id = $1
+         AND user_id = $2
+         AND owner_type = $3
+         AND owner_id = $4
+         AND project_key = $5`,
+      [docId, userId, scope.ownerType, scope.ownerId, scope.projectKey],
     );
   }
 

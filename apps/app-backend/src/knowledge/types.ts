@@ -113,6 +113,8 @@ export interface ChunkResult {
 export interface RaptorNode {
   id: string;
   user_id: string;
+  owner_type: string;
+  owner_id: string;
   project_key: string;
   doc_id: string;
   level: number;

@@ -10,6 +10,7 @@
 import { query } from "../db/postgres.js";
 import { documentStore } from "../storage/document-store.js";
 import { llmGateway, configStore } from "../llm/index.js";
+import { resolveProjectScope } from "../project-scope.js";
 import type {
   HierarchyContext,
   AncestorLoadConfig,
@@ -178,7 +179,7 @@ export async function getDocumentSummary(
   docId: string,
 ): Promise<string | undefined> {
   // Check cache first
-  const cached = await getSummaryFromCache(docId);
+  const cached = await getSummaryFromCache(userId, projectKey, docId);
   if (cached) return cached;
 
   // Try to get from document metadata
@@ -245,11 +246,23 @@ async function generateSummary(
 /**
  * Get summary from cache
  */
-async function getSummaryFromCache(docId: string): Promise<string | undefined> {
+async function getSummaryFromCache(
+  userId: string,
+  projectKey: string,
+  docId: string,
+): Promise<string | undefined> {
   try {
+    const scope = resolveProjectScope(userId, projectKey);
+
     const result = await query<{ summary: string; expires_at: Date | null }>(
-      `SELECT summary, expires_at FROM document_summary_cache WHERE doc_id = $1`,
-      [docId],
+      `SELECT summary, expires_at
+       FROM document_summary_cache
+       WHERE user_id = $1
+         AND owner_type = $2
+         AND owner_id = $3
+         AND project_key = $4
+         AND doc_id = $5`,
+      [userId, scope.ownerType, scope.ownerId, scope.projectKey, docId],
     );
 
     if (result.rows.length === 0) return undefined;
@@ -259,7 +272,15 @@ async function getSummaryFromCache(docId: string): Promise<string | undefined> {
     // Check if expired
     if (row.expires_at && new Date(row.expires_at) < new Date()) {
       // Delete expired cache entry
-      await query(`DELETE FROM document_summary_cache WHERE doc_id = $1`, [docId]);
+      await query(
+        `DELETE FROM document_summary_cache
+         WHERE user_id = $1
+           AND owner_type = $2
+           AND owner_id = $3
+           AND project_key = $4
+           AND doc_id = $5`,
+        [userId, scope.ownerType, scope.ownerId, scope.projectKey, docId],
+      );
       return undefined;
     }
 
@@ -282,15 +303,18 @@ async function cacheSummary(
   const expiresAt = new Date(Date.now() + SUMMARY_CACHE_TTL_MS);
 
   try {
+    const scope = resolveProjectScope(userId, projectKey);
+
     await query(
-      `INSERT INTO document_summary_cache (doc_id, user_id, project_key, summary, model, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (doc_id) DO UPDATE SET
+      `INSERT INTO document_summary_cache
+        (doc_id, user_id, owner_type, owner_id, project_key, summary, model, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (user_id, owner_type, owner_id, project_key, doc_id) DO UPDATE SET
          summary = EXCLUDED.summary,
          model = EXCLUDED.model,
          expires_at = EXCLUDED.expires_at,
          created_at = NOW()`,
-      [docId, userId, projectKey, summary, model || null, expiresAt],
+      [docId, userId, scope.ownerType, scope.ownerId, scope.projectKey, summary, model || null, expiresAt],
     );
   } catch (err) {
     console.warn("[Hierarchy] Failed to cache summary:", err);
@@ -300,9 +324,22 @@ async function cacheSummary(
 /**
  * Clear summary cache for a document
  */
-export async function clearSummaryCache(docId: string): Promise<void> {
+export async function clearSummaryCache(
+  userId: string,
+  projectKey: string,
+  docId: string,
+): Promise<void> {
   try {
-    await query(`DELETE FROM document_summary_cache WHERE doc_id = $1`, [docId]);
+    const scope = resolveProjectScope(userId, projectKey);
+    await query(
+      `DELETE FROM document_summary_cache
+       WHERE user_id = $1
+         AND owner_type = $2
+         AND owner_id = $3
+         AND project_key = $4
+         AND doc_id = $5`,
+      [userId, scope.ownerType, scope.ownerId, scope.projectKey, docId],
+    );
   } catch {
     // Ignore errors
   }
@@ -316,9 +353,11 @@ export async function clearProjectSummaryCache(
   projectKey: string,
 ): Promise<void> {
   try {
+    const scope = resolveProjectScope(userId, projectKey);
     await query(
-      `DELETE FROM document_summary_cache WHERE user_id = $1 AND project_key = $2`,
-      [userId, projectKey],
+      `DELETE FROM document_summary_cache
+       WHERE user_id = $1 AND owner_type = $2 AND owner_id = $3 AND project_key = $4`,
+      [userId, scope.ownerType, scope.ownerId, scope.projectKey],
     );
   } catch {
     // Ignore errors

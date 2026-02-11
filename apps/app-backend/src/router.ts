@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
+import path from "node:path";
 import { v4 as uuidv4 } from "uuid";
 import type { JSONContent } from "@tiptap/core";
 
@@ -7,6 +8,12 @@ import { convertDocument } from "./services/convert.js";
 import { fetchUrl } from "./services/fetch-url.js";
 import { importGit } from "./services/import-git.js";
 import { importFileAsDocument } from "./services/smart-import.js";
+import {
+  readAsset as readSystemDocAsset,
+  readMarkdown as readSystemDocMarkdown,
+  scanDocsTree,
+  SystemDocsError,
+} from "./services/system-docs.js";
 import { ensureBlockIds } from "./utils/block-id.js";
 import { traceManager } from "./observability/index.js";
 import {
@@ -20,6 +27,7 @@ import { rebuildTaskManager } from "./knowledge/rebuild-task.js";
 import { notifyDocumentMoved } from "./knowledge/tree-sync.js";
 import { assetStore } from "./storage/asset-store.js";
 import { getUserId } from "./middleware/auth.js";
+import { projectScopeMiddleware } from "./middleware/project-scope.js";
 import {
   llmGateway,
   configStore,
@@ -40,6 +48,7 @@ import {
   confirmTool,
   rejectTool,
   selectIntent,
+  providePreflightInput,
   provideRequiredInput,
 } from "./services/chat.js";
 import { draftService } from "./services/draft.js";
@@ -50,11 +59,15 @@ import {
   optimizeFormatSync,
   type OptimizeMode,
 } from "./services/optimize.js";
+import { documentFavoriteStore } from "./services/document-favorite-store.js";
+import { documentRecentEditStore } from "./services/document-recent-edit-store.js";
 import { skillConfigStore } from "./llm/skills/skill-config-store.js";
 import { agentSkillCatalog, projectSkillConfigStore } from "./llm/agent/index.js";
 import { zodObjectHasRequiredKey } from "./llm/zod.js";
+import { pluginManagerV2 } from "./plugins-v2/index.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
+const pluginManager = pluginManagerV2;
 
 /**
  * Determine asset kind from MIME type
@@ -173,6 +186,71 @@ function error(res: Response, code: string, message: string, status = 400): void
   res.status(status).json({ code, message });
 }
 
+type DocumentHookEvent =
+  | "document.create"
+  | "document.update"
+  | "document.delete"
+  | "document.move"
+  | "document.import"
+  | "document.optimize";
+
+async function applyDocumentBeforeHooks(
+  req: Request,
+  res: Response,
+  event: DocumentHookEvent,
+  payload: Record<string, unknown>,
+): Promise<{ payload: Record<string, unknown>; requestId: string } | null> {
+  try {
+    const userId = getUserId(req);
+    const projectKey = String(req.params.projectKey || "").trim();
+    const requestId = `plugin-hook-${uuidv4()}`;
+
+    const result = await pluginManager.runBeforeHooks({
+      userId,
+      projectKey,
+      event,
+      payload,
+      requestId,
+    });
+
+    if (!result.allowed) {
+      const rejection = result.rejection || {
+        code: "PLUGIN_HOOK_REJECTED",
+        message: "Operation rejected by plugin hook",
+        status: 400,
+      };
+      error(res, rejection.code, rejection.message, rejection.status);
+      return null;
+    }
+
+    return {
+      payload: result.payload,
+      requestId,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Plugin before-hook execution failed";
+    error(res, "PLUGIN_HOOK_FAILED", message, 500);
+    return null;
+  }
+}
+
+function dispatchDocumentAfterHooks(
+  req: Request,
+  event: DocumentHookEvent,
+  payload: Record<string, unknown>,
+  requestId: string,
+): void {
+  const userId = getUserId(req);
+  const projectKey = String(req.params.projectKey || "").trim();
+  pluginManager.dispatchAfterHooks({
+    userId,
+    projectKey,
+    event,
+    payload,
+    requestId,
+  });
+}
+
 /**
  * Recursively update block attributes in document content
  */
@@ -203,14 +281,86 @@ export const buildRouter = () => {
   const router = Router();
 
   // ============================================
+  // System Docs APIs (read-only, filesystem-based)
+  // ============================================
+
+  /**
+   * Get system docs tree
+   * GET /system-docs/tree
+   */
+  router.get("/system-docs/tree", async (req: Request, res: Response) => {
+    try {
+      const language = String(req.query.lang ?? "");
+      const tree = await scanDocsTree(language);
+      success(res, tree);
+    } catch (err) {
+      if (err instanceof SystemDocsError) {
+        error(res, err.code, err.message, err.status);
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Get system docs tree failed";
+      error(res, "SYSTEM_DOCS_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Get markdown content from system docs
+   * GET /system-docs/content?path=xxx
+   */
+  router.get("/system-docs/content", async (req: Request, res: Response) => {
+    try {
+      const relativePath = String(req.query.path ?? "");
+      const language = String(req.query.lang ?? "");
+      const data = await readSystemDocMarkdown(relativePath, language);
+      success(res, data);
+    } catch (err) {
+      if (err instanceof SystemDocsError) {
+        error(res, err.code, err.message, err.status);
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Read system doc failed";
+      error(res, "SYSTEM_DOCS_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Get static asset from system docs
+   * GET /system-docs/asset?path=xxx
+   */
+  router.get("/system-docs/asset", async (req: Request, res: Response) => {
+    try {
+      const relativePath = String(req.query.path ?? "");
+      const data = await readSystemDocAsset(relativePath);
+
+      res.setHeader("Content-Type", data.mime);
+      const asciiFilename = path.basename(data.path).replace(/[^\x20-\x7E]/g, "_");
+      const encodedFilename = encodeURIComponent(path.basename(data.path));
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`,
+      );
+      res.send(data.buffer);
+    } catch (err) {
+      if (err instanceof SystemDocsError) {
+        error(res, err.code, err.message, err.status);
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Read system doc asset failed";
+      error(res, "SYSTEM_DOCS_FAILED", message, 500);
+    }
+  });
+
+  router.use("/projects/:ownerType/:ownerKey/:projectKey", projectScopeMiddleware);
+
+  // ============================================
   // Document CRUD APIs
   // ============================================
 
   /**
    * List documents under a parent
-   * GET /projects/:projectKey/documents?parent_id=xxx
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents?parent_id=xxx
    */
-  router.get("/projects/:projectKey/documents", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/documents", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
       const userId = getUserId(req);
@@ -225,9 +375,9 @@ export const buildRouter = () => {
 
   /**
    * Get the full document tree (all documents with nested children)
-   * GET /projects/:projectKey/documents/tree
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/tree
    */
-  router.get("/projects/:projectKey/documents/tree", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/documents/tree", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
       const userId = getUserId(req);
@@ -241,10 +391,10 @@ export const buildRouter = () => {
 
   /**
    * Suggest documents matching a query (for @ mention autocomplete)
-   * GET /projects/:projectKey/documents/suggest?q=xxx&limit=10&parentId=xxx
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/suggest?q=xxx&limit=10&parentId=xxx
    * @param parentId - Optional: Only search children of this parent ("root" or "" for root level)
    */
-  router.get("/projects/:projectKey/documents/suggest", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/documents/suggest", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
       const userId = getUserId(req);
@@ -262,10 +412,88 @@ export const buildRouter = () => {
   });
 
   /**
-   * Get a document by ID
-   * GET /projects/:projectKey/documents/:docId
+   * List favorite documents for current user + project
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/favorites
    */
-  router.get("/projects/:projectKey/documents/:docId", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/documents/favorites", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const favorites = await documentFavoriteStore.list(userId, projectKey);
+      success(res, favorites);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "List favorites failed";
+      error(res, "LIST_FAVORITES_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * List recently edited documents for current user + project
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/recent-edits
+   */
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/documents/recent-edits", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const recentEdits = await documentRecentEditStore.list(userId, projectKey);
+      success(res, recentEdits);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "List recent edits failed";
+      error(res, "LIST_RECENT_EDITS_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Favorite a document (idempotent, repeats move to top)
+   * PUT /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/favorite
+   */
+  router.put(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/favorite",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+
+        await documentFavoriteStore.add(userId, projectKey, docId);
+        const favorites = await documentFavoriteStore.list(userId, projectKey);
+        success(res, favorites);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          error(res, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Favorite failed";
+        error(res, "FAVORITE_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Remove document from favorites (idempotent)
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/favorite
+   */
+  router.delete(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/favorite",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+
+        await documentFavoriteStore.remove(userId, projectKey, docId);
+        const favorites = await documentFavoriteStore.list(userId, projectKey);
+        success(res, favorites);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unfavorite failed";
+        error(res, "UNFAVORITE_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Get a document by ID
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId
+   */
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/documents/:docId", async (req: Request, res: Response) => {
     try {
       const { projectKey, docId } = req.params;
       const userId = getUserId(req);
@@ -283,10 +511,10 @@ export const buildRouter = () => {
 
   /**
    * Get document hierarchy (ancestor chain)
-   * GET /projects/:projectKey/documents/:docId/hierarchy
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/hierarchy
    */
   router.get(
-    "/projects/:projectKey/documents/:docId/hierarchy",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/hierarchy",
     async (req: Request, res: Response) => {
       try {
         const { projectKey, docId } = req.params;
@@ -311,10 +539,10 @@ export const buildRouter = () => {
 
   /**
    * Get a specific block from a document
-   * GET /projects/:projectKey/documents/:docId/blocks/:blockId
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/blocks/:blockId
    */
   router.get(
-    "/projects/:projectKey/documents/:docId/blocks/:blockId",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/blocks/:blockId",
     async (req: Request, res: Response) => {
       try {
         const { projectKey, docId, blockId } = req.params;
@@ -338,34 +566,44 @@ export const buildRouter = () => {
 
   /**
    * Create a new document
-   * POST /projects/:projectKey/documents
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents
    */
-  router.post("/projects/:projectKey/documents", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/documents", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
       const userId = getUserId(req);
       const body = req.body as CreateDocumentRequest;
 
-      if (!body.meta?.title) {
+      const before = await applyDocumentBeforeHooks(req, res, "document.create", {
+        body,
+      });
+      if (!before) {
+        return;
+      }
+      const nextBody = (before.payload.body && typeof before.payload.body === "object"
+        ? before.payload.body
+        : body) as CreateDocumentRequest;
+
+      if (!nextBody.meta?.title) {
         error(res, "MISSING_TITLE", "title is required");
         return;
       }
 
       const doc: Document = {
         meta: {
-          id: body.meta.id || uuidv4(),
-          schema_version: body.meta.schema_version || "v1",
-          title: body.meta.title,
-          slug: body.meta.slug || "",
+          id: nextBody.meta.id || uuidv4(),
+          schema_version: nextBody.meta.schema_version || "v1",
+          title: nextBody.meta.title,
+          slug: nextBody.meta.slug || "",
           path: "",
-          parent_id: body.meta.parent_id || "root",
+          parent_id: nextBody.meta.parent_id || "root",
           created_at: "",
           updated_at: "",
-          extra: body.meta.extra,
+          extra: nextBody.meta.extra,
         },
         body: {
-          ...body.body,
-          content: body.body?.content ? ensureBlockIds(body.body.content as JSONContent) : body.body?.content,
+          ...nextBody.body,
+          content: nextBody.body?.content ? ensureBlockIds(nextBody.body.content as JSONContent) : nextBody.body?.content,
         },
       };
 
@@ -376,6 +614,11 @@ export const buildRouter = () => {
         console.error("Index error:", err);
       });
 
+      dispatchDocumentAfterHooks(req, "document.create", {
+        request: before.payload,
+        saved,
+      }, before.requestId);
+
       success(res, { meta: saved.meta, body: saved.body }, 201);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Create failed";
@@ -385,23 +628,34 @@ export const buildRouter = () => {
 
   /**
    * Update an existing document
-   * PUT /projects/:projectKey/documents/:docId
+   * PUT /projects/:ownerType/:ownerKey/:projectKey/documents/:docId
    */
-  router.put("/projects/:projectKey/documents/:docId", async (req: Request, res: Response) => {
+  router.put("/projects/:ownerType/:ownerKey/:projectKey/documents/:docId", async (req: Request, res: Response) => {
     try {
       const { projectKey, docId } = req.params;
       const userId = getUserId(req);
       const body = req.body as CreateDocumentRequest;
 
+      const before = await applyDocumentBeforeHooks(req, res, "document.update", {
+        docId,
+        body,
+      });
+      if (!before) {
+        return;
+      }
+      const nextBody = (before.payload.body && typeof before.payload.body === "object"
+        ? before.payload.body
+        : body) as CreateDocumentRequest;
+
       // Get existing document
       const existing = await documentStore.get(userId, projectKey, docId);
 
       // Merge updates
-      const updatedBody = body.body || existing.body;
+      const updatedBody = nextBody.body || existing.body;
       const doc: Document = {
         meta: {
           ...existing.meta,
-          ...body.meta,
+          ...nextBody.meta,
           id: docId, // Ensure ID doesn't change
         },
         body: {
@@ -417,6 +671,11 @@ export const buildRouter = () => {
         console.error("Index error:", err);
       });
 
+      dispatchDocumentAfterHooks(req, "document.update", {
+        request: before.payload,
+        saved,
+      }, before.requestId);
+
       success(res, { meta: saved.meta, body: saved.body });
     } catch (err) {
       if (err instanceof DocumentNotFoundError) {
@@ -430,15 +689,33 @@ export const buildRouter = () => {
 
   /**
    * Delete a document (optionally recursive)
-   * DELETE /projects/:projectKey/documents/:docId?recursive=true
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/documents/:docId?recursive=true
    */
-  router.delete("/projects/:projectKey/documents/:docId", async (req: Request, res: Response) => {
+  router.delete("/projects/:ownerType/:ownerKey/:projectKey/documents/:docId", async (req: Request, res: Response) => {
     try {
       const { projectKey, docId } = req.params;
       const userId = getUserId(req);
       const recursive = req.query.recursive === "true";
+
+      const before = await applyDocumentBeforeHooks(req, res, "document.delete", {
+        docId,
+        recursive,
+      });
+      if (!before) {
+        return;
+      }
+      const nextDocId = typeof before.payload.docId === "string" && before.payload.docId.trim()
+        ? before.payload.docId.trim()
+        : docId;
+      const nextRecursive = before.payload.recursive === true || recursive;
       
-      const deletedIds = await documentStore.delete(userId, projectKey, docId, recursive);
+      const deletedIds = await documentStore.delete(userId, projectKey, nextDocId, nextRecursive);
+
+      await documentFavoriteStore.removeMany(userId, projectKey, deletedIds);
+
+      documentRecentEditStore.removeMany(userId, projectKey, deletedIds).catch((cleanupErr) => {
+        console.error("Cleanup recent edits error:", cleanupErr);
+      });
 
       // Remove all deleted documents from index asynchronously
       for (const deletedId of deletedIds) {
@@ -446,6 +723,11 @@ export const buildRouter = () => {
           console.error("Remove index error:", err);
         });
       }
+
+      dispatchDocumentAfterHooks(req, "document.delete", {
+        request: before.payload,
+        deletedIds,
+      }, before.requestId);
 
       success(res, { deleted_ids: deletedIds, count: deletedIds.length });
     } catch (err) {
@@ -460,10 +742,10 @@ export const buildRouter = () => {
 
   /**
    * Update block attributes (for taskItem checked state, etc.)
-   * PATCH /projects/:projectKey/documents/:docId/blocks/:blockId
+   * PATCH /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/blocks/:blockId
    */
   router.patch(
-    "/projects/:projectKey/documents/:docId/blocks/:blockId",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/blocks/:blockId",
     async (req: Request, res: Response) => {
       try {
         const { projectKey, docId, blockId } = req.params;
@@ -532,15 +814,29 @@ export const buildRouter = () => {
 
   /**
    * Move a document to a new parent
-   * PATCH /projects/:projectKey/documents/:docId/move
+   * PATCH /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/move
    */
   router.patch(
-    "/projects/:projectKey/documents/:docId/move",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/move",
     async (req: Request, res: Response) => {
       try {
         const { projectKey, docId } = req.params;
         const userId = getUserId(req);
         const body = req.body as MoveDocumentRequest;
+
+        const beforeHook = await applyDocumentBeforeHooks(req, res, "document.move", {
+          docId,
+          body,
+        });
+        if (!beforeHook) {
+          return;
+        }
+        const nextDocId = typeof beforeHook.payload.docId === "string" && beforeHook.payload.docId.trim()
+          ? beforeHook.payload.docId.trim()
+          : docId;
+        const nextBody = (beforeHook.payload.body && typeof beforeHook.payload.body === "object"
+          ? beforeHook.payload.body
+          : body) as MoveDocumentRequest;
 
         // Capture old/new parent ids so we can sync knowledge_index paths after move.
         const normalizeParentId = (id: string | null | undefined): string | null => {
@@ -548,24 +844,32 @@ export const buildRouter = () => {
           if (!value || value === "root") return null;
           return value;
         };
-        const before = await documentStore.get(userId, projectKey, docId);
+        const before = await documentStore.get(userId, projectKey, nextDocId);
         const oldParentId = normalizeParentId(before.meta.parent_id);
-        const newParentId = normalizeParentId(body.target_parent_id);
+        const newParentId = normalizeParentId(nextBody.target_parent_id);
 
         await documentStore.move(
           userId,
           projectKey,
-          docId,
-          body.target_parent_id,
-          body.before_doc_id,
-          body.after_doc_id,
+          nextDocId,
+          nextBody.target_parent_id,
+          nextBody.before_doc_id,
+          nextBody.after_doc_id,
         );
 
         if (oldParentId !== newParentId) {
-          notifyDocumentMoved(userId, projectKey, docId, oldParentId, newParentId).catch((err) => {
+          notifyDocumentMoved(userId, projectKey, nextDocId, oldParentId, newParentId).catch((err) => {
             console.warn("[TreeSync] notifyDocumentMoved failed:", err);
           });
         }
+
+        dispatchDocumentAfterHooks(req, "document.move", {
+          request: beforeHook.payload,
+          moved: true,
+          docId: nextDocId,
+          oldParentId,
+          newParentId,
+        }, beforeHook.requestId);
 
         success(res, null);
       } catch (err) {
@@ -585,17 +889,28 @@ export const buildRouter = () => {
 
   /**
    * Start document optimization task
-   * POST /projects/:projectKey/documents/:docId/optimize
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/optimize
    */
   router.post(
-    "/projects/:projectKey/documents/:docId/optimize",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/optimize",
     async (req: Request, res: Response) => {
       try {
         const { projectKey, docId } = req.params;
         const userId = getUserId(req);
         const body = req.body as { mode?: OptimizeMode; preserveStructure?: boolean; language?: string };
 
-        const mode: OptimizeMode = body.mode || "full";
+        const before = await applyDocumentBeforeHooks(req, res, "document.optimize", {
+          docId,
+          body,
+        });
+        if (!before) {
+          return;
+        }
+        const nextBody = (before.payload.body && typeof before.payload.body === "object"
+          ? before.payload.body
+          : body) as { mode?: OptimizeMode; preserveStructure?: boolean; language?: string };
+
+        const mode: OptimizeMode = nextBody.mode || "full";
         if (!["format", "content", "full"].includes(mode)) {
           error(res, "INVALID_MODE", "mode must be 'format', 'content', or 'full'");
           return;
@@ -603,9 +918,15 @@ export const buildRouter = () => {
 
         const taskId = await createOptimizeTask(userId, projectKey, docId, {
           mode,
-          preserveStructure: body.preserveStructure,
-          language: body.language,
+          preserveStructure: nextBody.preserveStructure,
+          language: nextBody.language,
         });
+
+        dispatchDocumentAfterHooks(req, "document.optimize", {
+          request: before.payload,
+          taskId,
+          docId,
+        }, before.requestId);
 
         success(res, { taskId }, 201);
       } catch (err) {
@@ -621,10 +942,10 @@ export const buildRouter = () => {
 
   /**
    * Stream optimization results
-   * GET /projects/:projectKey/documents/:docId/optimize/:taskId/stream
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/optimize/:taskId/stream
    */
   router.get(
-    "/projects/:projectKey/documents/:docId/optimize/:taskId/stream",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/optimize/:taskId/stream",
     async (req: Request, res: Response) => {
       const { taskId } = req.params;
 
@@ -668,10 +989,10 @@ export const buildRouter = () => {
 
   /**
    * Get optimization task status
-   * GET /projects/:projectKey/documents/:docId/optimize/:taskId
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/optimize/:taskId
    */
   router.get(
-    "/projects/:projectKey/documents/:docId/optimize/:taskId",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/optimize/:taskId",
     async (req: Request, res: Response) => {
       const { taskId } = req.params;
 
@@ -699,10 +1020,10 @@ export const buildRouter = () => {
 
   /**
    * Convert document format
-   * POST /projects/:projectKey/convert
+   * POST /projects/:ownerType/:ownerKey/:projectKey/convert
    */
   router.post(
-    "/projects/:projectKey/convert",
+    "/projects/:ownerType/:ownerKey/:projectKey/convert",
     upload.single("file"),
     async (req: Request, res: Response) => {
       try {
@@ -725,9 +1046,9 @@ export const buildRouter = () => {
 
   /**
    * Fetch URL content
-   * POST /projects/:projectKey/documents/fetch-url
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/fetch-url
    */
-  router.post("/projects/:projectKey/documents/fetch-url", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/documents/fetch-url", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
       const userId = getUserId(req);
@@ -742,15 +1063,26 @@ export const buildRouter = () => {
 
   /**
    * Import from Git repository
-   * POST /projects/:projectKey/documents/import-git
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/import-git
    */
   router.post(
-    "/projects/:projectKey/documents/import-git",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/import-git",
     async (req: Request, res: Response) => {
       const { projectKey } = req.params;
       const userId = getUserId(req);
       const traceId = `import-git-${uuidv4()}`;
       const body = (req.body ?? {}) as Record<string, unknown>;
+
+      const before = await applyDocumentBeforeHooks(req, res, "document.import", {
+        source: "git",
+        body,
+      });
+      if (!before) {
+        return;
+      }
+      const nextBody = before.payload.body && typeof before.payload.body === "object"
+        ? before.payload.body as Record<string, unknown>
+        : body;
 
       const traceContext = traceManager.startTrace(traceId, {
         name: "import-git",
@@ -758,20 +1090,25 @@ export const buildRouter = () => {
         projectKey,
         tags: ["import", "import-git"],
         metadata: {
-          repo_url: sanitizeUrlForTrace(body.repo_url),
-          branch: body.branch,
-          subdir: body.subdir,
-          parent_id: body.parent_id,
-          smart_import: body.smart_import,
-          smart_import_types: body.smart_import_types,
-          file_types: body.file_types,
-          enable_format_optimize: body.enable_format_optimize,
+          repo_url: sanitizeUrlForTrace(nextBody.repo_url),
+          branch: nextBody.branch,
+          subdir: nextBody.subdir,
+          parent_id: nextBody.parent_id,
+          smart_import: nextBody.smart_import,
+          smart_import_types: nextBody.smart_import_types,
+          file_types: nextBody.file_types,
+          enable_format_optimize: nextBody.enable_format_optimize,
         },
       });
 
       try {
-        const result = await importGit(userId, projectKey, body as any, traceContext);
+        const result = await importGit(userId, projectKey, nextBody as any, traceContext);
         traceManager.updateTrace(traceContext, { output: result });
+        dispatchDocumentAfterHooks(req, "document.import", {
+          request: before.payload,
+          result,
+          source: "git",
+        }, before.requestId);
         success(res, result);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Import failed";
@@ -785,10 +1122,10 @@ export const buildRouter = () => {
 
   /**
    * Upload file as document (creates a document directly)
-   * POST /projects/:projectKey/documents/upload
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/upload
    */
   router.post(
-    "/projects/:projectKey/documents/upload",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/upload",
     upload.single("file"),
     async (req: Request, res: Response) => {
       try {
@@ -799,6 +1136,18 @@ export const buildRouter = () => {
           error(res, "INVALID_REQUEST", "file is required");
           return;
         }
+
+        const before = await applyDocumentBeforeHooks(req, res, "document.import", {
+          source: "upload",
+          filename: file.originalname,
+          mime: file.mimetype,
+          size: file.size,
+          body: req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {},
+        });
+        if (!before) {
+          return;
+        }
+
         const parentId = String(req.query.parent_id ?? "root");
         const filename = fixFilename(file.originalname);
         const sourceType = String(req.body?.source_type ?? "").trim().toLowerCase();
@@ -832,6 +1181,12 @@ export const buildRouter = () => {
         knowledgeSearch.indexDocument(userId, projectKey, saved).catch((err) => {
           console.error("Index error:", err);
         });
+
+        dispatchDocumentAfterHooks(req, "document.import", {
+          request: before.payload,
+          source: "upload",
+          saved,
+        }, before.requestId);
         
         success(res, { meta: saved.meta, body: saved.body }, 201);
       } catch (err) {
@@ -843,7 +1198,7 @@ export const buildRouter = () => {
 
   /**
    * Import a file and create a document (smart import if enabled)
-   * POST /projects/:projectKey/documents/import-file
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/import-file
    *
    * FormData fields:
    * - file: required
@@ -854,7 +1209,7 @@ export const buildRouter = () => {
    * - enable_format_optimize: optional boolean
    */
   router.post(
-    "/projects/:projectKey/documents/import-file",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/import-file",
     upload.single("file"),
     async (req: Request, res: Response) => {
       const { projectKey } = req.params;
@@ -862,6 +1217,17 @@ export const buildRouter = () => {
       const file = req.file;
       if (!file) {
         error(res, "INVALID_REQUEST", "file is required");
+        return;
+      }
+
+      const before = await applyDocumentBeforeHooks(req, res, "document.import", {
+        source: "import-file",
+        filename: file.originalname,
+        mime: file.mimetype,
+        size: file.size,
+        body: req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {},
+      });
+      if (!before) {
         return;
       }
 
@@ -911,6 +1277,11 @@ export const buildRouter = () => {
         traceManager.updateTrace(traceContext, {
           output: { docId: result.docId, title: result.title, mode: result.mode },
         });
+        dispatchDocumentAfterHooks(req, "document.import", {
+          request: before.payload,
+          source: "import-file",
+          result,
+        }, before.requestId);
         success(res, { id: result.docId, title: result.title, mode: result.mode }, 201);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Import failed";
@@ -924,10 +1295,10 @@ export const buildRouter = () => {
 
   /**
    * Import file as document (returns converted content without saving)
-   * POST /projects/:projectKey/documents/import
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/import
    */
   router.post(
-    "/projects/:projectKey/documents/import",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/import",
     upload.single("file"),
     async (req: Request, res: Response) => {
       try {
@@ -952,13 +1323,13 @@ export const buildRouter = () => {
 
   /**
    * Optimize markdown format using LLM
-   * POST /projects/:projectKey/documents/optimize-format
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/optimize-format
    * Body: { markdown: string }
    * 
    * This is a fail-safe endpoint: if optimization fails, returns original markdown.
    */
   router.post(
-    "/projects/:projectKey/documents/optimize-format",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/optimize-format",
     async (req: Request, res: Response) => {
       const { projectKey } = req.params;
       const userId = getUserId(req);
@@ -1018,10 +1389,10 @@ export const buildRouter = () => {
 
   /**
    * Upload an asset (image, file, etc.)
-   * POST /projects/:projectKey/assets/import
+   * POST /projects/:ownerType/:ownerKey/:projectKey/assets/import
    */
   router.post(
-    "/projects/:projectKey/assets/import",
+    "/projects/:ownerType/:ownerKey/:projectKey/assets/import",
     upload.single("file"),
     async (req: Request, res: Response) => {
       try {
@@ -1057,10 +1428,10 @@ export const buildRouter = () => {
 
   /**
    * Get asset content
-   * GET /projects/:projectKey/assets/:assetId/content
+   * GET /projects/:ownerType/:ownerKey/:projectKey/assets/:assetId/content
    */
   router.get(
-    "/projects/:projectKey/assets/:assetId/content",
+    "/projects/:ownerType/:ownerKey/:projectKey/assets/:assetId/content",
     async (req: Request, res: Response) => {
       try {
         const { projectKey, assetId } = req.params;
@@ -1090,10 +1461,10 @@ export const buildRouter = () => {
 
   /**
    * Get asset kind/info
-   * GET /projects/:projectKey/assets/:assetId/kind
+   * GET /projects/:ownerType/:ownerKey/:projectKey/assets/:assetId/kind
    */
   router.get(
-    "/projects/:projectKey/assets/:assetId/kind",
+    "/projects/:ownerType/:ownerKey/:projectKey/assets/:assetId/kind",
     async (req: Request, res: Response) => {
       try {
         const { projectKey, assetId } = req.params;
@@ -1125,9 +1496,9 @@ export const buildRouter = () => {
 
   /**
    * Search knowledge base
-   * POST /projects/:projectKey/knowledge/search
+   * POST /projects/:ownerType/:ownerKey/:projectKey/knowledge/search
    */
-  router.post("/projects/:projectKey/knowledge/search", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/knowledge/search", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
       const userId = getUserId(req);
@@ -1146,10 +1517,10 @@ export const buildRouter = () => {
 
   /**
    * Start async rebuild of all document indexes for a project
-   * POST /projects/:projectKey/rag/rebuild
+   * POST /projects/:ownerType/:ownerKey/:projectKey/rag/rebuild
    * Returns task ID for progress tracking
    */
-  router.post("/projects/:projectKey/rag/rebuild", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/rag/rebuild", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
       const userId = getUserId(req);
@@ -1212,9 +1583,9 @@ export const buildRouter = () => {
 
   /**
    * Get rebuild task status
-   * GET /projects/:projectKey/rag/rebuild/status
+   * GET /projects/:ownerType/:ownerKey/:projectKey/rag/rebuild/status
    */
-  router.get("/projects/:projectKey/rag/rebuild/status", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/rag/rebuild/status", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
       const task = rebuildTaskManager.getActiveTask(projectKey);
@@ -1247,9 +1618,9 @@ export const buildRouter = () => {
 
   /**
    * Rebuild index for a single document
-   * POST /projects/:projectKey/rag/rebuild/documents/:docId
+   * POST /projects/:ownerType/:ownerKey/:projectKey/rag/rebuild/documents/:docId
    */
-  router.post("/projects/:projectKey/rag/rebuild/documents/:docId", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/rag/rebuild/documents/:docId", async (req: Request, res: Response) => {
     try {
       const { projectKey, docId } = req.params;
       const userId = getUserId(req);
@@ -1944,9 +2315,9 @@ export const buildRouter = () => {
 
   /**
    * Create a chat run
-   * POST /projects/:projectKey/chat/runs
+   * POST /projects/:ownerType/:ownerKey/:projectKey/chat/runs
    */
-  router.post("/projects/:projectKey/chat/runs", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/chat/runs", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
       const userId = getUserId(req);
@@ -2008,9 +2379,9 @@ export const buildRouter = () => {
 
   /**
    * Stream a chat run response (SSE)
-   * GET /projects/:projectKey/chat/runs/:runId/stream
+   * GET /projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/stream
    */
-  router.get("/projects/:projectKey/chat/runs/:runId/stream", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/stream", async (req: Request, res: Response) => {
     const { runId } = req.params;
 
     // Set SSE headers
@@ -2048,11 +2419,14 @@ export const buildRouter = () => {
         if (chunk.type === "delta") {
           res.write(`event: assistant.delta\ndata: ${JSON.stringify(chunk.content)}\n\n`);
         } else if (chunk.type === "thinking") {
-          res.write(`event: assistant.thinking\ndata: ${JSON.stringify({
+          const payload = {
             content: chunk.content,
             phase: chunk.phase,
             subQueries: chunk.subQueries,
-          })}\n\n`);
+            searchQuery: chunk.searchQuery,
+            resultCount: chunk.resultCount,
+          };
+          res.write(`event: assistant.thinking\ndata: ${JSON.stringify(payload)}\n\n`);
         } else if (chunk.type === "search_start") {
           res.write(`event: assistant.search_start\ndata: ${JSON.stringify({
             content: chunk.content,
@@ -2077,6 +2451,8 @@ export const buildRouter = () => {
           res.write(`event: assistant.tool_pending\ndata: ${JSON.stringify(chunk.pendingTool)}\n\n`);
         } else if (chunk.type === "intent_pending") {
           res.write(`event: assistant.intent_pending\ndata: ${JSON.stringify(chunk.pendingIntent)}\n\n`);
+        } else if (chunk.type === "preflight_pending") {
+          res.write(`event: assistant.preflight_pending\ndata: ${JSON.stringify(chunk.pendingPreflight)}\n\n`);
         } else if (chunk.type === "input_pending") {
           res.write(`event: assistant.input_pending\ndata: ${JSON.stringify(chunk.pendingInput)}\n\n`);
         } else if (chunk.type === "tool_rejected") {
@@ -2100,9 +2476,9 @@ export const buildRouter = () => {
 
   /**
    * Cancel a chat run
-   * DELETE /projects/:projectKey/chat/runs/:runId
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId
    */
-  router.delete("/projects/:projectKey/chat/runs/:runId", async (req: Request, res: Response) => {
+  router.delete("/projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId", async (req: Request, res: Response) => {
     try {
       const { runId } = req.params;
       const cancelled = cancelRun(runId);
@@ -2115,9 +2491,9 @@ export const buildRouter = () => {
 
   /**
    * Confirm a pending tool execution
-   * POST /projects/:projectKey/chat/runs/:runId/confirm-tool
+   * POST /projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/confirm-tool
    */
-  router.post("/projects/:projectKey/chat/runs/:runId/confirm-tool", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/confirm-tool", async (req: Request, res: Response) => {
     try {
       const { runId } = req.params;
       const confirmed = confirmTool(runId);
@@ -2134,9 +2510,9 @@ export const buildRouter = () => {
 
   /**
    * Reject a pending tool execution
-   * POST /projects/:projectKey/chat/runs/:runId/reject-tool
+   * POST /projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/reject-tool
    */
-  router.post("/projects/:projectKey/chat/runs/:runId/reject-tool", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/reject-tool", async (req: Request, res: Response) => {
     try {
       const { runId } = req.params;
       const rejected = rejectTool(runId);
@@ -2153,9 +2529,9 @@ export const buildRouter = () => {
 
   /**
    * Select an intent option for a pending intent clarification
-   * POST /projects/:projectKey/chat/runs/:runId/select-intent
+   * POST /projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/select-intent
    */
-  router.post("/projects/:projectKey/chat/runs/:runId/select-intent", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/select-intent", async (req: Request, res: Response) => {
     try {
       const { runId } = req.params;
       const option = req.body as { type?: string; skillHint?: string; label?: string; confidence?: number };
@@ -2182,9 +2558,9 @@ export const buildRouter = () => {
 
   /**
    * Provide required input for a pending input clarification (e.g. doc scope)
-   * POST /projects/:projectKey/chat/runs/:runId/provide-input
+   * POST /projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/provide-input
    */
-  router.post("/projects/:projectKey/chat/runs/:runId/provide-input", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/provide-input", async (req: Request, res: Response) => {
     try {
       const { runId } = req.params;
       const raw = req.body as unknown;
@@ -2218,10 +2594,53 @@ export const buildRouter = () => {
   });
 
   /**
-   * List chat sessions
-   * GET /projects/:projectKey/chat/sessions
+   * Provide preflight input for pending preflight clarification.
+   * POST /projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/provide-preflight-input
    */
-  router.get("/projects/:projectKey/chat/sessions", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/provide-preflight-input", async (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const raw = req.body as unknown;
+      const payload: Record<string, unknown> =
+        raw && typeof raw === "object" && raw !== null
+          ? (raw as Record<string, unknown>)
+          : {};
+
+      const normalizedTaskInputs = Array.isArray(payload.taskInputs)
+        ? payload.taskInputs
+            .filter((item) => item && typeof item === "object")
+            .map((item) => {
+              const input = item as Record<string, unknown>;
+              const taskId = typeof input.taskId === "string" ? input.taskId.trim() : "";
+              const docId = typeof input.doc_id === "string" ? input.doc_id.trim() : undefined;
+              const args = input.args && typeof input.args === "object" && !Array.isArray(input.args)
+                ? input.args
+                : undefined;
+              return {
+                ...(taskId ? { taskId } : {}),
+                ...(docId !== undefined ? { doc_id: docId } : {}),
+                ...(args ? { args } : {}),
+              };
+            })
+        : [];
+
+      const ok = providePreflightInput(runId, { taskInputs: normalizedTaskInputs });
+      if (!ok) {
+        error(res, "NOT_FOUND", "No pending preflight input for this run", 404);
+        return;
+      }
+      success(res, { provided: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to provide preflight input";
+      error(res, "PROVIDE_PREFLIGHT_INPUT_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * List chat sessions
+   * GET /projects/:ownerType/:ownerKey/:projectKey/chat/sessions
+   */
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/chat/sessions", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
       const userId = getUserId(req);
@@ -2239,9 +2658,9 @@ export const buildRouter = () => {
 
   /**
    * Create a new chat session
-   * POST /projects/:projectKey/chat/sessions
+   * POST /projects/:ownerType/:ownerKey/:projectKey/chat/sessions
    */
-  router.post("/projects/:projectKey/chat/sessions", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/chat/sessions", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
       const userId = getUserId(req);
@@ -2258,14 +2677,15 @@ export const buildRouter = () => {
 
   /**
    * Get messages for a chat session
-   * GET /projects/:projectKey/chat/sessions/:sessionId/messages
+   * GET /projects/:ownerType/:ownerKey/:projectKey/chat/sessions/:sessionId/messages
    */
-  router.get("/projects/:projectKey/chat/sessions/:sessionId/messages", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/chat/sessions/:sessionId/messages", async (req: Request, res: Response) => {
     try {
-      const { sessionId } = req.params;
+      const { sessionId, projectKey } = req.params;
+      const userId = getUserId(req);
 
       const { chatSessionStore } = await import("./services/chat-session-store.js");
-      const messages = await chatSessionStore.getMessages(sessionId);
+      const messages = await chatSessionStore.getMessages(userId, projectKey, sessionId);
       success(res, { messages });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to get session messages";
@@ -2275,11 +2695,12 @@ export const buildRouter = () => {
 
   /**
    * Rename a chat session
-   * PATCH /projects/:projectKey/chat/sessions/:sessionId
+   * PATCH /projects/:ownerType/:ownerKey/:projectKey/chat/sessions/:sessionId
    */
-  router.patch("/projects/:projectKey/chat/sessions/:sessionId", async (req: Request, res: Response) => {
+  router.patch("/projects/:ownerType/:ownerKey/:projectKey/chat/sessions/:sessionId", async (req: Request, res: Response) => {
     try {
-      const { sessionId } = req.params;
+      const { sessionId, projectKey } = req.params;
+      const userId = getUserId(req);
       const { title } = req.body as { title?: string };
 
       if (!title || typeof title !== "string" || !title.trim()) {
@@ -2288,7 +2709,7 @@ export const buildRouter = () => {
       }
 
       const { chatSessionStore } = await import("./services/chat-session-store.js");
-      const session = await chatSessionStore.renameSession(sessionId, title.trim());
+      const session = await chatSessionStore.renameSession(userId, projectKey, sessionId, title.trim());
       if (!session) {
         error(res, "NOT_FOUND", "Session not found", 404);
         return;
@@ -2302,18 +2723,19 @@ export const buildRouter = () => {
 
   /**
    * Delete a chat session (replaces old clear-session endpoint)
-   * DELETE /projects/:projectKey/chat/sessions/:sessionId
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/chat/sessions/:sessionId
    */
-  router.delete("/projects/:projectKey/chat/sessions/:sessionId", async (req: Request, res: Response) => {
+  router.delete("/projects/:ownerType/:ownerKey/:projectKey/chat/sessions/:sessionId", async (req: Request, res: Response) => {
     try {
-      const { sessionId } = req.params;
+      const { sessionId, projectKey } = req.params;
+      const userId = getUserId(req);
 
       // Clear in-memory cache
       clearSession(sessionId);
 
       // Delete from DB (cascade deletes messages)
       const { chatSessionStore } = await import("./services/chat-session-store.js");
-      await chatSessionStore.deleteSession(sessionId);
+      await chatSessionStore.deleteSession(userId, projectKey, sessionId);
 
       success(res, { deleted: true });
     } catch (err) {
@@ -2328,9 +2750,9 @@ export const buildRouter = () => {
 
   /**
    * Get a draft by ID
-   * GET /projects/:projectKey/drafts/:draftId
+   * GET /projects/:ownerType/:ownerKey/:projectKey/drafts/:draftId
    */
-  router.get("/projects/:projectKey/drafts/:draftId", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/drafts/:draftId", async (req: Request, res: Response) => {
     try {
       const { projectKey, draftId } = req.params;
       const draft = draftService.get(draftId);
@@ -2354,9 +2776,9 @@ export const buildRouter = () => {
 
   /**
    * Apply a draft (save the document)
-   * POST /projects/:projectKey/drafts/:draftId/apply
+   * POST /projects/:ownerType/:ownerKey/:projectKey/drafts/:draftId/apply
    */
-  router.post("/projects/:projectKey/drafts/:draftId/apply", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/drafts/:draftId/apply", async (req: Request, res: Response) => {
     try {
       const { projectKey, draftId } = req.params;
       const { modifiedContent, parentId, saveAsNew, newTitle } = req.body as {
@@ -2392,9 +2814,9 @@ export const buildRouter = () => {
 
   /**
    * Reject a draft
-   * DELETE /projects/:projectKey/drafts/:draftId
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/drafts/:draftId
    */
-  router.delete("/projects/:projectKey/drafts/:draftId", async (req: Request, res: Response) => {
+  router.delete("/projects/:ownerType/:ownerKey/:projectKey/drafts/:draftId", async (req: Request, res: Response) => {
     try {
       const { projectKey, draftId } = req.params;
       const draft = draftService.get(draftId);
@@ -2421,9 +2843,9 @@ export const buildRouter = () => {
 
   /**
    * List pending drafts for a project
-   * GET /projects/:projectKey/drafts
+   * GET /projects/:ownerType/:ownerKey/:projectKey/drafts
    */
-  router.get("/projects/:projectKey/drafts", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/drafts", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
       const drafts = draftService.listPending(projectKey);
@@ -2437,6 +2859,308 @@ export const buildRouter = () => {
   // ─────────────────────────────────────────────────────────────────────────
   // Skills Configuration API
   // ─────────────────────────────────────────────────────────────────────────
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Plugin APIs
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * List plugins from store (v2)
+   * GET /plugins/v2/store?q=keyword
+   */
+  router.get("/plugins/v2/store", async (req: Request, res: Response) => {
+    try {
+      const q = String(req.query.q || "");
+      const plugins = await pluginManager.listStorePlugins(q);
+      success(res, { plugins });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list plugin store";
+      error(res, "LIST_PLUGIN_STORE_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * List plugin versions from store (v2)
+   * GET /plugins/v2/store/:pluginId/versions
+   */
+  router.get("/plugins/v2/store/:pluginId/versions", async (req: Request, res: Response) => {
+    try {
+      const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+      if (!pluginId) {
+        error(res, "INVALID_REQUEST", "pluginId is required");
+        return;
+      }
+      const versions = await pluginManager.listStorePluginVersions(pluginId);
+      success(res, { versions });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list plugin versions";
+      error(res, "LIST_PLUGIN_VERSIONS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * List current user's plugins (v2)
+   * GET /plugins/v2/me
+   */
+  router.get("/plugins/v2/me", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const plugins = await pluginManager.listUserPlugins(userId);
+      success(
+        res,
+        plugins.map((item) => ({
+          installation: item.installation,
+          manifest: item.manifest,
+        })),
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list installed plugins";
+      error(res, "LIST_INSTALLED_PLUGINS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Install a plugin for current user (v2)
+   * POST /plugins/v2/me/install
+   */
+  router.post("/plugins/v2/me/install", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const pluginId = String(req.body?.pluginId || "").trim();
+      const version = String(req.body?.version || "").trim() || undefined;
+      if (!pluginId) {
+        error(res, "INVALID_REQUEST", "pluginId is required");
+        return;
+      }
+
+      const result = await pluginManager.installPlugin(userId, pluginId, version);
+      success(res, result, 201);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to install plugin";
+      error(res, "INSTALL_PLUGIN_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Toggle plugin enabled state (v2)
+   * PATCH /plugins/v2/me/:pluginId
+   */
+  router.patch("/plugins/v2/me/:pluginId", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+      const enabled = req.body?.enabled;
+      if (typeof enabled !== "boolean") {
+        error(res, "INVALID_REQUEST", "enabled must be boolean");
+        return;
+      }
+      const installation = await pluginManager.setPluginEnabled(userId, pluginId, enabled);
+      success(res, installation);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update plugin state";
+      error(res, "UPDATE_PLUGIN_STATE_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Uninstall plugin (v2)
+   * DELETE /plugins/v2/me/:pluginId
+   */
+  router.delete("/plugins/v2/me/:pluginId", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+      const deleted = await pluginManager.uninstallPlugin(userId, pluginId);
+      success(res, { deleted });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to uninstall plugin";
+      error(res, "UNINSTALL_PLUGIN_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Runtime manifest for current user (v2)
+   * GET /plugins/v2/me/runtime
+   */
+  router.get("/plugins/v2/me/runtime", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const items = await pluginManager.getRuntimeForUser(userId);
+      success(res, { plugins: items });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to get plugin runtime";
+      error(res, "GET_PLUGIN_RUNTIME_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Runtime command registry for current user (v2)
+   * GET /plugins/v2/me/commands
+   */
+  router.get("/plugins/v2/me/commands", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const commands = await pluginManager.getRuntimeCommandsForUser(userId);
+      success(res, { commands });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list plugin commands";
+      error(res, "LIST_PLUGIN_COMMANDS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Get plugin settings for current user (v2)
+   * GET /plugins/v2/me/:pluginId/settings
+   */
+  router.get("/plugins/v2/me/:pluginId/settings", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+      const settings = await pluginManager.getPluginSettings(userId, pluginId);
+      success(res, { settings });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to get plugin settings";
+      error(res, "GET_PLUGIN_SETTINGS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Update plugin settings for current user (v2)
+   * PUT /plugins/v2/me/:pluginId/settings
+   */
+  router.put("/plugins/v2/me/:pluginId/settings", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+      const settings = req.body && typeof req.body === "object"
+        ? req.body as Record<string, unknown>
+        : {};
+      const next = await pluginManager.setPluginSettings(userId, pluginId, settings);
+      success(res, { settings: next });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update plugin settings";
+      error(res, "UPDATE_PLUGIN_SETTINGS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Serve plugin frontend assets for current user (v2)
+   * GET /plugins/v2/assets/:pluginId/:version/*
+   */
+  router.get("/plugins/v2/assets/:pluginId/:version/*", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+      const version = decodeURIComponent(String(req.params.version || "").trim());
+      const assetPath = String(req.params[0] || "").trim();
+      if (!assetPath) {
+        error(res, "INVALID_REQUEST", "asset path is required");
+        return;
+      }
+
+      const asset = await pluginManager.readAsset(userId, pluginId, version, assetPath);
+      res.setHeader("Content-Type", asset.mime);
+      res.setHeader("Cache-Control", "private, max-age=60");
+      res.send(asset.content);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to read plugin asset";
+      error(res, "READ_PLUGIN_ASSET_FAILED", msg, 404);
+    }
+  });
+
+  /**
+   * Execute plugin command in project scope (v2)
+   * POST /projects/:ownerType/:ownerKey/:projectKey/plugin-commands/:commandId/execute
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/plugin-commands/:commandId/execute",
+    async (req: Request, res: Response) => {
+      try {
+        const userId = getUserId(req);
+        const { projectKey } = req.params;
+        const commandId = decodeURIComponent(String(req.params.commandId || "").trim());
+        const rawBody = req.body && typeof req.body === "object"
+          ? { ...(req.body as Record<string, unknown>) }
+          : {};
+        const sourceRaw = String(rawBody.__source || "").trim().toLowerCase();
+        delete rawBody.__source;
+        const source = (sourceRaw === "palette" || sourceRaw === "tool" || sourceRaw === "api")
+          ? sourceRaw as "api" | "palette" | "tool"
+          : "api";
+        const requestId = `plugin-command-${uuidv4()}`;
+
+        const data = await pluginManager.executeCommand({
+          userId,
+          projectKey,
+          commandId,
+          args: rawBody,
+          source,
+          requestId,
+        });
+        success(res, data);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to execute plugin command";
+        if (/requires doc_id/i.test(msg)) {
+          error(res, "INVALID_REQUEST", msg, 400);
+          return;
+        }
+        if (/not available/i.test(msg)) {
+          error(res, "NOT_FOUND", msg, 404);
+          return;
+        }
+        if (/not enabled for api execution/i.test(msg)) {
+          error(res, "FORBIDDEN", msg, 403);
+          return;
+        }
+        error(res, "EXECUTE_PLUGIN_COMMAND_FAILED", msg, 500);
+      }
+    },
+  );
+
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/plugin-commands/:commandId\\:execute",
+    async (req: Request, res: Response) => {
+      try {
+        const userId = getUserId(req);
+        const { projectKey } = req.params;
+        const commandId = decodeURIComponent(String(req.params.commandId || "").trim());
+        const rawBody = req.body && typeof req.body === "object"
+          ? { ...(req.body as Record<string, unknown>) }
+          : {};
+        const sourceRaw = String(rawBody.__source || "").trim().toLowerCase();
+        delete rawBody.__source;
+        const source = (sourceRaw === "palette" || sourceRaw === "tool" || sourceRaw === "api")
+          ? sourceRaw as "api" | "palette" | "tool"
+          : "api";
+        const requestId = `plugin-command-${uuidv4()}`;
+
+        const data = await pluginManager.executeCommand({
+          userId,
+          projectKey,
+          commandId,
+          args: rawBody,
+          source,
+          requestId,
+        });
+        success(res, data);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to execute plugin command";
+        if (/requires doc_id/i.test(msg)) {
+          error(res, "INVALID_REQUEST", msg, 400);
+          return;
+        }
+        if (/not available/i.test(msg)) {
+          error(res, "NOT_FOUND", msg, 404);
+          return;
+        }
+        if (/not enabled for api execution/i.test(msg)) {
+          error(res, "FORBIDDEN", msg, 403);
+          return;
+        }
+        error(res, "EXECUTE_PLUGIN_COMMAND_FAILED", msg, 500);
+      }
+    },
+  );
 
   /**
    * Get all skills grouped by category
@@ -2456,10 +3180,16 @@ export const buildRouter = () => {
    * Get enabled skill commands (for frontend filtering)
    * GET /skills/enabled-commands
    */
-  router.get("/skills/enabled-commands", async (_req: Request, res: Response) => {
+  router.get("/skills/enabled-commands", async (req: Request, res: Response) => {
     try {
+      const userId = getUserId(req);
       const commands = await skillConfigStore.getEnabledCommands();
-      success(res, { commands });
+      const pluginCommands = await pluginManager.listEnabledSlashCommandsForUser(userId);
+      const merged = new Set(commands);
+      for (const command of pluginCommands) {
+        merged.add(command);
+      }
+      success(res, { commands: Array.from(merged).sort((a, b) => a.localeCompare(b)) });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to get enabled commands";
       error(res, "GET_COMMANDS_FAILED", msg, 500);
@@ -2583,13 +3313,15 @@ export const buildRouter = () => {
 
   /**
    * Get all project skills grouped by category
-   * GET /projects/:projectKey/skills
+   * GET /projects/:ownerType/:ownerKey/:projectKey/skills
    */
-  router.get("/projects/:projectKey/skills", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/skills", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
       await agentSkillCatalog.initialize();
-      const skills = agentSkillCatalog.getAllSkills();
+      await agentSkillCatalog.refreshPluginSkillsForUser(userId);
+      const skills = agentSkillCatalog.getAllSkills(userId);
       const categories = await projectSkillConfigStore.listByCategory(projectKey, skills);
       success(res, { categories });
     } catch (err) {
@@ -2600,11 +3332,12 @@ export const buildRouter = () => {
 
   /**
    * Update project skill enabled status
-   * PATCH /projects/:projectKey/skills/:skillId
+   * PATCH /projects/:ownerType/:ownerKey/:projectKey/skills/:skillId
    */
-  router.patch("/projects/:projectKey/skills/:skillId", async (req: Request, res: Response) => {
+  router.patch("/projects/:ownerType/:ownerKey/:projectKey/skills/:skillId", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
       const skillId = decodeURIComponent(req.params.skillId);
       const { enabled } = req.body as { enabled?: boolean };
 
@@ -2614,7 +3347,8 @@ export const buildRouter = () => {
       }
 
       await agentSkillCatalog.initialize();
-      const skill = agentSkillCatalog.getById(skillId);
+      await agentSkillCatalog.refreshPluginSkillsForUser(userId);
+      const skill = agentSkillCatalog.getById(skillId, userId);
       if (!skill) {
         error(res, "NOT_FOUND", `Skill not found: ${skillId}`, 404);
         return;
@@ -2630,11 +3364,12 @@ export const buildRouter = () => {
 
   /**
    * Batch update project skill enabled status
-   * PATCH /projects/:projectKey/skills
+   * PATCH /projects/:ownerType/:ownerKey/:projectKey/skills
    */
-  router.patch("/projects/:projectKey/skills", async (req: Request, res: Response) => {
+  router.patch("/projects/:ownerType/:ownerKey/:projectKey/skills", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
       const { updates } = req.body as {
         updates?: Array<{ skillId: string; enabled: boolean }>;
       };
@@ -2645,7 +3380,8 @@ export const buildRouter = () => {
       }
 
       await agentSkillCatalog.initialize();
-      const allSkills = agentSkillCatalog.getAllSkills();
+      await agentSkillCatalog.refreshPluginSkillsForUser(userId);
+      const allSkills = agentSkillCatalog.getAllSkills(userId);
       await projectSkillConfigStore.batchUpdateEnabled(projectKey, allSkills, updates);
       success(res, { success: true });
     } catch (err) {
@@ -2656,13 +3392,15 @@ export const buildRouter = () => {
 
   /**
    * Get enabled slash commands for a project
-   * GET /projects/:projectKey/skills/enabled-commands
+   * GET /projects/:ownerType/:ownerKey/:projectKey/skills/enabled-commands
    */
-  router.get("/projects/:projectKey/skills/enabled-commands", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/skills/enabled-commands", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
       await agentSkillCatalog.initialize();
-      const allSkills = agentSkillCatalog.getAllSkills();
+      await agentSkillCatalog.refreshPluginSkillsForUser(userId);
+      const allSkills = agentSkillCatalog.getAllSkills(userId);
       const enabledIds = new Set(
         await projectSkillConfigStore.getEnabledSkillIds(projectKey, allSkills),
       );
@@ -2683,7 +3421,6 @@ export const buildRouter = () => {
           };
         })
         .sort((a, b) => a.command.localeCompare(b.command));
-
       success(res, { commands });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to list enabled commands";
@@ -2693,13 +3430,15 @@ export const buildRouter = () => {
 
   /**
    * Get enabled tool names for a project
-   * GET /projects/:projectKey/skills/enabled-tools
+   * GET /projects/:ownerType/:ownerKey/:projectKey/skills/enabled-tools
    */
-  router.get("/projects/:projectKey/skills/enabled-tools", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/skills/enabled-tools", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
       await agentSkillCatalog.initialize();
-      const allSkills = agentSkillCatalog.getAllSkills();
+      await agentSkillCatalog.refreshPluginSkillsForUser(userId);
+      const allSkills = agentSkillCatalog.getAllSkills(userId);
       const toolNames = await projectSkillConfigStore.getEnabledToolNames(projectKey, allSkills);
       success(res, { tool_names: toolNames });
     } catch (err) {
@@ -2710,13 +3449,15 @@ export const buildRouter = () => {
 
   /**
    * Get skill source summary for a project
-   * GET /projects/:projectKey/skills/sources
+   * GET /projects/:ownerType/:ownerKey/:projectKey/skills/sources
    */
-  router.get("/projects/:projectKey/skills/sources", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/skills/sources", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
       await agentSkillCatalog.initialize();
-      const allSkills = agentSkillCatalog.getAllSkills();
+      await agentSkillCatalog.refreshPluginSkillsForUser(userId);
+      const allSkills = agentSkillCatalog.getAllSkills(userId);
       const sources = await projectSkillConfigStore.listSources(projectKey, allSkills);
       success(res, { sources });
     } catch (err) {
@@ -2863,10 +3604,10 @@ export const buildRouter = () => {
 
   /**
    * Upload a chat attachment (file or URL)
-   * POST /projects/:projectKey/chat/attachments
+   * POST /projects/:ownerType/:ownerKey/:projectKey/chat/attachments
    */
   router.post(
-    "/projects/:projectKey/chat/attachments",
+    "/projects/:ownerType/:ownerKey/:projectKey/chat/attachments",
     upload.single("file"),
     async (req: Request, res: Response) => {
       try {
@@ -2959,10 +3700,10 @@ export const buildRouter = () => {
 
   /**
    * Export document to PPT
-   * POST /projects/:projectKey/documents/:docId/export-ppt
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/export-ppt
    */
   router.post(
-    "/projects/:projectKey/documents/:docId/export-ppt",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/export-ppt",
     async (req: Request, res: Response) => {
       try {
         const { projectKey, docId } = req.params;
@@ -3018,10 +3759,10 @@ export const buildRouter = () => {
 
   /**
    * Get PPT generation task status
-   * GET /projects/:projectKey/ppt-tasks/:taskId
+   * GET /projects/:ownerType/:ownerKey/:projectKey/ppt-tasks/:taskId
    */
   router.get(
-    "/projects/:projectKey/ppt-tasks/:taskId",
+    "/projects/:ownerType/:ownerKey/:projectKey/ppt-tasks/:taskId",
     async (req: Request, res: Response) => {
       try {
         const { taskId } = req.params;
@@ -3048,10 +3789,10 @@ export const buildRouter = () => {
 
   /**
    * Download generated PPTX file
-   * GET /projects/:projectKey/ppt-tasks/:taskId/download
+   * GET /projects/:ownerType/:ownerKey/:projectKey/ppt-tasks/:taskId/download
    */
   router.get(
-    "/projects/:projectKey/ppt-tasks/:taskId/download",
+    "/projects/:ownerType/:ownerKey/:projectKey/ppt-tasks/:taskId/download",
     async (req: Request, res: Response) => {
       try {
         const { taskId } = req.params;
@@ -3071,10 +3812,10 @@ export const buildRouter = () => {
 
   /**
    * Get slide previews for a task
-   * GET /projects/:projectKey/ppt-tasks/:taskId/previews
+   * GET /projects/:ownerType/:ownerKey/:projectKey/ppt-tasks/:taskId/previews
    */
   router.get(
-    "/projects/:projectKey/ppt-tasks/:taskId/previews",
+    "/projects/:ownerType/:ownerKey/:projectKey/ppt-tasks/:taskId/previews",
     async (req: Request, res: Response) => {
       try {
         const { taskId } = req.params;
@@ -3092,10 +3833,10 @@ export const buildRouter = () => {
 
   /**
    * Modify a slide using natural language
-   * POST /projects/:projectKey/ppt-tasks/:taskId/modify
+   * POST /projects/:ownerType/:ownerKey/:projectKey/ppt-tasks/:taskId/modify
    */
   router.post(
-    "/projects/:projectKey/ppt-tasks/:taskId/modify",
+    "/projects/:ownerType/:ownerKey/:projectKey/ppt-tasks/:taskId/modify",
     async (req: Request, res: Response) => {
       try {
         const { taskId } = req.params;
@@ -3140,9 +3881,9 @@ export const buildRouter = () => {
 
   /**
    * List all PPT templates for a project (presets + custom)
-   * GET /projects/:projectKey/ppt-templates
+   * GET /projects/:ownerType/:ownerKey/:projectKey/ppt-templates
    */
-  router.get("/projects/:projectKey/ppt-templates", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/ppt-templates", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
       const { templateStore } = await import("./services/ppt/template-store.js");
@@ -3156,9 +3897,9 @@ export const buildRouter = () => {
 
   /**
    * Create a custom PPT template
-   * POST /projects/:projectKey/ppt-templates
+   * POST /projects/:ownerType/:ownerKey/:projectKey/ppt-templates
    */
-  router.post("/projects/:projectKey/ppt-templates", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/ppt-templates", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
       const { name, description, preview_url, template_images, color_scheme } = req.body as {
@@ -3198,9 +3939,9 @@ export const buildRouter = () => {
 
   /**
    * Get a custom PPT template
-   * GET /projects/:projectKey/ppt-templates/:templateId
+   * GET /projects/:ownerType/:ownerKey/:projectKey/ppt-templates/:templateId
    */
-  router.get("/projects/:projectKey/ppt-templates/:templateId", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/ppt-templates/:templateId", async (req: Request, res: Response) => {
     try {
       const { projectKey, templateId } = req.params;
       const { templateStore } = await import("./services/ppt/template-store.js");
@@ -3220,9 +3961,9 @@ export const buildRouter = () => {
 
   /**
    * Update a custom PPT template
-   * PUT /projects/:projectKey/ppt-templates/:templateId
+   * PUT /projects/:ownerType/:ownerKey/:projectKey/ppt-templates/:templateId
    */
-  router.put("/projects/:projectKey/ppt-templates/:templateId", async (req: Request, res: Response) => {
+  router.put("/projects/:ownerType/:ownerKey/:projectKey/ppt-templates/:templateId", async (req: Request, res: Response) => {
     try {
       const { projectKey, templateId } = req.params;
       const { name, description, preview_url, template_images, color_scheme } = req.body as {
@@ -3262,9 +4003,9 @@ export const buildRouter = () => {
 
   /**
    * Delete a custom PPT template
-   * DELETE /projects/:projectKey/ppt-templates/:templateId
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/ppt-templates/:templateId
    */
-  router.delete("/projects/:projectKey/ppt-templates/:templateId", async (req: Request, res: Response) => {
+  router.delete("/projects/:ownerType/:ownerKey/:projectKey/ppt-templates/:templateId", async (req: Request, res: Response) => {
     try {
       const { projectKey, templateId } = req.params;
       const { templateStore } = await import("./services/ppt/template-store.js");

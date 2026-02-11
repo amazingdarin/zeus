@@ -26,16 +26,21 @@ import {
   executeChatGraph,
   resumeChatGraph,
   resumeChatGraphWithIntent,
+  resumeChatGraphWithPreflightInput,
   resumeChatGraphWithRequiredInput,
   type ChatExecutionPlan,
   type ChatGraphResult,
   type GraphSourceReference,
   type IntentOption,
   type PendingIntentInfo,
+  type PendingPreflightInfo,
+  type TaskRuntimeHints,
 } from "./chat-graph.js";
 import { chatSettingsStore } from "./chat-settings-store.js";
 import { chatSessionStore } from "./chat-session-store.js";
 import { draftService } from "./draft.js";
+import { resolveProjectScope } from "../project-scope.js";
+import { pluginManagerV2 } from "../plugins-v2/index.js";
 
 export type ChatMessage = {
   role: "user" | "assistant" | "system";
@@ -82,10 +87,12 @@ export type ChatRun = {
     | "cancelled"
     | "awaiting_confirmation"
     | "awaiting_intent"
-    | "awaiting_input";
+    | "awaiting_input"
+    | "awaiting_preflight_input";
   pendingTool?: PendingToolCall;  // Tool awaiting user confirmation
   pendingIntent?: SkillIntent;    // Intent to execute after confirmation
   pendingIntentInfo?: import("./chat-graph.js").PendingIntentInfo;  // Intent clarification
+  pendingPreflightInfo?: import("./chat-graph.js").PendingPreflightInfo;
   pendingRequiredInput?: import("./chat-graph.js").PendingRequiredInputInfo;  // Required input clarification
   createdAt: number;
   updatedAt: number;
@@ -104,6 +111,7 @@ export type ChatStreamChunk = {
     | "tool_pending"
     | "tool_rejected"
     | "intent_pending"
+    | "preflight_pending"
     | "input_pending"
     | "search_start"
     | "search_result";
@@ -114,6 +122,7 @@ export type ChatStreamChunk = {
   draft?: DocumentDraft;
   pendingTool?: PendingToolCall;  // For tool_pending type
   pendingIntent?: import("./chat-graph.js").PendingIntentInfo;  // For intent_pending type
+  pendingPreflight?: import("./chat-graph.js").PendingPreflightInfo;  // For preflight_pending type
   pendingInput?: import("./chat-graph.js").PendingRequiredInputInfo;  // For input_pending type
   // Deep search specific fields
   phase?: "decompose" | "search_kb" | "evaluate" | "search_web" | "synthesize";
@@ -144,6 +153,12 @@ const pendingIntentSelections = new Map<string, {
 
 // Pending required input collection
 const pendingRequiredInputs = new Map<string, {
+  resolve: (payload: Record<string, unknown> | null) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}>();
+
+// Pending preflight input collection
+const pendingPreflightInputs = new Map<string, {
   resolve: (payload: Record<string, unknown> | null) => void;
   timeout: ReturnType<typeof setTimeout>;
 }>();
@@ -183,6 +198,112 @@ function parseEnvInt(name: string, defaultValue: number): number {
 
 const DOC_GUARD_ENABLED = parseEnvBool("DOC_GUARD_ENABLED", true);
 const DOC_GUARD_MAX_ATTEMPTS = parseEnvInt("DOC_GUARD_MAX_ATTEMPTS", 3);
+const THINKING_TRACE_ENABLED = parseEnvBool("CHAT_THINKING_TRACE_ENABLED", true);
+
+function intentLabel(type: "command" | "skill" | "deep_search" | "chat"): string {
+  switch (type) {
+    case "command":
+      return "命令执行";
+    case "skill":
+      return "技能执行";
+    case "deep_search":
+      return "深度搜索";
+    case "chat":
+    default:
+      return "对话问答";
+  }
+}
+
+function planThinkingMessage(plan: ChatExecutionPlan): string | null {
+  switch (plan.action) {
+    case "stream_chat":
+      return "已完成检索与上下文准备，开始生成回答。";
+    case "execute_skill":
+      return `开始执行技能：${plan.skillId}`;
+    case "execute_skill_batch":
+      return `开始按顺序执行 ${plan.tasks.length} 个子任务。`;
+    case "deep_search":
+      return "进入深度搜索流程。";
+    case "respond_text":
+      return "已生成直接文本回复。";
+    case "respond_blocked":
+      return "该请求被策略拦截。";
+    case "respond_rejected":
+      return "操作被取消。";
+    case "respond_error":
+      return "执行阶段发生错误。";
+    default:
+      return null;
+  }
+}
+
+type BatchTask = Extract<ChatExecutionPlan, { action: "execute_skill_batch" }>['tasks'][number];
+
+function resolveBatchTaskInputs(
+  task: BatchTask,
+  outputContext: Map<string, Record<string, unknown>>,
+): {
+  args: Record<string, unknown>;
+  docIds: string[];
+  unresolvedBindings: string[];
+  bindingNotes: string[];
+} {
+  const args = { ...(task.args || {}) };
+  let docIds = [...(task.docIds || [])];
+  const unresolvedBindings: string[] = [];
+  const bindingNotes: string[] = [];
+
+  for (const binding of task.inputBindings || []) {
+    const upstreamOutput = outputContext.get(binding.fromTaskId);
+    if (!upstreamOutput) {
+      unresolvedBindings.push(`${binding.fromTaskId}.${binding.fromKey}`);
+      continue;
+    }
+
+    const value = upstreamOutput[binding.fromKey];
+    if (value === undefined || value === null || (typeof value === "string" && value.trim().length === 0)) {
+      unresolvedBindings.push(`${binding.fromTaskId}.${binding.fromKey}`);
+      continue;
+    }
+
+    args[binding.toArg] = value;
+    bindingNotes.push(`${binding.toArg} <- ${binding.fromTaskId}.${binding.fromKey}`);
+
+    if (binding.toArg === "doc_id" && typeof value === "string" && value.trim().length > 0) {
+      docIds = [value.trim()];
+    }
+  }
+
+  const argDocId = typeof args.doc_id === "string" ? args.doc_id.trim() : "";
+  if (argDocId) {
+    docIds = [argDocId];
+  }
+
+  return {
+    args,
+    docIds,
+    unresolvedBindings,
+    bindingNotes,
+  };
+}
+
+function parseOutputFromDoneMessage(message?: string): Record<string, unknown> {
+  if (!message) return {};
+
+  const output: Record<string, unknown> = {};
+
+  const taskIdMatch = message.match(/task[_\s-]?id\s*[:：=]\s*([a-zA-Z0-9_-]+)/i);
+  if (taskIdMatch?.[1]) {
+    output.taskId = taskIdMatch[1];
+  }
+
+  const docIdMatch = message.match(/doc[_\s-]?id\s*[:：=]\s*([a-zA-Z0-9_-]+)/i);
+  if (docIdMatch?.[1]) {
+    output.docId = docIdMatch[1];
+  }
+
+  return output;
+}
 
 async function getLLMConfig(): Promise<ProviderConfigInternal | null> {
   if (llmConfigCache && Date.now() - llmConfigCache.timestamp < CONFIG_CACHE_TTL) {
@@ -247,7 +368,7 @@ export async function createRun(
 
   // Ensure session exists in DB (auto-create if not)
   try {
-    const existing = await chatSessionStore.getSession(sessionId);
+    const existing = await chatSessionStore.getSession(userId, projectKey, sessionId);
     if (!existing) {
       await chatSessionStore.createSession(userId, projectKey, "新对话");
       // Use the returned id — but we need to keep the caller's sessionId.
@@ -266,7 +387,7 @@ export async function createRun(
   let history = sessionMessages.get(sessionId);
   if (!history) {
     try {
-      const dbMessages = await chatSessionStore.getMessages(sessionId);
+      const dbMessages = await chatSessionStore.getMessages(userId, projectKey, sessionId);
       history = dbMessages.map((m) => ({
         role: m.role as ChatMessage["role"],
         content: m.content,
@@ -284,7 +405,7 @@ export async function createRun(
   // Persist user message to DB (fire-and-forget)
   chatSessionStore
     .addMessage(sessionId, "user", message)
-    .then(() => chatSessionStore.updateSessionTimestamp(sessionId))
+    .then(() => chatSessionStore.updateSessionTimestamp(userId, projectKey, sessionId))
     .catch((err) => {
       console.warn("[chat] Failed to persist user message:", err);
     });
@@ -321,13 +442,15 @@ export async function createRun(
  */
 async function ensureSessionExists(userId: string, projectKey: string, sessionId: string): Promise<void> {
   try {
+    const scope = resolveProjectScope(userId, projectKey);
+
     // Use INSERT ... ON CONFLICT to avoid race conditions
     await import("../db/postgres.js").then(({ query }) =>
       query(
-        `INSERT INTO chat_sessions (id, user_id, project_key, title, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, now(), now())
+        `INSERT INTO chat_sessions (id, user_id, owner_type, owner_id, project_key, title, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, now(), now())
          ON CONFLICT (id) DO NOTHING`,
-        [sessionId, userId, projectKey, "新对话"],
+        [sessionId, userId, scope.ownerType, scope.ownerId, scope.projectKey, "新对话"],
       ),
     );
   } catch (err) {
@@ -359,6 +482,7 @@ export function cancelRun(runId: string): boolean {
     && run.status !== "awaiting_confirmation"
     && run.status !== "awaiting_intent"
     && run.status !== "awaiting_input"
+    && run.status !== "awaiting_preflight_input"
   ) {
     return false;
   }
@@ -392,6 +516,14 @@ export function cancelRun(runId: string): boolean {
     clearTimeout(pendingInput.timeout);
     pendingInput.resolve(null);
     pendingRequiredInputs.delete(runId);
+  }
+
+  // If waiting for preflight input, resolve as timeout (null).
+  const pendingPreflight = pendingPreflightInputs.get(runId);
+  if (pendingPreflight) {
+    clearTimeout(pendingPreflight.timeout);
+    pendingPreflight.resolve(null);
+    pendingPreflightInputs.delete(runId);
   }
 
   run.status = "cancelled";
@@ -505,6 +637,20 @@ async function waitForRequiredInput(runId: string): Promise<Record<string, unkno
 }
 
 /**
+ * Wait for user to provide preflight inputs for all tasks.
+ */
+async function waitForPreflightInput(runId: string): Promise<Record<string, unknown> | null> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      pendingPreflightInputs.delete(runId);
+      resolve(null);
+    }, PENDING_TOOL_TTL);
+
+    pendingPreflightInputs.set(runId, { resolve, timeout });
+  });
+}
+
+/**
  * Provide required input for a pending input clarification
  */
 export function provideRequiredInput(runId: string, payload: Record<string, unknown>): boolean {
@@ -518,6 +664,25 @@ export function provideRequiredInput(runId: string, payload: Record<string, unkn
     clearTimeout(pending.timeout);
     pending.resolve(payload);
     pendingRequiredInputs.delete(runId);
+  }
+
+  return true;
+}
+
+/**
+ * Provide preflight input payload for pending preflight clarification.
+ */
+export function providePreflightInput(runId: string, payload: Record<string, unknown>): boolean {
+  const run = activeRuns.get(runId);
+  if (!run || run.status !== "awaiting_preflight_input") {
+    return false;
+  }
+
+  const pending = pendingPreflightInputs.get(runId);
+  if (pending) {
+    clearTimeout(pending.timeout);
+    pending.resolve(payload);
+    pendingPreflightInputs.delete(runId);
   }
 
   return true;
@@ -557,6 +722,13 @@ export function selectIntent(runId: string, selectedOption: IntentOption): boole
   return true;
 }
 
+export type ProvidePreflightInputPayload = {
+  taskInputs: Array<{
+    taskId: string;
+    doc_id?: string;
+    args?: Record<string, unknown>;
+  }>;
+};
 /**
  * Get the pending tool for a run
  */
@@ -617,6 +789,11 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
 
     let graphResult: ChatGraphResult;
     try {
+      try {
+        await agentSkillCatalog.refreshPluginSkillsForUser(run.userId);
+      } catch (pluginErr) {
+        console.warn("[chat] Failed to refresh plugin skills:", pluginErr);
+      }
       graphResult = await executeChatGraph(runId, {
         userQuery,
         messages: run.messages,
@@ -643,6 +820,16 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
       `[chat] Graph result status: ${graphResult.status}, intent: ${graphResult.intent.type} (${graphResult.intent.confidence})`,
     );
 
+    if (THINKING_TRACE_ENABLED) {
+      const reasoning = graphResult.intent.reasoning
+        ? `；判断依据：${graphResult.intent.reasoning}`
+        : "";
+      yield {
+        type: "thinking",
+        content: `意图识别：${intentLabel(graphResult.intent.type)}（置信度 ${(graphResult.intent.confidence * 100).toFixed(0)}%）${reasoning}`,
+      };
+    }
+
     // ──────────────── Phase 1-2: Graph Interrupt Handling Loop ────────────────
     // The graph can interrupt multiple times (intent selection, then tool confirmation).
     // Each graph invocation (execute/resume) gets its own planning span.
@@ -656,6 +843,13 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
 
       // ──────────────── Phase 1.5: Intent Clarification ────────────────
       if (graphResult.status === "awaiting_intent") {
+        if (THINKING_TRACE_ENABLED) {
+          yield {
+            type: "thinking",
+            content: `意图存在歧义，等待你从 ${graphResult.pendingIntent.options.length} 个候选中选择。`,
+          };
+        }
+
         traceManager.endSpan(planSpan, {
           intent: graphResult.intent.type,
           planAction: "awaiting_intent",
@@ -713,6 +907,13 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
       }
 
       if (graphResult.status === "awaiting_input") {
+        if (THINKING_TRACE_ENABLED) {
+          yield {
+            type: "thinking",
+            content: `执行前缺少必要输入：${graphResult.pendingInput.skillName}（${graphResult.pendingInput.kind}）。`,
+          };
+        }
+
         traceManager.endSpan(planSpan, {
           intent: graphResult.intent.type,
           planAction: "awaiting_input",
@@ -767,8 +968,71 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
         continue;
       }
 
+      if (graphResult.status === "awaiting_preflight_input") {
+        if (THINKING_TRACE_ENABLED) {
+          yield {
+            type: "thinking",
+            content: `任务编排完成，待补充 ${graphResult.pendingPreflight.missingInputs.length} 项信息后继续。`,
+          };
+        }
+
+        traceManager.endSpan(planSpan, {
+          intent: graphResult.intent.type,
+          planAction: "awaiting_preflight_input",
+          tasks: graphResult.pendingPreflight.tasks.length,
+          missingInputs: graphResult.pendingPreflight.missingInputs.length,
+        });
+
+        run.status = "awaiting_preflight_input";
+        run.pendingPreflightInfo = graphResult.pendingPreflight;
+        run.updatedAt = Date.now();
+        yield { type: "preflight_pending", pendingPreflight: graphResult.pendingPreflight };
+
+        const provided = await waitForPreflightInput(runId);
+        run.pendingPreflightInfo = undefined;
+
+        if (abortSignal.aborted) {
+          run.status = "cancelled";
+          run.updatedAt = Date.now();
+          return;
+        }
+
+        const payload: Record<string, unknown> = provided || { taskInputs: [] };
+
+        run.status = "running";
+        run.updatedAt = Date.now();
+
+        planSpan = traceManager.startSpan(traceContext, "chat-graph-plan-resume-preflight", {
+          hasPayload: !!provided,
+          taskInputs: Array.isArray((payload as { taskInputs?: unknown }).taskInputs)
+            ? ((payload as { taskInputs?: unknown[] }).taskInputs?.length || 0)
+            : 0,
+        });
+
+        try {
+          graphResult = await resumeChatGraphWithPreflightInput(runId, payload);
+        } catch (resumeErr) {
+          const errMsg = resumeErr instanceof Error ? resumeErr.message : "Graph resume failed";
+          console.error("[chat] Graph resume (preflight) error:", errMsg);
+          traceManager.endSpan(planSpan, { error: errMsg }, "ERROR");
+          run.status = "failed";
+          run.updatedAt = Date.now();
+          yield { type: "error", error: errMsg };
+          return;
+        }
+
+        continue;
+      }
+
       // ──────────────── Phase 2: Human-in-the-Loop (Tool Confirmation) ────────────────
       if (graphResult.status === "awaiting_confirmation") {
+        if (THINKING_TRACE_ENABLED) {
+          yield {
+            type: "thinking",
+            content: `该操作风险较高，等待确认：${graphResult.pendingTool.skillName}`,
+          };
+        }
+
         traceManager.endSpan(planSpan, {
           intent: graphResult.intent.type,
           planAction: "awaiting_confirmation",
@@ -853,6 +1117,13 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
     const plan = graphResult.plan;
     console.log(`[chat] Executing plan: ${plan.action}`);
 
+    if (THINKING_TRACE_ENABLED) {
+      const planMessage = planThinkingMessage(plan);
+      if (planMessage) {
+        yield { type: "thinking", content: planMessage };
+      }
+    }
+
     switch (plan.action) {
       case "stream_chat":
         yield* executeStreamChat(run, plan, abortSignal, traceContext);
@@ -860,6 +1131,10 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
 
       case "execute_skill":
         yield* executeSkillPlan(run, plan, userQuery, abortSignal, traceContext, chatSettings.fullAccess);
+        return;
+
+      case "execute_skill_batch":
+        yield* executeSkillBatchPlan(run, plan, userQuery, abortSignal, traceContext, chatSettings.fullAccess);
         return;
 
       case "deep_search":
@@ -874,7 +1149,7 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
         if (history) history.push({ role: "assistant", content: plan.text });
         run.status = "completed";
         run.updatedAt = Date.now();
-        persistAssistantMessage(run.sessionId, plan.text);
+        persistAssistantMessage(run.userId, run.projectKey, run.sessionId, plan.text);
         yield { type: "done", message: plan.text };
         return;
       }
@@ -994,7 +1269,7 @@ async function* executeStreamChat(
     run.updatedAt = Date.now();
 
     // Persist assistant message to DB
-    persistAssistantMessage(run.sessionId, fullResponse, sources);
+    persistAssistantMessage(run.userId, run.projectKey, run.sessionId, fullResponse, sources);
 
     yield { type: "done", message: fullResponse, sources };
   } catch (err) {
@@ -1034,7 +1309,7 @@ async function* executeSkillPlan(
         : "command";
 
   await agentSkillCatalog.initialize();
-  const skill = agentSkillCatalog.getById(plan.skillId);
+  const skill = agentSkillCatalog.getById(plan.skillId, run.userId);
   if (!skill) {
     run.status = "failed";
     run.updatedAt = Date.now();
@@ -1045,6 +1320,259 @@ async function* executeSkillPlan(
   // Delegate to existing handler, but skip its internal policy check
   // and confirmation logic since the graph already handled those.
   yield* executeSkillDirect(run, skill, plan.args, plan.docIds, sourceIntent, userQuery, abortSignal, traceContext, fullAccess);
+}
+
+/**
+ * Execute a batch of skill tasks sequentially.
+ * Intermediate per-task completion chunks are converted to deltas so SSE stays open.
+ */
+async function* executeSkillBatchPlan(
+  run: ChatRun,
+  plan: Extract<ChatExecutionPlan, { action: "execute_skill_batch" }>,
+  userQuery: string,
+  abortSignal: AbortSignal,
+  traceContext: TraceContext,
+  fullAccess = false,
+): AsyncGenerator<ChatStreamChunk> {
+  if (!Array.isArray(plan.tasks) || plan.tasks.length === 0) {
+    run.status = "completed";
+    run.updatedAt = Date.now();
+    yield { type: "done", message: "没有可执行的任务。" };
+    return;
+  }
+
+  await agentSkillCatalog.initialize();
+
+  const summaries: string[] = [];
+  const warnings: string[] = [];
+  const total = plan.tasks.length;
+  const taskOutputContext = new Map<string, Record<string, unknown>>();
+
+  for (let index = 0; index < total; index += 1) {
+    if (abortSignal.aborted) {
+      run.status = "cancelled";
+      run.updatedAt = Date.now();
+      return;
+    }
+
+    const task = plan.tasks[index];
+    if (!task) continue;
+
+    const failurePolicy = task.failurePolicy || "required";
+
+    const unresolvedDependencies = (task.dependsOn || []).filter((taskId) => !taskOutputContext.has(taskId));
+    if (unresolvedDependencies.length > 0) {
+      const reason = `子任务 ${task.title} 缺少依赖输出: ${unresolvedDependencies.join(", ")}`;
+      if (failurePolicy === "best_effort") {
+        warnings.push(`${index + 1}. ${task.title}: ${reason}`);
+        taskOutputContext.set(task.taskId, {
+          taskId: task.taskId,
+          skillId: task.skillId,
+          status: "failed",
+          error: reason,
+        });
+        yield {
+          type: "thinking",
+          content: `子任务 ${index + 1}/${total} 失败但已继续（best_effort）：${task.title}`,
+        };
+        continue;
+      }
+
+      run.status = "failed";
+      run.updatedAt = Date.now();
+      yield {
+        type: "error",
+        error: reason,
+      };
+      return;
+    }
+
+    const resolved = resolveBatchTaskInputs(task, taskOutputContext);
+    if (resolved.unresolvedBindings.length > 0) {
+      const reason = `子任务 ${task.title} 无法解析输入绑定: ${resolved.unresolvedBindings.join(", ")}`;
+      if (failurePolicy === "best_effort") {
+        warnings.push(`${index + 1}. ${task.title}: ${reason}`);
+        taskOutputContext.set(task.taskId, {
+          taskId: task.taskId,
+          skillId: task.skillId,
+          status: "failed",
+          error: reason,
+        });
+        yield {
+          type: "thinking",
+          content: `子任务 ${index + 1}/${total} 失败但已继续（best_effort）：${task.title}`,
+        };
+        continue;
+      }
+
+      run.status = "failed";
+      run.updatedAt = Date.now();
+      yield {
+        type: "error",
+        error: reason,
+      };
+      return;
+    }
+
+    const sourceIntent: "command" | "anthropic-keyword" | "tool" =
+      task.sourceIntent === "llm-tool"
+        ? "tool"
+        : task.sourceIntent === "keyword"
+          ? "anthropic-keyword"
+          : "command";
+
+    const skill = agentSkillCatalog.getById(task.skillId, run.userId);
+    if (!skill) {
+      const reason = `Unknown skill: ${task.skillId}`;
+      if (failurePolicy === "best_effort") {
+        warnings.push(`${index + 1}. ${task.title}: ${reason}`);
+        taskOutputContext.set(task.taskId, {
+          taskId: task.taskId,
+          skillId: task.skillId,
+          status: "failed",
+          error: reason,
+        });
+        yield {
+          type: "thinking",
+          content: `子任务 ${index + 1}/${total} 失败但已继续（best_effort）：${task.title}`,
+        };
+        continue;
+      }
+
+      run.status = "failed";
+      run.updatedAt = Date.now();
+      yield { type: "error", error: reason };
+      return;
+    }
+
+    yield {
+      type: "thinking",
+      content: `执行子任务 ${index + 1}/${total}: ${task.title}`,
+    };
+
+    if (resolved.bindingNotes.length > 0) {
+      yield {
+        type: "thinking",
+        content: `输入绑定已解析：${resolved.bindingNotes.join("，")}`,
+      };
+    }
+
+    let taskFailed = false;
+    let taskErrorMessage: string | null = null;
+    let taskDoneMessage: string | null = null;
+    const taskOutput: Record<string, unknown> = {
+      taskId: task.taskId,
+      skillId: task.skillId,
+      status: "running",
+    };
+
+    const initialDocId = typeof resolved.args.doc_id === "string" ? resolved.args.doc_id.trim() : "";
+    if (initialDocId) {
+      taskOutput.docId = initialDocId;
+    }
+
+    for await (const chunk of executeSkillDirect(
+      run,
+      skill,
+      resolved.args,
+      resolved.docIds,
+      sourceIntent,
+      userQuery,
+      abortSignal,
+      traceContext,
+      fullAccess,
+      {
+        finalizeRun: false,
+        persistSummary: false,
+        runtimeHints: task.runtimeHints,
+        onOutput: (output) => {
+          Object.assign(taskOutput, output);
+        },
+      },
+    )) {
+      if (chunk.type === "done") {
+        const msg = chunk.message || `${task.title} 已完成`;
+        if (!taskDoneMessage) {
+          taskDoneMessage = msg;
+          yield { type: "delta", content: `\n[${task.title}] ${msg}\n` };
+          Object.assign(taskOutput, parseOutputFromDoneMessage(msg));
+        }
+        continue;
+      }
+
+      if (chunk.type === "tool_rejected") {
+        yield chunk;
+        run.status = "completed";
+        run.updatedAt = Date.now();
+        return;
+      }
+
+      if (chunk.type === "error") {
+        taskFailed = true;
+        taskErrorMessage = chunk.error || `${task.title} 执行失败`;
+        if (failurePolicy !== "best_effort") {
+          yield chunk;
+        }
+        break;
+      }
+
+      yield chunk;
+    }
+
+    if (taskFailed) {
+      const reason = taskErrorMessage || `${task.title} 执行失败`;
+      if (failurePolicy === "best_effort") {
+        warnings.push(`${index + 1}. ${task.title}: ${reason}`);
+        taskOutputContext.set(task.taskId, {
+          ...taskOutput,
+          status: "failed",
+          error: reason,
+        });
+        yield {
+          type: "thinking",
+          content: `子任务 ${index + 1}/${total} 失败但已继续（best_effort）：${task.title}`,
+        };
+        continue;
+      }
+
+      run.status = "failed";
+      run.updatedAt = Date.now();
+      return;
+    }
+
+    const summary = taskDoneMessage || `${task.title} 已完成`;
+    summaries.push(`${index + 1}. ${task.title}: ${summary}`);
+
+    if (!taskDoneMessage) {
+      yield { type: "delta", content: `\n[${task.title}] ${summary}\n` };
+    }
+
+    taskOutputContext.set(task.taskId, {
+      ...taskOutput,
+      status: "completed",
+      message: summary,
+    });
+  }
+
+  const baseMessage = summaries.length > 0
+    ? `批量任务执行完成：\n${summaries.join("\n")}`
+    : "批量任务执行完成";
+
+  const warningMessage = warnings.length > 0
+    ? `\n\n告警（best_effort 已继续）：\n${warnings.join("\n")}`
+    : "";
+
+  const finalMessage = `${baseMessage}${warningMessage}`;
+
+  const history = sessionMessages.get(run.sessionId);
+  if (history) {
+    history.push({ role: "assistant", content: finalMessage });
+  }
+
+  run.status = "completed";
+  run.updatedAt = Date.now();
+  persistAssistantMessage(run.userId, run.projectKey, run.sessionId, finalMessage);
+  yield { type: "done", message: finalMessage };
 }
 
 /**
@@ -1062,7 +1590,16 @@ async function* executeSkillDirect(
   abortSignal: AbortSignal,
   traceContext: TraceContext,
   fullAccess = false,
+  options?: {
+    finalizeRun?: boolean;
+    persistSummary?: boolean;
+    runtimeHints?: TaskRuntimeHints;
+    onOutput?: (output: Record<string, unknown>) => void;
+  },
 ): AsyncGenerator<ChatStreamChunk> {
+  const finalizeRun = options?.finalizeRun ?? true;
+  const persistSummary = options?.persistSummary ?? true;
+
   const normalized = normalizeAndValidateSkillArgs(skill, args, docIds);
   if (!normalized.ok) {
     run.status = "failed";
@@ -1073,6 +1610,17 @@ async function* executeSkillDirect(
 
   const normalizedArgs = normalized.args;
   const normalizedDocIds = normalized.docIds;
+  const autoApplyDraft = fullAccess || options?.runtimeHints?.autoApplyDraft === true;
+
+  const publishOutput = (output: Record<string, unknown>): void => {
+    if (!options?.onOutput) return;
+    options.onOutput(output);
+  };
+
+  const initialDocId = typeof normalizedArgs.doc_id === "string" ? normalizedArgs.doc_id.trim() : "";
+  if (initialDocId) {
+    publishOutput({ docId: initialDocId });
+  }
 
   const skillSpan = traceManager.startSpan(traceContext, `agent:${skill.id}`, {
     source: skill.source,
@@ -1127,11 +1675,23 @@ async function* executeSkillDirect(
           }
 
           // FullAccess: auto-apply drafts without preview (only when validation passed)
-          if (chunk.type === "draft" && fullAccess && chunk.draft.validation?.passed === true) {
+          if (chunk.type === "draft") {
+            publishOutput({
+              draftId: chunk.draft.id,
+              draftDocId: chunk.draft.docId,
+            });
+          }
+
+          if (chunk.type === "draft" && autoApplyDraft && chunk.draft.validation?.passed === true) {
             try {
               const applyResult = await draftService.apply(run.projectKey, chunk.draft.id);
               const action = applyResult.isNew ? "创建" : "更新";
               const msg = `文档「${chunk.draft.title}」已自动${action}`;
+              publishOutput({
+                docId: applyResult.docId,
+                isNew: applyResult.isNew,
+                draftId: chunk.draft.id,
+              });
               addDraftToHistory(run.sessionId, chunk.draft);
               yield { type: "done", message: msg };
               skipNextDoneAfterApply = true;
@@ -1148,6 +1708,9 @@ async function* executeSkillDirect(
           }
 
           const mappedChunk = mapSkillChunkToChatChunk(chunk);
+          if (chunk.type === "done") {
+            publishOutput(parseOutputFromDoneMessage(chunk.message));
+          }
           yield mappedChunk;
           if (chunk.type === "draft") {
             addDraftToHistory(run.sessionId, chunk.draft);
@@ -1163,11 +1726,24 @@ async function* executeSkillDirect(
           }
 
           // FullAccess: auto-apply drafts without preview
-          if (chunk.type === "draft" && fullAccess && (!DOC_GUARD_ENABLED || chunk.draft.validation?.passed === true)) {
+          if (chunk.type === "draft") {
+            publishOutput({
+              draftId: chunk.draft.id,
+              draftDocId: chunk.draft.docId,
+            });
+          }
+
+          const allowRuntimeAutoApply = options?.runtimeHints?.autoApplyDraft === true;
+          if (chunk.type === "draft" && autoApplyDraft && (!DOC_GUARD_ENABLED || allowRuntimeAutoApply || chunk.draft.validation?.passed === true)) {
             try {
               const applyResult = await draftService.apply(run.projectKey, chunk.draft.id);
               const action = applyResult.isNew ? "创建" : "更新";
               const msg = `文档「${chunk.draft.title}」已自动${action}`;
+              publishOutput({
+                docId: applyResult.docId,
+                isNew: applyResult.isNew,
+                draftId: chunk.draft.id,
+              });
               addDraftToHistory(run.sessionId, chunk.draft);
               yield { type: "done", message: msg };
               continue;
@@ -1233,6 +1809,9 @@ async function* executeSkillDirect(
           }
 
           const mappedChunk = mapSkillChunkToChatChunk(chunk);
+          if (chunk.type === "done") {
+            publishOutput(parseOutputFromDoneMessage(chunk.message));
+          }
           yield mappedChunk;
           if (chunk.type === "draft") {
             addDraftToHistory(run.sessionId, chunk.draft);
@@ -1281,7 +1860,7 @@ async function* executeSkillDirect(
         }
         yield mapSkillChunkToChatChunk(chunk);
       }
-    } else {
+    } else if (skill.source === "mcp") {
       // MCP tool execution
       const mcpToolId = typeof skill.metadata?.mcpToolId === "string"
         ? skill.metadata.mcpToolId
@@ -1299,14 +1878,65 @@ async function* executeSkillDirect(
         yield { type: "delta", content: result.output };
       }
       yield { type: "done", message: `${skill.displayName} 执行完成` };
+    } else {
+      const pluginId = typeof skill.metadata?.pluginId === "string"
+        ? skill.metadata.pluginId
+        : "";
+      const commandId = typeof skill.metadata?.commandId === "string"
+        ? skill.metadata.commandId
+        : "";
+      const operationId = typeof skill.metadata?.operationId === "string"
+        ? skill.metadata.operationId
+        : "";
+      if (!pluginId || (!commandId && !operationId)) {
+        throw new Error(`Plugin skill metadata missing plugin command/operation id for ${skill.id}`);
+      }
+
+      yield { type: "thinking", content: `正在执行插件操作: ${skill.displayName}...` };
+      const result = commandId
+        ? await pluginManagerV2.executeCommand({
+          userId: run.userId,
+          projectKey: run.projectKey,
+          commandId,
+          args: normalizedArgs,
+          source: "slash",
+        })
+        : await pluginManagerV2.executeOperation({
+          userId: run.userId,
+          projectKey: run.projectKey,
+          pluginId,
+          operationId,
+          args: normalizedArgs,
+        });
+      publishOutput(result);
+
+      const messageFromResult = typeof result.message === "string"
+        ? result.message.trim()
+        : "";
+      const textFromResult = typeof result.text === "string"
+        ? result.text.trim()
+        : "";
+      const message = messageFromResult || textFromResult || `${skill.displayName} 执行完成`;
+
+      if (messageFromResult || textFromResult) {
+        yield { type: "delta", content: message };
+      }
+      yield { type: "done", message };
     }
 
-    run.status = "completed";
-    run.updatedAt = Date.now();
+    if (finalizeRun) {
+      run.status = "completed";
+      run.updatedAt = Date.now();
+    } else {
+      run.status = "running";
+      run.updatedAt = Date.now();
+    }
     traceManager.endSpan(skillSpan, { status: "completed" });
 
-    // Persist a summary assistant message for skill execution
-    persistAssistantMessage(run.sessionId, `[技能执行] ${skill.displayName} 已完成`);
+    // Persist a summary assistant message for single skill execution
+    if (persistSummary) {
+      persistAssistantMessage(run.userId, run.projectKey, run.sessionId, "[技能执行] " + skill.displayName + " 已完成");
+    }
   } catch (err) {
     if (abortSignal.aborted) {
       run.status = "cancelled";
@@ -1524,6 +2154,8 @@ function addDraftToHistory(sessionId: string, draft: DocumentDraft): void {
  * Also triggers session timestamp update and title generation for the first exchange.
  */
 function persistAssistantMessage(
+  userId: string,
+  projectKey: string,
   sessionId: string,
   content: string,
   sources?: unknown,
@@ -1532,8 +2164,8 @@ function persistAssistantMessage(
   if (!content) return;
   chatSessionStore
     .addMessage(sessionId, "assistant", content, sources || undefined, artifacts || undefined)
-    .then(() => chatSessionStore.updateSessionTimestamp(sessionId))
-    .then(() => chatSessionStore.getMessageCount(sessionId))
+    .then(() => chatSessionStore.updateSessionTimestamp(userId, projectKey, sessionId))
+    .then(() => chatSessionStore.getMessageCount(userId, projectKey, sessionId))
     .then((count) => {
       // Trigger title generation after the first user+assistant exchange (count == 2)
       if (count <= 2) {

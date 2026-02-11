@@ -6,13 +6,16 @@
  */
 
 import { query } from "../../db/postgres.js";
-import type { StyleTemplate, PresetTemplate, PRESET_TEMPLATES } from "./types.js";
+import { resolveProjectScope } from "../../project-scope.js";
+import type { StyleTemplate, PresetTemplate } from "./types.js";
 
 /**
  * Database row for custom template
  */
 interface TemplateRow {
   id: string;
+  owner_type: string;
+  owner_id: string;
   project_key: string;
   name: string;
   description: string | null;
@@ -78,6 +81,8 @@ export const templateStore = {
     await query(`
       CREATE TABLE IF NOT EXISTS ppt_templates (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        owner_type TEXT NOT NULL DEFAULT 'personal',
+        owner_id TEXT NOT NULL DEFAULT '',
         project_key VARCHAR(255) NOT NULL,
         name VARCHAR(255) NOT NULL,
         description TEXT,
@@ -90,8 +95,38 @@ export const templateStore = {
         color_accent VARCHAR(7),
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        UNIQUE(project_key, name)
+        UNIQUE(owner_type, owner_id, project_key, name)
       )
+    `);
+
+    await query(`ALTER TABLE ppt_templates ADD COLUMN IF NOT EXISTS owner_type TEXT NOT NULL DEFAULT 'personal'`);
+    await query(`ALTER TABLE ppt_templates ADD COLUMN IF NOT EXISTS owner_id TEXT NOT NULL DEFAULT ''`);
+
+    await query(`
+      UPDATE ppt_templates
+         SET owner_type = CASE WHEN split_part(project_key, '::', 1) = 'team' THEN 'team' ELSE 'personal' END,
+             owner_id = split_part(project_key, '::', 2)
+       WHERE owner_id = '' AND project_key LIKE '%::%::%'
+    `);
+
+    await query(`
+      UPDATE ppt_templates t
+         SET owner_type = CASE WHEN p.owner_type = 'team' THEN 'team' ELSE 'personal' END,
+             owner_id = p.owner_id
+        FROM project p
+       WHERE t.owner_id = '' AND t.project_key = p.key
+    `);
+
+    await query(`
+      UPDATE ppt_templates
+         SET project_key = split_part(project_key, '::', 3)
+       WHERE project_key LIKE '%::%::%'
+    `);
+
+    await query(`ALTER TABLE ppt_templates DROP CONSTRAINT IF EXISTS ppt_templates_project_key_name_key`);
+    await query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_ppt_templates_owner_project_name
+      ON ppt_templates (owner_type, owner_id, project_key, name)
     `);
   },
 
@@ -99,14 +134,18 @@ export const templateStore = {
    * Create a custom template
    */
   async create(projectKey: string, input: CreateTemplateInput): Promise<StyleTemplate> {
+    const scope = resolveProjectScope("", projectKey);
+
     const result = await query<TemplateRow>(
       `INSERT INTO ppt_templates (
-        project_key, name, description, preview_url, template_images,
+        owner_type, owner_id, project_key, name, description, preview_url, template_images,
         color_primary, color_secondary, color_background, color_text, color_accent
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING *`,
       [
-        projectKey,
+        scope.ownerType,
+        scope.ownerId,
+        scope.projectKey,
         input.name,
         input.description || null,
         input.previewUrl || null,
@@ -116,7 +155,7 @@ export const templateStore = {
         input.colorScheme?.background || null,
         input.colorScheme?.text || null,
         input.colorScheme?.accent || null,
-      ]
+      ],
     );
 
     return rowToTemplate(result.rows[0]);
@@ -126,9 +165,12 @@ export const templateStore = {
    * Get a template by ID
    */
   async get(projectKey: string, templateId: string): Promise<StyleTemplate | null> {
+    const scope = resolveProjectScope("", projectKey);
+
     const result = await query<TemplateRow>(
-      `SELECT * FROM ppt_templates WHERE id = $1 AND project_key = $2`,
-      [templateId, projectKey]
+      `SELECT * FROM ppt_templates
+       WHERE id = $1 AND owner_type = $2 AND owner_id = $3 AND project_key = $4`,
+      [templateId, scope.ownerType, scope.ownerId, scope.projectKey],
     );
 
     if (result.rows.length === 0) {
@@ -142,9 +184,13 @@ export const templateStore = {
    * List all custom templates for a project
    */
   async list(projectKey: string): Promise<StyleTemplate[]> {
+    const scope = resolveProjectScope("", projectKey);
+
     const result = await query<TemplateRow>(
-      `SELECT * FROM ppt_templates WHERE project_key = $1 ORDER BY name ASC`,
-      [projectKey]
+      `SELECT * FROM ppt_templates
+       WHERE owner_type = $1 AND owner_id = $2 AND project_key = $3
+       ORDER BY name ASC`,
+      [scope.ownerType, scope.ownerId, scope.projectKey],
     );
 
     return result.rows.map(rowToTemplate);
@@ -156,8 +202,10 @@ export const templateStore = {
   async update(
     projectKey: string,
     templateId: string,
-    input: Partial<CreateTemplateInput>
+    input: Partial<CreateTemplateInput>,
   ): Promise<StyleTemplate | null> {
+    const scope = resolveProjectScope("", projectKey);
+
     const updates: string[] = [];
     const values: unknown[] = [];
     let paramIndex = 1;
@@ -200,17 +248,20 @@ export const templateStore = {
     }
 
     if (updates.length === 0) {
-      return this.get(projectKey, templateId);
+      return this.get(scope.scopedProjectKey, templateId);
     }
 
     updates.push(`updated_at = NOW()`);
-    values.push(templateId, projectKey);
+    values.push(templateId, scope.ownerType, scope.ownerId, scope.projectKey);
 
     const result = await query<TemplateRow>(
       `UPDATE ppt_templates SET ${updates.join(", ")}
-       WHERE id = $${paramIndex++} AND project_key = $${paramIndex}
+       WHERE id = $${paramIndex++}
+         AND owner_type = $${paramIndex++}
+         AND owner_id = $${paramIndex++}
+         AND project_key = $${paramIndex}
        RETURNING *`,
-      values
+      values,
     );
 
     if (result.rows.length === 0) {
@@ -224,9 +275,12 @@ export const templateStore = {
    * Delete a custom template
    */
   async delete(projectKey: string, templateId: string): Promise<boolean> {
+    const scope = resolveProjectScope("", projectKey);
+
     const result = await query(
-      `DELETE FROM ppt_templates WHERE id = $1 AND project_key = $2`,
-      [templateId, projectKey]
+      `DELETE FROM ppt_templates
+       WHERE id = $1 AND owner_type = $2 AND owner_id = $3 AND project_key = $4`,
+      [templateId, scope.ownerType, scope.ownerId, scope.projectKey],
     );
 
     return (result.rowCount ?? 0) > 0;

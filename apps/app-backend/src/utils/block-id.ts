@@ -4,8 +4,7 @@
 
 import { randomUUID } from "crypto";
 
-// Block types that should have IDs
-const BLOCK_ID_NODE_TYPES = new Set([
+const baseBlockIdNodeTypes = new Set([
   "paragraph",
   "heading",
   "codeBlock",
@@ -23,11 +22,31 @@ const BLOCK_ID_NODE_TYPES = new Set([
   "openapi",
   "openapiRef",
   "toc",
+  "unsupportedPluginBlock",
   // List containers - need IDs for accurate DIFF matching
   "bulletList",
   "orderedList",
   "taskList",
 ]);
+
+const extraBlockIdNodeTypes = new Set<string>();
+
+export function registerBlockIdNodeTypes(nodeTypes: string[]): void {
+  for (const nodeType of nodeTypes || []) {
+    const normalized = String(nodeType || "").trim();
+    if (normalized) {
+      extraBlockIdNodeTypes.add(normalized);
+    }
+  }
+}
+
+export function getBlockIdNodeTypes(): string[] {
+  return Array.from(new Set([...baseBlockIdNodeTypes, ...extraBlockIdNodeTypes]));
+}
+
+function shouldHaveBlockId(type: string): boolean {
+  return baseBlockIdNodeTypes.has(type) || extraBlockIdNodeTypes.has(type);
+}
 
 type JSONContent = {
   type?: string;
@@ -77,7 +96,7 @@ export function ensureBlockIds(content: JSONContent): JSONContent {
 
     // Check if this node type should have an ID
     const type = node.type ?? "";
-    if (BLOCK_ID_NODE_TYPES.has(type)) {
+    if (shouldHaveBlockId(type)) {
       const currentId = normalizeId(node.attrs?.id);
       if (!currentId || usedIds.has(currentId)) {
         // Generate new ID

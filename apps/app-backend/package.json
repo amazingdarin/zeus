@@ -6,6 +6,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "migrate:user-data-layout": "node --import tsx src/scripts/migrate-user-data-layout.ts",
     "test:agent-skills": "node --import tsx --test --test-force-exit tests/agent-optimize-skills.test.ts",
     "test:doc-guard": "node --import tsx --test --test-force-exit tests/doc-guard.test.ts",
     "test:doc-refine": "node --import tsx --test --test-force-exit tests/doc-refine-loop.test.ts"
@@ -20,6 +21,8 @@
     "@tiptap/core": "^2.12.0",
     "@tiptap/extension-image": "^2.12.0",
     "@tiptap/starter-kit": "^2.12.0",
+    "@zeus/plugin-sdk-backend": "workspace:*",
+    "@zeus/plugin-sdk-shared": "workspace:*",
     "@zeus/shared": "workspace:*",
     "ai": "^6.0.62",
     "cors": "^2.8.5",
@@ -37,7 +40,9 @@
     "pgvector": "^0.2.0",
     "prosemirror-markdown": "^1.13.1",
     "prosemirror-model": "^1.24.1",
+    "semver": "^7.7.3",
     "simple-git": "^3.28.0",
+    "tar": "^7.5.2",
     "turndown": "^7.2.0",
     "uuid": "^11.0.5",
     "yaml": "^2.8.1"

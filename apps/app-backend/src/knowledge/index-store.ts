@@ -6,6 +6,7 @@
  */
 
 import { query } from "../db/postgres.js";
+import { resolveProjectScope } from "../project-scope.js";
 import type { Document } from "../storage/types.js";
 import type {
   IndexEntry,
@@ -115,8 +116,9 @@ export const indexStore = {
       throw new Error("Invalid parameters for indexDocument");
     }
 
+    const scope = resolveProjectScope(userId, projectKey);
     const errors: string[] = [];
-    const chunks = chunkDocument(userId, projectKey, doc, parentPath);
+    const chunks = chunkDocument(userId, scope.projectKey, doc, parentPath);
     const entries = flattenChunkResult(chunks);
 
     if (entries.length === 0) {
@@ -135,7 +137,7 @@ export const indexStore = {
     }
 
     // Delete existing entries for this document
-    await this.removeDocument(userId, projectKey, doc.meta.id);
+    await this.removeDocument(userId, scope.scopedProjectKey, doc.meta.id);
 
     // Insert new entries
     let indexed = 0;
@@ -144,7 +146,7 @@ export const indexStore = {
       const embedding = embeddings[i] || null;
 
       try {
-        await this.upsertEntry(entry, embedding);
+        await this.upsertEntry(entry, embedding, scope);
         indexed++;
       } catch (err) {
         errors.push(
@@ -159,15 +161,20 @@ export const indexStore = {
   /**
    * Upsert a single index entry
    */
-  async upsertEntry(entry: IndexEntry, embedding?: number[] | null): Promise<void> {
+  async upsertEntry(
+    entry: IndexEntry,
+    embedding?: number[] | null,
+    scopeInput?: { ownerType: string; ownerId: string; projectKey: string },
+  ): Promise<void> {
     const embeddingStr = embedding ? formatVector(embedding) : null;
+    const scope = scopeInput ?? resolveProjectScope(entry.user_id, entry.project_key);
 
     await query(
       `INSERT INTO knowledge_index (
-        id, user_id, project_key, doc_id, granularity,
+        id, user_id, owner_type, owner_id, project_key, doc_id, granularity,
         content, embedding, metadata, created_at, updated_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7::vector, $8, to_timestamp($9/1000.0), to_timestamp($10/1000.0))
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::vector, $10, to_timestamp($11/1000.0), to_timestamp($12/1000.0))
       ON CONFLICT (id) DO UPDATE SET
         content = EXCLUDED.content,
         embedding = EXCLUDED.embedding,
@@ -176,7 +183,9 @@ export const indexStore = {
       [
         entry.id,
         entry.user_id,
-        entry.project_key,
+        scope.ownerType,
+        scope.ownerId,
+        scope.projectKey,
         entry.doc_id,
         entry.granularity,
         entry.content,
@@ -196,11 +205,16 @@ export const indexStore = {
     projectKey: string,
     docId: string,
   ): Promise<number> {
+    const scope = resolveProjectScope(userId, projectKey);
     const result = await query(
       `DELETE FROM knowledge_index
-       WHERE user_id = $1 AND project_key = $2 AND doc_id = $3
+       WHERE user_id = $1
+         AND owner_type = $2
+         AND owner_id = $3
+         AND project_key = $4
+         AND doc_id = $5
        RETURNING id`,
-      [userId, projectKey, docId],
+      [userId, scope.ownerType, scope.ownerId, scope.projectKey, docId],
     );
     return result.rowCount || 0;
   },
@@ -209,11 +223,15 @@ export const indexStore = {
    * Remove all entries for a project
    */
   async removeProject(userId: string, projectKey: string): Promise<number> {
+    const scope = resolveProjectScope(userId, projectKey);
     const result = await query(
       `DELETE FROM knowledge_index
-       WHERE user_id = $1 AND project_key = $2
+       WHERE user_id = $1
+         AND owner_type = $2
+         AND owner_id = $3
+         AND project_key = $4
        RETURNING id`,
-      [userId, projectKey],
+      [userId, scope.ownerType, scope.ownerId, scope.projectKey],
     );
     return result.rowCount || 0;
   },
@@ -255,14 +273,18 @@ export const indexStore = {
       }
     }
 
+    const scope = resolveProjectScope(userId, projectKey);
+
     // Build WHERE clause
     const conditions: string[] = [
       "user_id = $1",
-      "project_key = $2",
+      "owner_type = $2",
+      "owner_id = $3",
+      "project_key = $4",
       "embedding IS NOT NULL",
     ];
-    const params: unknown[] = [userId, projectKey];
-    let paramIndex = 3;
+    const params: unknown[] = [userId, scope.ownerType, scope.ownerId, scope.projectKey];
+    let paramIndex = 5;
 
     if (granularities && granularities.length > 0) {
       conditions.push(`granularity = ANY($${paramIndex})`);
@@ -343,14 +365,18 @@ export const indexStore = {
     const tsvColumn = lang === "zhparser" ? "tsv_zh" : "tsv_en";
     const config = lang === "zhparser" ? "zhparser" : "english";
 
+    const scope = resolveProjectScope(userId, projectKey);
+
     // Build WHERE clause
     const conditions: string[] = [
       "user_id = $1",
-      "project_key = $2",
-      `${tsvColumn} @@ plainto_tsquery('${config}', $3)`,
+      "owner_type = $2",
+      "owner_id = $3",
+      "project_key = $4",
+      `${tsvColumn} @@ plainto_tsquery('${config}', $5)`,
     ];
-    const params: unknown[] = [userId, projectKey, queryText];
-    let paramIndex = 4;
+    const params: unknown[] = [userId, scope.ownerType, scope.ownerId, scope.projectKey, queryText];
+    let paramIndex = 6;
 
     if (granularities && granularities.length > 0) {
       conditions.push(`granularity = ANY($${paramIndex})`);
@@ -375,7 +401,7 @@ export const indexStore = {
         doc_id,
         granularity,
         content,
-        ts_rank(${tsvColumn}, plainto_tsquery('${config}', $3)) as score,
+        ts_rank(${tsvColumn}, plainto_tsquery('${config}', $5)) as score,
         metadata
       FROM knowledge_index
       WHERE ${conditions.join(" AND ")}
@@ -487,18 +513,24 @@ export const indexStore = {
     docId: string,
     granularities?: IndexGranularity[],
   ): Promise<IndexEntry[]> {
+    const scope = resolveProjectScope(userId, projectKey);
+
     let sql = `
       SELECT id, user_id, project_key, doc_id, granularity,
              content, metadata, 
              EXTRACT(EPOCH FROM created_at) * 1000 as created_at,
              EXTRACT(EPOCH FROM updated_at) * 1000 as updated_at
       FROM knowledge_index
-      WHERE user_id = $1 AND project_key = $2 AND doc_id = $3
+      WHERE user_id = $1
+        AND owner_type = $2
+        AND owner_id = $3
+        AND project_key = $4
+        AND doc_id = $5
     `;
-    const params: unknown[] = [userId, projectKey, docId];
+    const params: unknown[] = [userId, scope.ownerType, scope.ownerId, scope.projectKey, docId];
 
     if (granularities && granularities.length > 0) {
-      sql += " AND granularity = ANY($4)";
+      sql += " AND granularity = ANY($6)";
       params.push(granularities);
     }
 
@@ -540,15 +572,20 @@ export const indexStore = {
     byGranularity: Record<IndexGranularity, number>;
     documentCount: number;
   }> {
+    const scope = resolveProjectScope(userId, projectKey);
+
     const result = await query<{
       granularity: IndexGranularity;
       count: string;
     }>(
       `SELECT granularity, COUNT(*) as count
        FROM knowledge_index
-       WHERE user_id = $1 AND project_key = $2
+       WHERE user_id = $1
+         AND owner_type = $2
+         AND owner_id = $3
+         AND project_key = $4
        GROUP BY granularity`,
-      [userId, projectKey],
+      [userId, scope.ownerType, scope.ownerId, scope.projectKey],
     );
 
     const byGranularity: Record<IndexGranularity, number> = {
@@ -567,8 +604,11 @@ export const indexStore = {
     const docResult = await query<{ count: string }>(
       `SELECT COUNT(DISTINCT doc_id) as count
        FROM knowledge_index
-       WHERE user_id = $1 AND project_key = $2`,
-      [userId, projectKey],
+       WHERE user_id = $1
+         AND owner_type = $2
+         AND owner_id = $3
+         AND project_key = $4`,
+      [userId, scope.ownerType, scope.ownerId, scope.projectKey],
     );
 
     return {

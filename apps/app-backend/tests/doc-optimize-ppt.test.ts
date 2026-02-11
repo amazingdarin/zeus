@@ -32,11 +32,23 @@ function bulletList(id: string, items: string[]) {
   };
 }
 
-test("documentSkills includes doc-optimize-ppt and requires doc_id", () => {
-  const skill = documentSkills.find((s) => s.name === "doc-optimize-ppt");
-  assert(skill, "doc-optimize-ppt skill not found");
-  assert.equal(skill.command, "/doc-optimize-ppt");
-  assert.equal(skill.parameters.required.includes("doc_id"), true);
+test("documentSkills exposes ppt alias and split skills", () => {
+  const compat = documentSkills.find((s) => s.name === "doc-optimize-ppt");
+  const outline = documentSkills.find((s) => s.name === "doc-optimize-ppt-outline");
+  const htmlRender = documentSkills.find((s) => s.name === "doc-render-ppt-html");
+
+  assert(compat, "doc-optimize-ppt skill not found");
+  assert(outline, "doc-optimize-ppt-outline skill not found");
+  assert(htmlRender, "doc-render-ppt-html skill not found");
+
+  assert.equal(compat?.command, "/doc-optimize-ppt");
+  assert.equal(outline?.command, "/doc-optimize-ppt-outline");
+  assert.equal(htmlRender?.command, "/doc-render-ppt-html");
+
+  assert.equal(compat?.inputSchema.safeParse({ doc_id: "doc-1" }).success, true);
+  assert.equal(outline?.inputSchema.safeParse({ doc_id: "doc-1" }).success, true);
+  assert.equal(htmlRender?.inputSchema.safeParse({ doc_id: "doc-1", theme: "modern" }).success, true);
+  assert.equal(htmlRender?.inputSchema.safeParse({}).success, false);
 });
 
 test("ppt-guard passes for a valid slide deck", () => {

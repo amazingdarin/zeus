@@ -69,7 +69,7 @@ export const knowledgeSearch = {
   async indexDocument(userId: string, projectKey: string, doc: Document): Promise<void> {
     const parentPath = await getParentPathTitles(userId, projectKey, doc.meta.id);
     const { indexed } = await indexStore.indexDocument(userId, projectKey, doc, parentPath);
-    await clearSummaryCache(doc.meta.id);
+    await clearSummaryCache(userId, projectKey, doc.meta.id);
 
     // Build RAPTOR tree from block/code-level chunks
     if (indexed > 0) {
@@ -91,7 +91,7 @@ export const knowledgeSearch = {
   async removeDocument(userId: string, projectKey: string, docId: string): Promise<void> {
     await Promise.all([
       indexStore.removeDocument(userId, projectKey, docId),
-      clearSummaryCache(docId),
+      clearSummaryCache(userId, projectKey, docId),
       clearRaptorTree(userId, projectKey, docId),
     ]);
   },
@@ -133,7 +133,7 @@ export const knowledgeSearch = {
       try {
         const parentPath = computeParentPathFromList(metaById, doc.meta.id);
         const { indexed } = await indexStore.indexDocument(userId, projectKey, doc, parentPath);
-        await clearSummaryCache(doc.meta.id);
+        await clearSummaryCache(userId, projectKey, doc.meta.id);
 
         // Build RAPTOR tree from block/code-level chunks
         if (indexed > 0) {

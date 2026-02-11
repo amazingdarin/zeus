@@ -1,11 +1,11 @@
 import type { TraceContext } from "../../observability/index.js";
 import type { AnyZodObject } from "../zod.js";
 
-export type AgentSkillSource = "native" | "anthropic" | "mcp";
+export type AgentSkillSource = "native" | "anthropic" | "mcp" | "plugin";
 
 export type AgentRiskLevel = "low" | "medium" | "high";
 
-export type AgentExecutionMode = "native-handler" | "llm-guided" | "mcp-tool";
+export type AgentExecutionMode = "native-handler" | "llm-guided" | "mcp-tool" | "plugin-worker";
 
 // Zod-based schema for tool-call arguments.
 // Conversion to OpenAI JSON schema happens at the catalog layer.

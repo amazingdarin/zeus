@@ -1,4 +1,5 @@
 import { query } from "../db/postgres.js";
+import { resolveProjectScope } from "../project-scope.js";
 import type { Document, SearchResult } from "../storage/types.js";
 import { extractDocumentText } from "./chunker.js";
 
@@ -25,6 +26,7 @@ export const fulltextIndex = {
       throw new Error("Invalid parameters for fulltext upsert");
     }
 
+    const scope = resolveProjectScope("", projectKey);
     const contentPlain = extractDocumentText(doc);
     const title = doc.meta.title || "";
     const metadata = {
@@ -33,18 +35,18 @@ export const fulltextIndex = {
     };
 
     await query(
-      `INSERT INTO knowledge_fulltext_index 
-        (project_key, index_name, doc_id, title, content_plain, tsv_en, tsv_zh, metadata_json, updated_at)
-       VALUES ($1, $2, $3, $4, $5, to_tsvector('english', $5), to_tsvector('zhparser', $5), $6, NOW())
-       ON CONFLICT (project_key, index_name, doc_id) 
-       DO UPDATE SET 
+      `INSERT INTO knowledge_fulltext_index
+        (owner_type, owner_id, project_key, index_name, doc_id, title, content_plain, tsv_en, tsv_zh, metadata_json, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, to_tsvector('english', $7), to_tsvector('zhparser', $7), $8, NOW())
+       ON CONFLICT (owner_type, owner_id, project_key, index_name, doc_id)
+       DO UPDATE SET
          title = EXCLUDED.title,
          content_plain = EXCLUDED.content_plain,
          tsv_en = EXCLUDED.tsv_en,
          tsv_zh = EXCLUDED.tsv_zh,
          metadata_json = EXCLUDED.metadata_json,
          updated_at = NOW()`,
-      [projectKey, indexName, doc.meta.id, title, contentPlain, JSON.stringify(metadata)],
+      [scope.ownerType, scope.ownerId, scope.projectKey, indexName, doc.meta.id, title, contentPlain, JSON.stringify(metadata)],
     );
   },
 
@@ -52,10 +54,12 @@ export const fulltextIndex = {
    * Remove a document from the fulltext index
    */
   async remove(projectKey: string, indexName: string, docId: string): Promise<void> {
+    const scope = resolveProjectScope("", projectKey);
+
     await query(
-      `DELETE FROM knowledge_fulltext_index 
-       WHERE project_key = $1 AND index_name = $2 AND doc_id = $3`,
-      [projectKey, indexName, docId],
+      `DELETE FROM knowledge_fulltext_index
+       WHERE owner_type = $1 AND owner_id = $2 AND project_key = $3 AND index_name = $4 AND doc_id = $5`,
+      [scope.ownerType, scope.ownerId, scope.projectKey, indexName, docId],
     );
   },
 
@@ -63,10 +67,12 @@ export const fulltextIndex = {
    * Remove all documents for an index
    */
   async removeByIndex(projectKey: string, indexName: string): Promise<void> {
+    const scope = resolveProjectScope("", projectKey);
+
     await query(
-      `DELETE FROM knowledge_fulltext_index 
-       WHERE project_key = $1 AND index_name = $2`,
-      [projectKey, indexName],
+      `DELETE FROM knowledge_fulltext_index
+       WHERE owner_type = $1 AND owner_id = $2 AND project_key = $3 AND index_name = $4`,
+      [scope.ownerType, scope.ownerId, scope.projectKey, indexName],
     );
   },
 
@@ -83,7 +89,7 @@ export const fulltextIndex = {
       highlight?: boolean;
       sortBy?: string;
       filters?: Record<string, string>;
-      docIds?: string[];  // Optional: filter by specific document IDs
+      docIds?: string[];
     } = {},
   ): Promise<SearchResult[]> {
     const { limit = 20, offset = 0, highlight = false, docIds } = options;
@@ -92,48 +98,52 @@ export const fulltextIndex = {
       return [];
     }
 
+    const scope = resolveProjectScope("", projectKey);
     const lang = detectLanguage(queryText);
     const tsvColumn = lang === "zhparser" ? "tsv_zh" : "tsv_en";
     const config = lang === "zhparser" ? "zhparser" : "english";
 
     let snippetExpr: string;
     if (highlight) {
-      snippetExpr = `ts_headline('${config}', content_plain, plainto_tsquery('${config}', $3), 'MaxWords=50, MinWords=20')`;
+      snippetExpr = `ts_headline('${config}', content_plain, plainto_tsquery('${config}', $5), 'MaxWords=50, MinWords=20')`;
     } else {
-      snippetExpr = `LEFT(content_plain, 200)`;
+      snippetExpr = "LEFT(content_plain, 200)";
     }
 
-    // Build query with optional doc_id filter
     let sql: string;
     let params: unknown[];
 
     if (docIds && docIds.length > 0) {
-      sql = `SELECT 
+      sql = `SELECT
          doc_id,
-         ts_rank(${tsvColumn}, plainto_tsquery('${config}', $3)) as score,
+         ts_rank(${tsvColumn}, plainto_tsquery('${config}', $5)) as score,
          ${snippetExpr} as snippet,
          metadata_json
        FROM knowledge_fulltext_index
-       WHERE project_key = $1 
-         AND index_name = $2 
-         AND ${tsvColumn} @@ plainto_tsquery('${config}', $3)
-         AND doc_id = ANY($6)
+       WHERE owner_type = $1
+         AND owner_id = $2
+         AND project_key = $3
+         AND index_name = $4
+         AND ${tsvColumn} @@ plainto_tsquery('${config}', $5)
+         AND doc_id = ANY($8)
        ORDER BY score DESC
-       LIMIT $4 OFFSET $5`;
-      params = [projectKey, indexName, queryText, limit, offset, docIds];
+       LIMIT $6 OFFSET $7`;
+      params = [scope.ownerType, scope.ownerId, scope.projectKey, indexName, queryText, limit, offset, docIds];
     } else {
-      sql = `SELECT 
+      sql = `SELECT
          doc_id,
-         ts_rank(${tsvColumn}, plainto_tsquery('${config}', $3)) as score,
+         ts_rank(${tsvColumn}, plainto_tsquery('${config}', $5)) as score,
          ${snippetExpr} as snippet,
          metadata_json
        FROM knowledge_fulltext_index
-       WHERE project_key = $1 
-         AND index_name = $2 
-         AND ${tsvColumn} @@ plainto_tsquery('${config}', $3)
+       WHERE owner_type = $1
+         AND owner_id = $2
+         AND project_key = $3
+         AND index_name = $4
+         AND ${tsvColumn} @@ plainto_tsquery('${config}', $5)
        ORDER BY score DESC
-       LIMIT $4 OFFSET $5`;
-      params = [projectKey, indexName, queryText, limit, offset];
+       LIMIT $6 OFFSET $7`;
+      params = [scope.ownerType, scope.ownerId, scope.projectKey, indexName, queryText, limit, offset];
     }
 
     const result = await query<{
@@ -170,24 +180,28 @@ export const fulltextIndex = {
       return [];
     }
 
+    const scope = resolveProjectScope("", projectKey);
+
     const result = await query<{
       doc_id: string;
       score: number;
       snippet: string;
       metadata_json: Record<string, unknown>;
     }>(
-      `SELECT 
+      `SELECT
          doc_id,
-         similarity(title || ' ' || content_plain, $3) as score,
+         similarity(title || ' ' || content_plain, $5) as score,
          LEFT(content_plain, 200) as snippet,
          metadata_json
        FROM knowledge_fulltext_index
-       WHERE project_key = $1 
-         AND index_name = $2 
-         AND similarity(title || ' ' || content_plain, $3) > $4
+       WHERE owner_type = $1
+         AND owner_id = $2
+         AND project_key = $3
+         AND index_name = $4
+         AND similarity(title || ' ' || content_plain, $5) > $6
        ORDER BY score DESC
-       LIMIT $5 OFFSET $6`,
-      [projectKey, indexName, queryText, minSimilarity, limit, offset],
+       LIMIT $7 OFFSET $8`,
+      [scope.ownerType, scope.ownerId, scope.projectKey, indexName, queryText, minSimilarity, limit, offset],
     );
 
     return result.rows.map((row) => ({

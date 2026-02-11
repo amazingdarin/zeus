@@ -5,6 +5,7 @@ import { initPool } from "./db/postgres.js";
 import { buildRouter } from "./router.js";
 import { skillRegistry, syncAnthropicSkillConfigs } from "./llm/skills/index.js";
 import { agentSkillCatalog } from "./llm/agent/index.js";
+import { pluginManagerV2 } from "./plugins-v2/index.js";
 
 const app = express();
 const port = Number(process.env.APP_BACKEND_PORT ?? 4870);
@@ -55,14 +56,21 @@ const start = async () => {
     // Sync Anthropic Skills enabled state from database
     await syncAnthropicSkillConfigs();
 
-    // Initialize system-agent skill catalog (native + anthropic + mcp)
+    // Initialize system-agent skill catalog (native + anthropic + mcp + plugin)
     await agentSkillCatalog.initialize();
     const agentCounts = agentSkillCatalog.getCounts();
     console.log(
-      `[app-backend] Agent skill catalog initialized: ${agentCounts.native} native, ${agentCounts.anthropic} anthropic, ${agentCounts.mcp} mcp`,
+      `[app-backend] Agent skill catalog initialized: ${agentCounts.native} native, ${agentCounts.anthropic} anthropic, ${agentCounts.mcp} mcp, ${agentCounts.plugin} plugin`,
     );
   } catch (err) {
     console.warn("[app-backend] Skill registry initialization failed:", err);
+  }
+
+  try {
+    await pluginManagerV2.initialize();
+    console.log("[app-backend] Plugin manager v2 initialized");
+  } catch (err) {
+    console.warn("[app-backend] Plugin manager v2 initialization failed:", err);
   }
 
   app.listen(port, () => {

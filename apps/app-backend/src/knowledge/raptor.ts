@@ -17,6 +17,7 @@
 
 import { query } from "../db/postgres.js";
 import { llmGateway, configStore, type LLMProviderId } from "../llm/index.js";
+import { resolveProjectScope } from "../project-scope.js";
 import type { RaptorNode, IndexSearchResult } from "./types.js";
 
 // ============================================================
@@ -118,8 +119,10 @@ export async function buildRaptorTree(
 
   console.log(`[RAPTOR] Building tree for doc ${docId} with ${chunks.length} chunks`);
 
+  const scope = resolveProjectScope(userId, projectKey);
+
   // Clear existing tree for this document
-  await clearRaptorTree(userId, projectKey, docId);
+  await clearRaptorTree(userId, scope.scopedProjectKey, docId);
 
   // Step 1: Create leaf nodes with embeddings
   const leafEmbeddings = await generateEmbeddings(chunks.map((c) => c.content));
@@ -127,7 +130,9 @@ export async function buildRaptorTree(
   const leafNodes: RaptorNode[] = chunks.map((chunk, idx) => ({
     id: `${docId}:raptor:leaf:${chunk.id}`,
     user_id: userId,
-    project_key: projectKey,
+    owner_type: scope.ownerType,
+    owner_id: scope.ownerId,
+    project_key: scope.projectKey,
     doc_id: docId,
     level: 0,
     content: chunk.content,
@@ -173,6 +178,10 @@ async function buildNextLevel(
   levelNum: number,
 ): Promise<RaptorNode[]> {
   const nextLevel: RaptorNode[] = [];
+  const fallbackScope = resolveProjectScope(userId, projectKey);
+  const ownerType = currentLevel[0]?.owner_type || fallbackScope.ownerType;
+  const ownerId = currentLevel[0]?.owner_id || fallbackScope.ownerId;
+  const ownerProjectKey = currentLevel[0]?.project_key || fallbackScope.projectKey;
 
   // Cluster nodes
   const clusters = clusterNodes(currentLevel, CLUSTER_SIZE);
@@ -192,7 +201,9 @@ async function buildNextLevel(
     const node: RaptorNode = {
       id: `${docId}:raptor:L${levelNum}:${clusterIdx}`,
       user_id: userId,
-      project_key: projectKey,
+      owner_type: ownerType,
+      owner_id: ownerId,
+      project_key: ownerProjectKey,
       doc_id: docId,
       level: levelNum,
       content: summary,
@@ -376,8 +387,8 @@ async function insertRaptorNodes(nodes: RaptorNode[]): Promise<void> {
 
     await query(
       `INSERT INTO raptor_tree (
-        id, user_id, project_key, doc_id, level, parent_id, children, content, embedding, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::vector, to_timestamp($10/1000.0))
+        id, user_id, owner_type, owner_id, project_key, doc_id, level, parent_id, children, content, embedding, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::vector, to_timestamp($12/1000.0))
       ON CONFLICT (id) DO UPDATE SET
         content = EXCLUDED.content,
         embedding = EXCLUDED.embedding,
@@ -385,6 +396,8 @@ async function insertRaptorNodes(nodes: RaptorNode[]): Promise<void> {
       [
         node.id,
         node.user_id,
+        node.owner_type,
+        node.owner_id,
         node.project_key,
         node.doc_id,
         node.level,
@@ -403,16 +416,21 @@ async function getRaptorNodes(
   projectKey: string,
   docIds?: string[],
 ): Promise<RaptorNode[]> {
+  const scope = resolveProjectScope(userId, projectKey);
+
   let sql = `
-    SELECT id, user_id, project_key, doc_id, level, parent_id, children, content, embedding,
+    SELECT id, user_id, owner_type, owner_id, project_key, doc_id, level, parent_id, children, content, embedding,
            EXTRACT(EPOCH FROM created_at) * 1000 as created_at
     FROM raptor_tree
-    WHERE user_id = $1 AND project_key = $2
+    WHERE user_id = $1
+      AND owner_type = $2
+      AND owner_id = $3
+      AND project_key = $4
   `;
-  const params: unknown[] = [userId, projectKey];
+  const params: unknown[] = [userId, scope.ownerType, scope.ownerId, scope.projectKey];
 
   if (docIds && docIds.length > 0) {
-    sql += " AND doc_id = ANY($3)";
+    sql += " AND doc_id = ANY($5)";
     params.push(docIds);
   }
 
@@ -421,6 +439,8 @@ async function getRaptorNodes(
   const result = await query<{
     id: string;
     user_id: string;
+    owner_type: string;
+    owner_id: string;
     project_key: string;
     doc_id: string;
     level: number;
@@ -434,6 +454,8 @@ async function getRaptorNodes(
   return result.rows.map((row) => ({
     id: row.id,
     user_id: row.user_id,
+    owner_type: row.owner_type,
+    owner_id: row.owner_id,
     project_key: row.project_key,
     doc_id: row.doc_id,
     level: row.level,
@@ -458,9 +480,16 @@ export async function clearRaptorTree(
   projectKey: string,
   docId: string,
 ): Promise<void> {
+  const scope = resolveProjectScope(userId, projectKey);
+
   await query(
-    `DELETE FROM raptor_tree WHERE user_id = $1 AND project_key = $2 AND doc_id = $3`,
-    [userId, projectKey, docId],
+    `DELETE FROM raptor_tree
+     WHERE user_id = $1
+       AND owner_type = $2
+       AND owner_id = $3
+       AND project_key = $4
+       AND doc_id = $5`,
+    [userId, scope.ownerType, scope.ownerId, scope.projectKey, docId],
   );
 }
 
@@ -471,9 +500,15 @@ export async function clearProjectRaptorTrees(
   userId: string,
   projectKey: string,
 ): Promise<void> {
+  const scope = resolveProjectScope(userId, projectKey);
+
   await query(
-    `DELETE FROM raptor_tree WHERE user_id = $1 AND project_key = $2`,
-    [userId, projectKey],
+    `DELETE FROM raptor_tree
+     WHERE user_id = $1
+       AND owner_type = $2
+       AND owner_id = $3
+       AND project_key = $4`,
+    [userId, scope.ownerType, scope.ownerId, scope.projectKey],
   );
 }
 
@@ -488,6 +523,8 @@ export async function getRaptorStats(
   documentCount: number;
   levelCounts: Record<number, number>;
 }> {
+  const scope = resolveProjectScope(userId, projectKey);
+
   const result = await query<{
     level: number;
     count: string;
@@ -495,10 +532,13 @@ export async function getRaptorStats(
   }>(
     `SELECT level, COUNT(*) as count, COUNT(DISTINCT doc_id) as doc_count
      FROM raptor_tree
-     WHERE user_id = $1 AND project_key = $2
+     WHERE user_id = $1
+       AND owner_type = $2
+       AND owner_id = $3
+       AND project_key = $4
      GROUP BY level
      ORDER BY level`,
-    [userId, projectKey],
+    [userId, scope.ownerType, scope.ownerId, scope.projectKey],
   );
 
   const levelCounts: Record<number, number> = {};

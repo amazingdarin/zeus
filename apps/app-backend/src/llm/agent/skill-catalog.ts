@@ -1,12 +1,15 @@
+import { z } from "zod";
+import type { PluginRegisteredCommandV2 } from "@zeus/plugin-sdk-shared";
+
 import { documentSkills } from "../skills/document-skills.js";
 import { skillRegistry, type OpenAITool } from "../skills/registry.js";
 import type { SkillDefinition } from "../skills/types.js";
 import type { UnifiedSkillDefinition } from "../skills/adapters/types.js";
-import { z } from "zod";
+import { zodObjectHasRequiredKey, zodObjectToOpenAIParameters } from "../zod.js";
+import { pluginManagerV2 } from "../../plugins-v2/index.js";
 import { mcpClientManager } from "./mcp-client-manager.js";
 import { mcpToolToAgentSkill } from "./mcp-skill-adapter.js";
 import type { AgentSkillDefinition } from "./types.js";
-import { zodObjectHasRequiredKey, zodObjectToOpenAIParameters } from "../zod.js";
 
 function normalizeToolName(source: string, name: string): string {
   const raw = `${source}_${name}`.toLowerCase();
@@ -91,10 +94,64 @@ function anthropicToAgentSkill(skill: UnifiedSkillDefinition): AgentSkillDefinit
   };
 }
 
+function pluginCommandToAgentSkill(
+  command: PluginRegisteredCommandV2,
+): AgentSkillDefinition {
+  const pluginId = String(command.pluginId || "").trim();
+  const commandId = String(command.commandId || "").trim();
+  const handler = String(command.handler || commandId).trim();
+  const commandName = Array.isArray(command.slashAliases)
+    ? String(command.slashAliases[0] || "").trim()
+    : "";
+  const requiresDocScope = command.requiresDocScope === true;
+
+  const inputSchema = requiresDocScope
+    ? z.object({ doc_id: z.string().min(1) }).catchall(z.unknown())
+    : z.object({ doc_id: z.string().min(1).optional() }).catchall(z.unknown());
+
+  const displayName = String(command.title || commandName || commandId || pluginId).trim();
+  const description = String(command.description || displayName).trim();
+  const id = `plugin:${pluginId}:${commandId}`;
+  const toolName = normalizeToolName("plugin", `${pluginId}_${commandId}`);
+
+  return {
+    id,
+    source: "plugin",
+    toolName,
+    displayName,
+    description,
+    category: String(command.category || "plugin").trim() || "plugin",
+    command: commandName || undefined,
+    inputSchema,
+    triggers: {
+      command: commandName || undefined,
+      keywords: [],
+      patterns: [],
+    },
+    risk: {
+      level: "medium",
+      requireConfirmation: false,
+    },
+    executionMode: "plugin-worker",
+    capabilities: ["plugin", "system.command.register"],
+    enabledByDefault: true,
+    priority: 500,
+    metadata: {
+      pluginId,
+      commandId,
+      operationId: handler,
+      command: commandName,
+      slashAliases: command.slashAliases || [],
+      requiresDocScope,
+    },
+  };
+}
+
 class AgentSkillCatalog {
   private byId = new Map<string, AgentSkillDefinition>();
   private byToolName = new Map<string, string>();
   private byCommand = new Map<string, string>();
+  private pluginByUser = new Map<string, AgentSkillDefinition[]>();
   private initialized = false;
 
   async initialize(): Promise<void> {
@@ -105,6 +162,22 @@ class AgentSkillCatalog {
       this.rebuild();
     });
     this.initialized = true;
+  }
+
+  async refreshPluginSkillsForUser(userId: string): Promise<void> {
+    const normalizedUserId = String(userId || "").trim();
+    if (!normalizedUserId) {
+      return;
+    }
+    const commands = await pluginManagerV2.listEnabledCommandsForUser(normalizedUserId);
+    const skills = commands
+      .map(pluginCommandToAgentSkill)
+      .sort((a, b) => {
+        const left = a.command || a.id;
+        const right = b.command || b.id;
+        return left.localeCompare(right);
+      });
+    this.pluginByUser.set(normalizedUserId, skills);
   }
 
   rebuild(): void {
@@ -135,38 +208,47 @@ class AgentSkillCatalog {
     }
   }
 
-  getAllSkills(): AgentSkillDefinition[] {
+  private resolveSkills(userId?: string): AgentSkillDefinition[] {
     this.rebuild();
-    return Array.from(this.byId.values());
+    const base = Array.from(this.byId.values());
+    const normalizedUserId = String(userId || "").trim();
+    if (!normalizedUserId) {
+      return base;
+    }
+    const pluginSkills = this.pluginByUser.get(normalizedUserId) || [];
+    return [...base, ...pluginSkills];
   }
 
-  getById(skillId: string): AgentSkillDefinition | undefined {
-    this.rebuild();
-    return this.byId.get(skillId);
+  getAllSkills(userId?: string): AgentSkillDefinition[] {
+    return this.resolveSkills(userId);
   }
 
-  getByToolName(toolName: string): AgentSkillDefinition | undefined {
-    this.rebuild();
-    const id = this.byToolName.get(toolName);
-    return id ? this.byId.get(id) : undefined;
+  getById(skillId: string, userId?: string): AgentSkillDefinition | undefined {
+    const all = this.resolveSkills(userId);
+    return all.find((skill) => skill.id === skillId);
   }
 
-  getByCommand(command: string): AgentSkillDefinition | undefined {
-    this.rebuild();
-    const id = this.byCommand.get(command);
-    return id ? this.byId.get(id) : undefined;
+  getByToolName(toolName: string, userId?: string): AgentSkillDefinition | undefined {
+    const all = this.resolveSkills(userId);
+    return all.find((skill) => skill.toolName === toolName);
+  }
+
+  getByCommand(command: string, userId?: string): AgentSkillDefinition | undefined {
+    const all = this.resolveSkills(userId);
+    return all.find((skill) => skill.command === command);
   }
 
   matchAnthropicByKeywords(
     message: string,
     enabledSkillIds?: Set<string>,
+    userId?: string,
   ): AgentSkillDefinition | undefined {
-    this.rebuild();
     const lowerMessage = message.toLowerCase();
     let best: AgentSkillDefinition | undefined;
     let bestScore = 0;
+    const all = this.resolveSkills(userId);
 
-    for (const skill of this.byId.values()) {
+    for (const skill of all) {
       if (skill.source !== "anthropic") continue;
       if (enabledSkillIds && !enabledSkillIds.has(skill.id)) continue;
 
@@ -183,10 +265,10 @@ class AgentSkillCatalog {
     return best;
   }
 
-  toOpenAITools(enabledSkillIds?: Set<string>): OpenAITool[] {
-    this.rebuild();
+  toOpenAITools(enabledSkillIds?: Set<string>, userId?: string): OpenAITool[] {
+    const all = this.resolveSkills(userId);
     const tools: OpenAITool[] = [];
-    for (const skill of this.byId.values()) {
+    for (const skill of all) {
       if (enabledSkillIds && !enabledSkillIds.has(skill.id)) continue;
       const parameters = zodObjectToOpenAIParameters(skill.inputSchema);
       tools.push({
@@ -201,21 +283,26 @@ class AgentSkillCatalog {
     return tools;
   }
 
-  getCounts(): { native: number; anthropic: number; mcp: number; total: number } {
-    this.rebuild();
+  getCounts(userId?: string): { native: number; anthropic: number; mcp: number; plugin: number; total: number } {
+    const all = this.resolveSkills(userId);
     let native = 0;
     let anthropic = 0;
     let mcp = 0;
-    for (const skill of this.byId.values()) {
+    let plugin = 0;
+
+    for (const skill of all) {
       if (skill.source === "native") native += 1;
       if (skill.source === "anthropic") anthropic += 1;
       if (skill.source === "mcp") mcp += 1;
+      if (skill.source === "plugin") plugin += 1;
     }
+
     return {
       native,
       anthropic,
       mcp,
-      total: native + anthropic + mcp,
+      plugin,
+      total: native + anthropic + mcp + plugin,
     };
   }
 }

@@ -159,35 +159,104 @@ export const docOptimizeFullSkill = createDocOptimizeSkill({
   warningMessage: "此操作将同时优化文档格式与内容，请确认后执行。",
 });
 
+const PPT_COMMON_INPUT_SCHEMA = z.object({
+  doc_id: z.string().describe("源文档 ID（从 @ 提及中解析）"),
+  title: z.string().describe("演示稿标题（可选，默认使用源文档标题）").optional(),
+  presenter: z.string().describe("报告人（可选，默认“待填写”）").optional(),
+  report_time: z.string().describe("报告时间（可选，格式 YYYY-MM-DD；默认当天）").optional(),
+  max_slides: z.number().describe("最大页数（可选，默认 12，建议 5-20）").optional(),
+  include_agenda: z.boolean().describe("是否包含目录页（可选，默认 true）").optional(),
+  include_qna: z.boolean().describe("是否包含 Q&A 页（可选，默认 true）").optional(),
+  instructions: z.string().describe("额外要求（可选，例如面向管理层、突出风险与收益、强调时间线）").optional(),
+});
+
 /**
- * Optimize document into a slide-like (PPT-style) deck.
+ * Legacy compatibility alias.
  *
- * Output format rules are enforced by prompt + ppt-guard in the refinement loop:
- * - Each slide starts with Heading 1
- * - Slides separated by horizontalRule
- * - Cover slide contains title + metadata only
+ * Supervisor will expand this into:
+ *   doc-optimize-ppt-outline -> doc-render-ppt-html
  */
 export const docOptimizePptSkill: SkillDefinition = {
   name: "doc-optimize-ppt",
   category: "doc",
   command: "/doc-optimize-ppt",
   description:
-    "将文档总结并重组为类 PPT 演示稿格式（每页以 Heading 1 开始，使用分割线分页）。需要通过 @ 指定文档。",
+    "兼容入口：自动执行“类 PPT 说明文档生成 + HTML 演示稿注入”。需要通过 @ 指定文档或由编排自动绑定。",
   required: false,
   confirmation: {
     required: true,
     riskLevel: "medium",
     warningMessage: "将基于原文生成新的演示稿文档草稿（不会覆盖原文），是否继续？",
   },
+  inputSchema: PPT_COMMON_INPUT_SCHEMA,
+};
+
+/**
+ * Step 1: Generate a structured PPT-outline document.
+ */
+export const docOptimizePptOutlineSkill: SkillDefinition = {
+  name: "doc-optimize-ppt-outline",
+  category: "doc",
+  command: "/doc-optimize-ppt-outline",
+  description:
+    "步骤1：将文档重组为结构化类 PPT 说明文档（包含封面字段、视觉建议、讲解备注）。需要通过 @ 指定文档。",
+  required: false,
+  confirmation: {
+    required: true,
+    riskLevel: "medium",
+    warningMessage: "将基于原文生成结构化类 PPT 文档草稿（不会覆盖原文），是否继续？",
+  },
+  inputSchema: PPT_COMMON_INPUT_SCHEMA,
+};
+
+/**
+ * Step 2: Render a static HTML slide deck and inject file_block at top.
+ */
+export const docRenderPptHtmlSkill: SkillDefinition = {
+  name: "doc-render-ppt-html",
+  category: "doc",
+  command: "/doc-render-ppt-html",
+  description:
+    "步骤2：根据结构化类 PPT 文档生成静态 HTML 演示稿，并将 file_block 注入文档顶部。",
+  required: false,
+  confirmation: {
+    required: false,
+    riskLevel: "low",
+  },
   inputSchema: z.object({
-    doc_id: z.string().describe("源文档 ID（从 @ 提及中解析）"),
-    title: z.string().describe("演示稿标题（可选，默认使用源文档标题）").optional(),
-    presenter: z.string().describe("报告人（可选，默认“待填写”）").optional(),
-    report_time: z.string().describe("报告时间（可选，格式 YYYY-MM-DD；默认当天）").optional(),
-    max_slides: z.number().describe("最大页数（可选，默认 12，建议 5-20）").optional(),
-    include_agenda: z.boolean().describe("是否包含目录页（可选，默认 true）").optional(),
-    include_qna: z.boolean().describe("是否包含 Q&A 页（可选，默认 true）").optional(),
-    instructions: z.string().describe("额外要求（可选，例如面向管理层、突出风险与收益、强调时间线）").optional(),
+    doc_id: z.string().describe("要注入 HTML 演示稿的目标文档 ID（由上游任务绑定或 @ 提及）"),
+    theme: z
+      .enum(["modern", "business", "minimal", "dark"])
+      .describe("主题风格（可选，默认 modern）")
+      .optional(),
+  }),
+};
+
+/**
+ * Export a PPT-style document to PPTX via async generation task.
+ */
+export const docExportPptSkill: SkillDefinition = {
+  name: "doc-export-ppt",
+  category: "doc",
+  command: "/doc-export-ppt",
+  description:
+    "将文档导出为 PPTX（异步任务）。需要通过 @ 指定文档，或由编排任务自动绑定 doc_id。",
+  required: false,
+  confirmation: {
+    required: false,
+    riskLevel: "low",
+  },
+  inputSchema: z.object({
+    doc_id: z.string().describe("要导出的文档 ID（从 @ 提及中解析或由上游任务绑定）"),
+    style: z.object({
+      description: z.string().describe("风格描述（可选）").optional(),
+      templateId: z.string().describe("模板 ID（可选）").optional(),
+      templateImages: z.array(z.string()).describe("模板图片 URL 列表（可选）").optional(),
+    }).describe("导出样式配置（可选）").optional(),
+    options: z.object({
+      aspectRatio: z.enum(["16:9", "4:3"]).describe("画面比例（可选）").optional(),
+      language: z.string().describe("语言（可选）").optional(),
+    }).describe("导出选项（可选）").optional(),
   }),
 };
 
@@ -458,6 +527,9 @@ export const documentSkills: SkillDefinition[] = [
   docOptimizeStyleSkill,
   docOptimizeFullSkill,
   docOptimizePptSkill,
+  docOptimizePptOutlineSkill,
+  docRenderPptHtmlSkill,
+  docExportPptSkill,
   docSummarySkill,
   docMoveSkill,
   docDeleteSkill,
