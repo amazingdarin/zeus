@@ -80,6 +80,7 @@ start-deps:
 	helm upgrade --install $(APP_NAME) $(HELM_CHART) --namespace $(NAMESPACE) --create-namespace -f deploy/helm/values.deps.yaml
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/postgres --timeout=120s
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/rustfs --timeout=120s
+	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/faster-whisper --timeout=180s
 
 start-deps-dev:
 	bash ./scripts/gen-config.sh $(NAMESPACE) $(CONFIG_PATH)
@@ -88,6 +89,7 @@ start-deps-dev:
 	helm upgrade --install $(APP_NAME) $(HELM_CHART) --namespace $(NAMESPACE) --create-namespace -f deploy/helm/values.deps-dev.yaml
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/postgres --timeout=120s
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/rustfs --timeout=120s
+	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/faster-whisper --timeout=180s
 
 stop-deps:
 	helm uninstall $(APP_NAME) --namespace $(NAMESPACE) || true
@@ -105,6 +107,7 @@ start-all:
 	helm upgrade --install $(APP_NAME) $(HELM_CHART) --namespace $(NAMESPACE) --create-namespace -f deploy/helm/values.full.yaml
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/postgres --timeout=120s
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/rustfs --timeout=120s
+	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/faster-whisper --timeout=180s
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/zeus-backend --timeout=120s
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/zeus-frontend --timeout=120s
 

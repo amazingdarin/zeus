@@ -23,6 +23,28 @@ rustfs:
     enabled: true
     size: 10Gi
 
+faster-whisper:
+  enabled: false
+  image:
+    repository: ghcr.io/fedirz/faster-whisper-server
+    tag: latest-cpu
+    pullPolicy: IfNotPresent
+    pullSecrets: []
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 8000
+    nodePort: null
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClassName: ""
+    mountPath: /root/.cache/huggingface
+  resources: {}
+  command: []
+  args: []
+  extraEnv: []
+
 global:
   hostNetwork: false
 

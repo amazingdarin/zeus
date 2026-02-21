@@ -1,0 +1,15 @@
+apiVersion: v2
+name: vscode-server
+description: VS Code Server (code-server) Helm chart
+type: application
+version: 0.1.0
+appVersion: "latest"
+
+keywords:
+  - vscode
+  - code-server
+  - ide
+  - dev
+
+maintainers:
+  - name: Zeus Team

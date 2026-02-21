@@ -9,3 +9,6 @@ langfuse:
 
 banana-slides:
   enabled: false
+
+faster-whisper:
+  enabled: true

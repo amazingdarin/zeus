@@ -37,3 +37,6 @@ banana-slides:
   service:
     type: ClusterIP
     port: 8080
+
+faster-whisper:
+  enabled: true

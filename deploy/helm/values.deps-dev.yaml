@@ -19,6 +19,14 @@ rustfs:
   persistence:
     storageClassName: local-path
 
+faster-whisper:
+  enabled: true
+  service:
+    type: NodePort
+    nodePort: 30800
+  persistence:
+    storageClassName: local-path
+
 # Langfuse LLM Observability (optional for local dev)
 langfuse:
   enabled: false  # Set to true to enable Langfuse locally

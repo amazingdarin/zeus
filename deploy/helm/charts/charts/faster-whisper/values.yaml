@@ -1,0 +1,28 @@
+image:
+  repository: ghcr.io/fedirz/faster-whisper-server
+  tag: 0.6.0-rc.4-cpu
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 8000
+  nodePort: null
+
+persistence:
+  enabled: true
+  size: 20Gi
+  storageClassName: ""
+  mountPath: /root/.cache/huggingface
+
+resources: {}
+
+command: []
+args: []
+extraEnv: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

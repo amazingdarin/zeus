@@ -24,7 +24,7 @@ persistence:
     registry:
       storageClass: local-path
       accessMode: ReadWriteOnce
-      size: 20Gi
+      size: 5Gi
     jobservice:
       jobLog:
         storageClass: local-path
@@ -67,6 +67,8 @@ core:
 
 jobservice:
   replicas: 1
+  jobLoggers:
+    - stdout
   nodeSelector:
     node-role.kubernetes.io/control-plane: "true"
 

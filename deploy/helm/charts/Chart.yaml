@@ -11,6 +11,10 @@ dependencies:
   - name: rustfs
     version: 0.1.0
     repository: "file://charts/rustfs"
+  - name: faster-whisper
+    version: 0.1.0
+    repository: "file://charts/faster-whisper"
+    condition: faster-whisper.enabled
   - name: langfuse
     version: 1.0.0
     repository: "file://charts/langfuse"

@@ -5,11 +5,14 @@ dependencies:
 - name: rustfs
   repository: file://charts/rustfs
   version: 0.1.0
+- name: faster-whisper
+  repository: file://charts/faster-whisper
+  version: 0.1.0
 - name: langfuse
   repository: file://charts/langfuse
   version: 1.0.0
 - name: banana-slides
   repository: file://charts/banana-slides
   version: 0.1.0
-digest: sha256:cb310343357e9195bf86d384c67b092be51acf54b895be4a41a253e0f0b51009
-generated: "2026-02-05T23:47:58.193851+08:00"
+digest: sha256:64d1a0214a3b238d6c96e83b33396ff5cfb1b5c6ae6542e560f6768efc23b316
+generated: "2026-02-12T16:47:41.869846+08:00"
