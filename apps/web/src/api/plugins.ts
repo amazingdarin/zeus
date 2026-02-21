@@ -146,6 +146,167 @@ export async function setPluginSettings(
   return payload?.data?.settings || {};
 }
 
+export type PluginLocalDataScope = "project" | "global";
+export type PluginLocalDataEncoding = "utf8" | "base64";
+
+export type PluginLocalDataEntry = {
+  path: string;
+  name: string;
+  type: "file" | "directory";
+  size?: number;
+  updatedAt?: string;
+};
+
+export type PluginLocalDataFile = {
+  path: string;
+  content: string;
+  encoding: PluginLocalDataEncoding;
+  size: number;
+  updatedAt: string;
+};
+
+export async function listPluginLocalDataFiles(
+  projectRef: string,
+  pluginId: string,
+  options?: {
+    scope?: PluginLocalDataScope;
+    dir?: string;
+    limit?: number;
+  },
+): Promise<PluginLocalDataEntry[]> {
+  const params = new URLSearchParams();
+  if (options?.scope) {
+    params.set("scope", options.scope);
+  }
+  if (typeof options?.dir === "string" && options.dir.trim()) {
+    params.set("dir", options.dir.trim());
+  }
+  if (typeof options?.limit === "number" && Number.isFinite(options.limit)) {
+    params.set("limit", String(Math.floor(options.limit)));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await apiFetch(
+    `/api/projects/${encodeProjectRef(projectRef)}/plugins/v2/${encodeURIComponent(pluginId)}/local-data/files${suffix}`,
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.message || "Failed to list plugin local data files");
+  }
+  const payload = await response.json() as { data?: { files?: PluginLocalDataEntry[] } };
+  return payload?.data?.files || [];
+}
+
+export async function readPluginLocalDataFile(
+  projectRef: string,
+  pluginId: string,
+  filePath: string,
+  options?: {
+    scope?: PluginLocalDataScope;
+    encoding?: PluginLocalDataEncoding;
+  },
+): Promise<PluginLocalDataFile> {
+  const params = new URLSearchParams();
+  params.set("path", filePath);
+  if (options?.scope) {
+    params.set("scope", options.scope);
+  }
+  if (options?.encoding) {
+    params.set("encoding", options.encoding);
+  }
+  const response = await apiFetch(
+    `/api/projects/${encodeProjectRef(projectRef)}/plugins/v2/${encodeURIComponent(pluginId)}/local-data/file?${params.toString()}`,
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.message || "Failed to read plugin local data file");
+  }
+  const payload = await response.json() as { data?: { file?: PluginLocalDataFile } };
+  if (!payload?.data?.file) {
+    throw new Error("Plugin local data file payload is empty");
+  }
+  return payload.data.file;
+}
+
+export async function writePluginLocalDataFile(
+  projectRef: string,
+  pluginId: string,
+  filePath: string,
+  content: string,
+  options?: {
+    scope?: PluginLocalDataScope;
+    encoding?: PluginLocalDataEncoding;
+    overwrite?: boolean;
+  },
+): Promise<{
+  path: string;
+  size: number;
+  updatedAt: string;
+}> {
+  const response = await apiFetch(
+    `/api/projects/${encodeProjectRef(projectRef)}/plugins/v2/${encodeURIComponent(pluginId)}/local-data/file`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        path: filePath,
+        content,
+        scope: options?.scope || "project",
+        encoding: options?.encoding || "utf8",
+        overwrite: options?.overwrite !== false,
+      }),
+    },
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.message || "Failed to write plugin local data file");
+  }
+  const payload = await response.json() as {
+    data?: {
+      file?: {
+        path?: string;
+        size?: number;
+        updatedAt?: string;
+      };
+    };
+  };
+  const file = payload?.data?.file;
+  if (!file?.path) {
+    throw new Error("Plugin local data write payload is empty");
+  }
+  return {
+    path: String(file.path),
+    size: Number(file.size || 0),
+    updatedAt: String(file.updatedAt || ""),
+  };
+}
+
+export async function deletePluginLocalDataFile(
+  projectRef: string,
+  pluginId: string,
+  filePath: string,
+  options?: {
+    scope?: PluginLocalDataScope;
+  },
+): Promise<boolean> {
+  const params = new URLSearchParams();
+  params.set("path", filePath);
+  if (options?.scope) {
+    params.set("scope", options.scope);
+  }
+  const response = await apiFetch(
+    `/api/projects/${encodeProjectRef(projectRef)}/plugins/v2/${encodeURIComponent(pluginId)}/local-data/file?${params.toString()}`,
+    {
+      method: "DELETE",
+    },
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.message || "Failed to delete plugin local data file");
+  }
+  const payload = await response.json() as { data?: { deleted?: boolean } };
+  return payload?.data?.deleted === true;
+}
+
 export async function executePluginCommand(
   projectRef: string,
   commandId: string,
@@ -184,4 +345,34 @@ export async function executePluginOperation(
 ): Promise<Record<string, unknown>> {
   void pluginId;
   return executePluginCommand(projectRef, operationId, input, { source: "api" });
+}
+
+export type PluginTraceMethod =
+  | "isEnabled"
+  | "startSpan"
+  | "endSpan"
+  | "logGeneration"
+  | "startGeneration"
+  | "endGeneration";
+
+export async function callPluginTrace<T = unknown>(
+  projectRef: string,
+  pluginId: string,
+  method: PluginTraceMethod,
+  args?: Record<string, unknown>,
+): Promise<T> {
+  const response = await apiFetch(
+    `/api/projects/${encodeProjectRef(projectRef)}/plugins/v2/${encodeURIComponent(pluginId)}/trace`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ method, args: args || {} }),
+    },
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.message || "Failed to call plugin trace");
+  }
+  const payload = await response.json() as { data?: T };
+  return (payload?.data ?? null) as T;
 }

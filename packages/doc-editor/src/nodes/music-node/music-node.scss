@@ -15,6 +15,12 @@
     outline: 2px solid rgba(59, 130, 246, 0.4);
     outline-offset: 1px;
   }
+
+  &.music-playing {
+    background-color: rgba(16, 185, 129, 0.1);
+    outline: 2px solid rgba(16, 185, 129, 0.35);
+    outline-offset: 1px;
+  }
 }
 
 // Inline music
@@ -26,6 +32,7 @@
   .music-content {
     display: inline-block;
     max-width: 300px;
+    cursor: pointer;
     
     svg {
       display: block;
@@ -49,6 +56,7 @@
     display: block;
     max-width: 100%;
     overflow-x: auto;
+    cursor: pointer;
     
     svg {
       display: block;
@@ -57,6 +65,13 @@
       height: auto;
     }
   }
+}
+
+.music-status {
+  display: block;
+  color: var(--muted, #6b7280);
+  font-size: 12px;
+  margin-top: 8px;
 }
 
 // Placeholder
@@ -191,6 +206,10 @@
 
     &.music-selected {
       background-color: rgba(59, 130, 246, 0.15);
+    }
+
+    &.music-playing {
+      background-color: rgba(16, 185, 129, 0.16);
     }
   }
 

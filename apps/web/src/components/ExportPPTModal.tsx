@@ -25,13 +25,11 @@ import {
   exportToPPT,
   pollTaskStatus,
   downloadPPTX,
-  getAllTemplates,
   getPPTServiceStatus,
-  type PresetTemplate,
-  type CustomTemplate,
   type PPTTaskStatus,
   type PPTStyleOptions,
 } from "../api/ppt";
+import { loadPptTemplateCatalog, type PptTemplateItem } from "../lib/ppt-template-catalog";
 
 const { Text, Title } = Typography;
 const { TextArea } = Input;
@@ -60,8 +58,8 @@ export const ExportPPTModal: React.FC<ExportPPTModalProps> = ({
   const [serviceAvailable, setServiceAvailable] = useState<boolean | null>(null);
 
   // Template selection
-  const [presetTemplates, setPresetTemplates] = useState<PresetTemplate[]>([]);
-  const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>([]);
+  const [presetTemplates, setPresetTemplates] = useState<PptTemplateItem[]>([]);
+  const [customTemplates, setCustomTemplates] = useState<PptTemplateItem[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | undefined>();
   const [styleDescription, setStyleDescription] = useState("");
   const [aspectRatio, setAspectRatio] = useState<"16:9" | "4:3">("16:9");
@@ -78,7 +76,7 @@ export const ExportPPTModal: React.FC<ExportPPTModalProps> = ({
     try {
       const [serviceStatus, templates] = await Promise.all([
         getPPTServiceStatus(),
-        getAllTemplates(projectKey),
+        loadPptTemplateCatalog(projectKey),
       ]);
 
       setServiceAvailable(serviceStatus.available);
@@ -86,8 +84,14 @@ export const ExportPPTModal: React.FC<ExportPPTModalProps> = ({
       setCustomTemplates(templates.custom);
 
       // Select first preset by default
-      if (templates.presets.length > 0 && !selectedTemplateId) {
-        setSelectedTemplateId(templates.presets[0].id);
+      const merged = [...templates.presets, ...templates.custom];
+      const isSelectedValid = selectedTemplateId
+        ? merged.some((template) => template.id === selectedTemplateId)
+        : false;
+      if (merged.length > 0 && !isSelectedValid) {
+        setSelectedTemplateId(merged[0].id);
+      } else if (merged.length === 0) {
+        setSelectedTemplateId(undefined);
       }
 
       setState("idle");

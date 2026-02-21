@@ -36,9 +36,14 @@ import type {
 import { registerDocEditorBlockIdNodeTypes } from "@zeus/doc-editor";
 
 import {
+  callPluginTrace,
+  deletePluginLocalDataFile,
   executePluginCommand,
   getPluginRuntime,
   getPluginRuntimeCommands,
+  listPluginLocalDataFiles,
+  readPluginLocalDataFile,
+  writePluginLocalDataFile,
 } from "../api/plugins";
 
 const LAST_PROJECT_REF_STORAGE_KEY = "zeus.lastProjectRef";
@@ -46,6 +51,23 @@ const LAST_PROJECT_REF_STORAGE_KEY = "zeus.lastProjectRef";
 type RuntimeWebPluginModule = WebPluginModule | WebPluginModuleV2;
 const DOC_EDITOR_BUILTIN_MODULE_LOADERS: Record<string, () => Promise<Record<string, unknown>>> = {
   "music": async () => (await import("../plugins/builtins/music-runtime")) as unknown as Record<string, unknown>,
+  "edu": async () => (await import("../plugins/builtins/edu-runtime")) as unknown as Record<string, unknown>,
+};
+const DOC_EDITOR_BUILTIN_BLOCK_FACTORIES: Record<
+  string,
+  {
+    moduleName: string;
+    factoryName: string;
+  }
+> = {
+  music: {
+    moduleName: "music",
+    factoryName: "createMusicBlockContribution",
+  },
+  edu_question_set: {
+    moduleName: "edu",
+    factoryName: "createEduQuestionSetBlockContribution",
+  },
 };
 const LOADED_PLUGIN_STYLE_URLS = new Set<string>();
 
@@ -76,6 +98,20 @@ export type PluginEditorContributions = {
   extraExtensions: Extensions;
   toolbarItems: ReactNode[];
   blockIdNodeTypes: string[];
+  pluginBlockGroups: PluginBlockToolbarGroup[];
+};
+
+export type PluginBlockToolbarAction = {
+  id: string;
+  blockType: string;
+  title: string;
+  toolbarButton: ReactNode;
+};
+
+export type PluginBlockToolbarGroup = {
+  pluginId: string;
+  pluginTitle: string;
+  blocks: PluginBlockToolbarAction[];
 };
 
 type PluginRuntimeContextValue = {
@@ -207,6 +243,69 @@ function normalizeMenuPlacement(value: unknown): PluginMenuPlacement | null {
   if (raw === "settings") return "settings";
   if (raw === "document_header" || raw === "documentHeader") return "document_header";
   return null;
+}
+
+function appendCacheBust(inputUrl: string, version: string): string {
+  const raw = String(inputUrl || "").trim();
+  if (!raw) return raw;
+
+  const hasQuery = raw.includes("?");
+  const separator = hasQuery ? "&" : "?";
+  return `${raw}${separator}v=${encodeURIComponent(version)}`;
+}
+
+async function registerBuiltinBlocksFromManifest(
+  runtimeItem: PluginRuntimeItemV2,
+  collector: {
+    toolbarItems: ReactNode[];
+    blockIdNodeTypes: Set<string>;
+    extraExtensions: NonNullable<PluginEditorContributions["extraExtensions"]>;
+    registeredBlockTypes: Set<string>;
+    pluginBlockGroups: Map<string, PluginBlockToolbarGroup>;
+  },
+): Promise<void> {
+  for (const contributedBlock of runtimeItem.contributes.blocks || []) {
+    const blockType = String(contributedBlock?.blockType || "").trim();
+    if (!blockType || collector.registeredBlockTypes.has(blockType)) {
+      continue;
+    }
+
+    const entry = DOC_EDITOR_BUILTIN_BLOCK_FACTORIES[blockType];
+    if (!entry) {
+      continue;
+    }
+
+    try {
+      const loader = DOC_EDITOR_BUILTIN_MODULE_LOADERS[entry.moduleName];
+      if (!loader) {
+        continue;
+      }
+      const builtinModule = await loader();
+      const factory = builtinModule[entry.factoryName];
+      if (typeof factory !== "function") {
+        console.warn(
+          `[plugin-runtime] Builtin factory ${entry.factoryName} is missing for block ${blockType}`,
+        );
+        continue;
+      }
+      const block = (factory as (createElementFn: typeof createElement) => EditorBlockContribution)(
+        createElement,
+      );
+      registerEditorBlockContribution(
+        block,
+        {
+          pluginId: runtimeItem.pluginId,
+          pluginTitle: String(runtimeItem.displayName || runtimeItem.pluginId).trim() || runtimeItem.pluginId,
+        },
+        collector,
+      );
+    } catch (builtinError) {
+      console.warn(
+        `[plugin-runtime] Failed to register builtin block fallback for ${runtimeItem.pluginId}:${blockType}:`,
+        builtinError,
+      );
+    }
+  }
 }
 
 function getRoutePathById(
@@ -397,6 +496,7 @@ export function PluginRuntimeProvider({ children }: { children: ReactNode }) {
     extraExtensions: [],
     toolbarItems: [],
     blockIdNodeTypes: [],
+    pluginBlockGroups: [],
   });
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -466,10 +566,13 @@ export function PluginRuntimeProvider({ children }: { children: ReactNode }) {
         const routeMap = new Map<string, PluginRouteEntry>();
         const toolbarItems: ReactNode[] = [];
         const blockIdNodeTypes = new Set<string>();
+        const registeredBlockTypes = new Set<string>();
         const extraExtensions: NonNullable<PluginEditorContributions["extraExtensions"]> = [];
+        const pluginBlockGroups = new Map<string, PluginBlockToolbarGroup>();
 
         for (const runtimeItem of runtimeItems) {
           const pluginId = runtimeItem.pluginId;
+          const pluginTitle = String(runtimeItem.displayName || pluginId).trim() || pluginId;
           const routeEntries = toRouteEntriesFromManifest(pluginId, runtimeItem.contributes.routes || []);
           const routeRefMap = routeEntries.map((route) => ({ id: route.id, path: route.path }));
 
@@ -527,13 +630,34 @@ export function PluginRuntimeProvider({ children }: { children: ReactNode }) {
             continue;
           }
           try {
-            const loaded = await import(/* @vite-ignore */ frontendEntry) as RuntimeWebPluginModule;
+            const frontendModuleUrl = appendCacheBust(frontendEntry, String(refreshKey));
+            const loaded = await import(/* @vite-ignore */ frontendModuleUrl) as RuntimeWebPluginModule;
             const plugin = (loaded.default || loaded.plugin) as ZeusWebPlugin | ZeusWebPluginV2 | undefined;
             if (!plugin || typeof plugin.register !== "function") {
+              await registerBuiltinBlocksFromManifest(runtimeItem, {
+                toolbarItems,
+                blockIdNodeTypes,
+                extraExtensions,
+                registeredBlockTypes,
+                pluginBlockGroups,
+              });
               continue;
             }
 
             const projectRefFromStorage = localStorage.getItem(LAST_PROJECT_REF_STORAGE_KEY) || undefined;
+            const traceState = { traceId: null as string | null };
+            const updateTraceState = (result: unknown) => {
+              if (!result || typeof result !== "object") {
+                return;
+              }
+              const row = result as { traceId?: unknown; traceEnded?: unknown };
+              if (typeof row.traceId === "string" && row.traceId.trim()) {
+                traceState.traceId = row.traceId.trim();
+              }
+              if (row.traceEnded === true) {
+                traceState.traceId = null;
+              }
+            };
             const pluginContext: WebPluginContext = {
               pluginId,
               projectKey: projectRefFromStorage,
@@ -551,7 +675,120 @@ export function PluginRuntimeProvider({ children }: { children: ReactNode }) {
                 input?: Record<string, unknown>,
                 projectRef?: string,
               ) => invokeOperation(targetPluginId, operationId, input || {}, projectRef),
+              localData: {
+                listFiles: (options) => {
+                  const projectRef = resolveProjectRef(options?.projectRef || projectRefFromStorage);
+                  return listPluginLocalDataFiles(projectRef, pluginId, {
+                    scope: options?.scope,
+                    dir: options?.dir,
+                    limit: options?.limit,
+                  });
+                },
+                readFile: (filePath, options) => {
+                  const projectRef = resolveProjectRef(options?.projectRef || projectRefFromStorage);
+                  return readPluginLocalDataFile(projectRef, pluginId, filePath, {
+                    scope: options?.scope,
+                    encoding: options?.encoding,
+                  });
+                },
+                writeFile: (filePath, content, options) => {
+                  const projectRef = resolveProjectRef(options?.projectRef || projectRefFromStorage);
+                  return writePluginLocalDataFile(projectRef, pluginId, filePath, content, {
+                    scope: options?.scope,
+                    encoding: options?.encoding,
+                    overwrite: options?.overwrite,
+                  });
+                },
+                deleteFile: (filePath, options) => {
+                  const projectRef = resolveProjectRef(options?.projectRef || projectRefFromStorage);
+                  return deletePluginLocalDataFile(projectRef, pluginId, filePath, {
+                    scope: options?.scope,
+                  });
+                },
+              },
               docEditor: createDocEditorRuntimeSdk(pluginId, frontendEntry),
+              trace: {
+                isEnabled: async () => {
+                  const projectRef = resolveProjectRef();
+                  const result = await callPluginTrace<boolean>(projectRef, pluginId, "isEnabled");
+                  return result === true;
+                },
+                startSpan: async (name, input) => {
+                  const projectRef = resolveProjectRef();
+                  const result = await callPluginTrace<{ spanId?: string; traceId?: string } | null>(
+                    projectRef,
+                    pluginId,
+                    "startSpan",
+                    {
+                      name,
+                      input,
+                      traceId: traceState.traceId || undefined,
+                    },
+                  );
+                  updateTraceState(result);
+                  if (!result || typeof result.spanId !== "string" || !result.spanId.trim()) {
+                    return null;
+                  }
+                  return { spanId: result.spanId, traceId: result.traceId };
+                },
+                endSpan: async (spanId, output, level) => {
+                  const projectRef = resolveProjectRef();
+                  const result = await callPluginTrace<{ ok?: boolean; traceEnded?: boolean }>(
+                    projectRef,
+                    pluginId,
+                    "endSpan",
+                    { spanId, output, level },
+                  );
+                  updateTraceState(result);
+                  return { ok: result?.ok === true, traceEnded: result?.traceEnded === true };
+                },
+                logGeneration: async (params) => {
+                  const projectRef = resolveProjectRef();
+                  const result = await callPluginTrace<{ ok?: boolean; traceId?: string; traceEnded?: boolean }>(
+                    projectRef,
+                    pluginId,
+                    "logGeneration",
+                    {
+                      params: {
+                        ...params,
+                        traceId: traceState.traceId || undefined,
+                      },
+                    },
+                  );
+                  updateTraceState(result);
+                  return { ok: result?.ok === true, traceId: result?.traceId, traceEnded: result?.traceEnded === true };
+                },
+                startGeneration: async (params) => {
+                  const projectRef = resolveProjectRef();
+                  const result = await callPluginTrace<{ generationId?: string; traceId?: string } | null>(
+                    projectRef,
+                    pluginId,
+                    "startGeneration",
+                    {
+                      params: {
+                        ...params,
+                        traceId: traceState.traceId || undefined,
+                      },
+                    },
+                  );
+                  updateTraceState(result);
+                  if (!result || typeof result.generationId !== "string" || !result.generationId.trim()) {
+                    return null;
+                  }
+                  return { generationId: result.generationId, traceId: result.traceId };
+                },
+                endGeneration: async (generationId, output, usage, level, statusMessage) => {
+                  const projectRef = resolveProjectRef();
+                  const result = await callPluginTrace<{ ok?: boolean; traceEnded?: boolean }>(
+                    projectRef,
+                    pluginId,
+                    "endGeneration",
+                    { generationId, output, usage, level, statusMessage },
+                  );
+                  updateTraceState(result);
+                  return { ok: result?.ok === true, traceEnded: result?.traceEnded === true };
+                },
+              },
             };
 
             const contributions = await plugin.register(pluginContext);
@@ -576,12 +813,28 @@ export function PluginRuntimeProvider({ children }: { children: ReactNode }) {
                 ? (contributions as { editorBlocks: EditorBlockContribution[] }).editorBlocks
                 : []);
             for (const block of blocks) {
-              registerEditorBlockContribution(block, {
-                toolbarItems,
-                blockIdNodeTypes,
-                extraExtensions,
-              });
+              registerEditorBlockContribution(
+                block,
+                {
+                  pluginId,
+                  pluginTitle,
+                },
+                {
+                  toolbarItems,
+                  blockIdNodeTypes,
+                  extraExtensions,
+                  registeredBlockTypes,
+                  pluginBlockGroups,
+                },
+              );
             }
+            await registerBuiltinBlocksFromManifest(runtimeItem, {
+              toolbarItems,
+              blockIdNodeTypes,
+              extraExtensions,
+              registeredBlockTypes,
+              pluginBlockGroups,
+            });
 
             const menus = Array.isArray((contributions as { menus?: unknown }).menus)
               ? (contributions as { menus: MenuContribution[] }).menus
@@ -604,6 +857,13 @@ export function PluginRuntimeProvider({ children }: { children: ReactNode }) {
             }
           } catch (moduleError) {
             console.warn(`[plugin-runtime] Failed to load frontend module for ${pluginId}:`, moduleError);
+            await registerBuiltinBlocksFromManifest(runtimeItem, {
+              toolbarItems,
+              blockIdNodeTypes,
+              extraExtensions,
+              registeredBlockTypes,
+              pluginBlockGroups,
+            });
           }
         }
 
@@ -617,6 +877,13 @@ export function PluginRuntimeProvider({ children }: { children: ReactNode }) {
         });
 
         registerDocEditorBlockIdNodeTypes(Array.from(blockIdNodeTypes));
+        const pluginBlockGroupItems = Array.from(pluginBlockGroups.values())
+          .map((group) => ({
+            ...group,
+            blocks: [...group.blocks].sort((a, b) => a.title.localeCompare(b.title)),
+          }))
+          .filter((group) => group.blocks.length > 0)
+          .sort((a, b) => a.pluginTitle.localeCompare(b.pluginTitle));
 
         setPlugins(runtimeItems);
         setCommands(runtimeCommands);
@@ -627,6 +894,7 @@ export function PluginRuntimeProvider({ children }: { children: ReactNode }) {
           extraExtensions,
           toolbarItems,
           blockIdNodeTypes: Array.from(blockIdNodeTypes),
+          pluginBlockGroups: pluginBlockGroupItems,
         });
       } catch (runtimeError) {
         if (!cancelled) {
@@ -641,6 +909,7 @@ export function PluginRuntimeProvider({ children }: { children: ReactNode }) {
             extraExtensions: [],
             toolbarItems: [],
             blockIdNodeTypes: [],
+            pluginBlockGroups: [],
           });
         }
       } finally {
@@ -694,15 +963,27 @@ export function PluginRuntimeProvider({ children }: { children: ReactNode }) {
 
 function registerEditorBlockContribution(
   block: EditorBlockContribution,
+  plugin: {
+    pluginId: string;
+    pluginTitle: string;
+  },
   collector: {
     toolbarItems: ReactNode[];
     blockIdNodeTypes: Set<string>;
     extraExtensions: NonNullable<PluginEditorContributions["extraExtensions"]>;
+    registeredBlockTypes: Set<string>;
+    pluginBlockGroups: Map<string, PluginBlockToolbarGroup>;
   },
 ): void {
   const blockType = String(block.blockType || "").trim();
+  if (blockType && collector.registeredBlockTypes.has(blockType)) {
+    return;
+  }
   if (blockType && block.requiresBlockId) {
     collector.blockIdNodeTypes.add(blockType);
+  }
+  if (blockType) {
+    collector.registeredBlockTypes.add(blockType);
   }
 
   const extension = (typeof block.extension === "function"
@@ -716,7 +997,24 @@ function registerEditorBlockContribution(
     ? block.toolbarButton()
     : block.toolbarButton) as ReactNode;
   if (toolbarButton) {
-    collector.toolbarItems.push(toolbarButton);
+    const contributionId = String(block.id || block.blockType || "").trim();
+    const groupKey = plugin.pluginId;
+    const existingGroup = collector.pluginBlockGroups.get(groupKey);
+    const targetGroup: PluginBlockToolbarGroup = existingGroup || {
+      pluginId: plugin.pluginId,
+      pluginTitle: plugin.pluginTitle,
+      blocks: [],
+    };
+    const alreadyExists = targetGroup.blocks.some((item) => item.id === contributionId);
+    if (!alreadyExists) {
+      targetGroup.blocks.push({
+        id: contributionId || `${plugin.pluginId}:${block.blockType}`,
+        blockType: String(block.blockType || "").trim(),
+        title: String(block.title || block.blockType || "Untitled Block").trim(),
+        toolbarButton,
+      });
+      collector.pluginBlockGroups.set(groupKey, targetGroup);
+    }
   }
 }
 

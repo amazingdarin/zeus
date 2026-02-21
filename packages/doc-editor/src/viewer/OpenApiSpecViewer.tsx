@@ -4,6 +4,7 @@ import "swagger-ui-react/swagger-ui.css"
 
 import type { OpenAPIRef, OpenAPIRefType, OpenAPISpec } from "../lib/openapi-filter"
 import { filterOpenAPISpec } from "../lib/openapi-filter"
+import { encodeProjectRefPath } from "../lib/project-scope"
 import type { OpenApiSourceType } from "../nodes/openapi-node/openapi-node-extension"
 
 const SwaggerUI = lazy(() => import("swagger-ui-react"))
@@ -66,7 +67,7 @@ const buildFetchUrl = (projectKey: string, source: string) => {
     return normalized
   }
   const assetId = normalized.replace(/^storage:\/\//, "")
-  return `/api/projects/${encodeURIComponent(projectKey)}/assets/${encodeURIComponent(
+  return `/api/projects/${encodeProjectRefPath(projectKey)}/assets/${encodeURIComponent(
     assetId
   )}/content`
 }

@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FolderOutlined, FileTextOutlined, LeftOutlined, HomeOutlined } from "@ant-design/icons";
+import { FolderOutlined, FileTextOutlined, LeftOutlined, HomeOutlined, AppstoreOutlined } from "@ant-design/icons";
 import type { DocumentSuggestion } from "../api/documents";
 import { suggestDocuments } from "../api/documents";
+import { loadPptTemplateCatalog, type PptTemplateItem } from "../lib/ppt-template-catalog";
 
 export type MentionItem = {
+  kind?: "doc" | "plugin_template";
   docId: string;
   title: string;
   titlePath: string;
   includeChildren: boolean;
+  pluginId?: string;
+  command?: string;
+  templateId?: string;
 };
 
 type DisplayItem = {
@@ -16,6 +21,12 @@ type DisplayItem = {
   titlePath: string;
   hasChildren: boolean;
   includeChildren: boolean;  // true = include children, false = doc only
+  kind: "doc" | "plugin_template";
+  pluginId?: string;
+  command?: string;
+  templateId?: string;
+  description?: string;
+  templateSource?: "preset" | "custom";
 };
 
 /** Navigation path item for breadcrumb */
@@ -26,6 +37,10 @@ type NavPathItem = {
 
 /** Number of items per page */
 const PAGE_SIZE = 10;
+async function loadPptTemplates(projectKey: string): Promise<PptTemplateItem[]> {
+  const { merged } = await loadPptTemplateCatalog(projectKey);
+  return merged;
+}
 
 type MentionDropdownProps = {
   projectKey: string;
@@ -48,10 +63,13 @@ function MentionDropdown({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [pptTemplates, setPptTemplates] = useState<PptTemplateItem[]>([]);
   // Navigation path: empty = root level, [parentId...] = children of that parent
   const [navPath, setNavPath] = useState<NavPathItem[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const normalizedQuery = query.trim();
+  const isPptMode = /^ppt(?::|$)/i.test(normalizedQuery);
 
   // Get current parentId from navigation path
   const currentParentId = useMemo(() => {
@@ -64,6 +82,7 @@ function MentionDropdown({
     if (!visible) {
       setNavPath([]);
       setSuggestions([]);
+      setPptTemplates([]);
       setCurrentPage(0);
     }
   }, [visible]);
@@ -72,6 +91,7 @@ function MentionDropdown({
   useEffect(() => {
     if (!visible || !projectKey) {
       setSuggestions([]);
+      setPptTemplates([]);
       return;
     }
 
@@ -84,13 +104,26 @@ function MentionDropdown({
     debounceRef.current = setTimeout(async () => {
       setLoading(true);
       try {
-        // Fetch more items to support pagination (up to 50)
-        const results = await suggestDocuments(projectKey, query, 50, currentParentId);
-        setSuggestions(results);
+        if (isPptMode) {
+          const keyword = normalizedQuery.replace(/^ppt:?/i, "").trim().toLowerCase();
+          const merged = (await loadPptTemplates(projectKey)).filter((item) => {
+            if (!keyword) return true;
+            const text = `${item.id} ${item.name} ${item.description || ""}`.toLowerCase();
+            return text.includes(keyword);
+          });
+          setPptTemplates(merged);
+          setSuggestions([]);
+        } else {
+          // Fetch more items to support pagination (up to 50)
+          const results = await suggestDocuments(projectKey, query, 50, currentParentId);
+          setSuggestions(results);
+          setPptTemplates([]);
+        }
         setSelectedIndex(0);
         setCurrentPage(0);
       } catch {
         setSuggestions([]);
+        setPptTemplates([]);
       } finally {
         setLoading(false);
       }
@@ -101,11 +134,27 @@ function MentionDropdown({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [projectKey, query, visible, currentParentId]);
+  }, [projectKey, query, visible, currentParentId, isPptMode, normalizedQuery]);
 
   // Build display items: for documents with children, show two options
   // Order: directories (hasChildren) first, then documents; each group preserves document order.
   const displayItems = useMemo<DisplayItem[]>(() => {
+    if (isPptMode) {
+      return pptTemplates.map((item) => ({
+        id: `ppt-template:${item.id}`,
+        title: item.name,
+        titlePath: `@ppt/${item.name}`,
+        hasChildren: false,
+        includeChildren: false,
+        kind: "plugin_template",
+        pluginId: "ppt-plugin",
+        command: "/ppt-agent",
+        templateId: item.id,
+        description: item.description,
+        templateSource: item.source,
+      }));
+    }
+
     const dirs: DocumentSuggestion[] = [];
     const files: DocumentSuggestion[] = [];
     for (const item of suggestions) {
@@ -119,14 +168,14 @@ function MentionDropdown({
     const items: DisplayItem[] = [];
     for (const item of dirs) {
       // Show two options for directories; directory option first.
-      items.push({ ...item, includeChildren: true });  // Document + children
-      items.push({ ...item, includeChildren: false }); // Document only
+      items.push({ ...item, includeChildren: true, kind: "doc" });  // Document + children
+      items.push({ ...item, includeChildren: false, kind: "doc" }); // Document only
     }
     for (const item of files) {
-      items.push({ ...item, includeChildren: false });
+      items.push({ ...item, includeChildren: false, kind: "doc" });
     }
     return items;
-  }, [suggestions]);
+  }, [suggestions, isPptMode, pptTemplates]);
 
   // Calculate pagination
   const totalPages = Math.ceil(displayItems.length / PAGE_SIZE);
@@ -226,7 +275,7 @@ function MentionDropdown({
           if (visibleItems[selectedIndex]) {
             const item = visibleItems[selectedIndex];
             // Only allow navigation when selecting "含子文档" option (includeChildren = true)
-            if (item.hasChildren && item.includeChildren) {
+            if (!isPptMode && item.hasChildren && item.includeChildren) {
               navigateInto(item.id, item.title);
             }
           }
@@ -234,19 +283,33 @@ function MentionDropdown({
         case "ArrowLeft":
           e.preventDefault();
           // Navigate back one level
-          navigateBack();
+          if (!isPptMode) {
+            navigateBack();
+          }
           break;
         case "Enter":
         case "Tab":
           e.preventDefault();
           if (visibleItems[selectedIndex]) {
             const item = visibleItems[selectedIndex];
-            onSelect({
-              docId: item.id,
-              title: item.title,
-              titlePath: item.titlePath,
-              includeChildren: item.includeChildren,
-            });
+            onSelect(item.kind === "plugin_template"
+              ? {
+                  kind: "plugin_template",
+                  docId: item.id,
+                  title: item.title,
+                  titlePath: item.titlePath,
+                  includeChildren: false,
+                  pluginId: item.pluginId,
+                  command: item.command,
+                  templateId: item.templateId,
+                }
+              : {
+                  kind: "doc",
+                  docId: item.id,
+                  title: item.title,
+                  titlePath: item.titlePath,
+                  includeChildren: item.includeChildren,
+                });
           }
           break;
         case "Escape":
@@ -255,7 +318,7 @@ function MentionDropdown({
           break;
       }
     },
-    [visible, visibleItems, selectedIndex, currentPage, totalPages, onSelect, onClose, navigateInto, navigateBack, goToNextPage, goToPrevPage]
+    [visible, visibleItems, selectedIndex, currentPage, totalPages, onSelect, onClose, navigateInto, navigateBack, goToNextPage, goToPrevPage, isPptMode]
   );
 
   // Add keyboard event listener
@@ -291,17 +354,29 @@ function MentionDropdown({
   if (!visible) return null;
 
   const handleItemClick = (item: DisplayItem) => {
-    onSelect({
-      docId: item.id,
-      title: item.title,
-      titlePath: item.titlePath,
-      includeChildren: item.includeChildren,
-    });
+    onSelect(item.kind === "plugin_template"
+      ? {
+          kind: "plugin_template",
+          docId: item.id,
+          title: item.title,
+          titlePath: item.titlePath,
+          includeChildren: false,
+          pluginId: item.pluginId,
+          command: item.command,
+          templateId: item.templateId,
+        }
+      : {
+          kind: "doc",
+          docId: item.id,
+          title: item.title,
+          titlePath: item.titlePath,
+          includeChildren: item.includeChildren,
+        });
   };
 
   // Double-click to navigate into (only for "含子文档" option)
   const handleItemDoubleClick = (item: DisplayItem) => {
-    if (item.hasChildren && item.includeChildren) {
+    if (!isPptMode && item.hasChildren && item.includeChildren) {
       navigateInto(item.id, item.title);
     }
   };
@@ -316,7 +391,7 @@ function MentionDropdown({
       style={position ? { top: position.top, left: position.left } : undefined}
     >
       {/* Breadcrumb Navigation */}
-      {navPath.length > 0 && (
+      {!isPptMode && navPath.length > 0 && (
         <div className="mention-dropdown-breadcrumb">
           <button
             className="mention-dropdown-breadcrumb-item mention-dropdown-breadcrumb-home"
@@ -356,9 +431,13 @@ function MentionDropdown({
       {loading && (
         <div className="mention-dropdown-loading">搜索中...</div>
       )}
-      {!loading && suggestions.length === 0 && (
+      {!loading && displayItems.length === 0 && (
         <div className="mention-dropdown-empty">
-          {query ? "无匹配文档" : navPath.length > 0 ? "无子文档" : "暂无文档"}
+          {isPptMode
+            ? "无匹配 PPT 模版（可输入 @ppt:关键词）"
+            : query
+              ? "无匹配文档"
+              : navPath.length > 0 ? "无子文档" : "暂无文档"}
         </div>
       )}
       {!loading && visibleItems.length > 0 && (
@@ -374,25 +453,32 @@ function MentionDropdown({
               onMouseEnter={() => setSelectedIndex(index)}
             >
               <span className="mention-dropdown-icon">
-                {item.includeChildren ? <FolderOutlined /> : <FileTextOutlined />}
+                {item.kind === "plugin_template"
+                  ? <AppstoreOutlined />
+                  : item.includeChildren ? <FolderOutlined /> : <FileTextOutlined />}
               </span>
               <span className="mention-dropdown-title">
                 {item.title}
-                {item.includeChildren && "/"}
+                {item.kind === "doc" && item.includeChildren && "/"}
               </span>
-              {/* Show path only at root level (breadcrumb already shows context in sub-levels). */}
-              {navPath.length === 0 && item.titlePath !== item.title && (
-                <span className="mention-dropdown-path">
-                  {item.titlePath}
-                  {item.includeChildren && "/"}
+              {item.kind === "plugin_template" && (
+                <span className="mention-dropdown-type">
+                  {item.templateSource === "custom" ? "自定义模版" : "预设模版"}
                 </span>
               )}
-              {item.hasChildren && (
+              {/* Show path only at root level (breadcrumb already shows context in sub-levels). */}
+              {(isPptMode || navPath.length === 0) && item.titlePath !== item.title && (
+                <span className="mention-dropdown-path">
+                  {item.titlePath}
+                  {item.kind === "doc" && item.includeChildren && "/"}
+                </span>
+              )}
+              {item.kind === "doc" && item.hasChildren && (
                 <span className="mention-dropdown-type">
                   {item.includeChildren ? "含子文档" : "仅文档"}
                 </span>
               )}
-              {item.hasChildren && item.includeChildren && (
+              {item.kind === "doc" && item.hasChildren && item.includeChildren && (
                 <span className="mention-dropdown-nav-hint" title="按 → 进入子文档">
                   →
                 </span>
@@ -428,10 +514,11 @@ function MentionDropdown({
       )}
       
       <div className="mention-dropdown-hint">
+        {!isPptMode && <span>输入 @ppt 选模版</span>}
         <span>↑↓ 选择</span>
         {totalPages > 1 && <span>PgUp/PgDn 翻页</span>}
-        {navPath.length > 0 && <span>← 返回</span>}
-        <span>→ 进入</span>
+        {!isPptMode && navPath.length > 0 && <span>← 返回</span>}
+        {!isPptMode && <span>→ 进入</span>}
         <span>Enter 确认</span>
         <span>Esc 取消</span>
       </div>

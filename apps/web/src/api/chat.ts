@@ -126,6 +126,13 @@ export type PendingRequiredInputInfo =
         type: string;
         description: string;
         enum?: string[];
+        options?: Array<{
+          value: string;
+          label: string;
+          description?: string;
+          meta?: Record<string, unknown>;
+        }>;
+        widget?: "select" | "choice_list";
       }>;
       currentArgs?: Record<string, unknown>;
     };
@@ -149,6 +156,13 @@ export type PreflightMissingInput = {
     type: string;
     description: string;
     enum?: string[];
+    options?: Array<{
+      value: string;
+      label: string;
+      description?: string;
+      meta?: Record<string, unknown>;
+    }>;
+    widget?: "select" | "choice_list";
   }>;
   missing?: string[];
   issues?: Array<{ path: string; message: string }>;
@@ -159,6 +173,18 @@ export type PendingPreflightInfo = {
   message: string;
   tasks: PreflightTaskInfo[];
   missingInputs: PreflightMissingInput[];
+};
+
+export type ChatTaskStatus = {
+  taskId: string;
+  title: string;
+  skillId: string;
+  index: number;
+  total: number;
+  failurePolicy: "required" | "best_effort";
+  status: "pending" | "running" | "completed" | "failed" | "skipped";
+  message?: string;
+  error?: string;
 };
 
 export type ProvideRequiredInputPayload =

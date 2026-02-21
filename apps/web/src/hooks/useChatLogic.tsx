@@ -28,6 +28,7 @@ import {
   type PendingIntentInfo,
   type PendingPreflightInfo,
   type PendingRequiredInputInfo,
+  type ChatTaskStatus,
   type ProvidePreflightInputPayload,
   type ProvideRequiredInputPayload,
   type IntentOption,
@@ -119,6 +120,14 @@ export const formatTime = (timestamp: number) => {
   });
 };
 
+function isPluginTemplateMention(item: MentionItem): boolean {
+  return item.kind === "plugin_template";
+}
+
+function isDocMention(item: MentionItem): boolean {
+  return !isPluginTemplateMention(item);
+}
+
 const parsePayload = (raw: string) => {
   if (!raw) return "";
   try {
@@ -176,6 +185,66 @@ const normalizeThinkingPayload = (payload: unknown) => {
   };
 };
 
+const normalizeTaskStatusPayload = (payload: unknown): ChatTaskStatus | null => {
+  if (!payload || typeof payload !== "object") return null;
+  const data = payload as Record<string, unknown>;
+  const taskId = typeof data.taskId === "string" ? data.taskId.trim() : "";
+  const title = typeof data.title === "string" ? data.title.trim() : "";
+  const skillId = typeof data.skillId === "string" ? data.skillId.trim() : "";
+  const statusRaw = typeof data.status === "string" ? data.status.trim() : "";
+  const status = statusRaw === "pending"
+    || statusRaw === "running"
+    || statusRaw === "completed"
+    || statusRaw === "failed"
+    || statusRaw === "skipped"
+    ? statusRaw
+    : "";
+  if (!taskId || !title || !skillId || !status) return null;
+
+  const indexValue = Number(data.index);
+  const totalValue = Number(data.total);
+  const index = Number.isFinite(indexValue) ? Math.max(1, Math.trunc(indexValue)) : 1;
+  const total = Number.isFinite(totalValue) ? Math.max(index, Math.trunc(totalValue)) : index;
+  const failurePolicy = data.failurePolicy === "best_effort" ? "best_effort" : "required";
+  const message = typeof data.message === "string" ? data.message.trim() : undefined;
+  const error = typeof data.error === "string" ? data.error.trim() : undefined;
+
+  return {
+    taskId,
+    title,
+    skillId,
+    index,
+    total,
+    failurePolicy,
+    status,
+    ...(message ? { message } : {}),
+    ...(error ? { error } : {}),
+  };
+};
+
+const taskStatusToThinkingContent = (status: ChatTaskStatus): string => {
+  const prefix = `子任务 ${status.index}/${status.total}`;
+  switch (status.status) {
+    case "pending":
+      return `${prefix} 待执行：${status.title}`;
+    case "running":
+      return `${prefix} 开始执行：${status.title}`;
+    case "completed":
+      return status.message
+        ? `${prefix} 已完成：${status.title}（${status.message}）`
+        : `${prefix} 已完成：${status.title}`;
+    case "skipped":
+      return status.error
+        ? `${prefix} 已跳过：${status.title}（${status.error}）`
+        : `${prefix} 已跳过：${status.title}`;
+    case "failed":
+    default:
+      return status.error
+        ? `${prefix} 失败：${status.title}（${status.error}）`
+        : `${prefix} 失败：${status.title}`;
+  }
+};
+
 // Markdown rendering for assistant messages
 export function renderMarkdown(content: string): React.ReactNode {
   return <Markdown content={content} variant="chat" />;
@@ -201,6 +270,7 @@ export type UseChatLogicReturn = {
   error: string | null;
   assistantBuffer: string;
   thinkingSteps: ThinkingStep[];
+  taskTodoItems: ChatTaskStatus[];
   llmConfig: ProviderConfig | null;
   mentions: MentionItem[];
   mentionState: MentionState;
@@ -241,7 +311,7 @@ export type UseChatLogicReturn = {
   handleKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   handleMentionSelect: (item: MentionItem) => void;
   handleMentionClose: () => void;
-  handleRemoveMention: (docId: string) => void;
+  handleRemoveMention: (mentionId: string) => void;
   handleSlashSelect: (command: SlashCommand) => void;
   handleDraftApplied: (docId: string, isNew: boolean) => void;
   handleDraftClose: () => void;
@@ -302,6 +372,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   }, [onDeepSearchChange]);
   const [assistantBuffer, setAssistantBuffer] = useState("");
   const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([]);
+  const [taskTodoItems, setTaskTodoItems] = useState<ChatTaskStatus[]>([]);
   const [llmConfig, setLlmConfig] = useState<ProviderConfig | null>(null);
   const [internalSessionId, setInternalSessionId] = useState<string>(() => `session-${createId()}`);
 
@@ -396,8 +467,13 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   }, []);
 
   const canSend = useMemo(() => {
-    return !isGenerating && input.trim().length > 0 && projectKey !== "";
-  }, [isGenerating, input, projectKey]);
+    const hasTypedInput = input.trim().length > 0;
+    const hasSelectedCommand = Boolean(selectedCommand);
+    const hasPluginTemplateMention = mentions.some(isPluginTemplateMention);
+    return !isGenerating
+      && projectKey !== ""
+      && (hasTypedInput || hasSelectedCommand || hasPluginTemplateMention);
+  }, [isGenerating, input, projectKey, selectedCommand, mentions]);
 
   // Load LLM config
   useEffect(() => {
@@ -482,16 +558,31 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         for (const m of mentionsRaw) {
           if (!m || typeof m !== "object") continue;
           const mr = m as Record<string, unknown>;
+          const kind = mr.kind === "plugin_template" ? "plugin_template" : "doc";
           const docId = typeof mr.docId === "string" ? mr.docId : "";
           if (!docId) continue;
           const title = typeof mr.title === "string" ? mr.title : "";
           const titlePath = typeof mr.titlePath === "string" ? mr.titlePath : title;
-          safeMentions.push({
-            docId,
-            title,
-            titlePath,
-            includeChildren: Boolean(mr.includeChildren),
-          });
+          if (kind === "plugin_template") {
+            safeMentions.push({
+              kind,
+              docId,
+              title,
+              titlePath,
+              includeChildren: false,
+              pluginId: typeof mr.pluginId === "string" ? mr.pluginId : "ppt-plugin",
+              command: typeof mr.command === "string" ? mr.command : "/ppt-agent",
+              templateId: typeof mr.templateId === "string" ? mr.templateId : undefined,
+            });
+          } else {
+            safeMentions.push({
+              kind: "doc",
+              docId,
+              title,
+              titlePath,
+              includeChildren: Boolean(mr.includeChildren),
+            });
+          }
         }
 
         let safeCommand: SlashCommand | null = null;
@@ -552,7 +643,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       container.scrollTop = container.scrollHeight;
     });
     return () => cancelAnimationFrame(handle);
-  }, [messages, assistantBuffer, thinkingSteps, autoScrollEnabled]);
+  }, [messages, assistantBuffer, thinkingSteps, taskTodoItems, autoScrollEnabled]);
 
   const closeStream = useCallback(() => {
     if (eventSourceRef.current) {
@@ -588,6 +679,31 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
 
   const resetThinkingSteps = useCallback(() => {
     setThinkingSteps([]);
+  }, []);
+
+  const resetTaskTodoItems = useCallback(() => {
+    setTaskTodoItems([]);
+  }, []);
+
+  const upsertTaskTodoItem = useCallback((taskStatus: ChatTaskStatus) => {
+    setTaskTodoItems((prev) => {
+      const next = [...prev];
+      const index = next.findIndex((item) => item.taskId === taskStatus.taskId);
+      if (index >= 0) {
+        const existing = next[index];
+        next[index] = {
+          ...existing,
+          ...taskStatus,
+        };
+      } else {
+        next.push(taskStatus);
+      }
+      next.sort((a, b) => {
+        if (a.index !== b.index) return a.index - b.index;
+        return a.taskId.localeCompare(b.taskId);
+      });
+      return next;
+    });
   }, []);
 
   const appendThinkingStep = useCallback((step: Omit<ThinkingStep, "id" | "timestamp">) => {
@@ -696,10 +812,30 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   const handleSend = useCallback(async () => {
     if (!canSend) return;
 
-    // Build full message with command prefix if selected
-    const commandPrefix = selectedCommand ? selectedCommand.command + " " : "";
-    const message = (commandPrefix + input).trim();
     const currentMentions = [...mentions];
+    const docMentions = currentMentions.filter(isDocMention);
+    const pluginTemplateMentions = currentMentions.filter(isPluginTemplateMention);
+    const selectedPptTemplateMention = pluginTemplateMentions[pluginTemplateMentions.length - 1];
+    const autoPptAgentCommand: SlashCommand | null = !selectedCommand && selectedPptTemplateMention
+      ? {
+          command: selectedPptTemplateMention.command || "/ppt-agent",
+          name: "PPT Agent",
+          description: "基于文档与知识库生成 PPT 类文档并导出",
+          category: "plugin",
+          icon: "📊",
+          requiresDocScope: false,
+        }
+      : null;
+    const effectiveCommand = selectedCommand || autoPptAgentCommand;
+    const commandPrefix = effectiveCommand ? `${effectiveCommand.command} ` : "";
+    const displayMessage = `${commandPrefix}${input.trim()}`.trim();
+    let messageBody = input.trim();
+    if (effectiveCommand?.command === "/ppt-agent" && selectedPptTemplateMention?.templateId) {
+      const templateArg = `template_id=${selectedPptTemplateMention.templateId}`;
+      messageBody = messageBody ? `${templateArg} ${messageBody}` : templateArg;
+    }
+    const message = `${commandPrefix}${messageBody}`.trim();
+    if (!message) return;
 
     // Get attachments context before clearing
     const attachmentsContext = getAttachmentsContext();
@@ -708,7 +844,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     // Save to command history before clearing
     const historyEntry: CommandHistoryEntry = {
       input: input,
-      command: selectedCommand,
+      command: effectiveCommand,
       mentions: [...currentMentions],
       timestamp: Date.now(),
     };
@@ -727,16 +863,21 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     clearAttachments();
 
     // Build display message with mention info and attachments
-    const mentionInfo = currentMentions.length > 0
-      ? `[检索范围: ${currentMentions.map((m) => m.titlePath + (m.includeChildren ? "/" : "")).join(", ")}]\n`
+    const docScopeInfo = docMentions.length > 0
+      ? `[检索范围: ${docMentions.map((m) => m.titlePath + (m.includeChildren ? "/" : "")).join(", ")}]\n`
       : "";
+    const pluginResourceInfo = pluginTemplateMentions.length > 0
+      ? `[插件资源: ${pluginTemplateMentions.map((m) => `@ppt:${m.title}`).join(", ")}]\n`
+      : "";
+    const mentionInfo = `${docScopeInfo}${pluginResourceInfo}`;
     const attachmentInfo = currentAttachments.length > 0
       ? `[附件: ${currentAttachments.map((a) => a.name).join(", ")}]\n`
       : "";
-    appendMessage("user", mentionInfo + attachmentInfo + message);
+    appendMessage("user", mentionInfo + attachmentInfo + (displayMessage || message));
     setIsGenerating(true);
     resetAssistantBuffer();
     resetThinkingSteps();
+    resetTaskTodoItems();
     closeStream();
 
     try {
@@ -750,8 +891,8 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       }
 
       // Convert mentions to document scope
-      const documentScope: DocumentScope[] | undefined = currentMentions.length > 0
-        ? currentMentions.map((m) => ({
+      const documentScope: DocumentScope[] | undefined = docMentions.length > 0
+        ? docMentions.map((m) => ({
             docId: m.docId,
             includeChildren: m.includeChildren,
           }))
@@ -834,6 +975,19 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         });
       });
 
+      source.addEventListener("assistant.task_status", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        const taskStatus = normalizeTaskStatusPayload(payload);
+        if (!taskStatus) return;
+        upsertTaskTodoItem(taskStatus);
+        if (taskStatus.status === "pending") return;
+        appendThinkingStep({
+          kind: "thinking",
+          content: taskStatusToThinkingContent(taskStatus),
+        });
+      });
+
       source.addEventListener("assistant.draft", (event) => {
         hasCustomEventsRef.current = true;
         const payload = parsePayload((event as MessageEvent).data);
@@ -894,6 +1048,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         setPendingRequiredInput(null);
         setIsGenerating(false);
         resetThinkingSteps();
+        resetTaskTodoItems();
         closeStream();
       });
 
@@ -923,6 +1078,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         setPendingPreflightInfo(null);
         setPendingRequiredInput(null);
         resetThinkingSteps();
+        resetTaskTodoItems();
         resetAssistantBuffer();
         closeStream();
       });
@@ -933,6 +1089,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         if (payload === null || payload === "null") {
           setIsGenerating(false);
           resetThinkingSteps();
+          resetTaskTodoItems();
           closeStream();
           return;
         }
@@ -942,6 +1099,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
           appendMessage("system", `错误: ${errMsg}`);
           setIsGenerating(false);
           resetThinkingSteps();
+          resetTaskTodoItems();
           closeStream();
           return;
         }
@@ -964,6 +1122,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         setPendingPreflightInfo(null);
         setPendingRequiredInput(null);
         resetThinkingSteps();
+        resetTaskTodoItems();
         resetAssistantBuffer();
         closeStream();
       };
@@ -973,6 +1132,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       appendMessage("system", `错误: ${errMsg}`);
       setIsGenerating(false);
       resetThinkingSteps();
+      resetTaskTodoItems();
       resetAssistantBuffer();
       closeStream();
     }
@@ -984,9 +1144,11 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     commitAssistantBuffer,
     handleDelta,
     input,
+    upsertTaskTodoItem,
     projectKey,
     resetAssistantBuffer,
     resetThinkingSteps,
+    resetTaskTodoItems,
     sessionId,
     mentions,
     selectedCommand,
@@ -1000,6 +1162,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       if (historyKey) {
         localStorage.removeItem(historyKey);
       }
+      localStorage.removeItem(`zeus-task-todo-expanded-${projectKey}-${sessionId}`);
     } catch {
       // Ignore storage errors
     }
@@ -1009,6 +1172,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     currentInputRef.current = null;
     resetAssistantBuffer();
     resetThinkingSteps();
+    resetTaskTodoItems();
 
     try {
       await clearChatSession(projectKey, sessionId);
@@ -1018,7 +1182,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       setMessages([]);
       setSessionId(`session-${createId()}`);
     }
-  }, [historyKey, projectKey, resetAssistantBuffer, resetThinkingSteps, sessionId, setSessionId]);
+  }, [historyKey, projectKey, resetAssistantBuffer, resetThinkingSteps, resetTaskTodoItems, sessionId, setSessionId]);
 
   const handleNewSession = useCallback(async () => {
     if (!projectKey) return;
@@ -1031,6 +1195,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     currentInputRef.current = null;
     resetAssistantBuffer();
     resetThinkingSteps();
+    resetTaskTodoItems();
 
     try {
       const { createSession } = await import("../api/chat-sessions");
@@ -1042,7 +1207,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       setMessages([]);
       setSessionId(`session-${createId()}`);
     }
-  }, [projectKey, resetAssistantBuffer, resetThinkingSteps, setSessionId]);
+  }, [projectKey, resetAssistantBuffer, resetThinkingSteps, resetTaskTodoItems, setSessionId]);
 
   /**
    * Stop the current generation
@@ -1055,6 +1220,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     setPendingPreflightInfo(null);
     setPendingRequiredInput(null);
     resetThinkingSteps();
+    resetTaskTodoItems();
 
     // If there's a partial response in the buffer, save it
     if (assistantBufferRef.current) {
@@ -1063,7 +1229,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     }
     
     setIsGenerating(false);
-  }, [appendMessage, closeStream, resetAssistantBuffer, resetThinkingSteps]);
+  }, [appendMessage, closeStream, resetAssistantBuffer, resetThinkingSteps, resetTaskTodoItems]);
 
   const handleDraftApplied = useCallback((docId: string, isNew: boolean) => {
     setPendingDraft(null);
@@ -1105,6 +1271,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       appendMessage("system", "操作已取消");
       setIsGenerating(false);
       resetThinkingSteps();
+      resetTaskTodoItems();
       closeStream();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "取消失败";
@@ -1112,7 +1279,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       setPendingTool(null);
       setIsGenerating(false);
     }
-  }, [projectKey, appendMessage, closeStream, resetThinkingSteps]);
+  }, [projectKey, appendMessage, closeStream, resetThinkingSteps, resetTaskTodoItems]);
 
   const handleSelectIntent = useCallback(async (option: IntentOption) => {
     const runId = currentRunIdRef.current;
@@ -1184,7 +1351,11 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       const currentMentionState = mentionStateRef.current;
 
       setMentions((prev) => {
-        if (prev.some((m) => m.docId === item.docId)) {
+        if (item.kind === "plugin_template") {
+          const filtered = prev.filter((m) => m.kind !== "plugin_template");
+          return [...filtered, item];
+        }
+        if (prev.some((m) => m.docId === item.docId && m.kind !== "plugin_template")) {
           return prev;
         }
         return [...prev, item];
@@ -1205,8 +1376,8 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     setMentionState({ active: false, query: "", startPos: 0 });
   }, []);
 
-  const handleRemoveMention = useCallback((docId: string) => {
-    setMentions((prev) => prev.filter((m) => m.docId !== docId));
+  const handleRemoveMention = useCallback((mentionId: string) => {
+    setMentions((prev) => prev.filter((m) => m.docId !== mentionId));
   }, []);
 
   // Paste handling for attachments
@@ -1427,6 +1598,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     error,
     assistantBuffer,
     thinkingSteps,
+    taskTodoItems,
     llmConfig,
     mentions,
     mentionState,

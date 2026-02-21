@@ -7,7 +7,7 @@ import type { JSONContent } from "@tiptap/react";
 import { Image } from "@tiptap/extension-image";
 import { StarterKit } from "@tiptap/starter-kit";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Input, message } from "antd";
+import { Checkbox, Input, message } from "antd";
 
 import DocumentHeader from "../components/DocumentHeader";
 import KnowledgeBaseLayout from "../components/KnowledgeBaseLayout";
@@ -33,7 +33,8 @@ import {
   deleteDocument,
   fetchUrlHtml,
   importFileAsDocument,
-  importGit,
+  createImportGitTask,
+  createImportFolderTask,
   updateBlockAttrs,
   type DocumentDetail,
   type DocumentTreeItem,
@@ -289,7 +290,7 @@ function DocumentPage() {
   const [gitRepoUrl, setGitRepoUrl] = useState("");
   const [gitBranch, setGitBranch] = useState("main");
   const [gitSubdir, setGitSubdir] = useState("");
-  const [gitLogEntries, setGitLogEntries] = useState<{ id: string; text: string }[]>([]);
+  const [gitAutoImportSubmodules, setGitAutoImportSubmodules] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadTotal, setUploadTotal] = useState(0);
   const [uploadCompleted, setUploadCompleted] = useState(0);
@@ -1663,7 +1664,7 @@ function DocumentPage() {
     setGitRepoUrl("");
     setGitBranch("main");
     setGitSubdir("");
-    setGitLogEntries([]);
+    setGitAutoImportSubmodules(false);
     setUploading(false);
     setUploadTotal(0);
     setUploadCompleted(0);
@@ -1685,7 +1686,7 @@ function DocumentPage() {
     setGitRepoUrl("");
     setGitBranch("main");
     setGitSubdir("");
-    setGitLogEntries([]);
+    setGitAutoImportSubmodules(false);
     // Reset file inputs
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -1720,7 +1721,7 @@ function DocumentPage() {
     setGitRepoUrl("");
     setGitBranch("main");
     setGitSubdir("");
-    setGitLogEntries([]);
+    setGitAutoImportSubmodules(false);
     setUploading(false);
     setUploadTotal(0);
     setUploadCompleted(0);
@@ -1833,27 +1834,13 @@ function DocumentPage() {
         ? ["all" as const]
         : Array.from(uploadFilterPresets) as ("all" | "images" | "office" | "text" | "markdown")[];
 
-      setGitLogEntries([
-        { id: crypto.randomUUID(), text: `Cloning ${repoUrl}` },
-        {
-          id: crypto.randomUUID(),
-          text: branchValue ? `Using branch ${branchValue}` : "Using default branch",
-        },
-        {
-          id: crypto.randomUUID(),
-          text: gitSubdir.trim() ? `正在导入子目录 ${gitSubdir.trim()}` : "正在导入整个仓库",
-        },
-        {
-          id: crypto.randomUUID(),
-          text: smartImportEnabled ? `智能导入: ${Array.from(smartImportTypes).join(", ")}` : "智能导入: 关闭",
-        },
-      ]);
       try {
-        const result = await importGit(resolvedProjectKey, {
+        const { taskId } = await createImportGitTask(resolvedProjectKey, {
           repo_url: repoUrl,
           branch: branchValue || undefined,
           subdir: gitSubdir.trim() || undefined,
           parent_id: activeDocument?.id ?? "root",
+          auto_import_submodules: gitAutoImportSubmodules,
           smart_import: smartImportEnabled,
           smart_import_types: Array.from(smartImportTypes).filter((t) => t !== "all") as Array<
             "markdown" | "word" | "pdf" | "image"
@@ -1861,46 +1848,71 @@ function DocumentPage() {
           file_types: fileTypeFilters,
           enable_format_optimize: smartImportEnabled && formatOptimizeEnabled,
         });
+        if (!taskId) {
+          throw new Error("任务创建失败");
+        }
         setUploadCompleted(1);
-        setGitLogEntries((prev) => [
-          ...prev,
-          { id: crypto.randomUUID(), text: `Created folders ${result.directories}` },
-          { id: crypto.randomUUID(), text: `Created documents ${result.files}` },
-          {
-            id: crypto.randomUUID(),
-            text: result.converted ? `Smart converted ${result.converted}` : "No smart conversions",
-          },
-          {
-            id: crypto.randomUUID(),
-            text: result.fallback ? `Fallback uploads ${result.fallback}` : "No fallback uploads",
-          },
-          {
-            id: crypto.randomUUID(),
-            text: result.skipped ? `Skipped ${result.skipped}` : "No skipped files",
-          },
-        ]);
-        setUploadSummary({
-          directories: result.directories,
-          files: result.files,
-          skipped: result.skipped,
-          converted: result.converted,
-          fallback: result.fallback,
-        });
-        setImportStatus({ type: "success", message: "导入完成" });
+        setImportStatus({ type: "success", message: "任务已创建，查看消息中心" });
+        message.success("任务已创建，查看消息中心");
         setImportModalOpen(false);
         setGitRepoUrl("");
         setGitBranch("main");
         setGitSubdir("");
-        setGitLogEntries([]);
-        await handleDocumentsChanged(activeDocument?.id ?? "");
+        setGitAutoImportSubmodules(false);
       } catch (err) {
         console.log("import_git_error", err);
-        const message = err instanceof Error && err.message ? err.message : "导入失败";
-        setGitLogEntries((prev) => [
-          ...prev,
-          { id: crypto.randomUUID(), text: `Failed: ${message}` },
-        ]);
-        setImportStatus({ type: "error", message });
+        const errorMessage = err instanceof Error && err.message ? err.message : "导入失败";
+        message.error(errorMessage);
+        setImportStatus({ type: "error", message: errorMessage });
+      } finally {
+        setUploading(false);
+        setUploadTotal(0);
+        setUploadCompleted(0);
+      }
+      return;
+    }
+    if (importMode === "folder") {
+      if (selectedFiles.length === 0) {
+        setImportStatus({ type: "error", message: "请选择文件夹" });
+        return;
+      }
+      const { files: filteredFiles } = filterFilesByPreset(
+        selectedFiles,
+        activeUploadPreset,
+      );
+      if (filteredFiles.length === 0) {
+        setImportStatus({ type: "error", message: "没有符合筛选条件的文件" });
+        return;
+      }
+      setUploading(true);
+      setUploadTotal(1);
+      setUploadCompleted(0);
+      setImportStatus({ type: "idle" });
+      setUploadSummary(null);
+
+      try {
+        const selectedSmartImportTypes = Array.from(smartImportTypes).filter((t) => t !== "all") as Array<
+          "markdown" | "word" | "pdf" | "image"
+        >;
+        const { taskId } = await createImportFolderTask(resolvedProjectKey, filteredFiles, {
+          parent_id: activeDocument?.id ?? "root",
+          smart_import: smartImportEnabled,
+          smart_import_types: selectedSmartImportTypes,
+          enable_format_optimize: smartImportEnabled && formatOptimizeEnabled,
+        });
+        if (!taskId) {
+          throw new Error("任务创建失败");
+        }
+        setUploadCompleted(1);
+        setImportStatus({ type: "success", message: "任务已创建，查看消息中心" });
+        message.success("任务已创建，查看消息中心");
+        setImportModalOpen(false);
+        setSelectedFiles([]);
+      } catch (err) {
+        console.log("import_folder_error", err);
+        const errorMessage = err instanceof Error && err.message ? err.message : "导入失败";
+        message.error(errorMessage);
+        setImportStatus({ type: "error", message: errorMessage });
       } finally {
         setUploading(false);
         setUploadTotal(0);
@@ -2476,16 +2488,16 @@ function DocumentPage() {
                         onChange={(event) => setGitSubdir(event.target.value)}
                         disabled={uploading}
                       />
-                    </div>
-                    {gitLogEntries.length > 0 ? (
-                      <div className="kb-import-git-log">
-                        {gitLogEntries.map((entry) => (
-                          <div key={entry.id} className="kb-import-git-log-line">
-                            {entry.text}
-                          </div>
-                        ))}
+                      <div className="kb-import-git-options">
+                        <Checkbox
+                          checked={gitAutoImportSubmodules}
+                          onChange={(event) => setGitAutoImportSubmodules(event.target.checked)}
+                          disabled={uploading}
+                        >
+                          自动导入子模块
+                        </Checkbox>
                       </div>
-                    ) : null}
+                    </div>
                   </div>
                 )}
                 {importStatus.type !== "idle" ? (

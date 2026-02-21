@@ -1,13 +1,15 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { AppstoreOutlined, FileTextOutlined, RobotOutlined } from "@ant-design/icons";
+import { AppstoreOutlined, BookOutlined, FileTextOutlined, RobotOutlined } from "@ant-design/icons";
 import { message } from "antd";
 
 import Sidebar from "../components/Sidebar";
 import SettingsModal from "../components/SettingsModal";
 import ChatPanel from "../components/ChatPanel";
 import CommandPalette from "../components/CommandPalette";
+import MessageCenter from "../components/MessageCenter";
 import { useAuth } from "../context/AuthContext";
+import { useProjectContext } from "../context/ProjectContext";
 import { usePluginRuntime } from "../context/PluginRuntimeContext";
 
 type AppShellProps = {
@@ -17,6 +19,7 @@ type AppShellProps = {
 const coreNavItems = [
   { label: "AI 助手", to: "/chat", icon: <RobotOutlined /> },
   { label: "文档", to: "/documents", icon: <FileTextOutlined /> },
+  { label: "Edu 题库", to: "/edu", icon: <BookOutlined /> },
 ];
 
 function AppShell({ children }: AppShellProps) {
@@ -24,6 +27,7 @@ function AppShell({ children }: AppShellProps) {
   const navigate = useNavigate();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { user, isAuthenticated, logout } = useAuth();
+  const { currentProject } = useProjectContext();
   const { sidebarMenus, runMenuAction } = usePluginRuntime();
 
   const navItems = useMemo(() => {
@@ -68,6 +72,9 @@ function AppShell({ children }: AppShellProps) {
       <header className="topbar">
         <div className="topbar-logo">Zeus</div>
         <div className="topbar-spacer" />
+        <div className="topbar-actions">
+          <MessageCenter projectKey={currentProject?.projectRef ?? null} />
+        </div>
       </header>
       <div className="app-body compact">
         <Sidebar

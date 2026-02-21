@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import type { ReactNode } from "react"
+import { cloneElement, isValidElement, useEffect, useMemo, useRef, useState } from "react"
+import type { ReactNode, ReactElement } from "react"
 import type { Editor, JSONContent } from "@tiptap/react"
 import { EditorContent, EditorContext, useEditor } from "@tiptap/react"
 import type { Extensions } from "@tiptap/core"
@@ -25,6 +25,14 @@ import {
   ToolbarGroup,
   ToolbarSeparator,
 } from "../../primitives/toolbar"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "../../primitives/dropdown-menu"
 
 // --- Tiptap Node ---
 import { ImageUploadNode } from "../../nodes/image-upload-node/image-upload-node-extension"
@@ -49,8 +57,10 @@ import "../../nodes/table-node/table-node.scss"
 import "../../nodes/math-node/math-node.scss"
 import "../../nodes/chart-node/chart-node.scss"
 import "../../nodes/mindmap-node/mindmap-node.scss"
+import "../../nodes/edu-question-set-node/edu-question-set-node.scss"
 import "../../ui/table-button/table-menu.scss"
 import "../../ui/chart-button/chart-button.scss"
+import "../../ui/edu-question-set-button/edu-question-set-button.scss"
 
 // --- Tiptap UI ---
 import { HeadingDropdownMenu } from "../../ui/heading-dropdown-menu"
@@ -77,6 +87,7 @@ import { UndoRedoButton } from "../../ui/undo-redo-button"
 
 // --- Icons ---
 import { ArrowLeftIcon } from "../../icons/arrow-left-icon"
+import { ChevronDownIcon } from "../../icons/chevron-down-icon"
 import { HighlighterIcon } from "../../icons/highlighter-icon"
 
 // --- Hooks ---
@@ -116,7 +127,20 @@ type DocEditorProps = {
     extraExtensions?: Extensions
     toolbarItems?: ReactNode[]
     blockIdNodeTypes?: string[]
+    pluginBlockGroups?: PluginBlockToolbarGroup[]
   }
+}
+
+type PluginBlockToolbarAction = {
+  id: string
+  title: string
+  toolbarButton: ReactNode
+}
+
+type PluginBlockToolbarGroup = {
+  pluginId: string
+  pluginTitle: string
+  blocks: PluginBlockToolbarAction[]
 }
 
 function collectExtensionNames(extensions: Extensions): string[] {
@@ -142,14 +166,99 @@ const defaultContent: JSONContent = {
   ],
 }
 
+function renderToolbarNodeWithEditor(node: ReactNode, editor: Editor | null): ReactNode {
+  if (isValidElement(node) && typeof node.type !== "string") {
+    return cloneElement(
+      node as ReactElement<Record<string, unknown>>,
+      { editor },
+    )
+  }
+  return node
+}
+
+const PluginBlockDropdown = ({
+  editor,
+  groups,
+  isMobile,
+}: {
+  editor: Editor | null
+  groups: PluginBlockToolbarGroup[]
+  isMobile: boolean
+}) => {
+  if (groups.length === 0) {
+    return null
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          data-style="ghost"
+          data-active-state="off"
+          role="button"
+          tabIndex={-1}
+          aria-label="Insert plugin block"
+          tooltip="插件 Block"
+        >
+          <span className="tiptap-button-text">插件 Block</span>
+          <ChevronDownIcon className="tiptap-button-dropdown-small" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align={isMobile ? "start" : "end"}
+        sideOffset={6}
+        className="doc-editor-plugin-block-dropdown"
+        portal={isMobile}
+      >
+        <div className="doc-editor-plugin-block-root">
+          {groups.map((group) => (
+            <DropdownMenuSub key={`plugin-block-group-${group.pluginId}`}>
+              <DropdownMenuSubTrigger className="doc-editor-plugin-block-subtrigger">
+                <span>{group.pluginTitle}</span>
+                <span aria-hidden className="doc-editor-plugin-block-subtrigger-arrow">›</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent
+                className="doc-editor-plugin-block-subcontent"
+                sideOffset={4}
+                portal={isMobile}
+              >
+                <div className="doc-editor-plugin-block-list">
+                  {group.blocks.map((block) => (
+                    <div
+                      key={`plugin-block-item-${group.pluginId}-${block.id}`}
+                      className="doc-editor-plugin-block-item"
+                    >
+                      <span className="doc-editor-plugin-block-item-title">
+                        {block.title}
+                      </span>
+                      <span className="doc-editor-plugin-block-item-action">
+                        {renderToolbarNodeWithEditor(block.toolbarButton, editor)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          ))}
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 const MainToolbarContent = ({
   onHighlighterClick,
   isMobile,
+  editor,
   pluginToolbarItems,
+  pluginBlockGroups,
 }: {
   onHighlighterClick: () => void
   isMobile: boolean
+  editor: Editor | null
   pluginToolbarItems: ReactNode[]
+  pluginBlockGroups: PluginBlockToolbarGroup[]
 }) => {
   return (
     <>
@@ -218,7 +327,7 @@ const MainToolbarContent = ({
           <ToolbarGroup>
             {pluginToolbarItems.map((item, index) => (
               <span key={`plugin-toolbar-item-${index}`} className="doc-editor-plugin-toolbar-item">
-                {item}
+                {renderToolbarNodeWithEditor(item, editor)}
               </span>
             ))}
           </ToolbarGroup>
@@ -226,6 +335,16 @@ const MainToolbarContent = ({
       ) : null}
 
       {!isMobile && <Spacer />}
+
+      {pluginBlockGroups.length > 0 ? (
+        <ToolbarGroup>
+          <PluginBlockDropdown
+            editor={editor}
+            groups={pluginBlockGroups}
+            isMobile={isMobile}
+          />
+        </ToolbarGroup>
+      ) : null}
 
       {isMobile && <ToolbarSeparator />}
 
@@ -286,6 +405,10 @@ export function DocEditor({
   const pluginBlockIdTypes = useMemo<string[]>(
     () => pluginContributions?.blockIdNodeTypes || [],
     [pluginContributions?.blockIdNodeTypes]
+  )
+  const pluginBlockGroups = useMemo<PluginBlockToolbarGroup[]>(
+    () => pluginContributions?.pluginBlockGroups || [],
+    [pluginContributions?.pluginBlockGroups]
   )
   const knownExtensionNodeTypes = useMemo<string[]>(
     () => collectExtensionNames([...(extensions || []), ...(extraExtensions || [])]),
@@ -500,7 +623,9 @@ export function DocEditor({
               <MainToolbarContent
                 onHighlighterClick={() => setMobileView("highlighter")}
                 isMobile={isMobile}
+                editor={editor}
                 pluginToolbarItems={pluginToolbarItems}
+                pluginBlockGroups={pluginBlockGroups}
               />
             ) : (
               <MobileToolbarContent onBack={() => setMobileView("main")} />

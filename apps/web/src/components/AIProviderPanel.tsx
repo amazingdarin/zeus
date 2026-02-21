@@ -27,6 +27,11 @@ import {
   type ConfigType,
 } from "../api/llm-config";
 
+const TRANSCRIPTION_PROVIDER: LLMProviderId = "openai-compatible";
+const TRANSCRIPTION_DISPLAY_NAME = "Whisper 转写服务";
+const DEFAULT_TRANSCRIPTION_BASE_URL = "http://localhost:30800/v1";
+const DEFAULT_TRANSCRIPTION_MODEL = "whisper-large-v3";
+
 /**
  * Format file size
  */
@@ -64,6 +69,7 @@ function AIProviderPanel() {
   const [llmConfig, setLlmConfig] = useState<ProviderConfig | null>(null);
   const [embeddingConfig, setEmbeddingConfig] = useState<ProviderConfig | null>(null);
   const [visionConfig, setVisionConfig] = useState<ProviderConfig | null>(null);
+  const [transcriptionConfig, setTranscriptionConfig] = useState<ProviderConfig | null>(null);
   const [providerTypes, setProviderTypes] = useState<ProviderType[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
@@ -81,15 +87,17 @@ function AIProviderPanel() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [llm, embedding, vision, types] = await Promise.all([
+      const [llm, embedding, vision, transcription, types] = await Promise.all([
         getConfigByType("llm"),
         getConfigByType("embedding"),
         getConfigByType("vision"),
+        getConfigByType("transcription"),
         getProviderTypes(),
       ]);
       setLlmConfig(llm);
       setEmbeddingConfig(embedding);
       setVisionConfig(vision);
+      setTranscriptionConfig(transcription);
       setProviderTypes(types);
     } catch (err) {
       message.error("加载配置失败");
@@ -108,6 +116,18 @@ function AIProviderPanel() {
   const handleOpenModal = (configType: ConfigType, existingConfig?: ProviderConfig | null) => {
     setEditingType(configType);
     form.resetFields();
+    if (configType === "transcription") {
+      setSelectedProvider(TRANSCRIPTION_PROVIDER);
+      form.setFieldsValue({
+        displayName: existingConfig?.displayName || TRANSCRIPTION_DISPLAY_NAME,
+        baseUrl: existingConfig?.baseUrl || DEFAULT_TRANSCRIPTION_BASE_URL,
+        defaultModel: existingConfig?.defaultModel || DEFAULT_TRANSCRIPTION_MODEL,
+        apiKey: "",
+        enabled: existingConfig?.enabled ?? true,
+      });
+      setModalVisible(true);
+      return;
+    }
     
     if (existingConfig) {
       setSelectedProvider(existingConfig.providerId);
@@ -176,17 +196,26 @@ function AIProviderPanel() {
    * Handle form submission
    */
   const handleSubmit = async (values: Record<string, unknown>) => {
-    if (!selectedProvider || !editingType) {
+    if (!editingType) {
       message.error("请选择一个提供商类型");
       return;
     }
+    const providerId =
+      editingType === "transcription" ? TRANSCRIPTION_PROVIDER : selectedProvider;
+    if (!providerId) {
+      message.error("请选择一个提供商类型");
+      return;
+    }
+    const isTranscription = editingType === "transcription";
 
     const input: ProviderConfigInput = {
-      providerId: selectedProvider,
-      displayName: values.displayName as string,
+      providerId,
+      displayName: isTranscription
+        ? TRANSCRIPTION_DISPLAY_NAME
+        : (values.displayName as string),
       baseUrl: (values.baseUrl as string) || undefined,
       defaultModel: (values.defaultModel as string) || undefined,
-      apiKey: (values.apiKey as string) || undefined,
+      apiKey: isTranscription ? undefined : (values.apiKey as string) || undefined,
       enabled: values.enabled as boolean ?? true,
     };
 
@@ -339,6 +368,7 @@ function AIProviderPanel() {
     if (configType === "llm") return llmConfig;
     if (configType === "embedding") return embeddingConfig;
     if (configType === "vision") return visionConfig;
+    if (configType === "transcription") return transcriptionConfig;
     return null;
   };
 
@@ -352,18 +382,21 @@ function AIProviderPanel() {
     const existingConfig = getExistingConfig(editingType);
     const isEditing = !!existingConfig;
     const requiresApiKey = typeInfo?.requiresApiKey ?? true;
+    const isTranscription = editingType === "transcription";
 
     return (
       <Form form={form} layout="vertical" onFinish={handleSubmit}>
-        <Form.Item
-          name="displayName"
-          label="显示名称"
-          rules={[{ required: true, message: "请输入显示名称" }]}
-        >
-          <Input placeholder={`我的 ${typeInfo?.name || ""} 连接`} />
-        </Form.Item>
+        {!isTranscription && (
+          <Form.Item
+            name="displayName"
+            label="显示名称"
+            rules={[{ required: true, message: "请输入显示名称" }]}
+          >
+            <Input placeholder={`我的 ${typeInfo?.name || ""} 连接`} />
+          </Form.Item>
+        )}
 
-        {requiresApiKey && (
+        {!isTranscription && requiresApiKey && (
           <Form.Item
             name="apiKey"
             label="API 密钥"
@@ -377,16 +410,34 @@ function AIProviderPanel() {
         {typeInfo?.supportsBaseUrl && (
           <Form.Item
             name="baseUrl"
-            label={selectedProvider === "paddleocr" ? "服务地址" : "API 地址"}
+            label={
+              isTranscription
+                ? "转写服务地址"
+                : selectedProvider === "paddleocr"
+                  ? "服务地址"
+                  : "API 地址"
+            }
             extra={
-              selectedProvider === "paddleocr" 
+              isTranscription
+                ? "例如 http://localhost:30800/v1，或你的 Whisper API 网关地址"
+                : selectedProvider === "paddleocr" 
                 ? "PaddleOCR 服务的 HTTP 地址"
                 : typeInfo.requiresBaseUrl ? "该提供商必须填写此项" : "可选，用于自定义接口地址"
             }
-            rules={typeInfo.requiresBaseUrl ? [{ required: true, message: selectedProvider === "paddleocr" ? "服务地址为必填项" : "API 地址为必填项" }] : undefined}
+            rules={
+              isTranscription
+                ? [{ required: true, message: "转写服务地址为必填项" }]
+                : typeInfo.requiresBaseUrl
+                  ? [{ required: true, message: selectedProvider === "paddleocr" ? "服务地址为必填项" : "API 地址为必填项" }]
+                  : undefined
+            }
           >
             <Input 
-              placeholder={typeInfo.defaultBaseUrl || "https://api.example.com/v1"}
+              placeholder={
+                isTranscription
+                  ? DEFAULT_TRANSCRIPTION_BASE_URL
+                  : (typeInfo.defaultBaseUrl || "https://api.example.com/v1")
+              }
               onBlur={(e) => {
                 // Auto-refresh Ollama models when baseUrl changes
                 if (selectedProvider === "ollama" && e.target.value) {
@@ -398,13 +449,13 @@ function AIProviderPanel() {
         )}
 
         {/* Don't show model field for PaddleOCR */}
-        {selectedProvider !== "paddleocr" && (
+        {(isTranscription || selectedProvider !== "paddleocr") && (
         <Form.Item
           name="defaultModel"
           label={
             <span>
-              默认模型
-              {selectedProvider === "ollama" && (
+              {isTranscription ? "Whisper 模型" : "默认模型"}
+              {!isTranscription && selectedProvider === "ollama" && (
                 <Button
                   type="link"
                   size="small"
@@ -420,9 +471,20 @@ function AIProviderPanel() {
               )}
             </span>
           }
-          extra={selectedProvider === "ollama" ? "从 Ollama 服务获取已安装的模型" : "可选，用于测试连接和作为回退模型"}
+          extra={
+            isTranscription
+              ? "例如 whisper-large-v3、whisper-large-v3-turbo、distil-large-v3"
+              : selectedProvider === "ollama"
+                ? "从 Ollama 服务获取已安装的模型"
+                : "可选，用于测试连接和作为回退模型"
+          }
+          rules={
+            isTranscription
+              ? [{ required: true, message: "Whisper 模型为必填项" }]
+              : undefined
+          }
         >
-          {selectedProvider === "ollama" ? (
+          {!isTranscription && selectedProvider === "ollama" ? (
             <Select
               placeholder={loadingOllamaModels ? "正在加载模型..." : "选择一个模型"}
               allowClear
@@ -434,7 +496,7 @@ function AIProviderPanel() {
               }))}
               notFoundContent={loadingOllamaModels ? <Spin size="small" /> : "未找到模型，请确保 Ollama 正在运行"}
             />
-          ) : typeInfo?.defaultModels && typeInfo.defaultModels.length > 0 ? (
+          ) : !isTranscription && typeInfo?.defaultModels && typeInfo.defaultModels.length > 0 ? (
             <Select
               placeholder="选择一个模型"
               allowClear
@@ -442,7 +504,7 @@ function AIProviderPanel() {
               options={typeInfo.defaultModels.map((m) => ({ label: m, value: m }))}
             />
           ) : (
-            <Input placeholder="model-name" />
+            <Input placeholder={isTranscription ? DEFAULT_TRANSCRIPTION_MODEL : "model-name"} />
           )}
         </Form.Item>
         )}
@@ -496,6 +558,12 @@ function AIProviderPanel() {
           "OCR 文档识别",
           "用于图片/PDF 文字识别，支持 LLM 视觉模型或 PaddleOCR 服务"
         )}
+        {renderConfigCard(
+          "transcription",
+          transcriptionConfig,
+          "音视频转写",
+          "用于音频/视频语音转文字（media-transcribe）"
+        )}
       </div>
 
       <Modal
@@ -514,6 +582,9 @@ function AIProviderPanel() {
             <div className="provider-type-grid">
               {providerTypes
                 .filter((type) => {
+                  if (editingType === "transcription") {
+                    return type.id === "openai" || type.id === "openai-compatible";
+                  }
                   // PaddleOCR only shows for vision/OCR config
                   if (type.id === "paddleocr") {
                     return editingType === "vision";

@@ -19,6 +19,7 @@ import {
   CloseCircleOutlined,
   FolderOutlined,
   FileTextOutlined,
+  AppstoreOutlined,
   RightOutlined,
   MessageOutlined,
 } from "@ant-design/icons";
@@ -37,6 +38,7 @@ import PreflightInputDialog from "./PreflightInputDialog";
 import RequiredInputDialog from "./RequiredInputDialog";
 import ToolConfirmDialog from "./ToolConfirmDialog";
 import ChatAttachmentTags from "./ChatAttachmentTags";
+import TaskTodoList from "./TaskTodoList";
 import ThinkingTimeline from "./ThinkingTimeline";
 
 type ChatPanelProps = {
@@ -57,6 +59,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     error,
     assistantBuffer,
     thinkingSteps,
+    taskTodoItems,
     llmConfig,
     mentions,
     mentionState,
@@ -75,6 +78,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     handleSend,
     handleStop,
     handleClearHistory,
+    sessionId,
     handleInputChange,
     handleKeyDown,
     handleMentionSelect,
@@ -100,6 +104,10 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     handlePaste,
     removeAttachment,
   } = useChatLogic({ autoScrollEnabled: isExpanded });
+
+  const taskTodoStorageKey = projectKey && sessionId
+    ? `zeus-task-todo-expanded-${projectKey}-${sessionId}`
+    : undefined;
 
   const mutableInputRef = inputRef as { current: HTMLTextAreaElement | null };
 
@@ -387,13 +395,6 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
           onSelect={handleSelectIntent}
         />
 
-        {/* Required Input Dialog */}
-        <RequiredInputDialog
-          visible={!!pendingRequiredInput}
-          projectKey={projectKey}
-          pendingInput={pendingRequiredInput}
-          onSubmit={handleProvideRequiredInput}
-        />
         <button
           type="button"
           className="chat-floating-btn"
@@ -434,21 +435,6 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
         visible={!!pendingIntentInfo}
         pendingIntent={pendingIntentInfo}
         onSelect={handleSelectIntent}
-      />
-
-      {/* Required Input Dialog */}
-      <RequiredInputDialog
-        visible={!!pendingRequiredInput}
-        projectKey={projectKey}
-        pendingInput={pendingRequiredInput}
-        onSubmit={handleProvideRequiredInput}
-      />
-
-      <PreflightInputDialog
-        visible={!!pendingPreflightInfo}
-        projectKey={projectKey}
-        pendingPreflight={pendingPreflightInfo}
-        onSubmit={handleProvidePreflightInput}
       />
 
       {/* Expanded Panel (animated open/close) */}
@@ -566,7 +552,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
                 ))}
 
                 {/* Streaming message */}
-                {(assistantBuffer || thinkingSteps.length > 0) && (
+                {(assistantBuffer || thinkingSteps.length > 0 || taskTodoItems.length > 0) && (
                   <div className="chat-msg chat-msg-assistant">
                     <div className="chat-msg-avatar">
                       <RobotOutlined />
@@ -579,6 +565,13 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
                         </span>
                       </div>
                       <div className="chat-msg-text chat-stream-content">
+                        {taskTodoItems.length > 0 && (
+                          <TaskTodoList
+                            items={taskTodoItems}
+                            loading={isGenerating}
+                            storageKey={taskTodoStorageKey}
+                          />
+                        )}
                         {thinkingSteps.length > 0 && (
                           <ThinkingTimeline steps={thinkingSteps} loading={isGenerating} />
                         )}
@@ -592,8 +585,42 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
                   </div>
                 )}
 
+                {pendingRequiredInput && (
+                  <div className="chat-msg chat-msg-assistant chat-msg-inline-input">
+                    <div className="chat-msg-avatar">
+                      <RobotOutlined />
+                    </div>
+                    <div className="chat-msg-content">
+                      <RequiredInputDialog
+                        visible={true}
+                        inline
+                        projectKey={projectKey}
+                        pendingInput={pendingRequiredInput}
+                        onSubmit={handleProvideRequiredInput}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {pendingPreflightInfo && (
+                  <div className="chat-msg chat-msg-assistant chat-msg-inline-input">
+                    <div className="chat-msg-avatar">
+                      <RobotOutlined />
+                    </div>
+                    <div className="chat-msg-content">
+                      <PreflightInputDialog
+                        visible={true}
+                        inline
+                        projectKey={projectKey}
+                        pendingPreflight={pendingPreflightInfo}
+                        onSubmit={handleProvidePreflightInput}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* Generating indicator */}
-                {isGenerating && !assistantBuffer && thinkingSteps.length === 0 && (
+                {isGenerating && !assistantBuffer && thinkingSteps.length === 0 && taskTodoItems.length === 0 && (
                   <div className="chat-msg chat-msg-assistant">
                     <div className="chat-msg-avatar">
                       <RobotOutlined />
@@ -633,11 +660,13 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
             {mentions.map((m) => (
               <span key={m.docId} className="chat-mention-tag">
                 <span className="chat-mention-tag-icon">
-                  {m.includeChildren ? <FolderOutlined /> : <FileTextOutlined />}
+                  {m.kind === "plugin_template"
+                    ? <AppstoreOutlined />
+                    : m.includeChildren ? <FolderOutlined /> : <FileTextOutlined />}
                 </span>
                 <span className="chat-mention-tag-text" title={m.titlePath}>
-                  {m.title}
-                  {m.includeChildren && "/"}
+                  {m.kind === "plugin_template" ? `@ppt:${m.title}` : m.title}
+                  {m.kind !== "plugin_template" && m.includeChildren && "/"}
                 </span>
                 <button
                   type="button"
@@ -708,7 +737,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
               selectedCommand
                 ? "输入参数..."
                 : projectKey
-                  ? "输入消息，@ 指定文档范围..."
+                  ? "输入消息，@ 指定文档范围，@ppt 选择 PPT 模版..."
                   : "请先选择项目"
             }
             value={input}

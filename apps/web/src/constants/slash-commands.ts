@@ -42,6 +42,14 @@ export const documentCommands: SlashCommand[] = [
     requiresDocScope: true,
   },
   {
+    command: "/doc-get",
+    name: "文档快照",
+    description: "读取文档元信息与 block attrs。支持 --content 返回正文，需先用 @ 指定文档",
+    category: "doc",
+    icon: "🧾",
+    requiresDocScope: true,
+  },
+  {
     command: "/doc-optimize-format",
     name: "格式优化",
     description: "优化文档格式。可附加额外要求，需先用 @ 指定文档",
@@ -105,6 +113,14 @@ export const documentCommands: SlashCommand[] = [
     category: "doc",
     icon: "📋",
     requiresDocScope: true,
+  },
+  {
+    command: "/media-transcribe",
+    name: "音视频转写",
+    description: "转写音频/视频为 Markdown 文本。支持文档候选自动识别、单个/批量确认及附件直传。",
+    category: "doc",
+    icon: "🎙️",
+    requiresDocScope: false,
   },
 ];
 

@@ -27,6 +27,8 @@
 @use "../nodes/paragraph-node/paragraph-node";
 @use "../nodes/block-ref-node/block-ref-node";
 @use "../nodes/music-node/music-node";
+@use "../nodes/edu-question-set-node/edu-question-set-node";
 
 @use "../ui/color-highlight-button/color-highlight-button";
 @use "../ui/music-button/music-button";
+@use "../ui/edu-question-set-button/edu-question-set-button";

@@ -32,6 +32,40 @@ export type PluginPermissionPolicyV2 = PluginPermissionPolicy & {
   maxHookExecutionMs?: number;
 };
 
+export type PluginSettingsFieldType =
+  | "string"
+  | "textarea"
+  | "number"
+  | "boolean"
+  | "select";
+
+export type PluginSettingsSelectOption = {
+  label: string;
+  value: string;
+  description?: string;
+};
+
+export type PluginSettingsField = {
+  key: string;
+  title: string;
+  description?: string;
+  type: PluginSettingsFieldType;
+  required?: boolean;
+  default?: string | number | boolean;
+  placeholder?: string;
+  secret?: boolean;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: PluginSettingsSelectOption[];
+};
+
+export type PluginSettingsSchema = {
+  title?: string;
+  description?: string;
+  fields: PluginSettingsField[];
+};
+
 export type PluginCommandDescriptor = {
   id: string;
   command: string;
@@ -197,6 +231,7 @@ export type PluginManifest = {
   };
   commands?: PluginCommandDescriptor[];
   permissions?: PluginPermissionPolicy;
+  settings?: PluginSettingsSchema;
   contributions?: PluginContributionSummary;
   integrity?: string;
   signature?: string;
@@ -222,6 +257,7 @@ export type PluginManifestV2 = {
     entry?: string;
   };
   permissions?: PluginPermissionPolicyV2;
+  settings?: PluginSettingsSchema;
   integrity?: string;
   signature?: string;
 };

@@ -52,42 +52,6 @@ export type PPTTaskStatus = {
 };
 
 /**
- * Preset template
- */
-export type PresetTemplate = {
-  id: string;
-  name: string;
-  description: string;
-  previewUrl?: string;
-};
-
-/**
- * Custom template
- */
-export type CustomTemplate = {
-  id: string;
-  name: string;
-  description?: string;
-  previewUrl?: string;
-  templateImages?: string[];
-  colorScheme?: {
-    primary: string;
-    secondary: string;
-    background: string;
-    text: string;
-    accent?: string;
-  };
-};
-
-/**
- * All templates response
- */
-export type AllTemplatesResponse = {
-  presets: PresetTemplate[];
-  custom: CustomTemplate[];
-};
-
-/**
  * PPT service status
  */
 export type PPTServiceStatus = {
@@ -213,93 +177,6 @@ export const modifySlide = async (
 
   const payload = await response.json();
   return payload?.data ?? payload;
-};
-
-/**
- * Get preset templates
- */
-export const getPresetTemplates = async (): Promise<PresetTemplate[]> => {
-  const response = await apiFetch("/api/ppt-templates");
-
-  if (!response.ok) {
-    return [];
-  }
-
-  const payload = await response.json();
-  return payload?.data?.templates ?? [];
-};
-
-/**
- * Get all templates (preset + custom) for a project
- */
-export const getAllTemplates = async (
-  projectKey: string
-): Promise<AllTemplatesResponse> => {
-  const response = await apiFetch(
-    `/api/projects/${encodeProjectRef(projectKey)}/ppt-templates`
-  );
-
-  if (!response.ok) {
-    return { presets: [], custom: [] };
-  }
-
-  const payload = await response.json();
-  return payload?.data ?? { presets: [], custom: [] };
-};
-
-/**
- * Create a custom template
- */
-export const createCustomTemplate = async (
-  projectKey: string,
-  template: {
-    name: string;
-    description?: string;
-    preview_url?: string;
-    template_images?: string[];
-    color_scheme?: {
-      primary?: string;
-      secondary?: string;
-      background?: string;
-      text?: string;
-      accent?: string;
-    };
-  }
-): Promise<CustomTemplate> => {
-  const response = await apiFetch(
-    `/api/projects/${encodeProjectRef(projectKey)}/ppt-templates`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(template),
-    }
-  );
-
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new Error(data?.message || "Failed to create template");
-  }
-
-  const payload = await response.json();
-  return payload?.data ?? payload;
-};
-
-/**
- * Delete a custom template
- */
-export const deleteCustomTemplate = async (
-  projectKey: string,
-  templateId: string
-): Promise<void> => {
-  const response = await apiFetch(
-    `/api/projects/${encodeProjectRef(projectKey)}/ppt-templates/${encodeURIComponent(templateId)}`,
-    { method: "DELETE" }
-  );
-
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new Error(data?.message || "Failed to delete template");
-  }
 };
 
 /**

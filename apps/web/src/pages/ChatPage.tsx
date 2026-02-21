@@ -18,6 +18,7 @@ import {
   CloseCircleOutlined,
   FolderOutlined,
   FileTextOutlined,
+  AppstoreOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
 
@@ -37,6 +38,7 @@ import RequiredInputDialog from "../components/RequiredInputDialog";
 import ToolConfirmDialog from "../components/ToolConfirmDialog";
 import SessionSidebar from "../components/SessionSidebar";
 import ChatAttachmentTags from "../components/ChatAttachmentTags";
+import TaskTodoList from "../components/TaskTodoList";
 import ThinkingTimeline from "../components/ThinkingTimeline";
 import { useProjectContext } from "../context/ProjectContext";
 import {
@@ -158,6 +160,7 @@ function ChatPage() {
     error,
     assistantBuffer,
     thinkingSteps,
+    taskTodoItems,
     llmConfig,
     mentions,
     mentionState,
@@ -179,6 +182,7 @@ function ChatPage() {
     handleStop,
     handleClearHistory,
     handleNewSession,
+    sessionId,
     handleInputChange,
     handleKeyDown,
     handleMentionSelect,
@@ -214,6 +218,9 @@ function ChatPage() {
 
   const activeSessionTitle =
     sessions.find((s) => s.id === activeSessionId)?.title ?? "";
+  const taskTodoStorageKey = projectKey && sessionId
+    ? `zeus-task-todo-expanded-${projectKey}-${sessionId}`
+    : undefined;
 
   // After a response finishes generating, refresh the session list so ordering/title stay in sync.
   useEffect(() => {
@@ -470,21 +477,6 @@ function ChatPage() {
         onSelect={handleSelectIntent}
       />
 
-      {/* Required Input Dialog */}
-      <RequiredInputDialog
-        visible={!!pendingRequiredInput}
-        projectKey={projectKey}
-        pendingInput={pendingRequiredInput}
-        onSubmit={handleProvideRequiredInput}
-      />
-
-      <PreflightInputDialog
-        visible={!!pendingPreflightInfo}
-        projectKey={projectKey}
-        pendingPreflight={pendingPreflightInfo}
-        onSubmit={handleProvidePreflightInput}
-      />
-
       {/* Tool Confirmation Dialog */}
       <ToolConfirmDialog
         visible={!!pendingTool}
@@ -626,7 +618,7 @@ function ChatPage() {
             ))}
 
             {/* Streaming message */}
-            {(assistantBuffer || thinkingSteps.length > 0) && (
+            {(assistantBuffer || thinkingSteps.length > 0 || taskTodoItems.length > 0) && (
               <div className="chat-msg chat-msg-assistant">
                 <div className="chat-msg-avatar">
                   <RobotOutlined />
@@ -639,6 +631,13 @@ function ChatPage() {
                     </span>
                   </div>
                   <div className="chat-msg-text chat-stream-content">
+                    {taskTodoItems.length > 0 && (
+                      <TaskTodoList
+                        items={taskTodoItems}
+                        loading={isGenerating}
+                        storageKey={taskTodoStorageKey}
+                      />
+                    )}
                     {thinkingSteps.length > 0 && (
                       <ThinkingTimeline steps={thinkingSteps} loading={isGenerating} />
                     )}
@@ -652,8 +651,42 @@ function ChatPage() {
               </div>
             )}
 
+            {pendingRequiredInput && (
+              <div className="chat-msg chat-msg-assistant chat-msg-inline-input">
+                <div className="chat-msg-avatar">
+                  <RobotOutlined />
+                </div>
+                <div className="chat-msg-content">
+                  <RequiredInputDialog
+                    visible={true}
+                    inline
+                    projectKey={projectKey}
+                    pendingInput={pendingRequiredInput}
+                    onSubmit={handleProvideRequiredInput}
+                  />
+                </div>
+              </div>
+            )}
+
+            {pendingPreflightInfo && (
+              <div className="chat-msg chat-msg-assistant chat-msg-inline-input">
+                <div className="chat-msg-avatar">
+                  <RobotOutlined />
+                </div>
+                <div className="chat-msg-content">
+                  <PreflightInputDialog
+                    visible={true}
+                    inline
+                    projectKey={projectKey}
+                    pendingPreflight={pendingPreflightInfo}
+                    onSubmit={handleProvidePreflightInput}
+                  />
+                </div>
+              </div>
+            )}
+
             {/* Generating indicator */}
-            {isGenerating && !assistantBuffer && thinkingSteps.length === 0 && (
+            {isGenerating && !assistantBuffer && thinkingSteps.length === 0 && taskTodoItems.length === 0 && (
               <div className="chat-msg chat-msg-assistant">
                 <div className="chat-msg-avatar">
                   <RobotOutlined />
@@ -692,11 +725,13 @@ function ChatPage() {
             {mentions.map((m) => (
               <span key={m.docId} className="chat-mention-tag">
                 <span className="chat-mention-tag-icon">
-                  {m.includeChildren ? <FolderOutlined /> : <FileTextOutlined />}
+                  {m.kind === "plugin_template"
+                    ? <AppstoreOutlined />
+                    : m.includeChildren ? <FolderOutlined /> : <FileTextOutlined />}
                 </span>
                 <span className="chat-mention-tag-text" title={m.titlePath}>
-                  {m.title}
-                  {m.includeChildren && "/"}
+                  {m.kind === "plugin_template" ? `@ppt:${m.title}` : m.title}
+                  {m.kind !== "plugin_template" && m.includeChildren && "/"}
                 </span>
                 <button
                   type="button"
@@ -767,7 +802,7 @@ function ChatPage() {
               selectedCommand
                 ? "输入参数..."
                 : projectKey
-                  ? "输入消息，@ 指定文档范围，/ 使用命令..."
+                  ? "输入消息，@ 指定文档范围，@ppt 选择模版，/ 使用命令..."
                   : "请先选择项目"
             }
             value={input}

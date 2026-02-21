@@ -37,6 +37,86 @@
   line-height: 1.4;
 }
 
+.doc-editor-plugin-block-dropdown {
+  min-width: 180px;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--tt-dropdown-menu-border-color);
+  background: var(--tt-dropdown-menu-bg-color);
+  box-shadow: var(--tt-shadow-elevated-md);
+}
+
+.doc-editor-plugin-block-root {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.doc-editor-plugin-block-subtrigger {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--tt-dropdown-menu-text-color);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.doc-editor-plugin-block-subtrigger:hover,
+.doc-editor-plugin-block-subtrigger[data-highlighted] {
+  background: var(--tt-gray-light-a-50);
+  color: var(--tt-gray-light-a-700);
+}
+
+.doc-editor-plugin-block-subtrigger-arrow {
+  opacity: 0.7;
+}
+
+.doc-editor-plugin-block-subcontent {
+  min-width: 260px;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--tt-dropdown-menu-border-color);
+  background: var(--tt-dropdown-menu-bg-color);
+  box-shadow: var(--tt-shadow-elevated-md);
+}
+
+.doc-editor-plugin-block-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.doc-editor-plugin-block-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 2px;
+}
+
+.doc-editor-plugin-block-item-title {
+  font-size: 12px;
+  color: var(--tt-dropdown-menu-text-color);
+}
+
+.doc-editor-plugin-block-item-action {
+  display: inline-flex;
+  align-items: center;
+}
+
+[data-theme="dark"] .doc-editor-plugin-block-subtrigger:hover,
+[data-theme="dark"] .doc-editor-plugin-block-subtrigger[data-highlighted] {
+  background: var(--tt-gray-dark-a-50);
+  color: var(--tt-gray-dark-a-700);
+}
+
 @media screen and (max-width: 480px) {
   .doc-editor-content .tiptap.ProseMirror.doc-editor {
     padding: 12px 12px 12px 24px; // Extra left padding for heading collapse buttons
