@@ -28,6 +28,19 @@ export function extractTiptapDoc(input: unknown): JSONContent {
       if (inner.type === "doc" && Array.isArray(inner.content)) {
         return inner as unknown as JSONContent;
       }
+      // Common Zeus shape: { type: "tiptap", content: { meta: {...}, content: { type: "doc", ... } } }
+      if (inner.content && typeof inner.content === "object") {
+        const nested = inner.content as { type?: unknown; content?: unknown };
+        if (nested.type === "doc" && Array.isArray(nested.content)) {
+          return nested as unknown as JSONContent;
+        }
+        if (Array.isArray(nested.content)) {
+          return { type: "doc", content: nested.content as JSONContent[] };
+        }
+        if (typeof nested.type === "string") {
+          return { type: "doc", content: [nested as unknown as JSONContent] };
+        }
+      }
       if (Array.isArray(content)) {
         return { type: "doc", content: content as JSONContent[] };
       }
@@ -47,6 +60,12 @@ export function extractTiptapDoc(input: unknown): JSONContent {
     if (inner.type === "doc" && Array.isArray(inner.content)) {
       return inner as unknown as JSONContent;
     }
+    if (inner.content && typeof inner.content === "object") {
+      const nested = inner.content as { type?: unknown; content?: unknown };
+      if (nested.type === "doc" && Array.isArray(nested.content)) {
+        return nested as unknown as JSONContent;
+      }
+    }
   }
 
   // Fallback: if it has a content array, wrap it.
@@ -56,4 +75,3 @@ export function extractTiptapDoc(input: unknown): JSONContent {
 
   return { type: "doc", content: [] };
 }
-

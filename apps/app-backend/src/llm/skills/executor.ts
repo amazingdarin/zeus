@@ -37,12 +37,14 @@ import {
 } from "../agent/optimize/index.js";
 import {
   executeDocRead,
+  executeDocGet,
   executeDocMove,
   executeDocDelete,
 } from "./native/doc-basic-skills.js";
 import {
   executeFileParse,
   executeImageAnalyze,
+  executeMediaTranscribe,
   executeUrlExtract,
 } from "./native/parse-skills.js";
 import {
@@ -54,6 +56,7 @@ import {
   executeDocConvert,
 } from "./native/integration-skills.js";
 import { pptService } from "../../services/ppt/index.js";
+import { querySuggestsBatchTranscription } from "../../services/media-transcribe-context.js";
 import {
   normalizePptHtmlModel,
   renderPptHtmlFromModel,
@@ -64,6 +67,86 @@ import { buildFileBlockNode } from "../../services/smart-import-shared.js";
 
 // Maximum retries for LLM content generation
 const MAX_RETRIES = 2;
+
+function parseMediaTranscribeCommandArgs(
+  rawText: string,
+): Record<string, unknown> {
+  const text = String(rawText || "").trim();
+  if (!text) return {};
+
+  const assetMatch = text.match(/(?:^|\s)asset[_-]?id\s*[:=]\s*([a-zA-Z0-9_-]+)/i);
+  const docMatch = text.match(/(?:^|\s)doc[_-]?id\s*[:=]\s*([a-zA-Z0-9_-]+)/i);
+  const blockMatch = text.match(/(?:^|\s)block[_-]?id\s*[:=]\s*([a-zA-Z0-9_-]+)/i);
+  const args: Record<string, unknown> = {};
+  if (assetMatch?.[1]) args.asset_id = assetMatch[1].trim();
+  if (docMatch?.[1]) args.doc_id = docMatch[1].trim();
+  if (blockMatch?.[1]) args.block_id = blockMatch[1].trim();
+  if (Object.keys(args).length > 0) {
+    return args;
+  }
+
+  if (querySuggestsBatchTranscription(text)) {
+    return { asset_id: "__ALL__" };
+  }
+
+  // Fallback only for token-like values to avoid treating natural language as asset_id.
+  if (/^[a-zA-Z0-9_-]+$/.test(text)) {
+    return { asset_id: text };
+  }
+
+  return {};
+}
+
+function parseDocGetCommandArgs(
+  rawText: string,
+): Record<string, unknown> {
+  const text = String(rawText || "").trim();
+  if (!text) return {};
+
+  const tokens = text.split(/\s+/).filter(Boolean);
+  const args: Record<string, unknown> = {};
+  let inferredDocId = "";
+
+  for (const token of tokens) {
+    const normalized = token.trim();
+    if (!normalized) continue;
+
+    if (normalized === "--content" || normalized === "content" || normalized === "include_content=true") {
+      args.include_content = true;
+      continue;
+    }
+    if (normalized === "--no-block-attrs" || normalized === "include_block_attrs=false") {
+      args.include_block_attrs = false;
+      continue;
+    }
+    if (normalized.startsWith("doc_id=")) {
+      const value = normalized.slice("doc_id=".length).trim();
+      if (value) args.doc_id = value;
+      continue;
+    }
+    if (normalized.startsWith("block_types=") || normalized.startsWith("--block-types=")) {
+      const raw = normalized.split("=", 2)[1] || "";
+      const values = raw
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (values.length > 0) {
+        args.block_types = values;
+      }
+      continue;
+    }
+
+    if (!inferredDocId && /^[a-zA-Z0-9_-]+$/.test(normalized)) {
+      inferredDocId = normalized;
+    }
+  }
+
+  if (!args.doc_id && inferredDocId) {
+    args.doc_id = inferredDocId;
+  }
+
+  return args;
+}
 
 /**
  * Detect skill intent from user message (sync version - only checks explicit commands)
@@ -108,6 +191,17 @@ export function detectSkillIntent(
       skill: "doc-read",
       command: "/doc-read",
       args: {},
+      rawMessage: message,
+      docIds,
+    };
+  }
+
+  if (trimmed.startsWith("/doc-get")) {
+    const rest = trimmed.slice("/doc-get".length).trim();
+    return {
+      skill: "doc-get",
+      command: "/doc-get",
+      args: parseDocGetCommandArgs(rest),
       rawMessage: message,
       docIds,
     };
@@ -340,6 +434,17 @@ export function detectSkillIntent(
     };
   }
 
+  if (trimmed.startsWith("/media-transcribe")) {
+    const rest = trimmed.slice("/media-transcribe".length).trim();
+    return {
+      skill: "media-transcribe",
+      command: "/media-transcribe",
+      args: parseMediaTranscribeCommandArgs(rest),
+      rawMessage: message,
+      docIds,
+    };
+  }
+
   // No explicit command found
   // Natural language is now handled by analyzeTrigger in trigger.ts
   return null;
@@ -408,6 +513,9 @@ export async function* executeSkillWithStream(
       case "doc-read":
         yield* executeDocRead(userId, projectKey, intent);
         break;
+      case "doc-get":
+        yield* executeDocGet(userId, projectKey, intent);
+        break;
       case "doc-create":
         yield* executeDocCreate(userId, projectKey, intent, traceContext);
         break;
@@ -473,6 +581,9 @@ export async function* executeSkillWithStream(
         break;
       case "url-extract":
         yield* executeUrlExtract(userId, projectKey, intent);
+        break;
+      case "media-transcribe":
+        yield* executeMediaTranscribe(userId, projectKey, intent, traceContext);
         break;
       default:
         yield { type: "error", error: `Unknown skill: ${intent.skill}` };
@@ -1780,7 +1891,7 @@ function insertSummaryAtTop(originalContent: JSONContent, summaryBlock: JSONCont
 // core doc-editing loops and dispatch.
 
 // ============================================================================
-// Parse Skills (file-parse, image-analyze, url-extract)
+// Parse Skills (file-parse, image-analyze, media-transcribe, url-extract)
 // ============================================================================
 
 /**

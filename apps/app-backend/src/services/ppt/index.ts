@@ -14,15 +14,12 @@ import type {
   GenerateOptions,
   GenerateResult,
   TaskStatus,
-  PresetTemplate,
-  PRESET_TEMPLATES,
 } from "./types.js";
 
 // Re-export types and utilities
 export * from "./types.js";
 export * from "./banana-client.js";
 export * from "./tiptap-converter.js";
-export * from "./template-store.js";
 
 /**
  * PPT Generation Service
@@ -168,17 +165,6 @@ export const pptService = {
   async isAvailable(): Promise<boolean> {
     const client = getBananaSlidesClient();
     return client.healthCheck();
-  },
-
-  /**
-   * Get list of available preset templates
-   *
-   * @returns Array of preset templates
-   */
-  getPresetTemplates(): PresetTemplate[] {
-    // Import at runtime to avoid circular dependency
-    const { PRESET_TEMPLATES } = require("./types.js");
-    return PRESET_TEMPLATES;
   },
 };
 

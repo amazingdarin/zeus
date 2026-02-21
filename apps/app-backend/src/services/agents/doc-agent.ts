@@ -12,6 +12,30 @@ import {
   type AgentSkillDefinition,
 } from "../../llm/agent/index.js";
 import { zodObjectToOpenAIParameters } from "../../llm/zod.js";
+import {
+  buildMediaCandidateDescription,
+  normalizeAssetIdList,
+  readMediaCandidatesFromArgs,
+  resolveCandidateKey,
+  resolveCandidateKeys,
+} from "../media-transcribe-context.js";
+import { traceManager, type TraceContext } from "../../observability/index.js";
+
+type PendingInputOption = {
+  value: string;
+  label: string;
+  description?: string;
+  meta?: Record<string, unknown>;
+};
+
+type PendingInputField = {
+  key: string;
+  type: string;
+  description: string;
+  enum?: string[];
+  options?: PendingInputOption[];
+  widget?: "select" | "choice_list";
+};
 
 export type DocAgentPendingRequiredInput =
   | {
@@ -27,12 +51,7 @@ export type DocAgentPendingRequiredInput =
       skillDescription: string;
       missing?: string[];
       issues?: Array<{ path: string; message: string }>;
-      fields: Array<{
-        key: string;
-        type: string;
-        description: string;
-        enum?: string[];
-      }>;
+      fields: PendingInputField[];
       currentArgs?: Record<string, unknown>;
     };
 
@@ -55,6 +74,7 @@ export type DocAgentInput = {
   skillDocIds: string[];
   sourceIntent: "command" | "keyword" | "llm-tool";
   fullAccess: boolean;
+  traceContext?: TraceContext;
 };
 
 export type DocAgentOutput = {
@@ -100,6 +120,233 @@ function hasDocScope(args: Record<string, unknown>, docIds: string[]): boolean {
   return typeof raw === "string" && raw.trim().length > 0;
 }
 
+function isMediaTranscribeSkill(skill: AgentSkillDefinition): boolean {
+  const legacy = typeof skill.metadata?.legacySkillName === "string"
+    ? skill.metadata.legacySkillName
+    : "";
+  return legacy === "media-transcribe";
+}
+
+function normalizeString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    const normalized = normalizeString(item);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
+function normalizeTargetMode(value: unknown): "single" | "all" | "" {
+  const normalized = normalizeString(value).toLowerCase();
+  if (normalized === "single" || normalized === "all") return normalized;
+  return "";
+}
+
+function hasMultipleDocumentCandidates(
+  candidates: ReturnType<typeof readMediaCandidatesFromArgs>,
+): boolean {
+  const docIds = Array.from(
+    new Set(candidates.map((candidate) => String(candidate.docId || "").trim()).filter(Boolean)),
+  );
+  return docIds.length > 1;
+}
+
+function buildTargetModeRequiredInput(
+  skill: AgentSkillDefinition,
+  currentArgs: Record<string, unknown>,
+): DocAgentPendingRequiredInput | null {
+  const candidates = readMediaCandidatesFromArgs(currentArgs);
+  if (candidates.length <= 1) return null;
+
+  return {
+    kind: "skill_args",
+    message: `检测到多个文档媒体候选，请先确认是转写单个媒体还是批量转写。\n${buildMediaCandidateDescription(candidates, 12)}`,
+    skillName: skill.displayName,
+    skillDescription: skill.description,
+    missing: ["target_mode"],
+    currentArgs,
+    fields: [{
+      key: "target_mode",
+      type: "string",
+      description: "选择 single（单个）或 all（批量）",
+      enum: ["single", "all"],
+      options: [
+        {
+          value: "single",
+          label: "单个媒体",
+          description: "先选一个媒体后执行",
+        },
+        {
+          value: "all",
+          label: "全部媒体",
+          description: "对当前候选媒体全部转写",
+        },
+      ],
+      widget: "choice_list",
+    }],
+  };
+}
+
+function buildCandidateSelectionRequiredInput(
+  skill: AgentSkillDefinition,
+  currentArgs: Record<string, unknown>,
+): DocAgentPendingRequiredInput | null {
+  const candidates = readMediaCandidatesFromArgs(currentArgs);
+  if (candidates.length <= 1) return null;
+
+  const options = candidates.slice(0, 50).map((candidate) => ({
+    value: candidate.candidateKey,
+    label: candidate.label,
+    description: `${candidate.mediaKind}${candidate.docTitle ? ` / ${candidate.docTitle}` : ""}`,
+    meta: {
+      candidate_key: candidate.candidateKey,
+      ...(candidate.docId ? { doc_id: candidate.docId } : {}),
+      ...(candidate.blockId ? { block_id: candidate.blockId } : {}),
+      media_kind: candidate.mediaKind,
+    },
+  }));
+
+  if (options.length === 0) return null;
+
+  return {
+    kind: "skill_args",
+    message: `检测到多个可转写媒体，请选择一个候选后继续。\n${buildMediaCandidateDescription(candidates, 12)}`,
+    skillName: skill.displayName,
+    skillDescription: skill.description,
+    missing: ["candidate_key"],
+    currentArgs,
+    fields: [{
+      key: "candidate_key",
+      type: "string",
+      description: "选择候选媒体（不会要求手动输入 asset_id）",
+      enum: options.map((option) => option.value),
+      options,
+      widget: "choice_list",
+    }],
+  };
+}
+
+function normalizeMediaTranscribeArgs(
+  skill: AgentSkillDefinition,
+  rawArgs: Record<string, unknown>,
+): { args: Record<string, unknown>; requiredInput: DocAgentPendingRequiredInput | null } {
+  const args = { ...rawArgs };
+  const rawAssetId = normalizeString(args.asset_id);
+  const rawCandidateKey = normalizeString(args.candidate_key);
+  const rawCandidateKeys = normalizeStringList(args.candidate_keys);
+  const rawTargetMode = normalizeTargetMode(args.target_mode);
+  const assetIds = normalizeAssetIdList(args.asset_ids);
+  const candidates = readMediaCandidatesFromArgs(args);
+  const candidateAssetIds = Array.from(
+    new Set(candidates.map((candidate) => candidate.assetId).filter(Boolean)),
+  );
+  const selectedFromCandidateKey = resolveCandidateKey(args, rawCandidateKey);
+  const selectedFromCandidateKeys = resolveCandidateKeys(args, rawCandidateKeys);
+  const multiDocCandidates = hasMultipleDocumentCandidates(candidates);
+
+  if (assetIds.length > 0) {
+    args.asset_ids = assetIds;
+  } else {
+    delete args.asset_ids;
+  }
+
+  if (rawAssetId && rawAssetId !== "__ALL__") {
+    args.asset_id = rawAssetId;
+  } else if (rawAssetId !== "__ALL__") {
+    delete args.asset_id;
+  }
+
+  if (rawCandidateKey) {
+    args.candidate_key = rawCandidateKey;
+  } else {
+    delete args.candidate_key;
+  }
+
+  if (rawCandidateKeys.length > 0) {
+    args.candidate_keys = rawCandidateKeys;
+  } else {
+    delete args.candidate_keys;
+  }
+
+  if (rawTargetMode) {
+    args.target_mode = rawTargetMode;
+  } else {
+    delete args.target_mode;
+  }
+
+  if (selectedFromCandidateKey) {
+    args.asset_id = selectedFromCandidateKey;
+  }
+
+  if (selectedFromCandidateKeys.length > 0) {
+    args.asset_ids = Array.from(new Set([
+      ...normalizeAssetIdList(args.asset_ids),
+      ...selectedFromCandidateKeys,
+    ]));
+  }
+
+  if (rawAssetId === "__ALL__") {
+    args.target_mode = "all";
+  }
+
+  if (args.target_mode === "all") {
+    const bulkAssetIds = selectedFromCandidateKeys.length > 0
+      ? selectedFromCandidateKeys
+      : candidateAssetIds;
+    const merged = Array.from(new Set([...normalizeAssetIdList(args.asset_ids), ...bulkAssetIds]));
+    if (merged.length === 0) {
+      return {
+        args,
+        requiredInput: buildCandidateSelectionRequiredInput(skill, args),
+      };
+    }
+    args.asset_ids = merged;
+    delete args.asset_id;
+    delete args.candidate_key;
+    return { args, requiredInput: null };
+  }
+
+  if (!args.asset_id && !Array.isArray(args.asset_ids)) {
+    if (candidateAssetIds.length === 1) {
+      const onlyCandidate = candidates[0];
+      if (onlyCandidate?.candidateKey) {
+        args.candidate_key = onlyCandidate.candidateKey;
+      }
+      args.asset_id = candidateAssetIds[0];
+      return { args, requiredInput: null };
+    }
+    if (candidateAssetIds.length > 1) {
+      if (!args.target_mode && multiDocCandidates) {
+        return {
+          args,
+          requiredInput: buildTargetModeRequiredInput(skill, args),
+        };
+      }
+      return {
+        args,
+        requiredInput: buildCandidateSelectionRequiredInput(skill, args),
+      };
+    }
+  }
+
+  if (args.target_mode === "single" && !args.asset_id && candidateAssetIds.length > 1) {
+    return {
+      args,
+      requiredInput: buildCandidateSelectionRequiredInput(skill, args),
+    };
+  }
+
+  return { args, requiredInput: null };
+}
+
 async function validate(state: DocAgentState): Promise<Partial<DocAgentState>> {
   const skillId = state.matchedSkillId;
   if (!skillId) {
@@ -134,7 +381,21 @@ async function validate(state: DocAgentState): Promise<Partial<DocAgentState>> {
     };
   }
 
-  const normalized = normalizeAndValidateSkillArgs(skill, state.skillArgs, state.skillDocIds);
+  let normalizedInputArgs = state.skillArgs;
+  if (isMediaTranscribeSkill(skill)) {
+    const mediaAdjusted = normalizeMediaTranscribeArgs(skill, state.skillArgs);
+    if (mediaAdjusted.requiredInput) {
+      return {
+        requiredInput: mediaAdjusted.requiredInput,
+        skillArgs: mediaAdjusted.args,
+        needsConfirmation: false,
+        plan: null,
+      };
+    }
+    normalizedInputArgs = mediaAdjusted.args;
+  }
+
+  const normalized = normalizeAndValidateSkillArgs(skill, normalizedInputArgs, state.skillDocIds);
   if (normalized.ok) {
     return {
       requiredInput: null,
@@ -180,12 +441,14 @@ async function validate(state: DocAgentState): Promise<Partial<DocAgentState>> {
       skillDescription: skill.description,
       missing: error.missing,
       issues: error.issues,
-      currentArgs: state.skillArgs,
+      currentArgs: normalizedInputArgs,
       fields: keys.slice(0, 12).map((key) => ({
         key,
         type: props[key]?.type || "string",
         description: props[key]?.description || key,
         enum: props[key]?.enum,
+        options: undefined,
+        widget: props[key]?.enum ? "select" : undefined,
       })),
     },
     needsConfirmation: false,
@@ -270,42 +533,72 @@ export const docAgentGraph = new StateGraph(DocAgentGraphState)
   .compile({ checkpointer: false, name: "doc_agent" });
 
 export async function runDocAgent(input: DocAgentInput): Promise<DocAgentOutput> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LangGraph invoke typing requires exact match
-  const result = await docAgentGraph.invoke({
-    userId: input.userId,
-    matchedSkillId: input.matchedSkillId,
-    skillArgs: input.skillArgs,
-    skillDocIds: input.skillDocIds,
-    sourceIntent: input.sourceIntent,
-    fullAccess: input.fullAccess,
-  } as any);
-
-  const matchedSkillId = typeof result.matchedSkillId === "string" ? result.matchedSkillId : null;
-  const skillArgs = (result.skillArgs && typeof result.skillArgs === "object")
-    ? (result.skillArgs as Record<string, unknown>)
-    : {};
-  const skillDocIds = Array.isArray(result.skillDocIds)
-    ? (result.skillDocIds as unknown[]).map((x) => String(x))
-    : [];
-
-  const requiredInput = (result.requiredInput && typeof result.requiredInput === "object")
-    ? (result.requiredInput as DocAgentPendingRequiredInput)
+  const span = input.traceContext
+    ? traceManager.startSpan(input.traceContext, "agent.doc", {
+        matchedSkillId: input.matchedSkillId,
+        docIds: input.skillDocIds.length,
+        sourceIntent: input.sourceIntent,
+        fullAccess: input.fullAccess,
+      })
     : null;
+  const start = Date.now();
 
-  const needsConfirmation = Boolean(result.needsConfirmation);
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LangGraph invoke typing requires exact match
+    const result = await docAgentGraph.invoke({
+      userId: input.userId,
+      matchedSkillId: input.matchedSkillId,
+      skillArgs: input.skillArgs,
+      skillDocIds: input.skillDocIds,
+      sourceIntent: input.sourceIntent,
+      fullAccess: input.fullAccess,
+    } as any);
 
-  const plan = (result.plan && typeof result.plan === "object")
-    ? (result.plan as DocAgentPlan)
-    : null;
+    const matchedSkillId = typeof result.matchedSkillId === "string" ? result.matchedSkillId : null;
+    const skillArgs = (result.skillArgs && typeof result.skillArgs === "object")
+      ? (result.skillArgs as Record<string, unknown>)
+      : {};
+    const skillDocIds = Array.isArray(result.skillDocIds)
+      ? (result.skillDocIds as unknown[]).map((x) => String(x))
+      : [];
 
-  return {
-    matchedSkillId,
-    skillArgs,
-    skillDocIds,
-    requiredInput,
-    needsConfirmation,
-    plan,
-  };
+    const requiredInput = (result.requiredInput && typeof result.requiredInput === "object")
+      ? (result.requiredInput as DocAgentPendingRequiredInput)
+      : null;
+
+    const needsConfirmation = Boolean(result.needsConfirmation);
+
+    const plan = (result.plan && typeof result.plan === "object")
+      ? (result.plan as DocAgentPlan)
+      : null;
+
+    if (span) {
+      traceManager.endSpan(span, {
+        matchedSkillId,
+        needsConfirmation,
+        requiredInput: Boolean(requiredInput),
+        planAction: plan?.action,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    return {
+      matchedSkillId,
+      skillArgs,
+      skillDocIds,
+      requiredInput,
+      needsConfirmation,
+      plan,
+    };
+  } catch (err) {
+    if (span) {
+      traceManager.endSpan(span, {
+        error: err instanceof Error ? err.message : String(err),
+        durationMs: Date.now() - start,
+      }, "ERROR");
+    }
+    throw err;
+  }
 }
 
 // Future: Review hooks can live here without leaking into Supervisor Graph.

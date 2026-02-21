@@ -32,6 +32,7 @@ export type ExecutePluginOperationInputV2 = {
   pluginId: string;
   operationId: string;
   args?: Record<string, unknown>;
+  traceId?: string;
 };
 
 export type ExecutePluginCommandInputV2 = {
@@ -41,6 +42,7 @@ export type ExecutePluginCommandInputV2 = {
   args?: Record<string, unknown>;
   source: "api" | "slash" | "palette" | "tool" | "hook";
   requestId?: string;
+  traceId?: string;
 };
 
 export type PluginCommandRuntimeItemV2 = PluginRegisteredCommandV2;

@@ -13,6 +13,7 @@ import { skillConfigStore } from "./skill-config-store.js";
 import type { SkillIntent } from "./types.js";
 import type { UnifiedSkillDefinition } from "./adapters/types.js";
 import type { SkillDefinition } from "./types.js";
+import { querySuggestsBatchTranscription } from "../../services/media-transcribe-context.js";
 
 /**
  * Trigger modes
@@ -39,6 +40,80 @@ export type TriggerResult = {
 
 // Command regex: matches /skill-name followed by optional arguments
 const COMMAND_REGEX = /^\/([a-z]+-[a-z-]+)(?:\s+(.*))?$/;
+
+function parseMediaTranscribeCommandArgs(rawText: string): Record<string, unknown> {
+  const text = String(rawText || "").trim();
+  if (!text) return {};
+
+  const assetMatch = text.match(/(?:^|\s)asset[_-]?id\s*[:=]\s*([a-zA-Z0-9_-]+)/i);
+  const docMatch = text.match(/(?:^|\s)doc[_-]?id\s*[:=]\s*([a-zA-Z0-9_-]+)/i);
+  const blockMatch = text.match(/(?:^|\s)block[_-]?id\s*[:=]\s*([a-zA-Z0-9_-]+)/i);
+  const args: Record<string, unknown> = {};
+  if (assetMatch?.[1]) args.asset_id = assetMatch[1].trim();
+  if (docMatch?.[1]) args.doc_id = docMatch[1].trim();
+  if (blockMatch?.[1]) args.block_id = blockMatch[1].trim();
+  if (Object.keys(args).length > 0) {
+    return args;
+  }
+
+  if (querySuggestsBatchTranscription(text)) {
+    return { asset_id: "__ALL__" };
+  }
+  // Fallback only for token-like values to avoid treating natural language as asset_id.
+  if (/^[a-zA-Z0-9_-]+$/.test(text)) {
+    return { asset_id: text };
+  }
+  return {};
+}
+
+function parseDocGetCommandArgs(rawText: string): Record<string, unknown> {
+  const text = String(rawText || "").trim();
+  if (!text) return {};
+
+  const tokens = text.split(/\s+/).filter(Boolean);
+  const args: Record<string, unknown> = {};
+  let docId = "";
+
+  for (const token of tokens) {
+    const normalized = token.trim();
+    if (!normalized) continue;
+
+    if (normalized === "--content" || normalized === "content" || normalized === "include_content=true") {
+      args.include_content = true;
+      continue;
+    }
+    if (normalized === "--no-block-attrs" || normalized === "include_block_attrs=false") {
+      args.include_block_attrs = false;
+      continue;
+    }
+    if (normalized.startsWith("doc_id=")) {
+      const value = normalized.slice("doc_id=".length).trim();
+      if (value) args.doc_id = value;
+      continue;
+    }
+    if (normalized.startsWith("block_types=") || normalized.startsWith("--block-types=")) {
+      const raw = normalized.split("=", 2)[1] || "";
+      const values = raw
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (values.length > 0) {
+        args.block_types = values;
+      }
+      continue;
+    }
+
+    if (!docId && /^[a-zA-Z0-9_-]+$/.test(normalized)) {
+      docId = normalized;
+    }
+  }
+
+  if (!args.doc_id && docId) {
+    args.doc_id = docId;
+  }
+
+  return args;
+}
 
 /**
  * Analyze user input and determine trigger mode
@@ -200,6 +275,15 @@ function buildIntent(
         docIds,
       };
 
+    case "doc-get":
+      return {
+        skill: skillName,
+        command,
+        args: parseDocGetCommandArgs(trimmedRest),
+        rawMessage,
+        docIds,
+      };
+
     case "doc-optimize-format":
     case "doc-optimize-content":
     case "doc-optimize-full":
@@ -291,6 +375,15 @@ function buildIntent(
           to: "markdown",
           content: trimmedRest,
         },
+        rawMessage,
+        docIds,
+      };
+
+    case "media-transcribe":
+      return {
+        skill: skillName,
+        command,
+        args: parseMediaTranscribeCommandArgs(trimmedRest),
         rawMessage,
         docIds,
       };

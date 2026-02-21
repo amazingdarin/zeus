@@ -27,6 +27,39 @@ export const docReadSkill: SkillDefinition = {
 };
 
 /**
+ * Inspect a document and return metadata / block attributes (optionally body content).
+ * Read-only operation.
+ */
+export const docGetSkill: SkillDefinition = {
+  name: "doc-get",
+  category: "doc",
+  command: "/doc-get",
+  description:
+    "获取文档元信息与 block 属性快照。可选返回正文内容，便于媒体候选解析与调试。",
+  required: false,
+  confirmation: {
+    required: false,
+    riskLevel: "low",
+  },
+  inputSchema: z.object({
+    doc_id: z.string().describe("可选：文档 ID；若未传则尝试从 @ 提及中使用第一个文档").optional(),
+    include_content: z
+      .boolean()
+      .describe("是否返回完整文档 body（默认 false）")
+      .optional(),
+    include_block_attrs: z
+      .boolean()
+      .describe("是否返回 block attrs 快照（默认 true）")
+      .optional(),
+    block_types: z
+      .array(z.string().min(1))
+      .max(50)
+      .describe("可选：仅提取指定 block 类型（默认不过滤）")
+      .optional(),
+  }),
+};
+
+/**
  * Create new document skill
  * Low risk - creates new content without modifying existing
  */
@@ -516,10 +549,86 @@ export const urlExtractSkill: SkillDefinition = {
 };
 
 /**
+ * Transcribe speech from audio/video attachments.
+ * Read-only operation — does not create a document.
+ */
+export const mediaTranscribeSkill: SkillDefinition = {
+  name: "media-transcribe",
+  category: "doc",
+  command: "/media-transcribe",
+  description:
+    "转写音频或视频中的语音文字，返回 Markdown 文本结果。支持附件、文档 file_block、单个或批量媒体。",
+  required: false,
+  confirmation: {
+    required: false,
+    riskLevel: "low",
+  },
+  inputSchema: z
+    .object({
+      asset_id: z
+        .string()
+        .describe("媒体资产 ID（来自聊天附件上传返回的 asset_id；可使用 __ALL__ 代表全部候选）")
+        .optional(),
+      asset_ids: z
+        .array(z.string().min(1))
+        .max(50)
+        .describe("批量转写的媒体资产 ID 列表")
+        .optional(),
+      candidate_key: z
+        .string()
+        .describe("候选媒体 key（由系统候选列表提供）")
+        .optional(),
+      candidate_keys: z
+        .array(z.string().min(1))
+        .max(50)
+        .describe("候选媒体 key 列表（批量）")
+        .optional(),
+      target_mode: z
+        .enum(["single", "all"])
+        .describe("候选目标模式：single 选择单个，all 批量全部")
+        .optional(),
+      media_scope: z
+        .enum(["all", "video", "audio"])
+        .describe("候选媒体范围，默认 all（音频+视频）")
+        .optional(),
+      doc_id: z.string().describe("可选：文档 ID，用于从文档 block 自动解析媒体").optional(),
+      block_id: z.string().describe("可选：文档中的 block ID，用于定位具体 file_block").optional(),
+      language: z
+        .string()
+        .describe("可选：目标语言代码（如 zh、en）")
+        .optional(),
+      prompt: z
+        .string()
+        .describe("可选：转写提示词（专业术语、人名地名等）")
+        .optional(),
+      model: z.string().describe("可选：转写模型名称").optional(),
+    })
+    .superRefine((value, ctx) => {
+      const hasAssetId = typeof value.asset_id === "string" && value.asset_id.trim().length > 0;
+      const hasAssetIds = Array.isArray(value.asset_ids)
+        && value.asset_ids.some((item) => typeof item === "string" && item.trim().length > 0);
+      const hasCandidateKey = typeof value.candidate_key === "string"
+        && value.candidate_key.trim().length > 0;
+      const hasCandidateKeys = Array.isArray(value.candidate_keys)
+        && value.candidate_keys.some((item) => typeof item === "string" && item.trim().length > 0);
+      const hasDocRef = (typeof value.doc_id === "string" && value.doc_id.trim().length > 0)
+        || (typeof value.block_id === "string" && value.block_id.trim().length > 0);
+      if (!hasAssetId && !hasAssetIds && !hasCandidateKey && !hasCandidateKeys && !hasDocRef) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["asset_id"],
+          message: "请提供 asset/candidate 参数，或 doc_id/block_id 让系统自动解析媒体",
+        });
+      }
+    }),
+};
+
+/**
  * All document skills
  */
 export const documentSkills: SkillDefinition[] = [
   docReadSkill,
+  docGetSkill,
   docCreateSkill,
   docEditSkill,
   docOptimizeFormatSkill,
@@ -541,6 +650,7 @@ export const documentSkills: SkillDefinition[] = [
   docConvertSkill,
   fileParseSkill,
   imageAnalyzeSkill,
+  mediaTranscribeSkill,
   urlExtractSkill,
 ];
 

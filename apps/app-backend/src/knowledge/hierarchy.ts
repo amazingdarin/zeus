@@ -212,6 +212,10 @@ async function generateSummary(
   if (!config || !config.enabled) {
     return undefined;
   }
+  if (config.providerId === "openai-compatible" && !config.baseUrl) {
+    console.warn("[Hierarchy] OpenAI-compatible provider missing baseUrl, skipping summary.");
+    return undefined;
+  }
 
   const fullText = extractText(body);
   if (!fullText || fullText.length < 50) {
@@ -222,6 +226,8 @@ async function generateSummary(
     const response = await llmGateway.chat({
       provider: config.providerId as Parameters<typeof llmGateway.chat>[0]["provider"],
       model: config.defaultModel || "gpt-4o-mini",
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl,
       messages: [
         {
           role: "system",

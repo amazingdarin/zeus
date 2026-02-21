@@ -23,6 +23,7 @@ const ALLOWED_CAPABILITIES = new Set<PluginCapabilityV2>([
 
 const SLASH_COMMAND_REGEX = /^\/[a-z0-9][a-z0-9-]*$/;
 const IDENTIFIER_REGEX = /^[a-z0-9][a-z0-9._-]*$/;
+const SETTINGS_FIELD_KEY_REGEX = /^[A-Za-z][A-Za-z0-9._-]*$/;
 const DOC_HOOK_EVENTS = new Set<PluginDocHookEventV2>([
   "document.create",
   "document.update",
@@ -90,6 +91,7 @@ export function parsePluginManifestV2(raw: unknown): PluginManifestV2 {
   const frontendRaw = asRecord(value.frontend);
   const backendRaw = asRecord(value.backend);
   const permissionsRaw = asRecord(value.permissions);
+  const settingsRaw = asRecord(value.settings);
   const activationRaw = asRecord(value.activation);
   const contributesRaw = asRecord(value.contributes);
 
@@ -254,6 +256,51 @@ export function parsePluginManifestV2(raw: unknown): PluginManifestV2 {
       maxExecutionMs: asNumber(permissionsRaw.maxExecutionMs),
       maxHookExecutionMs: asNumber(permissionsRaw.maxHookExecutionMs),
     },
+    settings: Array.isArray(settingsRaw.fields)
+      ? {
+        title: asString(settingsRaw.title) || undefined,
+        description: asString(settingsRaw.description) || undefined,
+        fields: settingsRaw.fields
+          .map((item) => {
+            const row = asRecord(item);
+            const key = asString(row.key);
+            if (!key) return null;
+
+            const typeRaw = asString(row.type).toLowerCase();
+            const type = (typeRaw || "string") as "string" | "textarea" | "number" | "boolean" | "select";
+            const options = Array.isArray(row.options)
+              ? row.options
+                .map((option) => {
+                  const optionRow = asRecord(option);
+                  const value = asString(optionRow.value);
+                  if (!value) return null;
+                  return {
+                    value,
+                    label: asString(optionRow.label) || value,
+                    description: asString(optionRow.description) || undefined,
+                  };
+                })
+                .filter((option): option is NonNullable<typeof option> => Boolean(option))
+              : [];
+
+            return {
+              key,
+              title: asString(row.title) || key,
+              description: asString(row.description) || undefined,
+              type,
+              required: asBool(row.required, false),
+              default: row.default as string | number | boolean | undefined,
+              placeholder: asString(row.placeholder) || undefined,
+              secret: asBool(row.secret, false),
+              min: asNumber(row.min),
+              max: asNumber(row.max),
+              step: asNumber(row.step),
+              options: options.length > 0 ? options : undefined,
+            };
+          })
+          .filter((item): item is NonNullable<typeof item> => Boolean(item)),
+      }
+      : undefined,
     integrity: asString(value.integrity) || undefined,
     signature: asString(value.signature) || undefined,
   };
@@ -291,6 +338,87 @@ export function validatePluginManifestV2(
   for (const capability of manifest.capabilities) {
     if (!ALLOWED_CAPABILITIES.has(capability)) {
       throw new Error(`Plugin ${manifest.id} uses unsupported capability: ${capability}`);
+    }
+  }
+
+  const settings = manifest.settings;
+  if (settings) {
+    if (!Array.isArray(settings.fields) || settings.fields.length === 0) {
+      throw new Error(`Plugin ${manifest.id} has invalid settings.fields`);
+    }
+    if (settings.fields.length > 100) {
+      throw new Error(`Plugin ${manifest.id} has too many settings fields`);
+    }
+    const fieldKeys = new Set<string>();
+    for (const field of settings.fields) {
+      const fieldType = String(field.type || "").trim() as "string" | "textarea" | "number" | "boolean" | "select";
+      if (!field.key || !SETTINGS_FIELD_KEY_REGEX.test(field.key)) {
+        throw new Error(`Plugin ${manifest.id} has invalid settings field key: ${field.key || "<empty>"}`);
+      }
+      if (fieldKeys.has(field.key)) {
+        throw new Error(`Plugin ${manifest.id} has duplicated settings field key: ${field.key}`);
+      }
+      fieldKeys.add(field.key);
+
+      if (!["string", "textarea", "number", "boolean", "select"].includes(fieldType)) {
+        throw new Error(`Plugin ${manifest.id} has invalid settings field type: ${fieldType || "<empty>"}`);
+      }
+
+      if (!field.title || !field.title.trim()) {
+        throw new Error(`Plugin ${manifest.id} settings field ${field.key} requires title`);
+      }
+
+      const defaultValue = field.default;
+      if (defaultValue !== undefined) {
+        if ((fieldType === "string" || fieldType === "textarea" || fieldType === "select") && typeof defaultValue !== "string") {
+          throw new Error(`Plugin ${manifest.id} settings field ${field.key} default must be string`);
+        }
+        if (fieldType === "number" && (typeof defaultValue !== "number" || !Number.isFinite(defaultValue))) {
+          throw new Error(`Plugin ${manifest.id} settings field ${field.key} default must be number`);
+        }
+        if (fieldType === "boolean" && typeof defaultValue !== "boolean") {
+          throw new Error(`Plugin ${manifest.id} settings field ${field.key} default must be boolean`);
+        }
+      }
+
+      if (fieldType === "number") {
+        const min = field.min;
+        const max = field.max;
+        const step = field.step;
+        if (min !== undefined && !Number.isFinite(min)) {
+          throw new Error(`Plugin ${manifest.id} settings field ${field.key} min must be number`);
+        }
+        if (max !== undefined && !Number.isFinite(max)) {
+          throw new Error(`Plugin ${manifest.id} settings field ${field.key} max must be number`);
+        }
+        if (step !== undefined && (!Number.isFinite(step) || step <= 0)) {
+          throw new Error(`Plugin ${manifest.id} settings field ${field.key} step must be positive number`);
+        }
+        if (min !== undefined && max !== undefined && min > max) {
+          throw new Error(`Plugin ${manifest.id} settings field ${field.key} min cannot be greater than max`);
+        }
+      }
+
+      if (fieldType === "select") {
+        const options = Array.isArray(field.options) ? field.options : [];
+        if (options.length === 0) {
+          throw new Error(`Plugin ${manifest.id} settings field ${field.key} select requires options`);
+        }
+        const optionValues = new Set<string>();
+        for (const option of options) {
+          const optionValue = String(option.value || "").trim();
+          if (!optionValue) {
+            throw new Error(`Plugin ${manifest.id} settings field ${field.key} has empty option value`);
+          }
+          if (optionValues.has(optionValue)) {
+            throw new Error(`Plugin ${manifest.id} settings field ${field.key} has duplicated option value: ${optionValue}`);
+          }
+          optionValues.add(optionValue);
+        }
+        if (typeof defaultValue === "string" && defaultValue && !optionValues.has(defaultValue)) {
+          throw new Error(`Plugin ${manifest.id} settings field ${field.key} default is not in select options`);
+        }
+      }
     }
   }
 

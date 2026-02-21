@@ -14,6 +14,7 @@ export class PluginCommandExecutorV2 {
         args: Record<string, unknown>;
         source: "api" | "slash" | "palette" | "tool" | "hook";
         requestId?: string;
+        traceId?: string;
       },
     ) => Promise<Record<string, unknown>>,
     private readonly appendAudit: (input: {
@@ -36,6 +37,7 @@ export class PluginCommandExecutorV2 {
     args?: Record<string, unknown>;
     source: "api" | "slash" | "palette" | "tool" | "hook";
     requestId?: string;
+    traceId?: string;
   }): Promise<Record<string, unknown>> {
     const startedAt = Date.now();
     const commandIdOrAlias = String(input.commandId || "").trim();
@@ -69,6 +71,7 @@ export class PluginCommandExecutorV2 {
         args,
         source: input.source,
         requestId: input.requestId,
+        traceId: input.traceId,
       });
 
       await this.appendAudit({

@@ -12,6 +12,7 @@
     "test:doc-refine": "node --import tsx --test --test-force-exit tests/doc-refine-loop.test.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
     "@ai-sdk/anthropic": "^3.0.31",
     "@ai-sdk/google": "^3.0.18",
     "@ai-sdk/openai": "^3.0.23",
@@ -38,6 +39,8 @@
     "pdf-parse": "^1.1.1",
     "pg": "^8.13.1",
     "pgvector": "^0.2.0",
+    "playwright": "^1.50.0",
+    "pptxgenjs": "^3.12.0",
     "prosemirror-markdown": "^1.13.1",
     "prosemirror-model": "^1.24.1",
     "semver": "^7.7.3",

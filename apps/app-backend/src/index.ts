@@ -6,6 +6,7 @@ import { buildRouter } from "./router.js";
 import { skillRegistry, syncAnthropicSkillConfigs } from "./llm/skills/index.js";
 import { agentSkillCatalog } from "./llm/agent/index.js";
 import { pluginManagerV2 } from "./plugins-v2/index.js";
+import { createMcpRouter, loadMcpServerConfig } from "./mcp/index.js";
 
 const app = express();
 const port = Number(process.env.APP_BACKEND_PORT ?? 4870);
@@ -35,6 +36,12 @@ app.use(
     credentials: true,
   }),
 );
+
+const mcpConfig = loadMcpServerConfig();
+if (mcpConfig.enabled) {
+  app.use(mcpConfig.path, createMcpRouter(mcpConfig));
+  console.log(`[app-backend] MCP server enabled at ${mcpConfig.path}`);
+}
 
 app.use("/api", buildRouter());
 

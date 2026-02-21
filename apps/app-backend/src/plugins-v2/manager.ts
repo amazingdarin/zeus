@@ -7,8 +7,10 @@ import {
   readdir,
   rm,
   stat,
+  unlink,
   writeFile,
 } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import os from "node:os";
@@ -23,6 +25,7 @@ import type {
   PluginManifestV2,
   PluginRegisteredCommandV2,
   PluginRuntimeItemV2,
+  PluginSettingsField,
   PluginStorePluginSummary,
   PluginStoreVersionV2,
 } from "@zeus/plugin-sdk-shared";
@@ -37,6 +40,7 @@ import { assetStore } from "../storage/asset-store.js";
 import {
   getUserPluginCacheRoot,
   getUserPluginDataGlobalRoot,
+  getUserPluginDataProjectRoot,
   getUserPluginRoot,
   getUserPluginRuntimeRoot,
   getUserPluginSettingsDir,
@@ -46,12 +50,14 @@ import { knowledgeSearch } from "../knowledge/search.js";
 import { documentSkills } from "../llm/skills/document-skills.js";
 import { skillRegistry } from "../llm/skills/registry.js";
 import { query } from "../db/postgres.js";
+import { traceManager, isLangfuseEnabled, type SpanContext, type TraceContext } from "../observability/index.js";
 import {
   assertManifestIntegrityV2,
   parsePluginManifestV2,
   validatePluginManifestV2,
   verifyManifestSignatureV2,
 } from "./manifest.js";
+import type { LangfuseGenerationClient } from "langfuse";
 import { pluginStoreClientV2 } from "./store-client.js";
 import { pluginInstallStoreV2 } from "./install-store.js";
 import { pluginRegistrySnapshotStore } from "./registry-snapshot-store.js";
@@ -69,6 +75,28 @@ import { HookOrchestratorV2 } from "./hook-orchestrator.js";
 
 const execFileAsync = promisify(execFile);
 const RESERVED_ROUTE_PREFIXES = ["/documents", "/chat", "/teams", "/login", "/register", "/plugins/store"];
+const MAX_PLUGIN_LOCAL_DATA_FILE_BYTES = 5 * 1024 * 1024;
+const MAX_PLUGIN_LOCAL_DATA_LIST_LIMIT = 500;
+const PPT_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+type PluginLocalDataScope = "project" | "global";
+type PluginLocalDataEncoding = "utf8" | "base64";
+
+export type PluginLocalDataEntry = {
+  path: string;
+  name: string;
+  type: "file" | "directory";
+  size?: number;
+  updatedAt?: string;
+};
+
+export type PluginLocalDataFile = {
+  path: string;
+  content: string;
+  encoding: PluginLocalDataEncoding;
+  size: number;
+  updatedAt: string;
+};
 
 function normalizePathInsidePlugin(relativePath: string): string {
   return relativePath
@@ -164,8 +192,134 @@ function normalizeCapabilities(value: unknown): string[] {
   return value.map((item) => String(item || "").trim()).filter(Boolean);
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function collectSettingsDefaults(manifest: PluginManifestV2): Record<string, unknown> {
+  const defaults: Record<string, unknown> = {};
+  const fields = manifest.settings?.fields || [];
+  for (const field of fields) {
+    if (field.default !== undefined) {
+      defaults[field.key] = field.default;
+    }
+  }
+  return defaults;
+}
+
+function normalizeBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "off"].includes(normalized)) return false;
+  }
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  return undefined;
+}
+
+function normalizeNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const n = Number(trimmed);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function normalizeStringValue(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return undefined;
+}
+
+function normalizeSettingFieldValue(
+  manifest: PluginManifestV2,
+  field: PluginSettingsField,
+  rawValue: unknown,
+): string | number | boolean {
+  if (field.type === "boolean") {
+    const boolValue = normalizeBoolean(rawValue);
+    if (boolValue === undefined) {
+      throw new Error(`Plugin ${manifest.id} settings field ${field.key} requires boolean`);
+    }
+    return boolValue;
+  }
+
+  if (field.type === "number") {
+    const numberValue = normalizeNumber(rawValue);
+    if (numberValue === undefined) {
+      throw new Error(`Plugin ${manifest.id} settings field ${field.key} requires number`);
+    }
+    if (field.min !== undefined && numberValue < field.min) {
+      throw new Error(`Plugin ${manifest.id} settings field ${field.key} must be >= ${field.min}`);
+    }
+    if (field.max !== undefined && numberValue > field.max) {
+      throw new Error(`Plugin ${manifest.id} settings field ${field.key} must be <= ${field.max}`);
+    }
+    return numberValue;
+  }
+
+  const textValue = normalizeStringValue(rawValue);
+  if (textValue === undefined) {
+    throw new Error(`Plugin ${manifest.id} settings field ${field.key} requires string`);
+  }
+
+  if (field.type === "select") {
+    const options = Array.isArray(field.options) ? field.options : [];
+    if (!options.some((option) => option.value === textValue)) {
+      throw new Error(`Plugin ${manifest.id} settings field ${field.key} has invalid option value`);
+    }
+  }
+
+  return textValue;
+}
+
+function normalizePluginLocalDataScope(value: unknown): PluginLocalDataScope {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "global" ? "global" : "project";
+}
+
+function normalizePluginLocalDataEncoding(value: unknown): PluginLocalDataEncoding {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "base64" ? "base64" : "utf8";
+}
+
+function normalizePluginLocalDataRelativePath(
+  value: unknown,
+  options?: { allowEmpty?: boolean },
+): string {
+  const normalized = normalizePathInsidePlugin(String(value || ""));
+  if (!normalized && options?.allowEmpty !== true) {
+    throw new Error("path is required");
+  }
+  return normalized;
+}
+
+function normalizePluginLocalDataLimit(value: unknown): number {
+  const parsed = Math.floor(Number(value || 200));
+  if (!Number.isFinite(parsed)) {
+    return 200;
+  }
+  return Math.min(Math.max(parsed, 1), MAX_PLUGIN_LOCAL_DATA_LIST_LIMIT);
+}
+
 export class PluginManagerV2 {
-  private readonly manifestCache = new Map<string, PluginManifestV2>();
+  private readonly manifestCache = new Map<
+    string,
+    {
+      manifest: PluginManifestV2;
+      manifestPath: string;
+      mtimeMs: number;
+    }
+  >();
   private readonly workerPool = new PluginWorkerPool(this.handleHostCall.bind(this));
   private readonly commandExecutor = new PluginCommandExecutorV2(
     this.resolveCommandForUser.bind(this),
@@ -178,6 +332,14 @@ export class PluginManagerV2 {
     pluginInstallStoreV2.appendAudit,
   );
   private readonly coreCommands = new Set(documentSkills.map((skill) => skill.command).filter(Boolean));
+  private readonly pluginTraceSpans = new Map<string, SpanContext>();
+  private readonly pluginTraceGenerations = new Map<string, {
+    generation: LangfuseGenerationClient;
+    traceId: string;
+    ownsTrace: boolean;
+  }>();
+  private readonly pluginTraceOwners = new Map<string, { count: number }>();
+  private traceHandleSeq = 0;
 
   async initialize(): Promise<void> {
     await mkdir(pluginConfig.rootDir, { recursive: true });
@@ -272,7 +434,8 @@ export class PluginManagerV2 {
       await mkdir(path.dirname(versionDir), { recursive: true });
       await cp(extractedRoot, versionDir, { recursive: true, force: true });
 
-      this.manifestCache.set(`${pluginId}@${selected.version}`, manifest);
+      this.manifestCache.delete(this.getManifestCacheKey(pluginId, selected.version, userId));
+      this.manifestCache.delete(this.getManifestCacheKey(pluginId, selected.version));
       this.registerManifestBlockTypes(manifest);
 
       const installation = await pluginInstallStoreV2.upsert(userId, pluginId, {
@@ -379,7 +542,9 @@ export class PluginManagerV2 {
   }
 
   async getPluginSettings(userId: string, pluginId: string): Promise<Record<string, unknown>> {
-    return (await pluginInstallStoreV2.getSettings(userId, pluginId)) || {};
+    const manifest = await this.getInstalledManifest(userId, pluginId);
+    const stored = (await pluginInstallStoreV2.getSettings(userId, pluginId)) || {};
+    return this.normalizePluginSettings(manifest, stored, { strictRequired: false });
   }
 
   async setPluginSettings(
@@ -387,12 +552,260 @@ export class PluginManagerV2 {
     pluginId: string,
     settings: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
+    const manifest = await this.getInstalledManifest(userId, pluginId);
+    const current = await this.getPluginSettings(userId, pluginId);
+    const merged = {
+      ...current,
+      ...(isObjectRecord(settings) ? settings : {}),
+    };
+    const normalized = this.normalizePluginSettings(manifest, merged, { strictRequired: true });
+    await this.ensureUserPluginLayout(userId, pluginId);
+    return pluginInstallStoreV2.setSettings(userId, pluginId, normalized);
+  }
+
+  async listLocalDataFiles(input: {
+    userId: string;
+    projectKey: string;
+    pluginId: string;
+    scope?: PluginLocalDataScope;
+    dir?: string;
+    limit?: number;
+  }): Promise<PluginLocalDataEntry[]> {
+    const root = await this.resolvePluginLocalDataRoot({
+      userId: input.userId,
+      projectKey: input.projectKey,
+      pluginId: input.pluginId,
+      scope: input.scope,
+    });
+    const relativeDir = normalizePluginLocalDataRelativePath(input.dir, { allowEmpty: true });
+    const absoluteDir = relativeDir ? joinPluginPath(root, relativeDir) : root;
+    const limit = normalizePluginLocalDataLimit(input.limit);
+
+    let dirEntries: Dirent[] = [];
+    try {
+      dirEntries = await readdir(absoluteDir, { withFileTypes: true });
+    } catch (err: unknown) {
+      const code = typeof err === "object" && err && "code" in err
+        ? String((err as { code?: unknown }).code || "")
+        : "";
+      if (code === "ENOENT") {
+        return [];
+      }
+      throw err;
+    }
+
+    const sortedEntries = [...dirEntries].sort((a, b) => {
+      if (a.isDirectory() !== b.isDirectory()) {
+        return a.isDirectory() ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    const result: PluginLocalDataEntry[] = [];
+    for (const entry of sortedEntries) {
+      if (result.length >= limit) {
+        break;
+      }
+      if (!entry.isDirectory() && !entry.isFile()) {
+        continue;
+      }
+      const relativePath = relativeDir
+        ? `${relativeDir}/${entry.name}`
+        : entry.name;
+      if (entry.isDirectory()) {
+        result.push({
+          path: relativePath,
+          name: entry.name,
+          type: "directory",
+        });
+        continue;
+      }
+      const absolutePath = joinPluginPath(root, relativePath);
+      const fileMeta = await stat(absolutePath);
+      result.push({
+        path: relativePath,
+        name: entry.name,
+        type: "file",
+        size: fileMeta.size,
+        updatedAt: fileMeta.mtime.toISOString(),
+      });
+    }
+
+    return result;
+  }
+
+  async readLocalDataFile(input: {
+    userId: string;
+    projectKey: string;
+    pluginId: string;
+    scope?: PluginLocalDataScope;
+    path: string;
+    encoding?: PluginLocalDataEncoding;
+  }): Promise<PluginLocalDataFile> {
+    const root = await this.resolvePluginLocalDataRoot({
+      userId: input.userId,
+      projectKey: input.projectKey,
+      pluginId: input.pluginId,
+      scope: input.scope,
+    });
+    const relativePath = normalizePluginLocalDataRelativePath(input.path);
+    const absolutePath = joinPluginPath(root, relativePath);
+    const meta = await stat(absolutePath);
+    if (!meta.isFile()) {
+      throw new Error("Plugin local data path is not a file");
+    }
+    const contentBuffer = await readFile(absolutePath);
+    if (contentBuffer.length > MAX_PLUGIN_LOCAL_DATA_FILE_BYTES) {
+      throw new Error("Plugin local data file exceeds size limit");
+    }
+    const encoding = normalizePluginLocalDataEncoding(input.encoding);
+    return {
+      path: relativePath,
+      content: encoding === "base64" ? contentBuffer.toString("base64") : contentBuffer.toString("utf8"),
+      encoding,
+      size: contentBuffer.length,
+      updatedAt: meta.mtime.toISOString(),
+    };
+  }
+
+  async writeLocalDataFile(input: {
+    userId: string;
+    projectKey: string;
+    pluginId: string;
+    scope?: PluginLocalDataScope;
+    path: string;
+    content: string;
+    encoding?: PluginLocalDataEncoding;
+    overwrite?: boolean;
+  }): Promise<{
+    path: string;
+    size: number;
+    updatedAt: string;
+  }> {
+    const root = await this.resolvePluginLocalDataRoot({
+      userId: input.userId,
+      projectKey: input.projectKey,
+      pluginId: input.pluginId,
+      scope: input.scope,
+    });
+    const relativePath = normalizePluginLocalDataRelativePath(input.path);
+    const absolutePath = joinPluginPath(root, relativePath);
+    const encoding = normalizePluginLocalDataEncoding(input.encoding);
+
+    const rawContent = typeof input.content === "string" ? input.content : "";
+    let contentBuffer: Buffer;
+    if (encoding === "base64") {
+      try {
+        contentBuffer = Buffer.from(rawContent, "base64");
+      } catch {
+        throw new Error("Invalid base64 content");
+      }
+    } else {
+      contentBuffer = Buffer.from(rawContent, "utf8");
+    }
+
+    if (contentBuffer.length > MAX_PLUGIN_LOCAL_DATA_FILE_BYTES) {
+      throw new Error("Plugin local data file exceeds size limit");
+    }
+
+    await mkdir(path.dirname(absolutePath), { recursive: true });
+    if (input.overwrite === false) {
+      try {
+        await access(absolutePath);
+        throw new Error("Plugin local data file already exists");
+      } catch (err: unknown) {
+        const code = typeof err === "object" && err && "code" in err
+          ? String((err as { code?: unknown }).code || "")
+          : "";
+        if (code && code !== "ENOENT") {
+          throw err;
+        }
+      }
+    }
+
+    await writeFile(absolutePath, contentBuffer);
+    const fileMeta = await stat(absolutePath);
+    return {
+      path: relativePath,
+      size: fileMeta.size,
+      updatedAt: fileMeta.mtime.toISOString(),
+    };
+  }
+
+  async deleteLocalDataFile(input: {
+    userId: string;
+    projectKey: string;
+    pluginId: string;
+    scope?: PluginLocalDataScope;
+    path: string;
+  }): Promise<{ deleted: boolean }> {
+    const root = await this.resolvePluginLocalDataRoot({
+      userId: input.userId,
+      projectKey: input.projectKey,
+      pluginId: input.pluginId,
+      scope: input.scope,
+    });
+    const relativePath = normalizePluginLocalDataRelativePath(input.path);
+    const absolutePath = joinPluginPath(root, relativePath);
+    try {
+      const fileMeta = await stat(absolutePath);
+      if (!fileMeta.isFile()) {
+        return { deleted: false };
+      }
+      await unlink(absolutePath);
+      return { deleted: true };
+    } catch (err: unknown) {
+      const code = typeof err === "object" && err && "code" in err
+        ? String((err as { code?: unknown }).code || "")
+        : "";
+      if (code === "ENOENT") {
+        return { deleted: false };
+      }
+      throw err;
+    }
+  }
+
+  private async getInstalledManifest(userId: string, pluginId: string): Promise<PluginManifestV2> {
     const installation = await pluginInstallStoreV2.get(userId, pluginId);
     if (!installation || installation.status !== "installed") {
       throw new Error(`Plugin is not installed: ${pluginId}`);
     }
-    await this.ensureUserPluginLayout(userId, pluginId);
-    return pluginInstallStoreV2.setSettings(userId, pluginId, settings);
+    const manifest = await this.loadManifestFromDisk(pluginId, installation.version, userId);
+    if (!manifest) {
+      throw new Error(`Manifest not found: ${pluginId}@${installation.version}`);
+    }
+    return manifest;
+  }
+
+  private normalizePluginSettings(
+    manifest: PluginManifestV2,
+    raw: unknown,
+    options?: { strictRequired?: boolean },
+  ): Record<string, unknown> {
+    const strictRequired = options?.strictRequired === true;
+    const defaults = collectSettingsDefaults(manifest);
+    const fields = manifest.settings?.fields || [];
+    if (fields.length === 0) {
+      return isObjectRecord(raw) ? { ...raw } : {};
+    }
+
+    const source = isObjectRecord(raw) ? raw : {};
+    const next: Record<string, unknown> = { ...defaults };
+    for (const field of fields) {
+      if (!Object.prototype.hasOwnProperty.call(source, field.key)) {
+        continue;
+      }
+      const normalized = normalizeSettingFieldValue(manifest, field, source[field.key]);
+      next[field.key] = normalized;
+    }
+
+    for (const field of fields) {
+      const value = next[field.key];
+      if (field.required && strictRequired && (value === undefined || value === null || value === "")) {
+        throw new Error(`Plugin ${manifest.id} settings field ${field.key} is required`);
+      }
+    }
+    return next;
   }
 
   async getRuntimeForUser(userId: string): Promise<PluginRuntimeItemV2[]> {
@@ -505,6 +918,7 @@ export class PluginManagerV2 {
       args: input.args,
       source: input.source,
       requestId: input.requestId,
+      traceId: input.traceId,
     });
   }
 
@@ -536,8 +950,230 @@ export class PluginManagerV2 {
         userId: input.userId,
         projectKey: input.projectKey,
       },
+      traceId: input.traceId,
       timeoutMs: normalizeExecutionTimeoutMs(manifest),
     });
+  }
+
+  async traceFromWeb(input: {
+    userId: string;
+    projectKey: string;
+    pluginId: string;
+    method: string;
+    args?: Record<string, unknown>;
+  }): Promise<unknown> {
+    const methodName = String(input.method || "").trim();
+    if (!methodName) {
+      throw new Error("trace method is required");
+    }
+    if (methodName === "isEnabled") {
+      return isLangfuseEnabled();
+    }
+    if (!isLangfuseEnabled()) {
+      if (methodName === "startSpan" || methodName === "startGeneration") {
+        return null;
+      }
+      return { ok: false };
+    }
+
+    const installation = await pluginInstallStoreV2.get(input.userId, input.pluginId);
+    if (!installation || installation.status !== "installed" || !installation.enabled) {
+      throw new Error(`Plugin is not installed or disabled: ${input.pluginId}`);
+    }
+
+    const manifest = await this.getManifestOrThrow(input.pluginId, installation.version, input.userId);
+    const args = input.args && typeof input.args === "object"
+      ? (input.args as Record<string, unknown>)
+      : {};
+
+    const traceName = typeof args.traceName === "string" && args.traceName.trim()
+      ? args.traceName.trim()
+      : "plugin.web";
+    const extraTags = Array.isArray(args.traceTags)
+      ? args.traceTags.filter((tag) => typeof tag === "string").map((tag) => tag.trim()).filter(Boolean)
+      : [];
+    const traceTags = ["plugin", input.pluginId, "web", ...extraTags];
+
+    const baseContext: WorkerExecutionContext = {
+      pluginId: input.pluginId,
+      userId: input.userId,
+      projectKey: input.projectKey,
+      traceId: undefined,
+      permissions: {
+        allowedHttpHosts: [],
+        maxExecutionMs: 0,
+      },
+      capabilities: manifest.capabilities,
+    };
+
+    const traceMetadata = this.buildPluginTraceMetadata(baseContext, {
+      source: "web",
+      pluginVersion: manifest.version,
+      ...(args.traceMetadata && typeof args.traceMetadata === "object" && !Array.isArray(args.traceMetadata)
+        ? args.traceMetadata
+        : {}),
+    });
+
+    switch (methodName) {
+      case "startSpan": {
+        const name = String(args.name || "").trim();
+        if (!name) {
+          throw new Error("trace.startSpan name is required");
+        }
+        const traceId = typeof args.traceId === "string" ? args.traceId : undefined;
+        const traceState = this.ensureWebTraceContext({
+          traceId,
+          traceName,
+          traceTags,
+          traceMetadata,
+          userId: input.userId,
+          projectKey: input.projectKey,
+          pluginId: input.pluginId,
+        });
+        if (!traceState?.traceContext) {
+          return null;
+        }
+        const spanInput = this.buildPluginTraceInput(
+          { ...baseContext, traceId: traceState.traceId },
+          args.input,
+        );
+        const span = traceManager.startSpan(traceState.traceContext, name, spanInput);
+        this.pluginTraceSpans.set(span.spanId, span);
+        if (traceState.ownsTrace) {
+          this.retainOwnedTrace(traceState.traceId);
+        }
+        return { spanId: span.spanId, traceId: traceState.traceId };
+      }
+
+      case "endSpan": {
+        const spanId = String(args.spanId || "").trim();
+        if (!spanId) {
+          throw new Error("trace.endSpan spanId is required");
+        }
+        const span = this.pluginTraceSpans.get(spanId);
+        if (!span) {
+          return { ok: false };
+        }
+        traceManager.endSpan(span, args.output, this.normalizeTraceLevel(args.level));
+        this.pluginTraceSpans.delete(spanId);
+        const traceEnded = this.releaseOwnedTrace(span.traceContext.traceId);
+        return { ok: true, traceEnded };
+      }
+
+      case "logGeneration": {
+        const params = args.params && typeof args.params === "object"
+          ? args.params as Record<string, unknown>
+          : {};
+        const name = String(params.name || "").trim();
+        const model = String(params.model || "").trim();
+        if (!name || !model) {
+          throw new Error("trace.logGeneration requires name and model");
+        }
+        const traceId = typeof params.traceId === "string" ? params.traceId : undefined;
+        const traceState = this.ensureWebTraceContext({
+          traceId,
+          traceName,
+          traceTags,
+          traceMetadata,
+          userId: input.userId,
+          projectKey: input.projectKey,
+          pluginId: input.pluginId,
+        });
+        if (!traceState?.traceContext) {
+          return { ok: false };
+        }
+        traceManager.logGeneration(traceState.traceContext, {
+          name,
+          model,
+          provider: typeof params.provider === "string" ? params.provider : undefined,
+          input: params.input,
+          output: typeof params.output === "string" ? params.output : undefined,
+          usage: this.normalizeTraceUsage(params.usage),
+          startTime: this.normalizeTraceDate(params.startTime),
+          endTime: this.normalizeTraceDate(params.endTime),
+          level: this.normalizeTraceLevel(params.level),
+          statusMessage: typeof params.statusMessage === "string" ? params.statusMessage : undefined,
+          metadata: this.buildPluginTraceMetadata(baseContext, params.metadata),
+        });
+        const traceEnded = traceState.created && !this.pluginTraceOwners.has(traceState.traceId);
+        if (traceEnded) {
+          traceManager.endTrace(traceState.traceId, { status: "ok" });
+        }
+        return { ok: true, traceId: traceState.traceId, traceEnded };
+      }
+
+      case "startGeneration": {
+        const params = args.params && typeof args.params === "object"
+          ? args.params as Record<string, unknown>
+          : {};
+        const name = String(params.name || "").trim();
+        const model = String(params.model || "").trim();
+        if (!name || !model) {
+          throw new Error("trace.startGeneration requires name and model");
+        }
+        const traceId = typeof params.traceId === "string" ? params.traceId : undefined;
+        const traceState = this.ensureWebTraceContext({
+          traceId,
+          traceName,
+          traceTags,
+          traceMetadata,
+          userId: input.userId,
+          projectKey: input.projectKey,
+          pluginId: input.pluginId,
+        });
+        if (!traceState?.traceContext) {
+          return null;
+        }
+        const generation = traceManager.startGeneration(traceState.traceContext, {
+          name,
+          model,
+          provider: typeof params.provider === "string" ? params.provider : undefined,
+          input: params.input,
+          startTime: this.normalizeTraceDate(params.startTime),
+          level: this.normalizeTraceLevel(params.level),
+          statusMessage: typeof params.statusMessage === "string" ? params.statusMessage : undefined,
+          metadata: this.buildPluginTraceMetadata(baseContext, params.metadata),
+        });
+        if (!generation) {
+          return null;
+        }
+        const generationId = this.nextTraceHandle(`gen-${input.pluginId}`);
+        this.pluginTraceGenerations.set(generationId, {
+          generation,
+          traceId: traceState.traceId,
+          ownsTrace: traceState.ownsTrace,
+        });
+        if (traceState.ownsTrace) {
+          this.retainOwnedTrace(traceState.traceId);
+        }
+        return { generationId, traceId: traceState.traceId };
+      }
+
+      case "endGeneration": {
+        const generationId = String(args.generationId || "").trim();
+        if (!generationId) {
+          throw new Error("trace.endGeneration generationId is required");
+        }
+        const entry = this.pluginTraceGenerations.get(generationId);
+        if (!entry) {
+          return { ok: false };
+        }
+        const output = typeof args.output === "string" ? args.output : "";
+        traceManager.endGeneration(
+          entry.generation,
+          output,
+          this.normalizeTraceUsage(args.usage),
+          this.normalizeTraceLevel(args.level),
+          typeof args.statusMessage === "string" ? args.statusMessage : undefined,
+        );
+        this.pluginTraceGenerations.delete(generationId);
+        const traceEnded = entry.ownsTrace ? this.releaseOwnedTrace(entry.traceId) : false;
+        return { ok: true, traceEnded };
+      }
+
+      default:
+        throw new Error(`Unknown trace method: ${methodName}`);
+    }
   }
 
   async runBeforeHooks(input: HookDispatchInputV2) {
@@ -668,6 +1304,7 @@ export class PluginManagerV2 {
       args: Record<string, unknown>;
       source: "api" | "slash" | "palette" | "tool" | "hook";
       requestId?: string;
+      traceId?: string;
     },
   ): Promise<Record<string, unknown>> {
     const manifest = await this.getManifestOrThrow(command.pluginId, command.version, input.userId);
@@ -695,6 +1332,7 @@ export class PluginManagerV2 {
         userId: input.userId,
         projectKey: input.projectKey,
       },
+      traceId: input.traceId,
       timeoutMs: normalizeExecutionTimeoutMs(manifest),
     });
   }
@@ -748,15 +1386,70 @@ export class PluginManagerV2 {
       projectKey: string;
     };
     timeoutMs: number;
+    traceId?: string;
+    traceName?: string;
+    traceTags?: string[];
+    traceMetadata?: Record<string, unknown>;
   }): Promise<Record<string, unknown>> {
     const versionDir = resolvePluginVersionDir(input.manifest.id, input.manifest.version, input.userId);
     const backendPath = joinPluginPath(versionDir, input.backendEntry);
     await access(backendPath);
 
+    const traceName = input.traceName || "plugin.execute";
+    const traceTags = ["plugin", input.manifest.id, ...(input.traceTags || [])];
+    const traceMetadata = {
+      pluginId: input.manifest.id,
+      pluginVersion: input.manifest.version,
+      handler: input.handler,
+      ...this.buildPluginTraceMetadata({
+        pluginId: input.manifest.id,
+        userId: input.context.userId,
+        projectKey: input.context.projectKey,
+        permissions: { allowedHttpHosts: [], maxExecutionMs: 0 },
+      }, input.traceMetadata),
+    };
+
+    let ownsTrace = false;
+    const traceContext = (() => {
+      const explicit = typeof input.traceId === "string" ? input.traceId.trim() : "";
+      if (explicit) {
+        const existing = traceManager.getTrace(explicit);
+        if (existing) return existing;
+        ownsTrace = true;
+        return traceManager.startTrace(explicit, {
+          name: traceName,
+          userId: input.context.userId,
+          projectKey: input.context.projectKey,
+          tags: traceTags,
+          metadata: traceMetadata,
+        });
+      }
+
+      const generated = `plugin-${input.manifest.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      ownsTrace = true;
+      return traceManager.startTrace(generated, {
+        name: traceName,
+        userId: input.context.userId,
+        projectKey: input.context.projectKey,
+        tags: traceTags,
+        metadata: traceMetadata,
+      });
+    })();
+
+    const execSpan = traceContext?.trace
+      ? traceManager.startSpan(traceContext, traceName, {
+          handler: input.handler,
+          pluginId: input.manifest.id,
+          projectKey: input.context.projectKey,
+          userId: input.context.userId,
+        })
+      : null;
+
     const executionContext: WorkerExecutionContext = {
       pluginId: input.manifest.id,
       userId: input.context.userId,
       projectKey: input.context.projectKey,
+      traceId: traceContext?.traceId || input.traceId,
       permissions: {
         allowedHttpHosts: input.manifest.permissions?.allowedHttpHosts || [],
         maxExecutionMs: normalizeExecutionTimeoutMs(input.manifest),
@@ -764,17 +1457,228 @@ export class PluginManagerV2 {
       capabilities: input.manifest.capabilities,
     };
 
-    const result = await this.workerPool.execute(
-      input.manifest.id,
-      input.manifest.version,
-      backendPath,
-      input.handler,
-      input.input,
-      executionContext,
-      Math.max(200, Math.round(input.timeoutMs || normalizeExecutionTimeoutMs(input.manifest))),
-    );
+    try {
+      const result = await this.workerPool.execute(
+        input.manifest.id,
+        input.manifest.version,
+        backendPath,
+        input.handler,
+        input.input,
+        executionContext,
+        Math.max(200, Math.round(input.timeoutMs || normalizeExecutionTimeoutMs(input.manifest))),
+      );
 
-    return result;
+      if (execSpan) {
+        traceManager.endSpan(execSpan, { status: "ok" });
+      }
+
+      if (ownsTrace && traceContext) {
+        traceManager.endTrace(traceContext.traceId, { status: "ok" });
+      }
+
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (execSpan) {
+        traceManager.endSpan(execSpan, { status: "error", error: message }, "ERROR");
+      }
+      if (ownsTrace && traceContext) {
+        traceManager.endTrace(traceContext.traceId, { error: message });
+      }
+      throw err;
+    }
+  }
+
+  private nextTraceHandle(prefix: string): string {
+    this.traceHandleSeq += 1;
+    return `${prefix}-${Date.now()}-${this.traceHandleSeq}`;
+  }
+
+  private retainOwnedTrace(traceId: string): void {
+    if (!traceId) return;
+    const current = this.pluginTraceOwners.get(traceId);
+    if (current) {
+      current.count += 1;
+      return;
+    }
+    this.pluginTraceOwners.set(traceId, { count: 1 });
+  }
+
+  private releaseOwnedTrace(traceId: string): boolean {
+    if (!traceId) return false;
+    const current = this.pluginTraceOwners.get(traceId);
+    if (!current) {
+      return false;
+    }
+    current.count -= 1;
+    if (current.count > 0) {
+      this.pluginTraceOwners.set(traceId, current);
+      return false;
+    }
+    this.pluginTraceOwners.delete(traceId);
+    traceManager.endTrace(traceId, { status: "ok" });
+    return true;
+  }
+
+  private getTraceContext(context: WorkerExecutionContext): TraceContext | null {
+    const traceId = typeof context.traceId === "string" ? context.traceId.trim() : "";
+    if (!traceId) return null;
+    return traceManager.getTrace(traceId);
+  }
+
+  private ensureWebTraceContext(input: {
+    traceId?: string;
+    traceName: string;
+    traceTags: string[];
+    traceMetadata: Record<string, unknown>;
+    userId: string;
+    projectKey: string;
+    pluginId: string;
+  }): { traceContext: TraceContext; traceId: string; ownsTrace: boolean; created: boolean } | null {
+    if (!isLangfuseEnabled()) {
+      return null;
+    }
+    const explicit = typeof input.traceId === "string" ? input.traceId.trim() : "";
+    if (explicit) {
+      const existing = traceManager.getTrace(explicit);
+      if (existing) {
+        return {
+          traceContext: existing,
+          traceId: explicit,
+          ownsTrace: this.pluginTraceOwners.has(explicit),
+          created: false,
+        };
+      }
+      const traceContext = traceManager.startTrace(explicit, {
+        name: input.traceName,
+        userId: input.userId,
+        projectKey: input.projectKey,
+        tags: input.traceTags,
+        metadata: input.traceMetadata,
+      });
+      return {
+        traceContext,
+        traceId: explicit,
+        ownsTrace: true,
+        created: true,
+      };
+    }
+
+    const generated = `plugin-web-${input.pluginId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const traceContext = traceManager.startTrace(generated, {
+      name: input.traceName,
+      userId: input.userId,
+      projectKey: input.projectKey,
+      tags: input.traceTags,
+      metadata: input.traceMetadata,
+    });
+    return {
+      traceContext,
+      traceId: generated,
+      ownsTrace: true,
+      created: true,
+    };
+  }
+
+  private buildPluginTraceInput(context: WorkerExecutionContext, input: unknown): unknown {
+    const pluginMeta = {
+      pluginId: context.pluginId,
+      userId: context.userId,
+      projectKey: context.projectKey,
+    };
+
+    if (!input) {
+      return { _plugin: pluginMeta };
+    }
+    if (typeof input === "object" && !Array.isArray(input)) {
+      return { ...(input as Record<string, unknown>), _plugin: pluginMeta };
+    }
+    return { input, _plugin: pluginMeta };
+  }
+
+  private buildPluginTraceMetadata(context: WorkerExecutionContext, metadata: unknown): Record<string, unknown> {
+    const base = (metadata && typeof metadata === "object" && !Array.isArray(metadata))
+      ? (metadata as Record<string, unknown>)
+      : {};
+    return {
+      ...base,
+      pluginId: context.pluginId,
+      userId: context.userId,
+      projectKey: context.projectKey,
+    };
+  }
+
+  private normalizeTraceLevel(value: unknown): "DEBUG" | "DEFAULT" | "WARNING" | "ERROR" | undefined {
+    if (value === "DEBUG" || value === "DEFAULT" || value === "WARNING" || value === "ERROR") {
+      return value;
+    }
+    return undefined;
+  }
+
+  private normalizeTraceUsage(value: unknown): {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  } | undefined {
+    if (!value || typeof value !== "object") {
+      return undefined;
+    }
+    const row = value as Record<string, unknown>;
+    const promptTokens = typeof row.promptTokens === "number" ? row.promptTokens : undefined;
+    const completionTokens = typeof row.completionTokens === "number" ? row.completionTokens : undefined;
+    const totalTokens = typeof row.totalTokens === "number" ? row.totalTokens : undefined;
+    if (promptTokens === undefined && completionTokens === undefined && totalTokens === undefined) {
+      return undefined;
+    }
+    return { promptTokens, completionTokens, totalTokens };
+  }
+
+  private normalizeTraceDate(value: unknown): Date | undefined {
+    if (value instanceof Date) {
+      if (!Number.isNaN(value.getTime())) {
+        return value;
+      }
+      return undefined;
+    }
+    if (typeof value !== "string") {
+      return undefined;
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return undefined;
+    }
+    return parsed;
+  }
+
+  private normalizePptFilename(value: unknown, fallback: string): string {
+    const raw = typeof value === "string" ? value.trim() : "";
+    const base = raw || fallback;
+    const sanitized = base.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
+    return sanitized || fallback;
+  }
+
+  private async waitForPptTask(
+    taskId: string,
+    waitMs: number,
+    pollIntervalMs: number,
+  ): Promise<{ status: "pending" | "processing" | "completed" | "failed"; error?: string; waitedMs: number }> {
+    const { pptService } = await import("../services/ppt/index.js");
+    const startedAt = Date.now();
+    let status = await pptService.getTaskStatus(taskId);
+    const shouldContinue = () =>
+      (status.status === "pending" || status.status === "processing")
+      && Date.now() - startedAt < waitMs;
+
+    while (shouldContinue()) {
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      status = await pptService.getTaskStatus(taskId);
+    }
+
+    return {
+      status: status.status,
+      error: status.error,
+      waitedMs: Date.now() - startedAt,
+    };
   }
 
   private async handleHostCall(
@@ -785,6 +1689,130 @@ export class PluginManagerV2 {
     const methodName = String(method || "").trim();
 
     switch (methodName) {
+      case "trace.isEnabled": {
+        const traceContext = this.getTraceContext(context);
+        return Boolean(traceContext?.trace);
+      }
+
+      case "trace.startSpan": {
+        const traceContext = this.getTraceContext(context);
+        if (!traceContext) {
+          return null;
+        }
+        const name = String(args.name || "").trim();
+        if (!name) {
+          throw new Error("trace.startSpan name is required");
+        }
+        const spanInput = this.buildPluginTraceInput(context, args.input);
+        const span = traceManager.startSpan(traceContext, name, spanInput);
+        this.pluginTraceSpans.set(span.spanId, span);
+        return { spanId: span.spanId };
+      }
+
+      case "trace.endSpan": {
+        const spanId = String(args.spanId || "").trim();
+        if (!spanId) {
+          throw new Error("trace.endSpan spanId is required");
+        }
+        const span = this.pluginTraceSpans.get(spanId);
+        if (!span) {
+          return { ok: false };
+        }
+        traceManager.endSpan(span, args.output, this.normalizeTraceLevel(args.level));
+        this.pluginTraceSpans.delete(spanId);
+        return { ok: true };
+      }
+
+      case "trace.logGeneration": {
+        const traceContext = this.getTraceContext(context);
+        if (!traceContext) {
+          return { ok: false };
+        }
+        const params = args.params && typeof args.params === "object"
+          ? args.params as Record<string, unknown>
+          : {};
+        const name = String(params.name || "").trim();
+        const model = String(params.model || "").trim();
+        if (!name || !model) {
+          throw new Error("trace.logGeneration requires name and model");
+        }
+
+        traceManager.logGeneration(traceContext, {
+          name,
+          model,
+          provider: typeof params.provider === "string" ? params.provider : undefined,
+          input: params.input,
+          output: typeof params.output === "string" ? params.output : undefined,
+          usage: this.normalizeTraceUsage(params.usage),
+          startTime: this.normalizeTraceDate(params.startTime),
+          endTime: this.normalizeTraceDate(params.endTime),
+          level: this.normalizeTraceLevel(params.level),
+          statusMessage: typeof params.statusMessage === "string" ? params.statusMessage : undefined,
+          metadata: this.buildPluginTraceMetadata(context, params.metadata),
+        });
+        return { ok: true };
+      }
+
+      case "trace.startGeneration": {
+        const traceContext = this.getTraceContext(context);
+        if (!traceContext) {
+          return null;
+        }
+        const params = args.params && typeof args.params === "object"
+          ? args.params as Record<string, unknown>
+          : {};
+        const name = String(params.name || "").trim();
+        const model = String(params.model || "").trim();
+        if (!name || !model) {
+          throw new Error("trace.startGeneration requires name and model");
+        }
+
+        const generation = traceManager.startGeneration(traceContext, {
+          name,
+          model,
+          provider: typeof params.provider === "string" ? params.provider : undefined,
+          input: params.input,
+          startTime: this.normalizeTraceDate(params.startTime),
+          level: this.normalizeTraceLevel(params.level),
+          statusMessage: typeof params.statusMessage === "string" ? params.statusMessage : undefined,
+          metadata: this.buildPluginTraceMetadata(context, params.metadata),
+        });
+
+        if (!generation) {
+          return null;
+        }
+
+        const generationId = this.nextTraceHandle(`gen-${context.pluginId}`);
+        this.pluginTraceGenerations.set(generationId, {
+          generation,
+          traceId: traceContext.traceId,
+          ownsTrace: false,
+        });
+        return { generationId };
+      }
+
+      case "trace.endGeneration": {
+        const generationId = String(args.generationId || "").trim();
+        if (!generationId) {
+          throw new Error("trace.endGeneration generationId is required");
+        }
+        const entry = this.pluginTraceGenerations.get(generationId);
+        if (!entry) {
+          return { ok: false };
+        }
+        const output = typeof args.output === "string" ? args.output : "";
+        traceManager.endGeneration(
+          entry.generation,
+          output,
+          this.normalizeTraceUsage(args.usage),
+          this.normalizeTraceLevel(args.level),
+          typeof args.statusMessage === "string" ? args.statusMessage : undefined,
+        );
+        this.pluginTraceGenerations.delete(generationId);
+        const traceEnded = entry.ownsTrace ? this.releaseOwnedTrace(entry.traceId) : false;
+        return { ok: true, traceEnded };
+      }
+
       case "getDocument": {
         this.assertCapability(context, "docs.read", methodName);
         const projectKey = String(args.projectKey || context.projectKey).trim();
@@ -876,6 +1904,90 @@ export class PluginManagerV2 {
         return await assetStore.getMeta(context.userId, projectKey, assetId);
       }
 
+      case "getPluginSettings": {
+        const targetPluginId = String(args.pluginId || context.pluginId).trim();
+        if (!targetPluginId || targetPluginId !== context.pluginId) {
+          throw new Error("pluginId is invalid for getPluginSettings");
+        }
+        return await this.getPluginSettings(context.userId, targetPluginId);
+      }
+
+      case "listPluginDataFiles": {
+        const targetPluginId = String(args.pluginId || context.pluginId).trim();
+        if (!targetPluginId || targetPluginId !== context.pluginId) {
+          throw new Error("pluginId is invalid for listPluginDataFiles");
+        }
+        return this.listLocalDataFiles({
+          userId: context.userId,
+          projectKey: String(args.projectKey || context.projectKey).trim(),
+          pluginId: targetPluginId,
+          scope: normalizePluginLocalDataScope(args.scope),
+          dir: typeof args.dir === "string" ? args.dir : "",
+          limit: Number(args.limit || 200),
+        });
+      }
+
+      case "readPluginDataFile": {
+        const targetPluginId = String(args.pluginId || context.pluginId).trim();
+        if (!targetPluginId || targetPluginId !== context.pluginId) {
+          throw new Error("pluginId is invalid for readPluginDataFile");
+        }
+        const dataPath = String(args.path || "").trim();
+        if (!dataPath) {
+          throw new Error("path is required");
+        }
+        return this.readLocalDataFile({
+          userId: context.userId,
+          projectKey: String(args.projectKey || context.projectKey).trim(),
+          pluginId: targetPluginId,
+          scope: normalizePluginLocalDataScope(args.scope),
+          path: dataPath,
+          encoding: normalizePluginLocalDataEncoding(args.encoding),
+        });
+      }
+
+      case "writePluginDataFile": {
+        const targetPluginId = String(args.pluginId || context.pluginId).trim();
+        if (!targetPluginId || targetPluginId !== context.pluginId) {
+          throw new Error("pluginId is invalid for writePluginDataFile");
+        }
+        const dataPath = String(args.path || "").trim();
+        if (!dataPath) {
+          throw new Error("path is required");
+        }
+        if (typeof args.content !== "string") {
+          throw new Error("content must be a string");
+        }
+        return this.writeLocalDataFile({
+          userId: context.userId,
+          projectKey: String(args.projectKey || context.projectKey).trim(),
+          pluginId: targetPluginId,
+          scope: normalizePluginLocalDataScope(args.scope),
+          path: dataPath,
+          content: args.content,
+          encoding: normalizePluginLocalDataEncoding(args.encoding),
+          overwrite: args.overwrite !== false,
+        });
+      }
+
+      case "deletePluginDataFile": {
+        const targetPluginId = String(args.pluginId || context.pluginId).trim();
+        if (!targetPluginId || targetPluginId !== context.pluginId) {
+          throw new Error("pluginId is invalid for deletePluginDataFile");
+        }
+        const dataPath = String(args.path || "").trim();
+        if (!dataPath) {
+          throw new Error("path is required");
+        }
+        return this.deleteLocalDataFile({
+          userId: context.userId,
+          projectKey: String(args.projectKey || context.projectKey).trim(),
+          pluginId: targetPluginId,
+          scope: normalizePluginLocalDataScope(args.scope),
+          path: dataPath,
+        });
+      }
+
       case "searchKnowledge":
       case "getKnowledgeSources": {
         this.assertCapability(context, "docs.read", methodName);
@@ -888,6 +2000,244 @@ export class PluginManagerV2 {
           text: queryText,
           limit,
         });
+      }
+
+      case "exportDocumentPpt": {
+        this.assertCapability(context, "docs.read", methodName);
+        const projectKey = String(args.projectKey || context.projectKey).trim();
+        const docId = String(args.docId || "").trim();
+        if (!docId) {
+          throw new Error("docId is required");
+        }
+
+        const requestRow = args.request && typeof args.request === "object"
+          ? args.request as Record<string, unknown>
+          : {};
+        const styleRow = requestRow.style && typeof requestRow.style === "object"
+          ? requestRow.style as Record<string, unknown>
+          : {};
+        const optionsRow = requestRow.options && typeof requestRow.options === "object"
+          ? requestRow.options as Record<string, unknown>
+          : {};
+
+        const style = {
+          description: typeof styleRow.description === "string" ? styleRow.description : undefined,
+          templateId: typeof styleRow.templateId === "string" ? styleRow.templateId : undefined,
+          templateImages: Array.isArray(styleRow.templateImages)
+            ? styleRow.templateImages.map((item) => String(item || "").trim()).filter(Boolean)
+            : undefined,
+        };
+        const aspectRatioRaw = String(optionsRow.aspectRatio || "").trim();
+        let aspectRatio: "16:9" | "4:3" | undefined;
+        if (aspectRatioRaw === "16:9" || aspectRatioRaw === "4:3") {
+          aspectRatio = aspectRatioRaw;
+        }
+        const options = {
+          aspectRatio,
+          language: typeof optionsRow.language === "string" ? optionsRow.language : undefined,
+        };
+
+        const doc = await documentStore.get(context.userId, projectKey, docId);
+        const body = doc.body?.content as Record<string, unknown> | undefined;
+        if (!body || body.type !== "doc") {
+          throw new Error("Document has no valid Tiptap content");
+        }
+
+        const { pptService } = await import("../services/ppt/index.js");
+        const available = await pptService.isAvailable();
+        if (!available) {
+          throw new Error("PPT generation service is not available");
+        }
+
+        const result = await pptService.generateFromDocument(body as any, style, options);
+        return {
+          taskId: result.taskId,
+          status: result.status,
+        };
+      }
+
+      case "generatePptFromHtml": {
+        this.assertCapability(context, "docs.write", methodName);
+        const projectKey = String(args.projectKey || context.projectKey).trim();
+        const html = typeof args.html === "string" ? args.html : "";
+        if (!html.trim()) {
+          throw new Error("html is required");
+        }
+
+        const exportBackend = String(process.env.PPT_EXPORT_BACKEND || "local").trim().toLowerCase();
+        const preferBanana = exportBackend === "banana";
+        const preferAuto = exportBackend === "auto";
+
+        const style = args.style && typeof args.style === "object"
+          ? args.style as {
+            description?: string;
+            templateId?: string;
+            templateImages?: string[];
+          }
+          : undefined;
+
+        const options = args.options && typeof args.options === "object"
+          ? args.options as {
+            aspectRatio?: "16:9" | "4:3";
+            language?: string;
+          }
+          : undefined;
+
+        const filenameBase = this.normalizePptFilename(args.fileName, `presentation-${Date.now()}`);
+        const htmlFilename = filenameBase.toLowerCase().endsWith(".html")
+          ? filenameBase
+          : `${filenameBase}.html`;
+
+        if (!preferBanana) {
+          if (preferAuto) {
+            const { pptService } = await import("../services/ppt/index.js");
+            const available = await pptService.isAvailable();
+            if (available) {
+              const result = await pptService.generateFromFile(
+                Buffer.from(html, "utf-8"),
+                htmlFilename,
+                style,
+              );
+
+              const maxWaitMsRaw = typeof args.waitMs === "number" ? args.waitMs : context.permissions.maxExecutionMs;
+              const maxWaitMs = Math.max(0, Math.min(Math.floor(maxWaitMsRaw || 0), 60000));
+              const pollIntervalMsRaw = typeof args.pollIntervalMs === "number" ? args.pollIntervalMs : 1000;
+              const pollIntervalMs = Math.max(200, Math.min(Math.floor(pollIntervalMsRaw || 1000), 5000));
+
+              const taskStatus = await this.waitForPptTask(result.taskId, maxWaitMs, pollIntervalMs);
+              if (taskStatus.status !== "completed") {
+                return {
+                  taskId: result.taskId,
+                  status: taskStatus.status,
+                  error: taskStatus.error,
+                  waitedMs: taskStatus.waitedMs,
+                };
+              }
+
+              const buffer = await pptService.downloadPPTX(result.taskId);
+              const pptFilename = filenameBase.toLowerCase().endsWith(".pptx")
+                ? filenameBase
+                : `${filenameBase}.pptx`;
+              const assetMeta = await assetStore.save(
+                context.userId,
+                projectKey,
+                pptFilename,
+                PPT_MIME,
+                buffer,
+              );
+
+              return {
+                taskId: result.taskId,
+                status: taskStatus.status,
+                asset: {
+                  id: assetMeta.id,
+                  filename: assetMeta.filename,
+                  mime: assetMeta.mime,
+                  size: assetMeta.size,
+                },
+                waitedMs: taskStatus.waitedMs,
+              };
+            }
+          }
+
+          const { exportHtmlToPptxBuffer } = await import("../services/ppt/local-html-export.js");
+          const startedAt = Date.now();
+          const buffer = await exportHtmlToPptxBuffer(html, { aspectRatio: options?.aspectRatio });
+          const pptFilename = filenameBase.toLowerCase().endsWith(".pptx")
+            ? filenameBase
+            : `${filenameBase}.pptx`;
+          const assetMeta = await assetStore.save(
+            context.userId,
+            projectKey,
+            pptFilename,
+            PPT_MIME,
+            buffer,
+          );
+
+          return {
+            taskId: `local-${Date.now()}`,
+            status: "completed",
+            asset: {
+              id: assetMeta.id,
+              filename: assetMeta.filename,
+              mime: assetMeta.mime,
+              size: assetMeta.size,
+            },
+            waitedMs: Date.now() - startedAt,
+          };
+        }
+
+        const { pptService } = await import("../services/ppt/index.js");
+        const available = await pptService.isAvailable();
+        if (!available) {
+          throw new Error("PPT generation service is not available");
+        }
+
+        const result = await pptService.generateFromFile(
+          Buffer.from(html, "utf-8"),
+          htmlFilename,
+          style,
+        );
+
+        const maxWaitMsRaw = typeof args.waitMs === "number" ? args.waitMs : context.permissions.maxExecutionMs;
+        const maxWaitMs = Math.max(0, Math.min(Math.floor(maxWaitMsRaw || 0), 60000));
+        const pollIntervalMsRaw = typeof args.pollIntervalMs === "number" ? args.pollIntervalMs : 1000;
+        const pollIntervalMs = Math.max(200, Math.min(Math.floor(pollIntervalMsRaw || 1000), 5000));
+
+        const taskStatus = await this.waitForPptTask(result.taskId, maxWaitMs, pollIntervalMs);
+        if (taskStatus.status !== "completed") {
+          return {
+            taskId: result.taskId,
+            status: taskStatus.status,
+            error: taskStatus.error,
+            waitedMs: taskStatus.waitedMs,
+          };
+        }
+
+        const buffer = await pptService.downloadPPTX(result.taskId);
+        const pptFilename = filenameBase.toLowerCase().endsWith(".pptx")
+          ? filenameBase
+          : `${filenameBase}.pptx`;
+        const assetMeta = await assetStore.save(
+          context.userId,
+          projectKey,
+          pptFilename,
+          PPT_MIME,
+          buffer,
+        );
+
+        return {
+          taskId: result.taskId,
+          status: taskStatus.status,
+          asset: {
+            id: assetMeta.id,
+            filename: assetMeta.filename,
+            mime: assetMeta.mime,
+            size: assetMeta.size,
+          },
+          waitedMs: taskStatus.waitedMs,
+        };
+      }
+
+      case "getPptTaskStatus": {
+        this.assertCapability(context, "docs.read", methodName);
+        const taskId = String(args.taskId || "").trim();
+        if (!taskId) {
+          throw new Error("taskId is required");
+        }
+
+        const { pptService } = await import("../services/ppt/index.js");
+        const status = await pptService.getTaskStatus(taskId);
+        return {
+          taskId: status.taskId,
+          status: status.status,
+          progress: status.progress,
+          currentSlide: status.currentSlide,
+          totalSlides: status.totalSlides,
+          error: status.error,
+          createdAt: status.createdAt,
+          updatedAt: status.updatedAt,
+        };
       }
 
       case "fetchUrl": {
@@ -1151,11 +2501,24 @@ export class PluginManagerV2 {
     return manifest;
   }
 
+  private getManifestCacheKey(pluginId: string, version: string, userId?: string): string {
+    const userSegment = userId ? `user:${userId}` : "global";
+    return `${userSegment}:${pluginId}@${version}`;
+  }
+
   private async loadManifestFromDisk(pluginId: string, version: string, userId?: string): Promise<PluginManifestV2 | null> {
-    const key = `${pluginId}@${version}`;
+    const key = this.getManifestCacheKey(pluginId, version, userId);
     const cached = this.manifestCache.get(key);
     if (cached) {
-      return cached;
+      try {
+        const meta = await stat(cached.manifestPath);
+        if (meta.isFile() && meta.mtimeMs === cached.mtimeMs) {
+          return cached.manifest;
+        }
+      } catch {
+        // manifest file disappeared or became unreadable; fall through to reload.
+      }
+      this.manifestCache.delete(key);
     }
 
     const versionDirs = userId
@@ -1169,13 +2532,21 @@ export class PluginManagerV2 {
 
     for (const manifestPath of candidates) {
       try {
+        const meta = await stat(manifestPath);
+        if (!meta.isFile()) {
+          continue;
+        }
         const raw = JSON.parse(await readFile(manifestPath, "utf8")) as unknown;
         const manifest = parsePluginManifestV2(raw);
         validatePluginManifestV2(manifest, {
           appBackend: pluginConfig.appBackendVersion,
           web: pluginConfig.webVersion,
         });
-        this.manifestCache.set(key, manifest);
+        this.manifestCache.set(key, {
+          manifest,
+          manifestPath,
+          mtimeMs: meta.mtimeMs,
+        });
         return manifest;
       } catch {
         // continue
@@ -1186,7 +2557,7 @@ export class PluginManagerV2 {
   }
 
   private async ensureManifestFromDisk(pluginId: string, version: string): Promise<void> {
-    const key = `${pluginId}@${version}`;
+    const key = this.getManifestCacheKey(pluginId, version);
     if (this.manifestCache.has(key)) return;
 
     const versionDir = resolvePluginVersionDir(pluginId, version);
@@ -1198,6 +2569,25 @@ export class PluginManagerV2 {
     } catch {
       this.manifestCache.delete(key);
     }
+  }
+
+  private async resolvePluginLocalDataRoot(input: {
+    userId: string;
+    projectKey: string;
+    pluginId: string;
+    scope?: PluginLocalDataScope;
+  }): Promise<string> {
+    const installation = await pluginInstallStoreV2.get(input.userId, input.pluginId);
+    if (!installation || installation.status !== "installed" || !installation.enabled) {
+      throw new Error(`Plugin is not installed or disabled: ${input.pluginId}`);
+    }
+
+    const scope = normalizePluginLocalDataScope(input.scope);
+    const root = scope === "global"
+      ? getUserPluginDataGlobalRoot(input.userId, input.pluginId)
+      : getUserPluginDataProjectRoot(input.userId, input.projectKey, input.pluginId);
+    await mkdir(root, { recursive: true });
+    return root;
   }
 
   private async ensureUserPluginLayout(userId: string, pluginId: string): Promise<void> {

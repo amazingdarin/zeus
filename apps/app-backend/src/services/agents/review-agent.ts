@@ -1,5 +1,6 @@
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import net from "node:net";
+import { traceManager, type TraceContext } from "../../observability/index.js";
 
 export type ReviewAgentPlan =
   | { action: "respond_text"; text: string }
@@ -15,6 +16,7 @@ export type ReviewAgentInput = {
    * When absent we assume the flow is heading to confirmation (or awaiting a plan).
    */
   planAction?: string;
+  traceContext?: TraceContext;
 };
 
 export type ReviewAgentOutput = {
@@ -180,29 +182,57 @@ export const reviewAgentGraph = new StateGraph(ReviewGraphState)
   .compile({ checkpointer: false, name: "review_agent" });
 
 export async function runReviewAgent(input: ReviewAgentInput): Promise<ReviewAgentOutput> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LangGraph invoke typing requires exact match
-  const result = await reviewAgentGraph.invoke({
-    matchedSkillId: input.matchedSkillId,
-    skillArgs: input.skillArgs,
-    needsConfirmation: input.needsConfirmation,
-    planAction: input.planAction,
-  } as any);
-
-  const matchedSkillId = typeof result.matchedSkillId === "string" ? result.matchedSkillId : null;
-  const needsConfirmation = Boolean(result.needsConfirmation);
-  const plan = (result.plan && typeof result.plan === "object")
-    ? (result.plan as ReviewAgentPlan)
+  const span = input.traceContext
+    ? traceManager.startSpan(input.traceContext, "agent.review", {
+        matchedSkillId: input.matchedSkillId,
+        needsConfirmation: input.needsConfirmation,
+        planAction: input.planAction,
+      })
     : null;
+  const start = Date.now();
 
-  const reviewWarningMessage = typeof result.reviewWarningMessage === "string" && result.reviewWarningMessage.trim()
-    ? result.reviewWarningMessage.trim()
-    : undefined;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LangGraph invoke typing requires exact match
+    const result = await reviewAgentGraph.invoke({
+      matchedSkillId: input.matchedSkillId,
+      skillArgs: input.skillArgs,
+      needsConfirmation: input.needsConfirmation,
+      planAction: input.planAction,
+    } as any);
 
-  return {
-    matchedSkillId,
-    needsConfirmation,
-    plan,
-    ...(reviewWarningMessage ? { reviewWarningMessage } : {}),
-  };
+    const matchedSkillId = typeof result.matchedSkillId === "string" ? result.matchedSkillId : null;
+    const needsConfirmation = Boolean(result.needsConfirmation);
+    const plan = (result.plan && typeof result.plan === "object")
+      ? (result.plan as ReviewAgentPlan)
+      : null;
+
+    const reviewWarningMessage = typeof result.reviewWarningMessage === "string" && result.reviewWarningMessage.trim()
+      ? result.reviewWarningMessage.trim()
+      : undefined;
+
+    if (span) {
+      traceManager.endSpan(span, {
+        matchedSkillId,
+        needsConfirmation,
+        planAction: plan?.action,
+        reviewWarning: Boolean(reviewWarningMessage),
+        durationMs: Date.now() - start,
+      });
+    }
+
+    return {
+      matchedSkillId,
+      needsConfirmation,
+      plan,
+      ...(reviewWarningMessage ? { reviewWarningMessage } : {}),
+    };
+  } catch (err) {
+    if (span) {
+      traceManager.endSpan(span, {
+        error: err instanceof Error ? err.message : String(err),
+        durationMs: Date.now() - start,
+      }, "ERROR");
+    }
+    throw err;
+  }
 }
-

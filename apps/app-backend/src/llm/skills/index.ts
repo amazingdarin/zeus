@@ -32,6 +32,7 @@ export {
   getDocumentSkill,
   getDocumentSkillByCommand,
   docReadSkill,
+  docGetSkill,
   docCreateSkill,
   docEditSkill,
   docOptimizePptSkill,
@@ -40,6 +41,7 @@ export {
   kbSearchSkill,
   docFetchUrlSkill,
   docImportGitSkill,
+  mediaTranscribeSkill,
   docConvertSkill,
   docOrganizeSkill,
 } from "./document-skills.js";

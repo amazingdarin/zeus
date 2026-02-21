@@ -37,11 +37,19 @@ import {
   projectSkillConfigStore,
   type AgentRiskLevel,
 } from "../llm/agent/index.js";
-import type { TraceContext } from "../observability/index.js";
+import { traceManager, type TraceContext } from "../observability/index.js";
 import { buildCommandArgs, runPlannerAgent } from "./agents/planner-agent.js";
 import { runRetrievalAgent } from "./agents/retrieval-agent.js";
 import { runDocAgent } from "./agents/doc-agent.js";
 import { runReviewAgent } from "./agents/review-agent.js";
+import {
+  querySuggestsBatchTranscription,
+  resolveMediaTranscribeCandidates,
+  writeMediaCandidatesToArgs,
+  normalizeAssetIdList,
+  normalizeMediaScope,
+} from "./media-transcribe-context.js";
+import { inspectDocumentSnapshots } from "./document-inspect.js";
 
 // ============================================================================
 // Types
@@ -78,6 +86,22 @@ export type PendingIntentInfo = {
   options: IntentOption[];
 };
 
+export type PendingInputOption = {
+  value: string;
+  label: string;
+  description?: string;
+  meta?: Record<string, unknown>;
+};
+
+export type PendingInputField = {
+  key: string;
+  type: string;
+  description: string;
+  enum?: string[];
+  options?: PendingInputOption[];
+  widget?: "select" | "choice_list";
+};
+
 /** Info sent to the caller when the graph interrupts for missing required input */
 export type PendingRequiredInputInfo =
   | {
@@ -96,12 +120,7 @@ export type PendingRequiredInputInfo =
       /** Zod validation issues (if applicable). */
       issues?: Array<{ path: string; message: string }>;
       /** Fields to collect from the user. */
-      fields: Array<{
-        key: string;
-        type: string;
-        description: string;
-        enum?: string[];
-      }>;
+      fields: PendingInputField[];
       /** Optional: current args snapshot for UI defaults. */
       currentArgs?: Record<string, unknown>;
     };
@@ -120,12 +139,7 @@ export type PreflightMissingInput = {
   kind: "doc_scope" | "skill_args";
   skillName: string;
   message: string;
-  fields?: Array<{
-    key: string;
-    type: string;
-    description: string;
-    enum?: string[];
-  }>;
+  fields?: PendingInputField[];
   missing?: string[];
   issues?: Array<{ path: string; message: string }>;
   currentArgs?: Record<string, unknown>;
@@ -297,12 +311,65 @@ const ChatGraphState = Annotation.Root({
 
 type GraphState = typeof ChatGraphState.State;
 
+function summarizeTasksForTrace(tasks: OrchestratedTask[] | undefined, limit = 5): Array<{
+  taskId: string;
+  skillId: string;
+  title: string;
+  dependsOn: number;
+  inputBindings: number;
+  failurePolicy: TaskFailurePolicy;
+}> {
+  if (!Array.isArray(tasks) || tasks.length === 0) return [];
+  return tasks.slice(0, limit).map((task) => ({
+    taskId: task.taskId,
+    skillId: task.skillId,
+    title: task.title,
+    dependsOn: task.dependsOn?.length || 0,
+    inputBindings: task.inputBindings?.length || 0,
+    failurePolicy: task.failurePolicy || "required",
+  }));
+}
+
+function withGraphSpan<T>(
+  state: GraphState,
+  name: string,
+  input: Record<string, unknown> | undefined,
+  fn: () => Promise<T>,
+  summarize?: (result: T) => Record<string, unknown>,
+): Promise<T> {
+  const tc = state.traceContext;
+  if (!tc) {
+    return fn();
+  }
+
+  const span = traceManager.startSpan(tc, name, input);
+  const start = Date.now();
+
+  return fn()
+    .then((result) => {
+      const output = summarize ? summarize(result) : {};
+      traceManager.endSpan(span, {
+        durationMs: Date.now() - start,
+        ...output,
+      });
+      return result;
+    })
+    .catch((err) => {
+      traceManager.endSpan(span, {
+        durationMs: Date.now() - start,
+        error: err instanceof Error ? err.message : String(err),
+      }, "ERROR");
+      throw err;
+    });
+}
+
 // ============================================================================
 // Constants
 // ============================================================================
 
 const COMMAND_REGEX = /^\/([a-z0-9][a-z0-9-]*)(?:\s+(.*))?$/;
 const MAX_ORCHESTRATED_TASKS = 5;
+const PPT_PLUGIN_AGENT_COMMAND = "/ppt-agent";
 const PPT_CREATE_SKILL_COMMAND = "/doc-create";
 const PPT_COMPAT_SKILL_COMMAND = "/doc-optimize-ppt";
 const PPT_OUTLINE_SKILL_COMMAND = "/doc-optimize-ppt-outline";
@@ -334,12 +401,12 @@ const INTENT_SYSTEM_PROMPT = `你是 Zeus 文档管理系统的意图分析器�
 - deep_search: 复杂问题，需要多轮检索和综合分析（"详细分析"、"全面调研"、"深入对比"、"系统整理"等）
 - chat: 简单提问、知识检索、闲聊、或意图不明确的请求
 
-skill_hint 可选值: doc-create, doc-edit, doc-delete, doc-move, doc-read, doc-summary, doc-optimize-format, doc-optimize-content, doc-optimize-style, doc-optimize-full, doc-optimize-ppt, doc-optimize-ppt-outline, doc-render-ppt-html, doc-export-ppt, kb-search, doc-fetch-url, doc-import-git, doc-smart-import, doc-organize, doc-convert, file-parse, image-analyze, url-extract
+skill_hint 可选值: doc-create, doc-edit, doc-delete, doc-move, doc-read, doc-get, doc-summary, doc-optimize-format, doc-optimize-content, doc-optimize-style, doc-optimize-full, ppt-agent, doc-optimize-ppt, doc-optimize-ppt-outline, doc-render-ppt-html, doc-export-ppt, kb-search, doc-fetch-url, doc-import-git, doc-smart-import, doc-organize, doc-convert, file-parse, image-analyze, media-transcribe, url-extract
 
 复合任务指导：
-- 当用户请求“从主题制作/生成/做 PPT”且未指定文档时，优先判断为技能执行（通常由编排层自动拆成“创建文档 -> PPT化”）。
-- 当用户已指定文档（如 @ 文档）时，优先倾向 doc-optimize-ppt。
-- 仅当用户明确提到“导出/下载/pptx”时，才倾向额外导出步骤（doc-export-ppt）。
+- 当用户请求“从主题制作/生成/做 PPT”时，优先倾向 ppt-agent（插件统一入口）。
+- 当用户已指定文档（如 @ 文档）时，优先倾向 ppt-agent，并把该文档作为 source_doc_ids。
+- 仅当插件不可用时，才回退到 doc-optimize-ppt / doc-render-ppt-html / doc-export-ppt 旧链路。
 
 label 要求：简短的中文描述，让用户看到就能理解（如"搜索知识库"、"创建新文档"、"优化文档格式"、"深度分析"）。
 
@@ -359,127 +426,156 @@ alternatives 说明：
 → {"primary":{"type":"chat","confidence":0.9,"label":"搜索知识库","reasoning":"用户在提问"},"alternatives":[]}`;
 
 async function detectIntent(state: GraphState): Promise<Partial<GraphState>> {
-  // Fast path 1: Explicit slash command
-  if (state.userQuery.trim().match(COMMAND_REGEX)) {
-    return {
-      intent: { type: "command", confidence: 1.0, reasoning: "Explicit slash command" },
-    };
-  }
+  const trimmed = state.userQuery.trim();
+  const hasSlashCommand = Boolean(trimmed.match(COMMAND_REGEX));
 
-  // Fast path 2: UI deep search toggle
-  if (state.deepSearchRequested) {
-    return {
-      intent: { type: "deep_search", confidence: 1.0, reasoning: "Deep search toggled by user" },
-    };
-  }
+  return withGraphSpan(
+    state,
+    "graph.detect_intent",
+    {
+      queryLength: state.userQuery.length,
+      deepSearchRequested: state.deepSearchRequested,
+      hasSlashCommand,
+      docIds: state.docIds?.length || 0,
+      attachmentCount: state.attachments?.length || 0,
+    },
+    async () => {
+      // Fast path 1: Explicit slash command
+      if (hasSlashCommand) {
+        return {
+          intent: { type: "command", confidence: 1.0, reasoning: "Explicit slash command" },
+        };
+      }
 
-  // Load LLM config for this invocation
-  const llmConfig = await configStore.getInternalByType("llm");
-  if (!llmConfig?.enabled || !llmConfig.defaultModel) {
-    return {
-      intent: heuristicIntent(state.userQuery),
-      llmConfig,
-    };
-  }
+      // Fast path 2: UI deep search toggle
+      if (state.deepSearchRequested) {
+        return {
+          intent: { type: "deep_search", confidence: 1.0, reasoning: "Deep search toggled by user" },
+        };
+      }
 
-  // LLM-based intent detection with candidate ranking
-  try {
-    const response = await llmGateway.chat({
-      provider: llmConfig.providerId,
-      model: llmConfig.defaultModel,
-      messages: [
-        { role: "system", content: INTENT_SYSTEM_PROMPT },
-        { role: "user", content: state.userQuery },
-      ],
-      temperature: 0,
-      maxTokens: 300,
-      baseUrl: llmConfig.baseUrl,
-      apiKey: llmConfig.apiKey,
-      traceContext: state.traceContext,
-    });
+      // Load LLM config for this invocation
+      const llmConfig = await configStore.getInternalByType("llm");
+      if (!llmConfig?.enabled || !llmConfig.defaultModel) {
+        return {
+          intent: heuristicIntent(state.userQuery),
+          llmConfig,
+        };
+      }
 
-    const parsed = JSON.parse(response.content.trim()) as {
-      primary?: {
-        type?: string;
-        confidence?: number;
-        skill_hint?: string;
-        label?: string;
-        reasoning?: string;
+      // LLM-based intent detection with candidate ranking
+      try {
+        const response = await llmGateway.chat({
+          provider: llmConfig.providerId,
+          model: llmConfig.defaultModel,
+          messages: [
+            { role: "system", content: INTENT_SYSTEM_PROMPT },
+            { role: "user", content: state.userQuery },
+          ],
+          temperature: 0,
+          maxTokens: 300,
+          baseUrl: llmConfig.baseUrl,
+          apiKey: llmConfig.apiKey,
+          traceContext: state.traceContext,
+        });
+
+        const parsed = JSON.parse(response.content.trim()) as {
+          primary?: {
+            type?: string;
+            confidence?: number;
+            skill_hint?: string;
+            label?: string;
+            reasoning?: string;
+          };
+          alternatives?: Array<{
+            type?: string;
+            confidence?: number;
+            skill_hint?: string;
+            label?: string;
+            reasoning?: string;
+          }>;
+          // Backward compatibility with old format
+          type?: string;
+          confidence?: number;
+          skill_hint?: string;
+          reasoning?: string;
+        };
+
+        // Support both new (primary/alternatives) and old (flat) format
+        const primary = parsed.primary || {
+          type: parsed.type,
+          confidence: parsed.confidence,
+          skill_hint: parsed.skill_hint,
+          label: undefined,
+          reasoning: parsed.reasoning,
+        };
+
+        const primaryIntent: ChatIntent = {
+          type: (primary.type as ChatIntent["type"]) || "chat",
+          confidence: primary.confidence ?? 0.5,
+          skillHint: primary.skill_hint,
+          reasoning: primary.reasoning,
+        };
+
+        // Build candidate list for potential clarification
+        const alternatives = (parsed.alternatives || [])
+          .filter((a) => a.type && (a.confidence ?? 0) > 0.3)
+          .map((a) => ({
+            type: (a.type as ChatIntent["type"]) || "chat",
+            skillHint: a.skill_hint,
+            label: a.label || a.type || "对话",
+            confidence: a.confidence ?? 0,
+          }));
+
+        const primaryOption: IntentOption = {
+          type: primaryIntent.type,
+          skillHint: primaryIntent.skillHint,
+          label: primary.label || labelForIntentType(primaryIntent.type, primaryIntent.skillHint),
+          confidence: primaryIntent.confidence,
+        };
+
+        const candidates = buildIntentCandidateList(primaryOption, alternatives);
+        const hasAlternatives = alternatives.length > 0;
+        const lowConfidence = primaryIntent.confidence < INTENT_CONFIDENCE_THRESHOLD;
+        const hasStrongCompetition = hasStrongIntentCompetition(candidates);
+
+        // Clarify when:
+        // 1) confidence is low for non-chat intents, or
+        // 2) confidence is low for chat but we have alternative interpretations, or
+        // 3) multiple intents are strong competitors (even if primary is high-confidence).
+        const needsClarification =
+          (lowConfidence && (primaryIntent.type !== "chat" || hasAlternatives))
+          || (!lowConfidence && hasStrongCompetition);
+
+        return {
+          intent: primaryIntent,
+          intentCandidates: needsClarification && candidates.length >= 2
+            ? candidates
+            : undefined,
+          llmConfig,
+        };
+      } catch (err) {
+        console.warn("[ChatGraph] Intent detection failed, using heuristic:", err);
+        return {
+          intent: heuristicIntent(state.userQuery),
+          llmConfig,
+        };
+      }
+    },
+    (result) => {
+      const intent = (result as Partial<GraphState>).intent;
+      const candidates = (result as Partial<GraphState>).intentCandidates;
+      const confidence = typeof intent?.confidence === "number"
+        ? Math.round(intent.confidence * 1000) / 1000
+        : undefined;
+      return {
+        intent: intent?.type,
+        confidence,
+        skillHint: intent?.skillHint,
+        candidates: Array.isArray(candidates) ? candidates.length : 0,
       };
-      alternatives?: Array<{
-        type?: string;
-        confidence?: number;
-        skill_hint?: string;
-        label?: string;
-        reasoning?: string;
-      }>;
-      // Backward compatibility with old format
-      type?: string;
-      confidence?: number;
-      skill_hint?: string;
-      reasoning?: string;
-    };
-
-    // Support both new (primary/alternatives) and old (flat) format
-    const primary = parsed.primary || {
-      type: parsed.type,
-      confidence: parsed.confidence,
-      skill_hint: parsed.skill_hint,
-      label: undefined,
-      reasoning: parsed.reasoning,
-    };
-
-    const primaryIntent: ChatIntent = {
-      type: (primary.type as ChatIntent["type"]) || "chat",
-      confidence: primary.confidence ?? 0.5,
-      skillHint: primary.skill_hint,
-      reasoning: primary.reasoning,
-    };
-
-    // Build candidate list for potential clarification
-    const alternatives = (parsed.alternatives || [])
-      .filter((a) => a.type && (a.confidence ?? 0) > 0.3)
-      .map((a) => ({
-        type: (a.type as ChatIntent["type"]) || "chat",
-        skillHint: a.skill_hint,
-        label: a.label || a.type || "对话",
-        confidence: a.confidence ?? 0,
-      }));
-
-    const primaryOption: IntentOption = {
-      type: primaryIntent.type,
-      skillHint: primaryIntent.skillHint,
-      label: primary.label || labelForIntentType(primaryIntent.type, primaryIntent.skillHint),
-      confidence: primaryIntent.confidence,
-    };
-
-    const candidates = buildIntentCandidateList(primaryOption, alternatives);
-    const hasAlternatives = alternatives.length > 0;
-    const lowConfidence = primaryIntent.confidence < INTENT_CONFIDENCE_THRESHOLD;
-    const hasStrongCompetition = hasStrongIntentCompetition(candidates);
-
-    // Clarify when:
-    // 1) confidence is low for non-chat intents, or
-    // 2) confidence is low for chat but we have alternative interpretations, or
-    // 3) multiple intents are strong competitors (even if primary is high-confidence).
-    const needsClarification =
-      (lowConfidence && (primaryIntent.type !== "chat" || hasAlternatives))
-      || (!lowConfidence && hasStrongCompetition);
-
-    return {
-      intent: primaryIntent,
-      intentCandidates: needsClarification && candidates.length >= 2
-        ? candidates
-        : undefined,
-      llmConfig,
-    };
-  } catch (err) {
-    console.warn("[ChatGraph] Intent detection failed, using heuristic:", err);
-    return {
-      intent: heuristicIntent(state.userQuery),
-      llmConfig,
-    };
-  }
+    },
+  );
 }
 
 /** Generate a default label for an intent type */
@@ -491,11 +587,13 @@ function labelForIntentType(type: ChatIntent["type"], skillHint?: string): strin
       "doc-delete": "删除文档",
       "doc-move": "移动文档",
       "doc-read": "阅读文档",
+      "doc-get": "读取文档快照",
       "doc-summary": "生成摘要",
       "doc-optimize-format": "优化文档格式",
       "doc-optimize-content": "优化文档内容",
       "doc-optimize-style": "优化文档风格",
       "doc-optimize-full": "全面优化文档",
+      "ppt-agent": "PPT Agent 生成演示稿",
       "doc-optimize-ppt": "PPT 化演示稿",
       "doc-optimize-ppt-outline": "生成 PPT 结构稿",
       "doc-render-ppt-html": "生成 HTML 演示稿",
@@ -508,6 +606,7 @@ function labelForIntentType(type: ChatIntent["type"], skillHint?: string): strin
       "doc-convert": "格式转换",
       "file-parse": "解析文件",
       "image-analyze": "识别图片",
+      "media-transcribe": "转写音视频",
       "url-extract": "提取网页内容",
     };
     return skillLabels[skillHint] || skillHint;
@@ -529,6 +628,7 @@ function heuristicIntent(message: string): ChatIntent {
     "移动文档", "优化文档", "导入", "转换格式", "create doc",
     "edit doc", "delete doc", "move doc",
     "解析文件", "解析这个", "提取内容", "提取文字", "parse file",
+    "音频转写", "视频转写", "语音转文字", "转录语音", "speech to text", "transcribe",
     "识别图片", "图片识别", "ocr", "文字识别", "analyze image",
     "提取网页", "提取url", "extract url", "抓取网页",
     "制作ppt", "生成ppt", "做ppt", "演示稿", "幻灯片", "powerpoint",
@@ -551,8 +651,10 @@ function heuristicIntent(message: string): ChatIntent {
     return {
       type: "skill",
       confidence: 0.82,
-      skillHint: hasExportIntent ? "doc-export-ppt" : "doc-optimize-ppt",
-      reasoning: hasExportIntent ? "Keyword match: ppt export workflow" : "Keyword match: ppt workflow",
+      skillHint: "ppt-agent",
+      reasoning: hasExportIntent
+        ? "Keyword match: ppt workflow (prefer plugin unified agent with export)"
+        : "Keyword match: ppt workflow (prefer plugin unified agent)",
     };
   }
 
@@ -687,19 +789,39 @@ async function awaitIntentSelection(state: GraphState): Promise<Partial<GraphSta
 }
 
 async function reviewAgent(state: GraphState): Promise<Partial<GraphState>> {
-  const result = await runReviewAgent({
-    matchedSkillId: state.matchedSkill,
-    skillArgs: state.skillArgs,
-    needsConfirmation: state.needsConfirmation,
-    planAction: state.plan?.action,
-  });
+  return withGraphSpan(
+    state,
+    "graph.review_agent",
+    {
+      matchedSkill: state.matchedSkill,
+      needsConfirmation: state.needsConfirmation,
+      planAction: state.plan?.action,
+    },
+    async () => {
+      const result = await runReviewAgent({
+        matchedSkillId: state.matchedSkill,
+        skillArgs: state.skillArgs,
+        needsConfirmation: state.needsConfirmation,
+        planAction: state.plan?.action,
+        traceContext: state.traceContext,
+      });
 
-  return {
-    matchedSkill: result.matchedSkillId,
-    needsConfirmation: result.needsConfirmation,
-    reviewWarningMessage: result.reviewWarningMessage,
-    ...(result.plan ? { plan: result.plan as unknown as ChatExecutionPlan } : {}),
-  };
+      return {
+        matchedSkill: result.matchedSkillId,
+        needsConfirmation: result.needsConfirmation,
+        reviewWarningMessage: result.reviewWarningMessage,
+        ...(result.plan ? { plan: result.plan as unknown as ChatExecutionPlan } : {}),
+      };
+    },
+    (result) => {
+      const planAction = (result as Partial<GraphState>).plan?.action;
+      return {
+        needsConfirmation: Boolean((result as Partial<GraphState>).needsConfirmation),
+        planAction,
+        reviewWarning: Boolean((result as Partial<GraphState>).reviewWarningMessage),
+      };
+    },
+  );
 }
 
 function buildTaskId(index: number, skillId: string): string {
@@ -749,16 +871,18 @@ function inferWorkflowIntent(
   const optimizeHint = intentSkillHint === "doc-optimize-ppt"
     || intentSkillHint === "doc-optimize-ppt-outline"
     || intentSkillHint === "doc-render-ppt-html";
+  const pluginHint = intentSkillHint === "ppt-agent"
+    || intentSkillHint === "ppt-plugin.agent.generate";
   const exportHint = intentSkillHint === "doc-export-ppt";
 
-  if (!hasPptKeyword && !optimizeHint && !exportHint) {
+  if (!hasPptKeyword && !optimizeHint && !pluginHint && !exportHint) {
     return { kind: "none", needsExport: false };
   }
 
   const needsExport = exportHint || /(?:导出|下载|pptx|输出文件|生成文件)/i.test(lower);
   const scoped = hasDocumentScope(docIds);
 
-  if (!hasPptAction && !optimizeHint && !exportHint && !scoped) {
+  if (!hasPptAction && !optimizeHint && !pluginHint && !exportHint && !scoped) {
     return { kind: "none", needsExport: false };
   }
 
@@ -849,6 +973,46 @@ async function buildPptWorkflowTasks(state: GraphState, workflow: WorkflowIntent
   const enabledSkillIds = new Set(
     await projectSkillConfigStore.getEnabledSkillIds(state.projectKey, allSkills),
   );
+  const sourceIntent = state.sourceIntent;
+  const scopedDocIds = hasDocumentScope(state.docIds)
+    ? (state.docIds || [])
+    : (state.skillDocIds || []);
+
+  const pptPluginSkill = agentSkillCatalog.getByCommand(PPT_PLUGIN_AGENT_COMMAND, state.userId);
+  if (pptPluginSkill && enabledSkillIds.has(pptPluginSkill.id)) {
+    const pluginArgs: Record<string, unknown> = { ...(state.skillArgs || {}) };
+    const normalizedSourceDocIds = Array.isArray(pluginArgs.source_doc_ids)
+      ? pluginArgs.source_doc_ids
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+      : [];
+    if (normalizedSourceDocIds.length === 0 && scopedDocIds.length > 0) {
+      pluginArgs.source_doc_ids = scopedDocIds;
+    }
+    const topic = typeof pluginArgs.topic === "string" ? pluginArgs.topic.trim() : "";
+    const fallbackInput = typeof pluginArgs.input === "string" ? pluginArgs.input.trim() : "";
+    if (!topic && !fallbackInput && workflow.kind === "ppt_from_topic") {
+      pluginArgs.topic = state.userQuery.trim();
+    }
+    if (workflow.needsExport) {
+      pluginArgs.export_ppt = true;
+    }
+    return {
+      tasks: [
+        buildTask(
+          0,
+          pptPluginSkill.id,
+          pptPluginSkill.displayName || pptPluginSkill.id,
+          pluginArgs,
+          scopedDocIds,
+          sourceIntent,
+          {
+            failurePolicy: "required",
+          },
+        ),
+      ],
+    };
+  }
 
   const createSkill = agentSkillCatalog.getByCommand(PPT_CREATE_SKILL_COMMAND, state.userId);
   const outlineSkill = agentSkillCatalog.getByCommand(PPT_OUTLINE_SKILL_COMMAND, state.userId);
@@ -877,11 +1041,6 @@ async function buildPptWorkflowTasks(state: GraphState, workflow: WorkflowIntent
       blockedReason: `请求包含导出，但技能 ${PPT_EXPORT_SKILL_COMMAND} 未启用。`,
     };
   }
-
-  const sourceIntent = state.sourceIntent;
-  const scopedDocIds = hasDocumentScope(state.docIds)
-    ? (state.docIds || [])
-    : (state.skillDocIds || []);
 
   const outlineBaseArgs = { ...(state.skillArgs || {}) };
   const htmlBaseArgs: Record<string, unknown> = {};
@@ -983,132 +1142,154 @@ async function buildPptWorkflowTasks(state: GraphState, workflow: WorkflowIntent
 }
 
 async function orchestrateTasks(state: GraphState): Promise<Partial<GraphState>> {
-  const skillId = state.matchedSkill;
-  if (!skillId) {
-    return { plannedTasks: [] };
-  }
+  return withGraphSpan(
+    state,
+    "graph.orchestrate_tasks",
+    {
+      matchedSkill: state.matchedSkill,
+      intentType: state.intent.type,
+      sourceIntent: state.sourceIntent,
+      docIds: state.docIds?.length || 0,
+    },
+    async () => {
+      const skillId = state.matchedSkill;
+      if (!skillId) {
+        return { plannedTasks: [] };
+      }
 
-  await agentSkillCatalog.initialize();
-  const currentSkill = agentSkillCatalog.getById(skillId, state.userId);
-  const currentName = currentSkill?.displayName || skillId;
+      await agentSkillCatalog.initialize();
+      const currentSkill = agentSkillCatalog.getById(skillId, state.userId);
+      const currentName = currentSkill?.displayName || skillId;
 
-  const baseTask: OrchestratedTask = {
-    taskId: buildTaskId(0, skillId),
-    title: currentName,
-    subagentId: skillId,
-    subagentName: currentName,
-    skillId,
-    args: state.skillArgs || {},
-    docIds: state.skillDocIds || [],
-    sourceIntent: state.sourceIntent,
-  };
-
-  let tasks: OrchestratedTask[] = [baseTask];
-
-  const currentLegacySkill = typeof currentSkill?.metadata?.legacySkillName === "string"
-    ? currentSkill.metadata.legacySkillName
-    : undefined;
-
-  const workflow = inferWorkflowIntent(
-    state.userQuery,
-    hasDocumentScope(state.docIds) ? state.docIds : state.skillDocIds,
-    state.intent.skillHint || currentLegacySkill,
-  );
-
-  const hasScopedDocIds = hasDocumentScope(state.docIds) || hasDocumentScope(state.skillDocIds);
-  const shouldApplyWorkflowTemplate = workflow.kind !== "none"
-    && (
-      (state.intent.type === "skill" && state.sourceIntent !== "command")
-      || (currentLegacySkill === "doc-optimize-ppt" && hasScopedDocIds)
-    );
-
-  if (shouldApplyWorkflowTemplate) {
-    const workflowBuildResult = await buildPptWorkflowTasks(state, workflow);
-    if (workflowBuildResult && "blockedReason" in workflowBuildResult) {
-      return {
-        plannedTasks: [],
-        plan: {
-          action: "respond_blocked",
-          reason: workflowBuildResult.blockedReason,
-        },
+      const baseTask: OrchestratedTask = {
+        taskId: buildTaskId(0, skillId),
+        title: currentName,
+        subagentId: skillId,
+        subagentName: currentName,
+        skillId,
+        args: state.skillArgs || {},
+        docIds: state.skillDocIds || [],
+        sourceIntent: state.sourceIntent,
       };
-    }
 
-    if (workflowBuildResult && "tasks" in workflowBuildResult && workflowBuildResult.tasks.length > 0) {
-      tasks = workflowBuildResult.tasks;
-    }
-  }
+      let tasks: OrchestratedTask[] = [baseTask];
 
-  if (tasks.length === 1) {
-    const canDecompose = state.intent.type === "skill"
-      && state.sourceIntent !== "command"
-      && workflow.kind === "none"
-      && shouldDecomposeQuery(state.userQuery);
+      const currentLegacySkill = typeof currentSkill?.metadata?.legacySkillName === "string"
+        ? currentSkill.metadata.legacySkillName
+        : undefined;
 
-    if (canDecompose) {
-      const steps = splitQueryIntoSteps(state.userQuery).slice(0, MAX_ORCHESTRATED_TASKS);
-      for (const step of steps.slice(1)) {
-        const planned = await runPlannerAgent({
-          userQuery: step,
-          messages: state.messages,
-          projectKey: state.projectKey,
-          userId: state.userId,
-          docIds: state.docIds,
-          attachments: state.attachments,
-          llmConfig: state.llmConfig,
-          traceContext: state.traceContext,
-        });
+      const workflow = inferWorkflowIntent(
+        state.userQuery,
+        hasDocumentScope(state.docIds) ? state.docIds : state.skillDocIds,
+        state.intent.skillHint || currentLegacySkill,
+      );
 
-        if (!planned.matchedSkillId) continue;
+      const hasScopedDocIds = hasDocumentScope(state.docIds) || hasDocumentScope(state.skillDocIds);
+      const shouldApplyWorkflowTemplate = workflow.kind !== "none"
+        && (
+          (state.intent.type === "skill" && state.sourceIntent !== "command")
+          || (currentSkill?.command === PPT_COMPAT_SKILL_COMMAND && hasScopedDocIds)
+          || (currentSkill?.command === PPT_PLUGIN_AGENT_COMMAND)
+        );
 
-        const plannedSkill = agentSkillCatalog.getById(planned.matchedSkillId, state.userId);
-        const plannedName = plannedSkill?.displayName || planned.matchedSkillId;
+      if (shouldApplyWorkflowTemplate) {
+        const workflowBuildResult = await buildPptWorkflowTasks(state, workflow);
+        if (workflowBuildResult && "blockedReason" in workflowBuildResult) {
+          return {
+            plannedTasks: [],
+            plan: {
+              action: "respond_blocked",
+              reason: workflowBuildResult.blockedReason,
+            },
+          };
+        }
 
-        tasks.push({
-          taskId: buildTaskId(tasks.length, planned.matchedSkillId),
-          title: plannedName,
-          subagentId: planned.matchedSkillId,
-          subagentName: plannedName,
-          skillId: planned.matchedSkillId,
-          args: planned.skillArgs,
-          docIds: planned.skillDocIds,
-          sourceIntent: planned.sourceIntent,
-        });
-
-        if (tasks.length >= MAX_ORCHESTRATED_TASKS) {
-          break;
+        if (workflowBuildResult && "tasks" in workflowBuildResult && workflowBuildResult.tasks.length > 0) {
+          tasks = workflowBuildResult.tasks;
         }
       }
-    }
-  }
 
-  const uniqueTasks: OrchestratedTask[] = [];
-  const seen = new Set<string>();
-  const oldToNewTaskId = new Map<string, string>();
+      if (tasks.length === 1) {
+        const canDecompose = state.intent.type === "skill"
+          && state.sourceIntent !== "command"
+          && workflow.kind === "none"
+          && shouldDecomposeQuery(state.userQuery);
 
-  for (const task of tasks) {
-    const key = taskFingerprint(task);
-    if (seen.has(key)) continue;
-    seen.add(key);
+        if (canDecompose) {
+          const steps = splitQueryIntoSteps(state.userQuery).slice(0, MAX_ORCHESTRATED_TASKS);
+          for (const step of steps.slice(1)) {
+            const planned = await runPlannerAgent({
+              userQuery: step,
+              messages: state.messages,
+              projectKey: state.projectKey,
+              userId: state.userId,
+              docIds: state.docIds,
+              attachments: state.attachments,
+              llmConfig: state.llmConfig,
+              traceContext: state.traceContext,
+            });
 
-    const nextTaskId = buildTaskId(uniqueTasks.length, task.skillId);
-    oldToNewTaskId.set(task.taskId, nextTaskId);
-    uniqueTasks.push({
-      ...task,
-      taskId: nextTaskId,
-    });
-  }
+            if (!planned.matchedSkillId) continue;
 
-  const remappedTasks = remapTaskDependencies(uniqueTasks, oldToNewTaskId);
-  const firstTask = remappedTasks[0];
+            const plannedSkill = agentSkillCatalog.getById(planned.matchedSkillId, state.userId);
+            const plannedName = plannedSkill?.displayName || planned.matchedSkillId;
 
-  return {
-    plannedTasks: remappedTasks,
-    matchedSkill: firstTask?.skillId || state.matchedSkill,
-    skillArgs: firstTask?.args || state.skillArgs,
-    skillDocIds: firstTask?.docIds || state.skillDocIds,
-    sourceIntent: firstTask?.sourceIntent || state.sourceIntent,
-  };
+            tasks.push({
+              taskId: buildTaskId(tasks.length, planned.matchedSkillId),
+              title: plannedName,
+              subagentId: planned.matchedSkillId,
+              subagentName: plannedName,
+              skillId: planned.matchedSkillId,
+              args: planned.skillArgs,
+              docIds: planned.skillDocIds,
+              sourceIntent: planned.sourceIntent,
+            });
+
+            if (tasks.length >= MAX_ORCHESTRATED_TASKS) {
+              break;
+            }
+          }
+        }
+      }
+
+      const uniqueTasks: OrchestratedTask[] = [];
+      const seen = new Set<string>();
+      const oldToNewTaskId = new Map<string, string>();
+
+      for (const task of tasks) {
+        const key = taskFingerprint(task);
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const nextTaskId = buildTaskId(uniqueTasks.length, task.skillId);
+        oldToNewTaskId.set(task.taskId, nextTaskId);
+        uniqueTasks.push({
+          ...task,
+          taskId: nextTaskId,
+        });
+      }
+
+      const remappedTasks = remapTaskDependencies(uniqueTasks, oldToNewTaskId);
+      const firstTask = remappedTasks[0];
+
+      return {
+        plannedTasks: remappedTasks,
+        matchedSkill: firstTask?.skillId || state.matchedSkill,
+        skillArgs: firstTask?.args || state.skillArgs,
+        skillDocIds: firstTask?.docIds || state.skillDocIds,
+        sourceIntent: firstTask?.sourceIntent || state.sourceIntent,
+      };
+    },
+    (result) => {
+      const plannedTasks = (result as Partial<GraphState>).plannedTasks;
+      return {
+        taskCount: Array.isArray(plannedTasks) ? plannedTasks.length : 0,
+        tasks: summarizeTasksForTrace(plannedTasks),
+        matchedSkill: (result as Partial<GraphState>).matchedSkill,
+        planAction: (result as Partial<GraphState>).plan?.action,
+      };
+    },
+  );
 }
 function toPreflightMissingInput(
   taskId: string,
@@ -1135,7 +1316,188 @@ function toPreflightMissingInput(
   };
 }
 
+function isMediaTranscribeTask(skillId: string, userId: string): boolean {
+  const skill = agentSkillCatalog.getById(skillId, userId);
+  if (!skill) return false;
+  return skill.source === "native"
+    && typeof skill.metadata?.legacySkillName === "string"
+    && skill.metadata.legacySkillName === "media-transcribe";
+}
+
+function hasMediaTargets(args: Record<string, unknown>): boolean {
+  const assetId = typeof args.asset_id === "string" ? args.asset_id.trim() : "";
+  if (assetId && assetId !== "__ALL__") return true;
+  if (normalizeAssetIdList(args.asset_ids).length > 0) return true;
+  const candidateKey = typeof args.candidate_key === "string" ? args.candidate_key.trim() : "";
+  if (candidateKey) return true;
+  const candidateKeys = Array.isArray(args.candidate_keys)
+    ? args.candidate_keys.some((item) => typeof item === "string" && item.trim().length > 0)
+    : false;
+  return candidateKeys;
+}
+
+function collectReferencedTaskIds(tasks: OrchestratedTask[]): Set<string> {
+  const referenced = new Set<string>();
+  for (const task of tasks) {
+    for (const depTaskId of task.dependsOn || []) {
+      referenced.add(depTaskId);
+    }
+    for (const binding of task.inputBindings || []) {
+      referenced.add(binding.fromTaskId);
+    }
+  }
+  return referenced;
+}
+
+async function enrichMediaTranscribeTask(
+  state: GraphState,
+  task: OrchestratedTask,
+): Promise<OrchestratedTask> {
+  if (!isMediaTranscribeTask(task.skillId, state.userId)) {
+    return task;
+  }
+
+  const explicitDocId = typeof task.args.doc_id === "string"
+    ? task.args.doc_id.trim()
+    : "";
+  const explicitBlockId = typeof task.args.block_id === "string"
+    ? task.args.block_id.trim()
+    : "";
+  const docIds = explicitDocId
+    ? [explicitDocId]
+    : (task.docIds.length > 0 ? task.docIds : (state.docIds || []));
+  const mediaScope = normalizeMediaScope(task.args.media_scope);
+
+  const documentSnapshots = docIds.length > 0
+    ? await inspectDocumentSnapshots({
+      userId: state.userId,
+      projectKey: state.projectKey,
+      docIds,
+      includeContent: false,
+      includeBlockAttrs: true,
+      blockTypes: ["file_block"],
+      maxDocs: 40,
+    })
+    : [];
+
+  const candidates = await resolveMediaTranscribeCandidates({
+    userId: state.userId,
+    projectKey: state.projectKey,
+    attachments: state.attachments,
+    docIds,
+    explicitDocId: explicitDocId || undefined,
+    explicitBlockId: explicitBlockId || undefined,
+    mediaScope,
+    documentSnapshots,
+    maxDocs: 40,
+    maxCandidates: 50,
+  });
+
+  if (candidates.length === 0) {
+    return task;
+  }
+
+  let nextArgs = writeMediaCandidatesToArgs(task.args, candidates);
+  const wantsBatch = querySuggestsBatchTranscription(state.userQuery);
+  const hasExplicitTargets = hasMediaTargets(nextArgs);
+  const targetMode = typeof nextArgs.target_mode === "string" ? nextArgs.target_mode.trim() : "";
+  const selectedAssetId = typeof nextArgs.asset_id === "string" ? nextArgs.asset_id.trim() : "";
+
+  if (selectedAssetId === "__ALL__") {
+    nextArgs = { ...nextArgs, target_mode: "all" };
+  }
+
+  if (nextArgs.target_mode === "all") {
+    nextArgs = {
+      ...nextArgs,
+      asset_ids: Array.from(new Set([
+        ...normalizeAssetIdList(nextArgs.asset_ids),
+        ...candidates.map((candidate) => candidate.assetId),
+      ])),
+    };
+    delete nextArgs.asset_id;
+    delete nextArgs.candidate_key;
+  } else if (!hasExplicitTargets) {
+    if (candidates.length === 1) {
+      nextArgs = {
+        ...nextArgs,
+        candidate_key: candidates[0].candidateKey,
+        asset_id: candidates[0].assetId,
+      };
+    } else if (wantsBatch || targetMode === "all") {
+      nextArgs = {
+        ...nextArgs,
+        target_mode: "all",
+        asset_ids: candidates.map((candidate) => candidate.assetId),
+      };
+    }
+  }
+
+  return {
+    ...task,
+    args: nextArgs,
+  };
+}
+
+async function preparePreflightTasks(
+  state: GraphState,
+  inputTasks: OrchestratedTask[],
+): Promise<OrchestratedTask[]> {
+  const referencedTaskIds = collectReferencedTaskIds(inputTasks);
+  const preparedTasks: OrchestratedTask[] = [];
+
+  for (const task of inputTasks) {
+    if (preparedTasks.length >= MAX_ORCHESTRATED_TASKS) {
+      break;
+    }
+
+    const preparedTask = await enrichMediaTranscribeTask(state, task);
+    if (!isMediaTranscribeTask(preparedTask.skillId, state.userId)) {
+      preparedTasks.push(preparedTask);
+      continue;
+    }
+
+    const assetIds = normalizeAssetIdList(preparedTask.args.asset_ids);
+    const canSplit = assetIds.length > 1 && !referencedTaskIds.has(preparedTask.taskId);
+    if (!canSplit) {
+      preparedTasks.push(preparedTask);
+      continue;
+    }
+
+    const availableSlots = Math.max(0, MAX_ORCHESTRATED_TASKS - preparedTasks.length);
+    const splitAssetIds = assetIds.slice(0, availableSlots);
+    for (let index = 0; index < splitAssetIds.length; index += 1) {
+      const assetId = splitAssetIds[index];
+      const splitArgs: Record<string, unknown> = {
+        ...preparedTask.args,
+        asset_id: assetId,
+      };
+      delete splitArgs.asset_ids;
+      delete splitArgs.target_mode;
+      delete splitArgs.candidate_keys;
+
+      preparedTasks.push({
+        ...preparedTask,
+        taskId: `${preparedTask.taskId}::media-${index + 1}`,
+        title: `${preparedTask.title} (${index + 1}/${assetIds.length})`,
+        args: splitArgs,
+      });
+    }
+  }
+
+  return preparedTasks.slice(0, MAX_ORCHESTRATED_TASKS);
+}
+
 async function preflightValidate(state: GraphState): Promise<Partial<GraphState>> {
+  return withGraphSpan(
+    state,
+    "graph.preflight_validate",
+    {
+      matchedSkill: state.matchedSkill,
+      plannedTasks: state.plannedTasks.length,
+      fullAccess: state.fullAccess,
+    },
+    async () => {
   const fallbackTasks: OrchestratedTask[] = state.matchedSkill
     ? [{
         taskId: buildTaskId(0, state.matchedSkill),
@@ -1157,6 +1519,7 @@ async function preflightValidate(state: GraphState): Promise<Partial<GraphState>
   }
 
   await agentSkillCatalog.initialize();
+  const preparedInputTasks = await preparePreflightTasks(state, inputTasks);
   const normalizedTasks: OrchestratedTask[] = [];
   const tasks: PreflightTaskInfo[] = [];
   const missingInputs: PreflightMissingInput[] = [];
@@ -1164,55 +1527,59 @@ async function preflightValidate(state: GraphState): Promise<Partial<GraphState>
   const reviewWarnings: string[] = [];
   const taskStatus = new Map<string, PreflightTaskInfo["status"]>();
 
-  for (const task of inputTasks) {
-    const unresolvedDependencies = (task.dependsOn || []).filter((depTaskId) => taskStatus.get(depTaskId) !== "ready");
-    const unresolvedBindingSources = (task.inputBindings || [])
+  for (const preparedTask of preparedInputTasks) {
+
+    const unresolvedDependencies = (preparedTask.dependsOn || []).filter(
+      (depTaskId) => taskStatus.get(depTaskId) !== "ready",
+    );
+    const unresolvedBindingSources = (preparedTask.inputBindings || [])
       .filter((binding) => {
-        const currentValue = task.args?.[binding.toArg];
+        const currentValue = preparedTask.args?.[binding.toArg];
         if (typeof currentValue === "string") return currentValue.trim().length === 0;
         return currentValue === undefined || currentValue === null;
       })
       .map((binding) => `${binding.fromTaskId}.${binding.fromKey}`);
 
     if (unresolvedDependencies.length > 0 || unresolvedBindingSources.length > 0) {
-      const waitingSkill = agentSkillCatalog.getById(task.skillId, state.userId);
+      const waitingSkill = agentSkillCatalog.getById(preparedTask.skillId, state.userId);
       const waitingTask: OrchestratedTask = {
-        ...task,
-        needsConfirmation: task.needsConfirmation
+        ...preparedTask,
+        needsConfirmation: preparedTask.needsConfirmation
           ?? (!state.fullAccess && Boolean(waitingSkill?.risk.requireConfirmation)),
       };
       const waitingSources = [...unresolvedDependencies, ...unresolvedBindingSources];
       normalizedTasks.push(waitingTask);
       tasks.push({
-        taskId: task.taskId,
-        title: task.title,
-        subagentId: task.subagentId,
-        subagentName: task.subagentName,
+        taskId: preparedTask.taskId,
+        title: preparedTask.title,
+        subagentId: preparedTask.subagentId,
+        subagentName: preparedTask.subagentName,
         status: "waiting_dependency",
         reason: `等待依赖任务输出: ${waitingSources.join(", ")}`,
       });
-      taskStatus.set(task.taskId, "waiting_dependency");
+      taskStatus.set(preparedTask.taskId, "waiting_dependency");
       continue;
     }
 
     const docResult = await runDocAgent({
       userId: state.userId,
-      matchedSkillId: task.skillId,
-      skillArgs: task.args,
-      skillDocIds: task.docIds,
-      sourceIntent: task.sourceIntent,
+      matchedSkillId: preparedTask.skillId,
+      skillArgs: preparedTask.args,
+      skillDocIds: preparedTask.docIds,
+      sourceIntent: preparedTask.sourceIntent,
       fullAccess: state.fullAccess,
+      traceContext: state.traceContext,
     });
 
     const validatedSkillId = docResult.matchedSkillId;
     const skill = validatedSkillId ? agentSkillCatalog.getById(validatedSkillId, state.userId) : undefined;
-    const subagentName = skill?.displayName || task.subagentName || task.skillId;
+    const subagentName = skill?.displayName || preparedTask.subagentName || preparedTask.skillId;
     const taskBase: OrchestratedTask = {
-      ...task,
-      title: task.title || subagentName,
-      subagentId: validatedSkillId || task.subagentId,
+      ...preparedTask,
+      title: preparedTask.title || subagentName,
+      subagentId: validatedSkillId || preparedTask.subagentId,
       subagentName,
-      skillId: validatedSkillId || task.skillId,
+      skillId: validatedSkillId || preparedTask.skillId,
       args: docResult.skillArgs,
       docIds: docResult.skillDocIds,
     };
@@ -1220,30 +1587,30 @@ async function preflightValidate(state: GraphState): Promise<Partial<GraphState>
     if (!validatedSkillId) {
       const reason = extractTerminalReasonFromPlan(docResult.plan || null) || "该任务未解析到可执行技能。";
       tasks.push({
-        taskId: task.taskId,
-        title: task.title,
-        subagentId: task.subagentId,
-        subagentName: task.subagentName,
+        taskId: preparedTask.taskId,
+        title: preparedTask.title,
+        subagentId: preparedTask.subagentId,
+        subagentName: preparedTask.subagentName,
         status: "blocked",
         reason,
       });
-      blockedReasons.push(`${task.title}: ${reason}`);
-      taskStatus.set(task.taskId, "blocked");
+      blockedReasons.push(`${preparedTask.title}: ${reason}`);
+      taskStatus.set(preparedTask.taskId, "blocked");
       continue;
     }
 
     if (docResult.requiredInput) {
       normalizedTasks.push(taskBase);
       tasks.push({
-        taskId: task.taskId,
+        taskId: preparedTask.taskId,
         title: taskBase.title,
         subagentId: taskBase.subagentId,
         subagentName: taskBase.subagentName,
         status: "missing_input",
         reason: docResult.requiredInput.message,
       });
-      missingInputs.push(toPreflightMissingInput(task.taskId, docResult.requiredInput as PendingRequiredInputInfo));
-      taskStatus.set(task.taskId, "missing_input");
+      missingInputs.push(toPreflightMissingInput(preparedTask.taskId, docResult.requiredInput as PendingRequiredInputInfo));
+      taskStatus.set(preparedTask.taskId, "missing_input");
       continue;
     }
 
@@ -1252,12 +1619,13 @@ async function preflightValidate(state: GraphState): Promise<Partial<GraphState>
       skillArgs: docResult.skillArgs,
       needsConfirmation: docResult.needsConfirmation,
       planAction: docResult.plan?.action,
+      traceContext: state.traceContext,
     });
 
     const reviewReason = extractTerminalReasonFromPlan(reviewResult.plan || null);
     if (reviewReason) {
       tasks.push({
-        taskId: task.taskId,
+        taskId: preparedTask.taskId,
         title: taskBase.title,
         subagentId: taskBase.subagentId,
         subagentName: taskBase.subagentName,
@@ -1265,7 +1633,7 @@ async function preflightValidate(state: GraphState): Promise<Partial<GraphState>
         reason: reviewReason,
       });
       blockedReasons.push(`${taskBase.title}: ${reviewReason}`);
-      taskStatus.set(task.taskId, "blocked");
+      taskStatus.set(preparedTask.taskId, "blocked");
       continue;
     }
 
@@ -1276,13 +1644,13 @@ async function preflightValidate(state: GraphState): Promise<Partial<GraphState>
     };
     normalizedTasks.push(readyTask);
     tasks.push({
-      taskId: task.taskId,
+      taskId: preparedTask.taskId,
       title: taskBase.title,
       subagentId: taskBase.subagentId,
       subagentName: taskBase.subagentName,
       status: "ready",
     });
-    taskStatus.set(task.taskId, "ready");
+    taskStatus.set(preparedTask.taskId, "ready");
 
     if (reviewResult.reviewWarningMessage) {
       reviewWarnings.push(`${taskBase.title}: ${reviewResult.reviewWarningMessage}`);
@@ -1379,6 +1747,19 @@ ${blockedReasons.map((reason, index) => `${index + 1}. ${reason}`).join("\n")}`,
       })),
     },
   };
+    },
+    (result) => {
+      const plannedTasks = (result as Partial<GraphState>).plannedTasks;
+      const preflight = (result as Partial<GraphState>).preflightInfo;
+      return {
+        planAction: (result as Partial<GraphState>).plan?.action,
+        needsConfirmation: Boolean((result as Partial<GraphState>).needsConfirmation),
+        taskCount: Array.isArray(plannedTasks) ? plannedTasks.length : 0,
+        missingInputs: preflight?.missingInputs?.length || 0,
+        tasks: summarizeTasksForTrace(plannedTasks),
+      };
+    },
+  );
 }
 
 type PreflightTaskInput = {
@@ -1527,42 +1908,60 @@ async function awaitPreflightInput(state: GraphState): Promise<Partial<GraphStat
 // ============================================================================
 
 async function resolveCommand(state: GraphState): Promise<Partial<GraphState>> {
-  const match = state.userQuery.trim().match(COMMAND_REGEX);
-  if (!match) {
-    return { matchedSkill: null };
-  }
+  const trimmed = state.userQuery.trim();
+  const match = trimmed.match(COMMAND_REGEX);
+  const commandName = match?.[1];
+  const rest = match?.[2] || "";
+  const command = commandName ? `/${commandName}` : undefined;
 
-  await agentSkillCatalog.initialize();
-  const [, commandName, rest = ""] = match;
-  const command = `/${commandName}`;
-  const skill = agentSkillCatalog.getByCommand(command, state.userId);
+  return withGraphSpan(
+    state,
+    "graph.resolve_command",
+    {
+      hasCommand: Boolean(commandName),
+      command,
+    },
+    async () => {
+      if (!match || !commandName || !command) {
+        return { matchedSkill: null };
+      }
 
-  if (!skill) {
-    return { matchedSkill: null };
-  }
+      await agentSkillCatalog.initialize();
+      const skill = agentSkillCatalog.getByCommand(command, state.userId);
 
-  // Check if enabled
-  const allSkills = agentSkillCatalog.getAllSkills(state.userId);
-  const enabledIds = new Set(
-    await projectSkillConfigStore.getEnabledSkillIds(state.projectKey, allSkills),
+      if (!skill) {
+        return { matchedSkill: null };
+      }
+
+      // Check if enabled
+      const allSkills = agentSkillCatalog.getAllSkills(state.userId);
+      const enabledIds = new Set(
+        await projectSkillConfigStore.getEnabledSkillIds(state.projectKey, allSkills),
+      );
+      if (!enabledIds.has(skill.id)) {
+        return {
+          matchedSkill: null,
+          plan: {
+            action: "respond_blocked",
+            reason: `技能 ${command} 已被禁用，请在项目设置中启用。`,
+          },
+        };
+      }
+
+      const args = buildCommandArgs(skill, rest.trim(), state.docIds);
+      return {
+        matchedSkill: skill.id,
+        skillArgs: args,
+        skillDocIds: state.docIds || [],
+        sourceIntent: "command",
+      };
+    },
+    (result) => ({
+      matchedSkill: (result as Partial<GraphState>).matchedSkill,
+      planAction: (result as Partial<GraphState>).plan?.action,
+      sourceIntent: (result as Partial<GraphState>).sourceIntent,
+    }),
   );
-  if (!enabledIds.has(skill.id)) {
-    return {
-      matchedSkill: null,
-      plan: {
-        action: "respond_blocked",
-        reason: `技能 ${command} 已被禁用，请在项目设置中启用。`,
-      },
-    };
-  }
-
-  const args = buildCommandArgs(skill, rest.trim(), state.docIds);
-  return {
-    matchedSkill: skill.id,
-    skillArgs: args,
-    skillDocIds: state.docIds || [],
-    sourceIntent: "command",
-  };
 }
 
 // ============================================================================
@@ -1570,54 +1969,71 @@ async function resolveCommand(state: GraphState): Promise<Partial<GraphState>> {
 // ============================================================================
 
 async function planSkill(state: GraphState): Promise<Partial<GraphState>> {
-  const planned = await runPlannerAgent({
-    userQuery: state.userQuery,
-    messages: state.messages,
-    projectKey: state.projectKey,
-    userId: state.userId,
-    docIds: state.docIds,
-    attachments: state.attachments,
-    skillHint: state.intent.skillHint,
-    llmConfig: state.llmConfig,
-    traceContext: state.traceContext,
-  });
+  return withGraphSpan(
+    state,
+    "graph.plan_skill",
+    {
+      intentSkillHint: state.intent.skillHint,
+      docIds: state.docIds?.length || 0,
+      attachmentCount: state.attachments?.length || 0,
+    },
+    async () => {
+      const planned = await runPlannerAgent({
+        userQuery: state.userQuery,
+        messages: state.messages,
+        projectKey: state.projectKey,
+        userId: state.userId,
+        docIds: state.docIds,
+        attachments: state.attachments,
+        skillHint: state.intent.skillHint,
+        llmConfig: state.llmConfig,
+        traceContext: state.traceContext,
+      });
 
-  let matchedSkillId = planned.matchedSkillId;
-  let skillArgs = planned.skillArgs;
-  let skillDocIds = planned.skillDocIds;
-  let sourceIntent = planned.sourceIntent;
+      let matchedSkillId = planned.matchedSkillId;
+      let skillArgs = planned.skillArgs;
+      let skillDocIds = planned.skillDocIds;
+      let sourceIntent = planned.sourceIntent;
 
-  if (!matchedSkillId && state.intent.skillHint) {
-    await agentSkillCatalog.initialize();
-    const hintedSkill = agentSkillCatalog.getByCommand(`/${state.intent.skillHint}`, state.userId);
-    if (hintedSkill) {
-      const allSkills = agentSkillCatalog.getAllSkills(state.userId);
-      const enabledIds = new Set(
-        await projectSkillConfigStore.getEnabledSkillIds(state.projectKey, allSkills),
-      );
-      if (enabledIds.has(hintedSkill.id)) {
-        matchedSkillId = hintedSkill.id;
-        skillDocIds = state.docIds || [];
-        skillArgs = buildCommandArgs(hintedSkill, state.userQuery.trim(), skillDocIds);
-        sourceIntent = "keyword";
+      if (!matchedSkillId && state.intent.skillHint) {
+        await agentSkillCatalog.initialize();
+        const hintedSkill = agentSkillCatalog.getByCommand(`/${state.intent.skillHint}`, state.userId);
+        if (hintedSkill) {
+          const allSkills = agentSkillCatalog.getAllSkills(state.userId);
+          const enabledIds = new Set(
+            await projectSkillConfigStore.getEnabledSkillIds(state.projectKey, allSkills),
+          );
+          if (enabledIds.has(hintedSkill.id)) {
+            matchedSkillId = hintedSkill.id;
+            skillDocIds = state.docIds || [];
+            skillArgs = buildCommandArgs(hintedSkill, state.userQuery.trim(), skillDocIds);
+            sourceIntent = "keyword";
+          }
+        }
       }
-    }
-  }
 
-  const nextDocIds = (!state.docIds || state.docIds.length === 0) && skillDocIds.length > 0
-    ? skillDocIds
-    : state.docIds;
+      const nextDocIds = (!state.docIds || state.docIds.length === 0) && skillDocIds.length > 0
+        ? skillDocIds
+        : state.docIds;
 
-  return {
-    matchedSkill: matchedSkillId,
-    skillArgs,
-    skillDocIds,
-    sourceIntent,
-    ...(nextDocIds ? { docIds: nextDocIds } : {}),
-    ...(!matchedSkillId && planned.respondText
-      ? { plan: { action: "respond_text", text: planned.respondText } }
-      : {}),
-  };
+      return {
+        matchedSkill: matchedSkillId,
+        skillArgs,
+        skillDocIds,
+        sourceIntent,
+        ...(nextDocIds ? { docIds: nextDocIds } : {}),
+        ...(!matchedSkillId && planned.respondText
+          ? { plan: { action: "respond_text", text: planned.respondText } }
+          : {}),
+      };
+    },
+    (result) => ({
+      matchedSkill: (result as Partial<GraphState>).matchedSkill,
+      sourceIntent: (result as Partial<GraphState>).sourceIntent,
+      respondText: (result as Partial<GraphState>).plan?.action === "respond_text",
+      docIds: (result as Partial<GraphState>).skillDocIds?.length || 0,
+    }),
+  );
 }
 
 // ============================================================================
@@ -1719,24 +2135,38 @@ async function awaitConfirmation(state: GraphState): Promise<Partial<GraphState>
 // ============================================================================
 
 async function ragRetrieve(state: GraphState): Promise<Partial<GraphState>> {
-  try {
-    const { ragContext, ragSources } = await runRetrievalAgent({
-      userQuery: state.userQuery,
-      userId: state.userId,
-      projectKey: state.projectKey,
-      docIds: state.docIds,
-      traceContext: state.traceContext,
-    });
+  return withGraphSpan(
+    state,
+    "graph.rag_retrieve",
+    {
+      queryLength: state.userQuery.length,
+      docIds: state.docIds?.length || 0,
+    },
+    async () => {
+      try {
+        const { ragContext, ragSources } = await runRetrievalAgent({
+          userQuery: state.userQuery,
+          userId: state.userId,
+          projectKey: state.projectKey,
+          docIds: state.docIds,
+          traceContext: state.traceContext,
+        });
 
-    return {
-      ragContext,
-      // RetrievalAgentSourceReference shape is compatible with GraphSourceReference.
-      ragSources: ragSources as unknown as GraphSourceReference[],
-    };
-  } catch (err) {
-    console.warn("[ChatGraph] RAG retrieval failed:", err);
-    return { ragContext: "", ragSources: [] };
-  }
+        return {
+          ragContext,
+          // RetrievalAgentSourceReference shape is compatible with GraphSourceReference.
+          ragSources: ragSources as unknown as GraphSourceReference[],
+        };
+      } catch (err) {
+        console.warn("[ChatGraph] RAG retrieval failed:", err);
+        return { ragContext: "", ragSources: [] };
+      }
+    },
+    (result) => ({
+      sourceCount: (result as Partial<GraphState>).ragSources?.length || 0,
+      contextChars: (result as Partial<GraphState>).ragContext?.length || 0,
+    }),
+  );
 }
 
 // ============================================================================
@@ -1744,15 +2174,29 @@ async function ragRetrieve(state: GraphState): Promise<Partial<GraphState>> {
 // ============================================================================
 
 async function buildResponse(state: GraphState): Promise<Partial<GraphState>> {
-  const systemPrompt = buildChatSystemPrompt(state.projectKey, state.ragContext);
-  return {
-    plan: {
-      action: "stream_chat",
-      ragContext: state.ragContext,
-      ragSources: state.ragSources,
-      systemPrompt,
+  return withGraphSpan(
+    state,
+    "graph.build_response",
+    {
+      contextChars: state.ragContext.length,
+      sourceCount: state.ragSources.length,
     },
-  };
+    async () => {
+      const systemPrompt = buildChatSystemPrompt(state.projectKey, state.ragContext);
+      return {
+        plan: {
+          action: "stream_chat",
+          ragContext: state.ragContext,
+          ragSources: state.ragSources,
+          systemPrompt,
+        },
+      };
+    },
+    (result) => ({
+      planAction: (result as Partial<GraphState>).plan?.action,
+      sourceCount: (result as Partial<GraphState>).ragSources?.length || 0,
+    }),
+  );
 }
 
 // ============================================================================
@@ -1762,9 +2206,17 @@ async function buildResponse(state: GraphState): Promise<Partial<GraphState>> {
 async function prepareDeepSearch(
   _state: GraphState,
 ): Promise<Partial<GraphState>> {
-  return {
-    plan: { action: "deep_search" },
-  };
+  return withGraphSpan(
+    _state,
+    "graph.prepare_deep_search",
+    undefined,
+    async () => ({
+      plan: { action: "deep_search" },
+    }),
+    (result) => ({
+      planAction: (result as Partial<GraphState>).plan?.action,
+    }),
+  );
 }
 
 // ============================================================================

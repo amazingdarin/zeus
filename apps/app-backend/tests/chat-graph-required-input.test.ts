@@ -3,7 +3,7 @@ import { after, test } from "node:test";
 
 import {
   executeChatGraph,
-  resumeChatGraphWithRequiredInput,
+  resumeChatGraphWithPreflightInput,
 } from "../src/services/chat-graph.ts";
 import { projectSkillConfigStore } from "../src/llm/agent/project-skill-config-store.ts";
 import { closePool } from "../src/db/postgres.ts";
@@ -32,23 +32,28 @@ test("chat-graph interrupts for missing required skill args (skill_args)", async
       sessionId: "session-1",
     });
 
-    assert.equal(result.status, "awaiting_input");
-    if (result.status !== "awaiting_input") return;
+    assert.equal(result.status, "awaiting_preflight_input");
+    if (result.status !== "awaiting_preflight_input") return;
 
-    assert.equal(result.pendingInput.kind, "skill_args");
-    assert.equal(result.pendingInput.skillName, "doc-import-git");
-    assert.deepEqual(result.pendingInput.missing, ["repo_url"]);
+    assert.equal(result.pendingPreflight.missingInputs.length > 0, true);
+    const missing = result.pendingPreflight.missingInputs[0];
+    assert(missing);
+    assert.equal(missing.kind, "skill_args");
+    assert.equal(missing.skillName, "doc-import-git");
+    assert.deepEqual(missing.missing, ["repo_url"]);
     assert.equal(
-      result.pendingInput.fields.some((f) => f.key === "repo_url"),
+      (missing.fields || []).some((f) => f.key === "repo_url"),
       true,
     );
 
-    const resumed = await resumeChatGraphWithRequiredInput(runId, {
-      args: { repo_url: "https://example.com/repo.git" },
+    const resumed = await resumeChatGraphWithPreflightInput(runId, {
+      taskInputs: [{
+        taskId: missing.taskId,
+        args: { repo_url: "https://example.com/repo.git" },
+      }],
     });
     assert.equal(resumed.status, "awaiting_confirmation");
   } finally {
     store.getEnabledSkillIds = original;
   }
 });
-

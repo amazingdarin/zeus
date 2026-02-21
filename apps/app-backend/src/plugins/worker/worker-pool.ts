@@ -23,6 +23,7 @@ export type WorkerExecutionContext = {
   userId: string;
   projectKey: string;
   capabilities?: string[];
+  traceId?: string;
   permissions: {
     allowedHttpHosts: string[];
     maxExecutionMs: number;

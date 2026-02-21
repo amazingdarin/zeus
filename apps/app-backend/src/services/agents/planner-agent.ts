@@ -11,7 +11,8 @@ import {
   projectSkillConfigStore,
   type AgentSkillDefinition,
 } from "../../llm/agent/index.js";
-import type { TraceContext } from "../../observability/index.js";
+import { traceManager, type TraceContext } from "../../observability/index.js";
+import { querySuggestsBatchTranscription } from "../media-transcribe-context.js";
 
 export type PlannerAgentAttachment = {
   assetId: string;
@@ -82,9 +83,17 @@ type PlannerState = typeof PlannerGraphState.State;
 // Helpers (Planner-only)
 // ============================================================================
 
-const PARSE_SKILL_NAMES = new Set(["file-parse", "image-analyze", "url-extract"]);
+const PARSE_SKILL_NAMES = new Set([
+  "file-parse",
+  "image-analyze",
+  "media-transcribe",
+  "url-extract",
+]);
+const PPT_PLUGIN_AGENT_COMMAND = "/ppt-agent";
 
 const IMAGE_MIME_PREFIXES = ["image/"];
+const AUDIO_MIME_PREFIXES = ["audio/"];
+const VIDEO_MIME_PREFIXES = ["video/"];
 const DOCUMENT_MIMES = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -95,6 +104,24 @@ const DOCUMENT_MIMES = new Set([
   "text/markdown",
   "text/csv",
   "application/json",
+]);
+
+const MEDIA_EXTENSIONS = new Set([
+  "mp3",
+  "wav",
+  "ogg",
+  "m4a",
+  "aac",
+  "flac",
+  "webm",
+  "mp4",
+  "mov",
+  "mkv",
+  "avi",
+  "m4v",
+  "ogv",
+  "mpeg",
+  "mpga",
 ]);
 
 function isParseSkill(skillHint: string): boolean {
@@ -154,7 +181,7 @@ function domainLabel(domain: PlannerDomain): string {
 function buildToolSelectionPrompt(domain: PlannerDomain, toolNames: string[]): string {
   const label = domainLabel(domain);
   const extraRules: Record<PlannerDomain, string> = {
-    doc: "优先处理文档创建/编辑/优化/导入/转换/解析等操作。",
+    doc: "优先处理文档创建/编辑/优化/导入/转换/解析等操作；doc-get 用于文档元信息/attrs读取；media-transcribe 可使用 asset_id/asset_ids，或 doc_id + block_id。",
     kb: "优先处理知识库检索与结果汇总（例如 kb-search）。",
     img: "优先处理图片分析与 OCR（例如 image-analyze）。",
     code: "优先处理代码相关任务（分析、修改、运行、测试等）。",
@@ -190,6 +217,93 @@ function attachmentLooksLikeImage(att: PlannerAgentAttachment): boolean {
     if (IMAGE_MIME_PREFIXES.some((p) => mime.startsWith(p))) return true;
   }
   return att.type === "image";
+}
+
+function attachmentLooksLikeMedia(att: PlannerAgentAttachment): boolean {
+  const mime = att.mimeType?.toLowerCase() || "";
+  if (AUDIO_MIME_PREFIXES.some((p) => mime.startsWith(p))) return true;
+  if (VIDEO_MIME_PREFIXES.some((p) => mime.startsWith(p))) return true;
+  const name = String(att.name || "").toLowerCase();
+  const ext = name.includes(".") ? name.split(".").pop() || "" : "";
+  return MEDIA_EXTENSIONS.has(ext);
+}
+
+function parseMediaTranscribeCommandArgs(
+  rawText: string,
+): Record<string, unknown> {
+  const text = String(rawText || "").trim();
+  if (!text) return {};
+
+  const assetMatch = text.match(/(?:^|\s)asset[_-]?id\s*[:=]\s*([a-zA-Z0-9_-]+)/i);
+  const docMatch = text.match(/(?:^|\s)doc[_-]?id\s*[:=]\s*([a-zA-Z0-9_-]+)/i);
+  const blockMatch = text.match(/(?:^|\s)block[_-]?id\s*[:=]\s*([a-zA-Z0-9_-]+)/i);
+  const args: Record<string, unknown> = {};
+  if (assetMatch?.[1]) args.asset_id = assetMatch[1].trim();
+  if (docMatch?.[1]) args.doc_id = docMatch[1].trim();
+  if (blockMatch?.[1]) args.block_id = blockMatch[1].trim();
+  if (Object.keys(args).length > 0) {
+    return args;
+  }
+
+  if (querySuggestsBatchTranscription(text)) {
+    return { asset_id: "__ALL__" };
+  }
+
+  // Fallback only for token-like values to avoid treating natural language as asset_id.
+  if (/^[a-zA-Z0-9_-]+$/.test(text)) {
+    return { asset_id: text };
+  }
+
+  return {};
+}
+
+function parseDocGetCommandArgs(
+  rawText: string,
+): Record<string, unknown> {
+  const text = String(rawText || "").trim();
+  if (!text) return {};
+
+  const tokens = text.split(/\s+/).filter(Boolean);
+  const args: Record<string, unknown> = {};
+  let docId = "";
+
+  for (const token of tokens) {
+    const normalized = token.trim();
+    if (!normalized) continue;
+
+    if (normalized === "--content" || normalized === "content" || normalized === "include_content=true") {
+      args.include_content = true;
+      continue;
+    }
+    if (normalized === "--no-block-attrs" || normalized === "include_block_attrs=false") {
+      args.include_block_attrs = false;
+      continue;
+    }
+    if (normalized.startsWith("doc_id=")) {
+      const value = normalized.slice("doc_id=".length).trim();
+      if (value) args.doc_id = value;
+      continue;
+    }
+    if (normalized.startsWith("block_types=") || normalized.startsWith("--block-types=")) {
+      const raw = normalized.split("=", 2)[1] || "";
+      const values = raw
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (values.length > 0) args.block_types = values;
+      continue;
+    }
+
+    if (!docId && /^[a-zA-Z0-9_-]+$/.test(normalized)) {
+      docId = normalized;
+    }
+  }
+
+  if (!args.doc_id && docId) {
+    args.doc_id = docId;
+  }
+
+  return args;
 }
 
 function inferPlannerDomainFromText(message: string): PlannerDomain {
@@ -315,6 +429,22 @@ function autoDetectParseSkill(
     };
   }
 
+  if (skillHint === "media-transcribe" && attachmentLooksLikeMedia(firstAttachment)) {
+    const mediaAttachments = attachments.filter(attachmentLooksLikeMedia);
+    if (mediaAttachments.length > 1 && querySuggestsBatchTranscription(userQuery)) {
+      return {
+        skill,
+        args: {
+          asset_ids: mediaAttachments.map((attachment) => attachment.assetId),
+        },
+      };
+    }
+    return {
+      skill,
+      args: { asset_id: firstAttachment.assetId },
+    };
+  }
+
   // url-extract doesn't use attachments, skip auto-detect
   return null;
 }
@@ -323,12 +453,28 @@ function enrichParseArgsWithAttachment(
   args: Record<string, unknown>,
   skillHint: string,
   attachments: PlannerAgentAttachment[],
+  userQuery: string,
 ): void {
   if (!attachments.length) return;
 
   const first = attachments[0];
 
-  if ((skillHint === "file-parse" || skillHint === "image-analyze") && !args.asset_id) {
+  if (
+    (skillHint === "file-parse" ||
+      skillHint === "image-analyze" ||
+      skillHint === "media-transcribe") &&
+    !args.asset_id &&
+    !Array.isArray(args.asset_ids)
+  ) {
+    if (skillHint === "media-transcribe") {
+      const mediaAttachments = attachments.filter(attachmentLooksLikeMedia);
+      if (mediaAttachments.length > 1 && querySuggestsBatchTranscription(userQuery)) {
+        args.asset_ids = mediaAttachments.map((attachment) => attachment.assetId);
+      } else {
+        args.asset_id = (mediaAttachments[0] || first).assetId;
+      }
+      return;
+    }
     args.asset_id = first.assetId;
   }
 }
@@ -350,6 +496,40 @@ export function buildCommandArgs(
     typeof skill.metadata?.legacySkillName === "string"
       ? skill.metadata.legacySkillName
       : "";
+  if (skill.source === "plugin" && skill.command === PPT_PLUGIN_AGENT_COMMAND) {
+    const sourceDocIds = Array.isArray(docIds)
+      ? docIds.map((docId) => String(docId || "").trim()).filter(Boolean)
+      : [];
+    const tokens = trimmed.split(/\s+/).filter(Boolean);
+    const topicTokens: string[] = [];
+    let templateId = "";
+    for (const token of tokens) {
+      const normalized = token.trim();
+      if (!normalized) continue;
+      if (normalized.startsWith("template_id=")) {
+        const value = normalized.slice("template_id=".length).trim();
+        if (value) templateId = value;
+        continue;
+      }
+      if (normalized.startsWith("templateId=")) {
+        const value = normalized.slice("templateId=".length).trim();
+        if (value) templateId = value;
+        continue;
+      }
+      if (normalized.startsWith("template=")) {
+        const value = normalized.slice("template=".length).trim();
+        if (value) templateId = value;
+        continue;
+      }
+      topicTokens.push(normalized);
+    }
+    const topic = topicTokens.join(" ").trim();
+    return {
+      ...(topic ? { topic } : {}),
+      ...(templateId ? { template_id: templateId } : {}),
+      ...(sourceDocIds.length > 0 ? { source_doc_ids: sourceDocIds } : {}),
+    };
+  }
 
   switch (legacy) {
     case "doc-create":
@@ -359,6 +539,8 @@ export function buildCommandArgs(
     case "doc-read":
     case "doc-summary":
       return {};
+    case "doc-get":
+      return parseDocGetCommandArgs(trimmed);
     case "doc-optimize-format":
     case "doc-optimize-content":
     case "doc-optimize-full":
@@ -399,6 +581,8 @@ export function buildCommandArgs(
       return { asset_id: trimmed };
     case "image-analyze":
       return { asset_id: trimmed };
+    case "media-transcribe":
+      return parseMediaTranscribeCommandArgs(trimmed);
     case "url-extract":
       return { url: trimmed };
     default:
@@ -506,7 +690,7 @@ async function hintMatch(state: PlannerState): Promise<Partial<PlannerState>> {
 
   // Enrich args with attachment asset_id for parse skills
   if (isParseSkill(hint) && state.attachments?.length) {
-    enrichParseArgsWithAttachment(args, hint, state.attachments);
+    enrichParseArgsWithAttachment(args, hint, state.attachments, state.userQuery);
   }
 
   return {
@@ -560,7 +744,7 @@ async function llmToolSelect(state: PlannerState): Promise<Partial<PlannerState>
         .join("\n");
       messages.push({
         role: "system",
-        content: `当前可用附件(可用于导入或解析):\n${lines}\n\n提示: 图片附件可用 image-analyze 解析; 文档附件(PDF/Word/HTML等)可用 file-parse 解析; URL 可用 url-extract 提取。`,
+        content: `当前可用附件(可用于导入或解析):\n${lines}\n\n提示: 图片附件可用 image-analyze 解析; 文档附件(PDF/Word/HTML等)可用 file-parse 解析; 音视频附件可用 media-transcribe 转写; URL 可用 url-extract 提取。`,
       });
     }
 
@@ -724,40 +908,68 @@ export const plannerAgentGraph = new StateGraph(PlannerGraphState)
   .compile({ checkpointer: false, name: "planner_agent" });
 
 export async function runPlannerAgent(input: PlannerAgentInput): Promise<PlannerAgentOutput> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LangGraph invoke typing requires exact match
-  const result = await plannerAgentGraph.invoke({
-    userQuery: input.userQuery,
-    messages: input.messages,
-    projectKey: input.projectKey,
-    userId: input.userId,
-    docIds: input.docIds,
-    attachments: input.attachments,
-    skillHint: input.skillHint,
-    llmConfig: input.llmConfig,
-    traceContext: input.traceContext,
-  } as any);
+  const span = input.traceContext
+    ? traceManager.startSpan(input.traceContext, "agent.planner", {
+        skillHint: input.skillHint,
+        docIds: input.docIds?.length || 0,
+        attachmentCount: input.attachments?.length || 0,
+      })
+    : null;
+  const start = Date.now();
 
-  const matchedSkillId = typeof result.matchedSkillId === "string" ? result.matchedSkillId : null;
-  const skillArgs = (result.skillArgs && typeof result.skillArgs === "object")
-    ? (result.skillArgs as Record<string, unknown>)
-    : {};
-  const skillDocIds = Array.isArray(result.skillDocIds)
-    ? (result.skillDocIds as unknown[]).map((x) => String(x))
-    : [];
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LangGraph invoke typing requires exact match
+    const result = await plannerAgentGraph.invoke({
+      userQuery: input.userQuery,
+      messages: input.messages,
+      projectKey: input.projectKey,
+      userId: input.userId,
+      docIds: input.docIds,
+      attachments: input.attachments,
+      skillHint: input.skillHint,
+      llmConfig: input.llmConfig,
+      traceContext: input.traceContext,
+    } as any);
 
-  const sourceIntent = result.sourceIntent === "command" || result.sourceIntent === "keyword" || result.sourceIntent === "llm-tool"
-    ? result.sourceIntent
-    : "llm-tool";
+    const matchedSkillId = typeof result.matchedSkillId === "string" ? result.matchedSkillId : null;
+    const skillArgs = (result.skillArgs && typeof result.skillArgs === "object")
+      ? (result.skillArgs as Record<string, unknown>)
+      : {};
+    const skillDocIds = Array.isArray(result.skillDocIds)
+      ? (result.skillDocIds as unknown[]).map((x) => String(x))
+      : [];
 
-  const respondText = typeof result.respondText === "string" && result.respondText.trim()
-    ? result.respondText.trim()
-    : undefined;
+    const sourceIntent = result.sourceIntent === "command" || result.sourceIntent === "keyword" || result.sourceIntent === "llm-tool"
+      ? result.sourceIntent
+      : "llm-tool";
 
-  return {
-    matchedSkillId,
-    skillArgs,
-    skillDocIds,
-    sourceIntent,
-    ...(respondText ? { respondText } : {}),
-  };
+    const respondText = typeof result.respondText === "string" && result.respondText.trim()
+      ? result.respondText.trim()
+      : undefined;
+
+    if (span) {
+      traceManager.endSpan(span, {
+        matchedSkillId,
+        sourceIntent,
+        respondText: Boolean(respondText),
+        durationMs: Date.now() - start,
+      });
+    }
+
+    return {
+      matchedSkillId,
+      skillArgs,
+      skillDocIds,
+      sourceIntent,
+      ...(respondText ? { respondText } : {}),
+    };
+  } catch (err) {
+    if (span) {
+      traceManager.endSpan(span, {
+        error: err instanceof Error ? err.message : String(err),
+        durationMs: Date.now() - start,
+      }, "ERROR");
+    }
+    throw err;
+  }
 }

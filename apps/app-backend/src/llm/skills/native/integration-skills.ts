@@ -2,7 +2,7 @@ import type { SkillIntent, SkillStreamChunk } from "../types.js";
 import type { TraceContext } from "../../../observability/index.js";
 import { knowledgeSearch } from "../../../knowledge/search.js";
 import { fetchUrl } from "../../../services/fetch-url.js";
-import { importGit } from "../../../services/import-git.js";
+import { createImportGitTask } from "../../../services/import-git-task.js";
 import { convertDocument } from "../../../services/convert.js";
 import { importAssetAsDocument } from "../../../services/smart-import.js";
 import {
@@ -193,23 +193,18 @@ export async function* executeDocImportGit(
     return;
   }
 
-  yield { type: "thinking", content: "正在导入 Git 仓库..." };
+  yield { type: "thinking", content: "正在创建 Git 导入任务..." };
   try {
-    const result = await importGit(
-      userId,
-      projectKey,
-      {
-        repo_url: repoUrl,
-        branch,
-        parent_id: parentId,
-      },
+    const { taskId } = await createImportGitTask(userId, projectKey, {
+      repo_url: repoUrl,
+      branch,
+      parent_id: parentId,
+    }, {
       traceContext,
-    );
+    });
     yield {
       type: "done",
-      message:
-        `导入完成：目录 ${result.directories}，文件 ${result.files}，` +
-        `跳过 ${result.skipped}，转换 ${result.converted}，兜底 ${result.fallback}`,
+      message: `Git 导入任务已创建（task_id=${taskId}），可在消息中心查看进度。`,
     };
   } catch (err) {
     yield {
@@ -310,4 +305,3 @@ export async function* executeDocConvert(
     };
   }
 }
-

@@ -246,11 +246,17 @@ async function generateSummary(content: string): Promise<string | null> {
     // Fallback: truncate content
     return content.slice(0, SUMMARY_MAX_LENGTH);
   }
+  if (config.providerId === "openai-compatible" && !config.baseUrl) {
+    console.warn("[RAPTOR] OpenAI-compatible provider missing baseUrl, skipping summary.");
+    return content.slice(0, SUMMARY_MAX_LENGTH);
+  }
 
   try {
     const response = await llmGateway.chat({
       provider: config.providerId as LLMProviderId,
       model: config.defaultModel || "gpt-4o-mini",
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl,
       messages: [
         {
           role: "system",

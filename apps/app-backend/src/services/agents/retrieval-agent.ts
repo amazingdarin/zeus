@@ -8,8 +8,7 @@ import type { IndexSearchResult } from "../../knowledge/types.js";
 import { ragSearch } from "../../knowledge/rag-graph.js";
 import { enrichResultsWithHierarchy } from "../../knowledge/hierarchy.js";
 import { documentStore } from "../../storage/document-store.js";
-import { ragTraceManager } from "../../observability/index.js";
-import type { TraceContext } from "../../observability/index.js";
+import { ragTraceManager, traceManager, type TraceContext } from "../../observability/index.js";
 
 export type RetrievalAgentInput = {
   userQuery: string;
@@ -166,20 +165,48 @@ export const retrievalAgentGraph = new StateGraph(RetrievalGraphState)
   .compile({ checkpointer: false, name: "retrieval_agent" });
 
 export async function runRetrievalAgent(input: RetrievalAgentInput): Promise<RetrievalAgentOutput> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LangGraph invoke typing requires exact match
-  const result = await retrievalAgentGraph.invoke({
-    userQuery: input.userQuery,
-    userId: input.userId,
-    projectKey: input.projectKey,
-    docIds: input.docIds,
-    traceContext: input.traceContext,
-  } as any);
+  const span = input.traceContext
+    ? traceManager.startSpan(input.traceContext, "agent.retrieval", {
+        queryLength: input.userQuery.length,
+        docIds: input.docIds?.length || 0,
+      })
+    : null;
+  const start = Date.now();
 
-  return {
-    ragContext: typeof result.ragContext === "string" ? result.ragContext : "",
-    ragSources: Array.isArray(result.ragSources)
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LangGraph invoke typing requires exact match
+    const result = await retrievalAgentGraph.invoke({
+      userQuery: input.userQuery,
+      userId: input.userId,
+      projectKey: input.projectKey,
+      docIds: input.docIds,
+      traceContext: input.traceContext,
+    } as any);
+
+    const ragContext = typeof result.ragContext === "string" ? result.ragContext : "";
+    const ragSources = Array.isArray(result.ragSources)
       ? (result.ragSources as RetrievalAgentSourceReference[])
-      : [],
-  };
-}
+      : [];
 
+    if (span) {
+      traceManager.endSpan(span, {
+        sourceCount: ragSources.length,
+        contextChars: ragContext.length,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    return {
+      ragContext,
+      ragSources,
+    };
+  } catch (err) {
+    if (span) {
+      traceManager.endSpan(span, {
+        error: err instanceof Error ? err.message : String(err),
+        durationMs: Date.now() - start,
+      }, "ERROR");
+    }
+    throw err;
+  }
+}

@@ -75,6 +75,15 @@ export async function evaluateRAGResponse(
       answerRelevancy: 0.5,
     };
   }
+  if (config.providerId === "openai-compatible" && !config.baseUrl) {
+    console.warn("[Evaluation] OpenAI-compatible provider missing baseUrl, skipping evaluation.");
+    return {
+      contextPrecision: 0.5,
+      contextRecall: 0.5,
+      faithfulness: 0.5,
+      answerRelevancy: 0.5,
+    };
+  }
 
   const contextText = input.context
     .map((c, i) => `[${i + 1}] ${c}`)
@@ -91,6 +100,8 @@ export async function evaluateRAGResponse(
     const response = await llmGateway.chat({
       provider: config.providerId as LLMProviderId,
       model: config.defaultModel || "gpt-4o-mini",
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl,
       messages: [
         {
           role: "system",
@@ -225,6 +236,10 @@ export async function evaluateSufficiency(
   if (!config || !config.enabled) {
     return { sufficient: true };
   }
+  if (config.providerId === "openai-compatible" && !config.baseUrl) {
+    console.warn("[Evaluation] OpenAI-compatible provider missing baseUrl, skipping sufficiency check.");
+    return { sufficient: true };
+  }
 
   const contextText = context.slice(0, 5).join("\n---\n");
 
@@ -232,6 +247,8 @@ export async function evaluateSufficiency(
     const response = await llmGateway.chat({
       provider: config.providerId as LLMProviderId,
       model: config.defaultModel || "gpt-4o-mini",
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl,
       messages: [
         {
           role: "system",
