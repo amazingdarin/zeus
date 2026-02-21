@@ -1,0 +1,448 @@
+.ppt-plugin-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+
+.ppt-plugin-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ppt-plugin-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.ppt-plugin-subtitle {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink-secondary);
+}
+
+.ppt-plugin-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.ppt-plugin-nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ppt-plugin-nav-item {
+  text-decoration: none;
+  font-size: 13px;
+  color: var(--ink-secondary);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: color-mix(in srgb, var(--surface) 85%, #000 15%);
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.ppt-plugin-nav-item:hover {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--border) 70%, #000 30%);
+}
+
+.ppt-plugin-nav-item.is-active {
+  color: var(--ink);
+  font-weight: 600;
+  border-color: color-mix(in srgb, var(--border) 55%, #000 45%);
+  background: color-mix(in srgb, var(--surface) 70%, #000 30%);
+}
+
+.ppt-plugin-template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.ppt-plugin-template-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ppt-plugin-template-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ppt-plugin-template-card-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ppt-plugin-template-card-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.ppt-plugin-template-card-id {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 80%, #000 20%);
+}
+
+.ppt-plugin-template-source {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+
+.ppt-plugin-template-source.is-preset {
+  color: var(--ink-secondary);
+  background: color-mix(in srgb, var(--surface) 82%, #000 18%);
+}
+
+.ppt-plugin-template-source.is-custom {
+  color: #0f766e;
+  border-color: rgba(15, 118, 110, 0.35);
+  background: rgba(15, 118, 110, 0.12);
+}
+
+.ppt-plugin-template-card-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-secondary);
+}
+
+.ppt-plugin-template-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ppt-plugin-template-tag {
+  font-size: 11px;
+  color: var(--ink-secondary);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: color-mix(in srgb, var(--surface) 85%, #000 15%);
+}
+
+.ppt-plugin-template-tag.is-muted {
+  color: var(--muted);
+}
+
+.ppt-plugin-empty {
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  color: var(--muted);
+  font-size: 13px;
+  background: color-mix(in srgb, var(--surface) 88%, #000 12%);
+}
+
+.ppt-plugin-doc-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ppt-plugin-doc-refresh {
+  font-size: 0;
+}
+
+.ppt-plugin-doc-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) 1fr;
+  gap: 12px;
+}
+
+.ppt-plugin-doc-sidebar {
+  display: flex;
+  flex-direction: column;
+}
+
+.ppt-plugin-doc-list-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding-left: 4px;
+}
+
+.ppt-plugin-doc-status {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 4px 8px;
+}
+
+.ppt-plugin-doc-status:empty {
+  display: none;
+}
+
+.ppt-plugin-doc-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ppt-plugin-doc-info {
+  border: none;
+  padding: 0;
+  background: transparent;
+}
+
+.ppt-plugin-doc-info-empty {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ppt-plugin-doc-info-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ppt-plugin-doc-info-title {
+  margin: 0;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.ppt-plugin-doc-info-link {
+  font-size: 12px;
+  color: var(--ink-secondary);
+  text-decoration: none;
+}
+
+.ppt-plugin-doc-info-link:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.ppt-plugin-doc-info-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.ppt-plugin-doc-info-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.ppt-plugin-doc-info-label {
+  min-width: 72px;
+  color: var(--muted);
+}
+
+.ppt-plugin-doc-info-value {
+  color: var(--ink-secondary);
+  word-break: break-all;
+}
+
+.ppt-plugin-doc-list-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ppt-plugin-doc-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.ppt-plugin-doc-control {
+  align-items: flex-start;
+  padding: 6px 8px;
+}
+
+.ppt-plugin-doc-title {
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.ppt-plugin-doc-meta {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.2;
+}
+
+.ppt-plugin-doc-item {
+  white-space: normal;
+  display: flex;
+  align-items: flex-start;
+}
+
+.ppt-plugin-doc-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ppt-plugin-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.ppt-plugin-doc-actions {
+  grid-row: span 2;
+  align-self: center;
+}
+
+.ppt-plugin-doc-open {
+  font-size: 12px;
+  color: var(--ink-secondary);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: color-mix(in srgb, var(--surface) 85%, #000 15%);
+}
+
+.ppt-plugin-doc-open:hover {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--border) 70%, #000 30%);
+}
+
+.ppt-plugin-doc-tabs {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+}
+
+.ppt-plugin-doc-tab {
+  border: none;
+  border-radius: 0;
+  padding: 2px 0;
+  font-size: 12px;
+  background: transparent;
+  color: var(--ink-secondary);
+  cursor: pointer;
+}
+
+.ppt-plugin-doc-tab.is-active {
+  color: var(--ink);
+  border-bottom: 2px solid var(--ink);
+  font-weight: 600;
+}
+
+.ppt-plugin-doc-view {
+  border: none;
+  border-radius: 0;
+  padding: 6px 0 0;
+  background: transparent;
+  min-height: 240px;
+}
+
+.ppt-plugin-view-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ppt-plugin-view-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.ppt-plugin-view-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ppt-plugin-view-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ppt-plugin-html-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ppt-plugin-html-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px;
+  background: transparent;
+}
+
+.ppt-plugin-html-title {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.ppt-plugin-html-editable {
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 6px;
+  min-height: 180px;
+  background: #fff;
+  color: #111827;
+}
+
+.ppt-plugin-doc-render {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.ppt-plugin-doc-render h1,
+.ppt-plugin-doc-render h2,
+.ppt-plugin-doc-render h3,
+.ppt-plugin-doc-render h4 {
+  margin: 0;
+  color: var(--ink);
+}
+
+.ppt-plugin-doc-render p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.ppt-plugin-doc-render ul,
+.ppt-plugin-doc-render ol {
+  margin: 0 0 0 18px;
+}
+
+.ppt-plugin-doc-empty {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  font-size: 12px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface) 90%, #000 10%);
+}

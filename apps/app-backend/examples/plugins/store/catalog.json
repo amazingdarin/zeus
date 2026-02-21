@@ -1,25 +1,27 @@
 {
   "plugins": [
     {
-      "pluginId": "ppt-template-manager",
-      "displayName": "PPT Template Manager",
-      "description": "Manage reusable PPT templates from Zeus plugin runtime.",
-      "tags": ["ppt", "templates", "plugin", "v2"],
+      "pluginId": "ppt-plugin",
+      "displayName": "PPT Plugin",
+      "description": "Unified PPT agent for generating deck-style documents and final PPT tasks.",
+      "tags": ["ppt", "agent", "plugin", "v2"],
       "versions": [
         {
-          "version": "0.2.0",
-          "packageUrl": "/Users/darin/mine/code/zeus/apps/app-backend/examples/plugins/dist/ppt-template-manager-0.2.0.tgz",
+          "version": "0.3.0",
+          "packageUrl": "/Users/darin/mine/code/zeus/apps/app-backend/examples/plugins/dist/ppt-plugin-0.3.0.tgz",
           "manifest": {
-            "id": "ppt-template-manager",
-            "version": "0.2.0",
-            "displayName": "PPT Template Manager",
-            "description": "Manage reusable PPT templates from Zeus plugin runtime.",
+            "id": "ppt-plugin",
+            "version": "0.3.0",
+            "displayName": "PPT Plugin",
+            "description": "Unified PPT agent for generating deck-style documents and final PPT tasks.",
             "pluginApiVersion": 2,
             "engines": {
               "zeusAppBackend": ">=0.1.0",
               "zeusWeb": ">=0.1.0"
             },
             "capabilities": [
+              "docs.read",
+              "docs.write",
               "system.command.register",
               "docs.tool.register",
               "ui.menu.register",
@@ -27,9 +29,13 @@
               "system.service.register"
             ],
             "activation": {
-              "commands": ["ppt-template-manager.list-templates"],
-              "routes": ["templates"],
-              "tools": ["ppt-template-doc-tool"]
+              "commands": [
+                "ppt-plugin.agent.generate",
+                "ppt-plugin.agent.task-status",
+                "ppt-plugin.list-templates"
+              ],
+              "routes": ["agent"],
+              "tools": ["ppt-agent-doc-tool"]
             },
             "frontend": {
               "entry": "frontend/index.mjs"
@@ -39,15 +45,35 @@
             },
             "permissions": {
               "allowedHttpHosts": [],
-              "maxExecutionMs": 8000,
+              "maxExecutionMs": 12000,
               "maxHookExecutionMs": 3000
             },
             "contributes": {
               "commands": [
                 {
-                  "id": "ppt-template-manager.list-templates",
+                  "id": "ppt-plugin.agent.generate",
+                  "title": "PPT Agent 生成演示稿",
+                  "description": "通过多个基础文档与知识检索结果生成 PPT 类文档，并触发最终 PPT 导出。",
+                  "category": "plugin",
+                  "slashAliases": ["/ppt-agent", "/ppt-generate"],
+                  "apiEnabled": true,
+                  "requiresDocScope": false,
+                  "handler": "agent-generate"
+                },
+                {
+                  "id": "ppt-plugin.agent.task-status",
+                  "title": "查询 PPT 导出任务",
+                  "description": "根据 task_id 查询 PPT 任务状态。",
+                  "category": "plugin",
+                  "slashAliases": ["/ppt-task"],
+                  "apiEnabled": true,
+                  "requiresDocScope": false,
+                  "handler": "task-status"
+                },
+                {
+                  "id": "ppt-plugin.list-templates",
                   "title": "列出 PPT 模版",
-                  "description": "列出可用的 PPT 模版",
+                  "description": "列出可用的 PPT 模版。",
                   "category": "plugin",
                   "slashAliases": ["/ppt-template-list"],
                   "apiEnabled": true,
@@ -57,50 +83,99 @@
               ],
               "docTools": [
                 {
-                  "id": "ppt-template-doc-tool",
+                  "id": "ppt-agent-doc-tool",
                   "placement": "documentHeader",
-                  "commandId": "ppt-template-manager.list-templates",
-                  "title": "PPT 模版推荐",
+                  "commandId": "ppt-plugin.agent.generate",
+                  "title": "PPT Agent 生成",
                   "order": 120,
                   "requiresDocScope": false
                 }
               ],
               "menus": [
                 {
-                  "id": "ppt-template-sidebar",
+                  "id": "ppt-agent-sidebar",
                   "placement": "sidebar",
-                  "title": "PPT 模版",
+                  "title": "PPT Agent",
                   "order": 120,
-                  "routeId": "templates"
+                  "routeId": "agent"
                 },
                 {
-                  "id": "ppt-template-doc-header",
+                  "id": "ppt-agent-doc-header",
                   "placement": "documentHeader",
-                  "title": "PPT 模版推荐",
+                  "title": "PPT Agent 生成",
                   "order": 120,
-                  "commandId": "ppt-template-manager.list-templates"
+                  "commandId": "ppt-plugin.agent.generate"
                 }
               ],
               "routes": [
                 {
-                  "id": "templates",
-                  "path": "/plugins/ppt-template-manager/templates",
-                  "title": "PPT 模版管理",
+                  "id": "agent",
+                  "path": "/plugins/ppt-plugin/agent",
+                  "title": "PPT Agent",
                   "order": 120
                 }
               ],
               "services": [
                 {
-                  "id": "ppt-template-analyzer",
+                  "id": "ppt-agent-analyzer",
                   "kind": "analyzer",
-                  "commandId": "ppt-template-manager.list-templates",
-                  "title": "PPT 模版分析",
-                  "description": "Analyze and list reusable PPT templates"
+                  "commandId": "ppt-plugin.agent.generate",
+                  "title": "PPT Agent Analyzer",
+                  "description": "Analyze multiple docs and knowledge to generate deck-ready documents."
                 }
               ]
             }
           },
           "publishedAt": "2026-02-11T00:00:00Z"
+        }
+      ]
+    },
+    {
+      "pluginId": "edu-plugin",
+      "displayName": "Edu Plugin",
+      "description": "Question-set block for educational quiz authoring.",
+      "tags": ["edu", "quiz", "doc-editor", "plugin", "v2"],
+      "versions": [
+        {
+          "version": "0.1.0",
+          "packageUrl": "/Users/darin/mine/code/zeus/apps/app-backend/examples/plugins/dist/edu-plugin-0.1.0.tgz",
+          "manifest": {
+            "id": "edu-plugin",
+            "version": "0.1.0",
+            "displayName": "Edu Plugin",
+            "description": "Question-set doc-editor block for quiz authoring (choice/blank/essay).",
+            "pluginApiVersion": 2,
+            "engines": {
+              "zeusAppBackend": ">=0.1.0",
+              "zeusWeb": ">=0.1.0"
+            },
+            "capabilities": [
+              "docs.block.register"
+            ],
+            "activation": {
+              "commands": [],
+              "routes": [],
+              "tools": [],
+              "documentEvents": []
+            },
+            "frontend": {
+              "entry": "frontend/index.mjs"
+            },
+            "permissions": {
+              "allowedHttpHosts": [],
+              "maxExecutionMs": 5000,
+              "maxHookExecutionMs": 2000
+            },
+            "contributes": {
+              "blocks": [
+                {
+                  "blockType": "edu_question_set",
+                  "requiresBlockId": true
+                }
+              ]
+            }
+          },
+          "publishedAt": "2026-02-12T00:00:00Z"
         }
       ]
     }

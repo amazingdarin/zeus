@@ -48,23 +48,25 @@ assets/*                      # 可选
 
 ```json
 {
-  "id": "ppt-template-manager",
-  "version": "0.2.0",
-  "displayName": "PPT Template Manager",
+  "id": "ppt-plugin",
+  "version": "0.3.0",
+  "displayName": "PPT Plugin",
   "pluginApiVersion": 2,
   "engines": {
     "zeusAppBackend": ">=0.1.0",
     "zeusWeb": ">=0.1.0"
   },
   "capabilities": [
+    "docs.read",
+    "docs.write",
     "system.command.register",
     "docs.tool.register",
     "ui.menu.register",
     "ui.route.register"
   ],
   "activation": {
-    "commands": ["list-templates"],
-    "routes": ["templates"]
+    "commands": ["ppt-plugin.agent.generate"],
+    "routes": ["agent"]
   },
   "frontend": { "entry": "frontend/index.mjs" },
   "backend": { "entry": "backend/index.mjs" },
@@ -76,34 +78,35 @@ assets/*                      # 可选
   "contributes": {
     "commands": [
       {
-        "id": "list-templates",
-        "title": "列出 PPT 模版",
-        "description": "列出可用模版",
-        "slashAliases": ["/ppt-template-list"],
-        "apiEnabled": true
+        "id": "ppt-plugin.agent.generate",
+        "title": "PPT Agent 生成演示稿",
+        "description": "通过多个文档与知识库生成 PPT 类文档，并触发最终 PPT 导出",
+        "slashAliases": ["/ppt-agent"],
+        "apiEnabled": true,
+        "handler": "agent-generate"
       }
     ],
     "docTools": [
       {
-        "id": "ppt-tool",
+        "id": "ppt-agent-doc-tool",
         "placement": "documentHeader",
-        "commandId": "list-templates",
-        "title": "PPT 模版推荐"
+        "commandId": "ppt-plugin.agent.generate",
+        "title": "PPT Agent 生成"
       }
     ],
     "menus": [
       {
-        "id": "ppt-sidebar",
+        "id": "ppt-agent-sidebar",
         "placement": "sidebar",
-        "title": "PPT 模版",
-        "routeId": "templates"
+        "title": "PPT Agent",
+        "routeId": "agent"
       }
     ],
     "routes": [
       {
-        "id": "templates",
-        "path": "/plugins/ppt-template-manager/templates",
-        "title": "PPT 模版管理"
+        "id": "agent",
+        "path": "/plugins/ppt-plugin/agent",
+        "title": "PPT Agent"
       }
     ]
   }
@@ -140,12 +143,12 @@ PLUGIN_WEB_VERSION=0.1.0
 {
   "plugins": [
     {
-      "pluginId": "ppt-template-manager",
-      "displayName": "PPT Template Manager",
+      "pluginId": "ppt-plugin",
+      "displayName": "PPT Plugin",
       "versions": [
         {
-          "version": "0.2.0",
-          "packageUrl": "/abs/path/ppt-template-manager-0.2.0.tgz",
+          "version": "0.3.0",
+          "packageUrl": "/abs/path/ppt-plugin-0.3.0.tgz",
           "manifest": { "...": "manifest.v2 content" },
           "publishedAt": "2026-02-11T00:00:00Z"
         }
@@ -178,13 +181,13 @@ curl -H "Authorization: Bearer <TOKEN>" \
 curl -X POST "http://localhost:4870/api/plugins/v2/me/install" \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
-  -d '{"pluginId":"ppt-template-manager","version":"0.2.0"}'
+  -d '{"pluginId":"ppt-plugin","version":"0.3.0"}'
 ```
 
 ### 6.3 启停插件
 
 ```bash
-curl -X PATCH "http://localhost:4870/api/plugins/v2/me/ppt-template-manager" \
+curl -X PATCH "http://localhost:4870/api/plugins/v2/me/ppt-plugin" \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"enabled":false}'
@@ -193,7 +196,7 @@ curl -X PATCH "http://localhost:4870/api/plugins/v2/me/ppt-template-manager" \
 ### 6.4 卸载插件
 
 ```bash
-curl -X DELETE "http://localhost:4870/api/plugins/v2/me/ppt-template-manager" \
+curl -X DELETE "http://localhost:4870/api/plugins/v2/me/ppt-plugin" \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -201,10 +204,10 @@ curl -X DELETE "http://localhost:4870/api/plugins/v2/me/ppt-template-manager" \
 
 ```bash
 curl -X POST \
-  "http://localhost:4870/api/projects/personal/me/test/plugin-commands/list-templates/execute" \
+  "http://localhost:4870/api/projects/personal/me/test/plugin-commands/ppt-plugin.agent.generate/execute" \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
-  -d '{"doc_id":"optional-doc-id","__source":"api"}'
+  -d '{"source_doc_ids":["doc-a","doc-b"],"knowledge_queries":["行业趋势","竞争格局"],"export_ppt":true,"__source":"api"}'
 ```
 
 `__source` 可选：`api | palette | tool`。
@@ -241,7 +244,49 @@ curl -X POST \
 - after：异步执行，不阻塞主流程
 - hook 异常默认 `fail-open`，主链路继续，写审计日志
 
-## 9. 冲突与校验规则
+## 9. Langfuse Trace（可选）
+
+当 `LANGFUSE_ENABLED=true` 且后端配置了 Langfuse，插件可以把执行过程写入 trace。若插件在聊天/技能编排中被调用，会自动复用当前 trace；若没有 trace（例如 API 直接触发插件），系统会自动创建 `plugin.execute` trace 并包一层 `plugin.execute` span。
+
+插件后端可用统一的 `ctx.host.trace` API：
+
+- `isEnabled()`：是否启用 Langfuse
+- `startSpan(name, input?)` / `endSpan(spanId, output?, level?)`
+- `logGeneration(params)`
+- `startGeneration(params)` / `endGeneration(generationId, output, usage?, level?, statusMessage?)`
+
+建议：
+- 优先调用 `ctx.host.trace.isEnabled()`，避免无效调用。
+- 只记录必要 input/output/metadata，避免大段原文或敏感信息。
+- 前端插件可用 `ctx.trace` 写入独立 trace（不绑定聊天/技能 traceId）。
+
+示例：
+
+```js
+const plugin = {
+  async executeCommand(commandId, input, ctx) {
+    if (await ctx.host.trace.isEnabled()) {
+      const span = await ctx.host.trace.startSpan("plugin.step", { commandId });
+      const gen = await ctx.host.trace.startGeneration({
+        name: "plugin.llm",
+        model: "gpt-4o-mini",
+        provider: "openai",
+        input: { prompt: input.prompt },
+      });
+      const output = "example output";
+      await ctx.host.trace.endGeneration(gen?.generationId || "", output, {
+        promptTokens: 120,
+        completionTokens: 60,
+        totalTokens: 180,
+      });
+      await ctx.host.trace.endSpan(span?.spanId || "", { status: "ok" });
+    }
+    return { ok: true };
+  },
+};
+```
+
+## 10. 冲突与校验规则
 
 安装时会校验：
 
@@ -266,8 +311,8 @@ curl -X POST \
 ```js
 export default {
   async executeCommand(commandId, input, ctx) {
-    if (commandId === "list-templates") {
-      return { items: [{ id: "default", name: "默认模板" }] };
+    if (commandId === "agent-generate") {
+      return { message: "PPT agent finished", docId: "generated-doc-id" };
     }
     throw new Error(`Unknown command: ${commandId}`);
   },
@@ -289,16 +334,16 @@ export default {
     return {
       menus: [
         {
-          id: "ppt-sidebar",
+          id: "ppt-agent-sidebar",
           placement: "sidebar",
-          title: "PPT 模版",
-          action: "list-templates"
+          title: "PPT Agent",
+          action: "ppt-plugin.agent.generate"
         }
       ],
       routes: [
         {
-          id: "templates",
-          path: "/plugins/ppt-template-manager/templates"
+          id: "agent",
+          path: "/plugins/ppt-plugin/agent"
         }
       ]
     };
@@ -315,3 +360,33 @@ ${ZEUS_DATA_ROOT}/users/{userId}/.plugin/
 ```
 
 详见：`docs/user-data-directory.md`
+
+## 12. Edu 题组 block 示例（choice/blank/essay）
+
+仓库内置了一个最小示例插件：
+
+- `apps/app-backend/examples/plugins/edu-plugin/manifest.json`
+- `apps/app-backend/examples/plugins/edu-plugin/frontend/index.mjs`
+
+其核心 manifest 贡献点：
+
+```json
+{
+  "id": "edu-plugin",
+  "pluginApiVersion": 2,
+  "capabilities": ["docs.block.register"],
+  "contributes": {
+    "blocks": [
+      {
+        "blockType": "edu_question_set",
+        "requiresBlockId": true
+      }
+    ]
+  }
+}
+```
+
+运行时行为：
+
+- 编辑态（`editor.isEditable=true`）：可编辑题干、子题和标准答案
+- 展示态（`editor.isEditable=false`）：仅展示题干与题目，不渲染答案字段
