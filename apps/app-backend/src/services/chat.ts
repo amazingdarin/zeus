@@ -113,6 +113,7 @@ export type ChatStreamChunk = {
     | "intent_pending"
     | "preflight_pending"
     | "input_pending"
+    | "task_status"
     | "search_start"
     | "search_result";
   content?: string;
@@ -124,11 +125,24 @@ export type ChatStreamChunk = {
   pendingIntent?: import("./chat-graph.js").PendingIntentInfo;  // For intent_pending type
   pendingPreflight?: import("./chat-graph.js").PendingPreflightInfo;  // For preflight_pending type
   pendingInput?: import("./chat-graph.js").PendingRequiredInputInfo;  // For input_pending type
+  taskStatus?: ChatBatchTaskStatus; // For task_status type
   // Deep search specific fields
   phase?: "decompose" | "search_kb" | "evaluate" | "search_web" | "synthesize";
   subQueries?: string[];
   searchQuery?: string;
   resultCount?: number;
+};
+
+export type ChatBatchTaskStatus = {
+  taskId: string;
+  title: string;
+  skillId: string;
+  index: number;
+  total: number;
+  failurePolicy: "required" | "best_effort";
+  status: "pending" | "running" | "completed" | "failed" | "skipped";
+  message?: string;
+  error?: string;
 };
 
 // In-memory storage for active chat runs
@@ -238,6 +252,23 @@ function planThinkingMessage(plan: ChatExecutionPlan): string | null {
 }
 
 type BatchTask = Extract<ChatExecutionPlan, { action: "execute_skill_batch" }>['tasks'][number];
+
+function formatBatchTaskStatusLine(status: ChatBatchTaskStatus): string {
+  const prefix = `${status.index}/${status.total}. ${status.title}`;
+  switch (status.status) {
+    case "pending":
+      return `${prefix} [pending] ${status.message || "待执行"}`;
+    case "completed":
+      return `${prefix} [completed] ${status.message || "已完成"}`;
+    case "running":
+      return `${prefix} [running] ${status.message || "执行中"}`;
+    case "skipped":
+      return `${prefix} [skipped] ${status.error || status.message || "已跳过"}`;
+    case "failed":
+    default:
+      return `${prefix} [failed] ${status.error || status.message || "执行失败"}`;
+  }
+}
 
 function resolveBatchTaskInputs(
   task: BatchTask,
@@ -856,6 +887,11 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
           candidates: graphResult.pendingIntent.options.length,
         });
 
+        const awaitSpan = traceManager.startSpan(traceContext, "graph.await_intent", {
+          intent: graphResult.intent.type,
+          candidates: graphResult.pendingIntent.options.length,
+        });
+
         run.status = "awaiting_intent";
         run.pendingIntentInfo = graphResult.pendingIntent;
         run.updatedAt = Date.now();
@@ -866,11 +902,21 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
 
         run.pendingIntentInfo = undefined;
 
+        const awaitOutput: Record<string, unknown> = {
+          selected: Boolean(selected),
+          selectedType: selected?.type,
+          selectedLabel: selected?.label,
+          status: selected ? "selected" : "timeout",
+        };
+
         if (abortSignal.aborted) {
+          traceManager.endSpan(awaitSpan, { ...awaitOutput, status: "cancelled" }, "WARNING");
           run.status = "cancelled";
           run.updatedAt = Date.now();
           return;
         }
+
+        traceManager.endSpan(awaitSpan, awaitOutput, selected ? undefined : "WARNING");
 
         // Timeout — fall back to chat
         const option = selected || {
@@ -921,6 +967,17 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
           skill: graphResult.pendingInput.skillName,
         });
 
+        const awaitSpan = traceManager.startSpan(traceContext, "graph.await_input", {
+          kind: graphResult.pendingInput.kind,
+          skill: graphResult.pendingInput.skillName,
+          fields: graphResult.pendingInput.kind === "skill_args"
+            ? (graphResult.pendingInput.fields?.length || 0)
+            : undefined,
+          missing: graphResult.pendingInput.kind === "skill_args"
+            ? (graphResult.pendingInput.missing?.length || 0)
+            : undefined,
+        });
+
         run.status = "awaiting_input";
         run.pendingRequiredInput = graphResult.pendingInput;
         run.updatedAt = Date.now();
@@ -929,11 +986,25 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
         const provided = await waitForRequiredInput(runId);
         run.pendingRequiredInput = undefined;
 
+        const providedArgs = (provided && typeof provided.args === "object" && !Array.isArray(provided.args))
+          ? (provided.args as Record<string, unknown>)
+          : null;
+        const providedDocId = typeof provided?.doc_id === "string" ? provided.doc_id.trim() : "";
+        const awaitOutput: Record<string, unknown> = {
+          provided: Boolean(provided),
+          hasDocId: providedDocId.length > 0,
+          argsKeys: providedArgs ? Object.keys(providedArgs).length : 0,
+          status: provided ? "provided" : "timeout",
+        };
+
         if (abortSignal.aborted) {
+          traceManager.endSpan(awaitSpan, { ...awaitOutput, status: "cancelled" }, "WARNING");
           run.status = "cancelled";
           run.updatedAt = Date.now();
           return;
         }
+
+        traceManager.endSpan(awaitSpan, awaitOutput, provided ? undefined : "WARNING");
 
         const payload: Record<string, unknown> =
           provided
@@ -983,6 +1054,11 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
           missingInputs: graphResult.pendingPreflight.missingInputs.length,
         });
 
+        const awaitSpan = traceManager.startSpan(traceContext, "graph.await_preflight_input", {
+          tasks: graphResult.pendingPreflight.tasks.length,
+          missingInputs: graphResult.pendingPreflight.missingInputs.length,
+        });
+
         run.status = "awaiting_preflight_input";
         run.pendingPreflightInfo = graphResult.pendingPreflight;
         run.updatedAt = Date.now();
@@ -991,11 +1067,23 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
         const provided = await waitForPreflightInput(runId);
         run.pendingPreflightInfo = undefined;
 
+        const taskInputs = provided && Array.isArray((provided as { taskInputs?: unknown }).taskInputs)
+          ? ((provided as { taskInputs?: unknown[] }).taskInputs?.length || 0)
+          : 0;
+        const awaitOutput: Record<string, unknown> = {
+          provided: Boolean(provided),
+          taskInputs,
+          status: provided ? "provided" : "timeout",
+        };
+
         if (abortSignal.aborted) {
+          traceManager.endSpan(awaitSpan, { ...awaitOutput, status: "cancelled" }, "WARNING");
           run.status = "cancelled";
           run.updatedAt = Date.now();
           return;
         }
+
+        traceManager.endSpan(awaitSpan, awaitOutput, provided ? undefined : "WARNING");
 
         const payload: Record<string, unknown> = provided || { taskInputs: [] };
 
@@ -1041,6 +1129,14 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
 
         // Build a PendingToolCall for the SSE event
         const pendingTool = createPendingToolCallFromGraphInfo(graphResult.pendingTool);
+        const taskCount = Array.isArray((pendingTool.args as { tasks?: unknown }).tasks)
+          ? ((pendingTool.args as { tasks?: unknown[] }).tasks?.length || 0)
+          : 0;
+        const awaitSpan = traceManager.startSpan(traceContext, "graph.await_confirmation", {
+          skill: pendingTool.skillName,
+          riskLevel: pendingTool.riskLevel,
+          taskCount,
+        });
         run.status = "awaiting_confirmation";
         run.pendingTool = pendingTool;
         run.updatedAt = Date.now();
@@ -1051,11 +1147,19 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
 
         run.pendingTool = undefined;
 
+        const awaitOutput: Record<string, unknown> = {
+          confirmed,
+          status: confirmed ? "confirmed" : "rejected_or_timeout",
+        };
+
         if (abortSignal.aborted) {
+          traceManager.endSpan(awaitSpan, { ...awaitOutput, status: "cancelled" }, "WARNING");
           run.status = "cancelled";
           run.updatedAt = Date.now();
           return;
         }
+
+        traceManager.endSpan(awaitSpan, awaitOutput, confirmed ? undefined : "WARNING");
 
         // Resume graph with the user's decision (false = rejected/timeout)
         run.status = "running";
@@ -1334,19 +1438,64 @@ async function* executeSkillBatchPlan(
   traceContext: TraceContext,
   fullAccess = false,
 ): AsyncGenerator<ChatStreamChunk> {
-  if (!Array.isArray(plan.tasks) || plan.tasks.length === 0) {
-    run.status = "completed";
-    run.updatedAt = Date.now();
-    yield { type: "done", message: "没有可执行的任务。" };
-    return;
-  }
-
-  await agentSkillCatalog.initialize();
-
-  const summaries: string[] = [];
+  const taskCount = Array.isArray(plan.tasks) ? plan.tasks.length : 0;
+  const taskSummary = Array.isArray(plan.tasks)
+    ? plan.tasks.slice(0, 5).map((task, index) => ({
+        taskId: task.taskId,
+        title: task.title,
+        skillId: task.skillId,
+        index: index + 1,
+        total: taskCount,
+        failurePolicy: task.failurePolicy || "required",
+      }))
+    : [];
+  const batchSpan = traceManager.startSpan(traceContext, "skill-batch", {
+    taskCount,
+    tasks: taskSummary,
+  });
+  let batchStatus: "completed" | "failed" | "cancelled" | "rejected" | "empty" | "error" = "completed";
+  let batchLevel: "DEBUG" | "DEFAULT" | "WARNING" | "ERROR" | undefined;
+  let batchError: string | undefined;
   const warnings: string[] = [];
-  const total = plan.tasks.length;
+
+  try {
+    if (!Array.isArray(plan.tasks) || plan.tasks.length === 0) {
+      batchStatus = "empty";
+      run.status = "completed";
+      run.updatedAt = Date.now();
+      yield { type: "done", message: "没有可执行的任务。" };
+      return;
+    }
+
+    await agentSkillCatalog.initialize();
+
+    const total = plan.tasks.length;
   const taskOutputContext = new Map<string, Record<string, unknown>>();
+  const taskStatusById = new Map<string, ChatBatchTaskStatus>();
+
+  const publishTaskStatus = (status: ChatBatchTaskStatus): ChatStreamChunk => {
+    taskStatusById.set(status.taskId, status);
+    return {
+      type: "task_status",
+      taskStatus: status,
+    };
+  };
+
+  // Publish orchestration result as a TODO-like pending list before execution starts.
+  for (let index = 0; index < total; index += 1) {
+    const task = plan.tasks[index];
+    if (!task) continue;
+    yield publishTaskStatus({
+      taskId: task.taskId,
+      title: task.title,
+      skillId: task.skillId,
+      index: index + 1,
+      total,
+      failurePolicy: task.failurePolicy || "required",
+      status: "pending",
+      message: "待执行",
+    });
+  }
 
   for (let index = 0; index < total; index += 1) {
     if (abortSignal.aborted) {
@@ -1359,6 +1508,14 @@ async function* executeSkillBatchPlan(
     if (!task) continue;
 
     const failurePolicy = task.failurePolicy || "required";
+    const statusSeed: Omit<ChatBatchTaskStatus, "status" | "message" | "error"> = {
+      taskId: task.taskId,
+      title: task.title,
+      skillId: task.skillId,
+      index: index + 1,
+      total,
+      failurePolicy,
+    };
 
     const unresolvedDependencies = (task.dependsOn || []).filter((taskId) => !taskOutputContext.has(taskId));
     if (unresolvedDependencies.length > 0) {
@@ -1371,6 +1528,12 @@ async function* executeSkillBatchPlan(
           status: "failed",
           error: reason,
         });
+        yield publishTaskStatus({
+          ...statusSeed,
+          status: "skipped",
+          error: reason,
+          message: "依赖缺失，已按 best_effort 跳过",
+        });
         yield {
           type: "thinking",
           content: `子任务 ${index + 1}/${total} 失败但已继续（best_effort）：${task.title}`,
@@ -1378,6 +1541,14 @@ async function* executeSkillBatchPlan(
         continue;
       }
 
+      yield publishTaskStatus({
+        ...statusSeed,
+        status: "failed",
+        error: reason,
+      });
+      batchStatus = "failed";
+      batchLevel = "ERROR";
+      batchError = reason;
       run.status = "failed";
       run.updatedAt = Date.now();
       yield {
@@ -1398,6 +1569,12 @@ async function* executeSkillBatchPlan(
           status: "failed",
           error: reason,
         });
+        yield publishTaskStatus({
+          ...statusSeed,
+          status: "skipped",
+          error: reason,
+          message: "输入绑定解析失败，已按 best_effort 跳过",
+        });
         yield {
           type: "thinking",
           content: `子任务 ${index + 1}/${total} 失败但已继续（best_effort）：${task.title}`,
@@ -1405,6 +1582,14 @@ async function* executeSkillBatchPlan(
         continue;
       }
 
+      yield publishTaskStatus({
+        ...statusSeed,
+        status: "failed",
+        error: reason,
+      });
+      batchStatus = "failed";
+      batchLevel = "ERROR";
+      batchError = reason;
       run.status = "failed";
       run.updatedAt = Date.now();
       yield {
@@ -1432,6 +1617,11 @@ async function* executeSkillBatchPlan(
           status: "failed",
           error: reason,
         });
+        yield publishTaskStatus({
+          ...statusSeed,
+          status: "failed",
+          error: reason,
+        });
         yield {
           type: "thinking",
           content: `子任务 ${index + 1}/${total} 失败但已继续（best_effort）：${task.title}`,
@@ -1439,12 +1629,25 @@ async function* executeSkillBatchPlan(
         continue;
       }
 
+      yield publishTaskStatus({
+        ...statusSeed,
+        status: "failed",
+        error: reason,
+      });
+      batchStatus = "failed";
+      batchLevel = "ERROR";
+      batchError = reason;
       run.status = "failed";
       run.updatedAt = Date.now();
       yield { type: "error", error: reason };
       return;
     }
 
+    yield publishTaskStatus({
+      ...statusSeed,
+      status: "running",
+      message: "开始执行",
+    });
     yield {
       type: "thinking",
       content: `执行子任务 ${index + 1}/${total}: ${task.title}`,
@@ -1502,6 +1705,8 @@ async function* executeSkillBatchPlan(
 
       if (chunk.type === "tool_rejected") {
         yield chunk;
+        batchStatus = "rejected";
+        batchLevel = "WARNING";
         run.status = "completed";
         run.updatedAt = Date.now();
         return;
@@ -1528,6 +1733,11 @@ async function* executeSkillBatchPlan(
           status: "failed",
           error: reason,
         });
+        yield publishTaskStatus({
+          ...statusSeed,
+          status: "failed",
+          error: reason,
+        });
         yield {
           type: "thinking",
           content: `子任务 ${index + 1}/${total} 失败但已继续（best_effort）：${task.title}`,
@@ -1535,13 +1745,20 @@ async function* executeSkillBatchPlan(
         continue;
       }
 
+      yield publishTaskStatus({
+        ...statusSeed,
+        status: "failed",
+        error: reason,
+      });
+      batchStatus = "failed";
+      batchLevel = "ERROR";
+      batchError = reason;
       run.status = "failed";
       run.updatedAt = Date.now();
       return;
     }
 
     const summary = taskDoneMessage || `${task.title} 已完成`;
-    summaries.push(`${index + 1}. ${task.title}: ${summary}`);
 
     if (!taskDoneMessage) {
       yield { type: "delta", content: `\n[${task.title}] ${summary}\n` };
@@ -1552,11 +1769,31 @@ async function* executeSkillBatchPlan(
       status: "completed",
       message: summary,
     });
+    yield publishTaskStatus({
+      ...statusSeed,
+      status: "completed",
+      message: summary,
+    });
   }
 
-  const baseMessage = summaries.length > 0
-    ? `批量任务执行完成：\n${summaries.join("\n")}`
-    : "批量任务执行完成";
+  const orderedTaskStatuses = plan.tasks.map((task, index) => (
+    taskStatusById.get(task.taskId) || {
+      taskId: task.taskId,
+      title: task.title,
+      skillId: task.skillId,
+      index: index + 1,
+      total,
+      failurePolicy: task.failurePolicy || "required",
+      status: "skipped" as const,
+      message: "未执行",
+    }
+  ));
+
+  const statusMessage = orderedTaskStatuses.length > 0
+    ? `子任务状态：\n${orderedTaskStatuses.map(formatBatchTaskStatusLine).join("\n")}`
+    : "子任务状态：无";
+
+  const baseMessage = `批量任务执行完成：\n${statusMessage}`;
 
   const warningMessage = warnings.length > 0
     ? `\n\n告警（best_effort 已继续）：\n${warnings.join("\n")}`
@@ -1572,7 +1809,21 @@ async function* executeSkillBatchPlan(
   run.status = "completed";
   run.updatedAt = Date.now();
   persistAssistantMessage(run.userId, run.projectKey, run.sessionId, finalMessage);
+  batchStatus = "completed";
   yield { type: "done", message: finalMessage };
+  } catch (err) {
+    batchStatus = "error";
+    batchLevel = "ERROR";
+    batchError = err instanceof Error ? err.message : String(err);
+    throw err;
+  } finally {
+    traceManager.endSpan(batchSpan, {
+      status: batchStatus,
+      taskCount,
+      warnings: warnings.length,
+      ...(batchError ? { error: batchError } : {}),
+    }, batchLevel);
+  }
 }
 
 /**
@@ -1900,6 +2151,7 @@ async function* executeSkillDirect(
           commandId,
           args: normalizedArgs,
           source: "slash",
+          traceId: traceContext.traceId,
         })
         : await pluginManagerV2.executeOperation({
           userId: run.userId,
@@ -1907,6 +2159,7 @@ async function* executeSkillDirect(
           pluginId,
           operationId,
           args: normalizedArgs,
+          traceId: traceContext.traceId,
         });
       publishOutput(result);
 

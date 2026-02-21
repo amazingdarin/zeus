@@ -1,13 +1,16 @@
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import path from "node:path";
+import { createReadStream } from "node:fs";
 import { v4 as uuidv4 } from "uuid";
 import type { JSONContent } from "@tiptap/core";
 
 import { convertDocument } from "./services/convert.js";
 import { fetchUrl } from "./services/fetch-url.js";
-import { importGit } from "./services/import-git.js";
+import { createImportGitTask } from "./services/import-git-task.js";
+import { createImportFolderTask } from "./services/import-folder-task.js";
 import { importFileAsDocument } from "./services/smart-import.js";
+import { parseMediaTranscription } from "./services/parse-service.js";
 import {
   readAsset as readSystemDocAsset,
   readMarkdown as readSystemDocMarkdown,
@@ -28,6 +31,7 @@ import { notifyDocumentMoved } from "./knowledge/tree-sync.js";
 import { assetStore } from "./storage/asset-store.js";
 import { getUserId } from "./middleware/auth.js";
 import { projectScopeMiddleware } from "./middleware/project-scope.js";
+import { resolveProjectScope } from "./project-scope.js";
 import {
   llmGateway,
   configStore,
@@ -61,13 +65,77 @@ import {
 } from "./services/optimize.js";
 import { documentFavoriteStore } from "./services/document-favorite-store.js";
 import { documentRecentEditStore } from "./services/document-recent-edit-store.js";
+import { messageCenterBus, messageCenterStore } from "./services/message-center-store.js";
+import {
+  documentContainsAnyBlockType,
+  normalizeBlockTypeQuery,
+} from "./services/document-filter.js";
 import { skillConfigStore } from "./llm/skills/skill-config-store.js";
 import { agentSkillCatalog, projectSkillConfigStore } from "./llm/agent/index.js";
 import { zodObjectHasRequiredKey } from "./llm/zod.js";
 import { pluginManagerV2 } from "./plugins-v2/index.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
+const uploadWithPath = multer({ storage: multer.memoryStorage(), preservePath: true });
 const pluginManager = pluginManagerV2;
+const VALID_CONFIG_TYPES = new Set<ConfigType>(["llm", "embedding", "vision", "transcription"]);
+const VALID_CONFIG_TYPE_MESSAGE =
+  "configType must be 'llm', 'embedding', 'vision', or 'transcription'";
+const TRANSCRIPTION_PROVIDER_IDS = new Set<LLMProviderId>(["openai", "openai-compatible"]);
+const DEFAULT_TRANSCRIPTION_PROVIDER: LLMProviderId = "openai-compatible";
+const DEFAULT_TRANSCRIPTION_DISPLAY_NAME = "Whisper Transcription";
+
+function isValidConfigType(configType: string): configType is ConfigType {
+  return VALID_CONFIG_TYPES.has(configType as ConfigType);
+}
+
+function isProviderAllowedForConfigType(configType: ConfigType, providerId: LLMProviderId): boolean {
+  if (configType === "transcription") {
+    return TRANSCRIPTION_PROVIDER_IDS.has(providerId);
+  }
+  return true;
+}
+
+function normalizeInputForConfigType(
+  configType: ConfigType,
+  input: Partial<ProviderConfigInput>,
+): Partial<ProviderConfigInput> {
+  if (configType !== "transcription") {
+    return input;
+  }
+  return {
+    ...input,
+    providerId: input.providerId || DEFAULT_TRANSCRIPTION_PROVIDER,
+    displayName: input.displayName || DEFAULT_TRANSCRIPTION_DISPLAY_NAME,
+  };
+}
+
+function createSilentWavBuffer(durationMs = 350, sampleRate = 16000): Buffer {
+  const channels = 1;
+  const bitsPerSample = 16;
+  const bytesPerSample = bitsPerSample / 8;
+  const sampleCount = Math.max(1, Math.floor((durationMs / 1000) * sampleRate));
+  const dataSize = sampleCount * channels * bytesPerSample;
+  const buffer = Buffer.alloc(44 + dataSize);
+  const byteRate = sampleRate * channels * bytesPerSample;
+  const blockAlign = channels * bytesPerSample;
+
+  buffer.write("RIFF", 0, "ascii");
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write("WAVE", 8, "ascii");
+  buffer.write("fmt ", 12, "ascii");
+  buffer.writeUInt32LE(16, 16); // PCM header length
+  buffer.writeUInt16LE(1, 20); // PCM format
+  buffer.writeUInt16LE(channels, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(byteRate, 28);
+  buffer.writeUInt16LE(blockAlign, 32);
+  buffer.writeUInt16LE(bitsPerSample, 34);
+  buffer.write("data", 36, "ascii");
+  buffer.writeUInt32LE(dataSize, 40);
+
+  return buffer;
+}
 
 /**
  * Determine asset kind from MIME type
@@ -353,6 +421,64 @@ export const buildRouter = () => {
   router.use("/projects/:ownerType/:ownerKey/:projectKey", projectScopeMiddleware);
 
   // ============================================
+  // Message Center APIs
+  // ============================================
+
+  /**
+   * List message center items (active + history)
+   * GET /projects/:ownerType/:ownerKey/:projectKey/message-center
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/message-center",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey } = req.params;
+        const userId = getUserId(req);
+        const limit = Number(req.query.limit ?? 50);
+        const cursor = typeof req.query.cursor === "string" ? req.query.cursor : undefined;
+        const result = await messageCenterStore.listTasks(userId, projectKey, { limit, cursor });
+        success(res, result);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "List message center failed";
+        error(res, "MESSAGE_CENTER_LIST_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Stream message center updates (SSE)
+   * GET /projects/:ownerType/:ownerKey/:projectKey/message-center/stream
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/message-center/stream",
+    async (req: Request, res: Response) => {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const scope = resolveProjectScope(userId, projectKey);
+      const scopeKey = `${userId}::${scope.ownerType}::${scope.ownerId}::${scope.projectKey}`;
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+
+      const unsubscribe = messageCenterBus.subscribe(scopeKey, (item) => {
+        res.write(`event: message.update\ndata: ${JSON.stringify(item)}\n\n`);
+      });
+
+      const heartbeat = setInterval(() => {
+        res.write(`event: message.ping\ndata: {}\n\n`);
+      }, 25000);
+
+      req.on("close", () => {
+        clearInterval(heartbeat);
+        unsubscribe();
+      });
+    },
+  );
+
+  // ============================================
   // Document CRUD APIs
   // ============================================
 
@@ -386,6 +512,77 @@ export const buildRouter = () => {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Get tree failed";
       error(res, "TREE_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Filter documents by metadata (generated_by / doc_type / title query)
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/filter
+   */
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/documents/filter", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const generatedBy = String(req.query.generated_by || "").trim();
+      const docType = String(req.query.doc_type || "").trim();
+      const containsBlockType = normalizeBlockTypeQuery(String(req.query.contains_block_type || ""));
+      const query = String(req.query.q || "").trim().toLowerCase();
+      const limit = Math.min(Math.max(1, Number(req.query.limit) || 200), 1000);
+
+      const docs = await documentStore.getAllDocuments(userId, projectKey);
+      const filtered = docs
+        .filter((doc) => {
+          const meta = doc.meta && typeof doc.meta === "object"
+            ? (doc.meta as unknown as Record<string, unknown>)
+            : {};
+          const extra = meta.extra && typeof meta.extra === "object"
+            ? (meta.extra as Record<string, unknown>)
+            : {};
+          const title = String(meta.title || "").trim();
+          const rowGeneratedBy = String(extra.generated_by || "").trim();
+          const rowDocType = String(extra.doc_type || "").trim();
+
+          if (generatedBy && rowGeneratedBy !== generatedBy) return false;
+          if (docType && rowDocType !== docType) return false;
+          if (containsBlockType.size > 0 && !documentContainsAnyBlockType(doc.body, containsBlockType)) {
+            return false;
+          }
+          if (query && !title.toLowerCase().includes(query)) return false;
+          return true;
+        })
+        .map((doc) => {
+          const meta = doc.meta && typeof doc.meta === "object"
+            ? (doc.meta as unknown as Record<string, unknown>)
+            : {};
+          const extra = meta.extra && typeof meta.extra === "object"
+            ? (meta.extra as Record<string, unknown>)
+            : {};
+          return {
+            id: String(meta.id || ""),
+            title: String(meta.title || "").trim(),
+            slug: String(meta.slug || "").trim(),
+            created_at: String(meta.created_at || "").trim(),
+            updated_at: String(meta.updated_at || "").trim(),
+            extra: {
+              doc_type: String(extra.doc_type || "").trim() || undefined,
+              generated_by: String(extra.generated_by || "").trim() || undefined,
+              source_doc_ids: Array.isArray(extra.source_doc_ids) ? extra.source_doc_ids : undefined,
+              knowledge_queries: Array.isArray(extra.knowledge_queries) ? extra.knowledge_queries : undefined,
+            },
+          };
+        })
+        .filter((row) => row.id && row.title);
+
+      filtered.sort((a, b) => {
+        const aTime = Date.parse(a.updated_at || a.created_at || "") || 0;
+        const bTime = Date.parse(b.updated_at || b.created_at || "") || 0;
+        return bTime - aTime;
+      });
+
+      success(res, filtered.slice(0, limit));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Filter failed";
+      error(res, "FILTER_FAILED", message, 500);
     }
   });
 
@@ -1102,20 +1299,105 @@ export const buildRouter = () => {
       });
 
       try {
-        const result = await importGit(userId, projectKey, nextBody as any, traceContext);
-        traceManager.updateTrace(traceContext, { output: result });
-        dispatchDocumentAfterHooks(req, "document.import", {
-          request: before.payload,
-          result,
-          source: "git",
-        }, before.requestId);
-        success(res, result);
+        const repoUrl = String(nextBody.repo_url ?? "").trim();
+        if (!repoUrl.startsWith("http://") && !repoUrl.startsWith("https://")) {
+          traceManager.updateTrace(traceContext, { output: { error: "repo_url must be http or https" } });
+          traceManager.endTrace(traceId);
+          error(res, "INVALID_REQUEST", "repo_url must be http or https");
+          return;
+        }
+
+        const { taskId } = await createImportGitTask(userId, projectKey, nextBody as any, {
+          traceContext,
+          hook: {
+            requestId: before.requestId,
+            payload: before.payload,
+          },
+        });
+        traceManager.updateTrace(traceContext, { output: { taskId } });
+        success(res, { taskId }, 202);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Import failed";
         traceManager.updateTrace(traceContext, { output: { error: message } });
-        error(res, "IMPORT_FAILED", message);
-      } finally {
         traceManager.endTrace(traceId);
+        error(res, "IMPORT_FAILED", message);
+      }
+    },
+  );
+
+  /**
+   * Import folder as documents (async)
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/import-folder
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/import-folder",
+    uploadWithPath.array("files"),
+    async (req: Request, res: Response) => {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const files = Array.isArray(req.files) ? req.files : [];
+      if (files.length === 0) {
+        error(res, "INVALID_REQUEST", "files is required");
+        return;
+      }
+
+      const before = await applyDocumentBeforeHooks(req, res, "document.import", {
+        source: "import-folder",
+        file_count: files.length,
+        body: req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {},
+      });
+      if (!before) {
+        return;
+      }
+
+      const parentId = String(req.body?.parent_id ?? "root");
+      const smartImport = parseBool(req.body?.smart_import, false);
+      const smartImportTypes = parseStringArray(req.body?.smart_import_types).filter((t) =>
+        t === "markdown" || t === "word" || t === "pdf" || t === "image",
+      );
+      const enableFormatOptimize = parseBool(req.body?.enable_format_optimize, false);
+
+      const traceId = `import-folder-${uuidv4()}`;
+      const traceContext = traceManager.startTrace(traceId, {
+        name: "import-folder",
+        userId,
+        projectKey,
+        tags: ["import", "import-folder"],
+        metadata: {
+          file_count: files.length,
+          parent_id: parentId,
+          smart_import: smartImport,
+          smart_import_types: smartImportTypes,
+          enable_format_optimize: enableFormatOptimize,
+        },
+      });
+
+      try {
+        const { taskId } = await createImportFolderTask(
+          userId,
+          projectKey,
+          {
+            parent_id: parentId,
+            smart_import: smartImport,
+            smart_import_types: smartImportTypes,
+            enable_format_optimize: enableFormatOptimize,
+          },
+          files,
+          {
+            traceContext,
+            hook: {
+              requestId: before.requestId,
+              payload: before.payload,
+            },
+          },
+        );
+        traceManager.updateTrace(traceContext, { output: { taskId } });
+        success(res, { taskId }, 202);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Import failed";
+        traceManager.updateTrace(traceContext, { output: { error: message } });
+        traceManager.endTrace(traceId);
+        error(res, "IMPORT_FAILED", message);
       }
     },
   );
@@ -1436,22 +1718,72 @@ export const buildRouter = () => {
       try {
         const { projectKey, assetId } = req.params;
         const userId = getUserId(req);
-        const result = await assetStore.getContent(userId, projectKey, assetId);
-        
+        const result = await assetStore.getContentFile(userId, projectKey, assetId);
+
         if (!result) {
           error(res, "NOT_FOUND", "Asset not found", 404);
           return;
         }
-        
-        res.setHeader("Content-Type", result.meta.mime);
+
+        const { meta, filePath, size } = result;
+        const mime = String(meta.mime || "application/octet-stream");
+        res.setHeader("Content-Type", mime);
+        res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("Content-Length", String(size));
         // Use RFC 5987 encoding for non-ASCII filenames
-        const asciiFilename = result.meta.filename.replace(/[^\x20-\x7E]/g, "_");
-        const encodedFilename = encodeURIComponent(result.meta.filename);
+        const asciiFilename = meta.filename.replace(/[^\x20-\x7E]/g, "_");
+        const encodedFilename = encodeURIComponent(meta.filename);
         res.setHeader(
           "Content-Disposition",
           `inline; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`
         );
-        res.send(result.buffer);
+
+        const rangeHeader = String(req.headers.range ?? "").trim();
+        if (!rangeHeader) {
+          createReadStream(filePath).pipe(res);
+          return;
+        }
+
+        const matched = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader);
+        if (!matched) {
+          res.status(416);
+          res.setHeader("Content-Range", `bytes */${size}`);
+          return res.end();
+        }
+
+        const startText = matched[1] ?? "";
+        const endText = matched[2] ?? "";
+        let start = startText ? Number.parseInt(startText, 10) : 0;
+        let end = endText ? Number.parseInt(endText, 10) : size - 1;
+
+        if (Number.isNaN(start) || Number.isNaN(end)) {
+          res.status(416);
+          res.setHeader("Content-Range", `bytes */${size}`);
+          return res.end();
+        }
+        if (!startText) {
+          // bytes=-N: last N bytes
+          const suffixLength = Number.parseInt(endText, 10);
+          if (!Number.isFinite(suffixLength) || suffixLength <= 0) {
+            res.status(416);
+            res.setHeader("Content-Range", `bytes */${size}`);
+            return res.end();
+          }
+          start = Math.max(size - suffixLength, 0);
+          end = size - 1;
+        }
+        if (start >= size || end < start) {
+          res.status(416);
+          res.setHeader("Content-Range", `bytes */${size}`);
+          return res.end();
+        }
+        end = Math.min(end, size - 1);
+
+        const chunkSize = end - start + 1;
+        res.status(206);
+        res.setHeader("Content-Range", `bytes ${start}-${end}/${size}`);
+        res.setHeader("Content-Length", String(chunkSize));
+        createReadStream(filePath, { start, end }).pipe(res);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Get content failed";
         error(res, "GET_CONTENT_FAILED", message, 500);
@@ -1776,15 +2108,15 @@ export const buildRouter = () => {
   });
 
   /**
-   * Get provider configuration by type (llm or embedding)
+   * Get provider configuration by type
    * GET /llm/configs/type/:configType
    */
   router.get("/llm/configs/type/:configType", async (req: Request, res: Response) => {
     try {
       const { configType } = req.params;
       
-      if (configType !== "llm" && configType !== "embedding" && configType !== "vision") {
-        error(res, "INVALID_TYPE", "configType must be 'llm', 'embedding', or 'vision'");
+      if (!isValidConfigType(configType)) {
+        error(res, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE);
         return;
       }
       
@@ -1805,24 +2137,38 @@ export const buildRouter = () => {
       const { configType } = req.params;
       const input = req.body as Omit<ProviderConfigInput, "configType">;
       
-      if (configType !== "llm" && configType !== "embedding" && configType !== "vision") {
-        error(res, "INVALID_TYPE", "configType must be 'llm', 'embedding', or 'vision'");
+      if (!isValidConfigType(configType)) {
+        error(res, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE);
         return;
       }
+
+      const normalizedInput = normalizeInputForConfigType(configType, input) as Omit<
+        ProviderConfigInput,
+        "configType"
+      >;
       
-      if (!input.providerId || !input.displayName) {
+      if (!normalizedInput.providerId || !normalizedInput.displayName) {
         error(res, "INVALID_REQUEST", "providerId and displayName are required");
         return;
       }
 
       // Validate provider ID
       const validProviders: LLMProviderId[] = ["openai", "anthropic", "google", "ollama", "openai-compatible", "paddleocr"];
-      if (!validProviders.includes(input.providerId)) {
-        error(res, "INVALID_PROVIDER", `Invalid provider: ${input.providerId}`);
+      if (!validProviders.includes(normalizedInput.providerId)) {
+        error(res, "INVALID_PROVIDER", `Invalid provider: ${normalizedInput.providerId}`);
         return;
       }
 
-      const config = await configStore.upsertByType(configType as ConfigType, input);
+      if (!isProviderAllowedForConfigType(configType as ConfigType, normalizedInput.providerId)) {
+        error(
+          res,
+          "INVALID_PROVIDER_FOR_TYPE",
+          "transcription config only supports 'openai' or 'openai-compatible'",
+        );
+        return;
+      }
+
+      const config = await configStore.upsertByType(configType as ConfigType, normalizedInput);
       
       // Refresh provider registry
       await providerRegistry.refresh();
@@ -1842,8 +2188,8 @@ export const buildRouter = () => {
     try {
       const { configType } = req.params;
       
-      if (configType !== "llm" && configType !== "embedding" && configType !== "vision") {
-        error(res, "INVALID_TYPE", "configType must be 'llm', 'embedding', or 'vision'");
+      if (!isValidConfigType(configType)) {
+        error(res, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE);
         return;
       }
       
@@ -1872,8 +2218,8 @@ export const buildRouter = () => {
     try {
       const { configType } = req.params;
       
-      if (configType !== "llm" && configType !== "embedding" && configType !== "vision") {
-        error(res, "INVALID_TYPE", "configType must be 'llm', 'embedding', or 'vision'");
+      if (!isValidConfigType(configType)) {
+        error(res, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE);
         return;
       }
       
@@ -1922,6 +2268,12 @@ export const buildRouter = () => {
             provider: config.providerId,
             apiKey: config.apiKey,
             baseUrl: config.baseUrl,
+          });
+        } else if (configType === "transcription") {
+          console.log("[LLM Test] Calling transcription API...");
+          const sampleAudio = createSilentWavBuffer();
+          await parseMediaTranscription(sampleAudio, "transcription-test.wav", "audio/wav", {
+            model: config.defaultModel || undefined,
           });
         } else {
           // Test LLM chat (for LLM and vision types with LLM providers)
@@ -1992,20 +2344,35 @@ export const buildRouter = () => {
   router.post("/llm/configs", async (req: Request, res: Response) => {
     try {
       const input = req.body as ProviderConfigInput;
-      
-      if (!input.providerId || !input.displayName) {
+      const configType = input.configType || "llm";
+      if (!isValidConfigType(configType)) {
+        error(res, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE);
+        return;
+      }
+
+      const normalizedInput = normalizeInputForConfigType(configType, input) as ProviderConfigInput;
+      if (!normalizedInput.providerId || !normalizedInput.displayName) {
         error(res, "INVALID_REQUEST", "providerId and displayName are required");
         return;
       }
 
       // Validate provider ID
       const validProviders: LLMProviderId[] = ["openai", "anthropic", "google", "ollama", "openai-compatible", "paddleocr"];
-      if (!validProviders.includes(input.providerId)) {
-        error(res, "INVALID_PROVIDER", `Invalid provider: ${input.providerId}`);
+      if (!validProviders.includes(normalizedInput.providerId)) {
+        error(res, "INVALID_PROVIDER", `Invalid provider: ${normalizedInput.providerId}`);
         return;
       }
 
-      const config = await configStore.create(input);
+      if (!isProviderAllowedForConfigType(configType, normalizedInput.providerId)) {
+        error(
+          res,
+          "INVALID_PROVIDER_FOR_TYPE",
+          "transcription config only supports 'openai' or 'openai-compatible'",
+        );
+        return;
+      }
+
+      const config = await configStore.create(normalizedInput);
       
       // Refresh provider registry
       await providerRegistry.refresh();
@@ -2447,6 +2814,8 @@ export const buildRouter = () => {
             message: chunk.message,
             sources: chunk.sources || [],
           })}\n\n`);
+        } else if (chunk.type === "task_status") {
+          res.write(`event: assistant.task_status\ndata: ${JSON.stringify(chunk.taskStatus)}\n\n`);
         } else if (chunk.type === "tool_pending") {
           res.write(`event: assistant.tool_pending\ndata: ${JSON.stringify(chunk.pendingTool)}\n\n`);
         } else if (chunk.type === "intent_pending") {
@@ -3044,6 +3413,150 @@ export const buildRouter = () => {
   });
 
   /**
+   * List plugin local data files in project scope (v2)
+   * GET /projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/local-data/files
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/local-data/files",
+    async (req: Request, res: Response) => {
+      try {
+        const userId = getUserId(req);
+        const { projectKey } = req.params;
+        const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+        const scopeRaw = String(req.query.scope || "project").trim().toLowerCase();
+        const scope = scopeRaw === "global" ? "global" : "project";
+        const dir = String(req.query.dir || "").trim();
+        const limit = Number(req.query.limit || 200);
+        if (!pluginId) {
+          error(res, "INVALID_REQUEST", "pluginId is required");
+          return;
+        }
+        const files = await pluginManager.listLocalDataFiles({
+          userId,
+          projectKey,
+          pluginId,
+          scope,
+          dir,
+          limit,
+        });
+        success(res, { files });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to list plugin local data files";
+        error(res, "LIST_PLUGIN_LOCAL_DATA_FAILED", msg, 500);
+      }
+    },
+  );
+
+  /**
+   * Read plugin local data file in project scope (v2)
+   * GET /projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/local-data/file?path=...
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/local-data/file",
+    async (req: Request, res: Response) => {
+      try {
+        const userId = getUserId(req);
+        const { projectKey } = req.params;
+        const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+        const scopeRaw = String(req.query.scope || "project").trim().toLowerCase();
+        const scope = scopeRaw === "global" ? "global" : "project";
+        const filePath = String(req.query.path || "").trim();
+        const encodingRaw = String(req.query.encoding || "utf8").trim().toLowerCase();
+        const encoding = encodingRaw === "base64" ? "base64" : "utf8";
+        if (!pluginId || !filePath) {
+          error(res, "INVALID_REQUEST", "pluginId and path are required");
+          return;
+        }
+        const file = await pluginManager.readLocalDataFile({
+          userId,
+          projectKey,
+          pluginId,
+          scope,
+          path: filePath,
+          encoding,
+        });
+        success(res, { file });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to read plugin local data file";
+        error(res, "READ_PLUGIN_LOCAL_DATA_FAILED", msg, 500);
+      }
+    },
+  );
+
+  /**
+   * Write plugin local data file in project scope (v2)
+   * PUT /projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/local-data/file
+   */
+  router.put(
+    "/projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/local-data/file",
+    async (req: Request, res: Response) => {
+      try {
+        const userId = getUserId(req);
+        const { projectKey } = req.params;
+        const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+        const scopeRaw = String(req.body?.scope || req.query.scope || "project").trim().toLowerCase();
+        const scope = scopeRaw === "global" ? "global" : "project";
+        const filePath = String(req.body?.path || "").trim();
+        const encodingRaw = String(req.body?.encoding || "utf8").trim().toLowerCase();
+        const encoding = encodingRaw === "base64" ? "base64" : "utf8";
+        const overwrite = req.body?.overwrite !== false;
+        const content = typeof req.body?.content === "string" ? req.body.content : "";
+        if (!pluginId || !filePath) {
+          error(res, "INVALID_REQUEST", "pluginId and path are required");
+          return;
+        }
+        const file = await pluginManager.writeLocalDataFile({
+          userId,
+          projectKey,
+          pluginId,
+          scope,
+          path: filePath,
+          content,
+          encoding,
+          overwrite,
+        });
+        success(res, { file });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to write plugin local data file";
+        error(res, "WRITE_PLUGIN_LOCAL_DATA_FAILED", msg, 500);
+      }
+    },
+  );
+
+  /**
+   * Delete plugin local data file in project scope (v2)
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/local-data/file?path=...
+   */
+  router.delete(
+    "/projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/local-data/file",
+    async (req: Request, res: Response) => {
+      try {
+        const userId = getUserId(req);
+        const { projectKey } = req.params;
+        const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+        const scopeRaw = String(req.query.scope || "project").trim().toLowerCase();
+        const scope = scopeRaw === "global" ? "global" : "project";
+        const filePath = String(req.query.path || "").trim();
+        if (!pluginId || !filePath) {
+          error(res, "INVALID_REQUEST", "pluginId and path are required");
+          return;
+        }
+        const result = await pluginManager.deleteLocalDataFile({
+          userId,
+          projectKey,
+          pluginId,
+          scope,
+          path: filePath,
+        });
+        success(res, result);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to delete plugin local data file";
+        error(res, "DELETE_PLUGIN_LOCAL_DATA_FAILED", msg, 500);
+      }
+    },
+  );
+
+  /**
    * Serve plugin frontend assets for current user (v2)
    * GET /plugins/v2/assets/:pluginId/:version/*
    */
@@ -3158,6 +3671,53 @@ export const buildRouter = () => {
           return;
         }
         error(res, "EXECUTE_PLUGIN_COMMAND_FAILED", msg, 500);
+      }
+    },
+  );
+
+  /**
+   * Plugin trace bridge for web plugins (v2)
+   * POST /projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/trace
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/trace",
+    async (req: Request, res: Response) => {
+      try {
+        const userId = getUserId(req);
+        const { projectKey } = req.params;
+        const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+        if (!pluginId) {
+          error(res, "INVALID_REQUEST", "pluginId is required");
+          return;
+        }
+        const method = String(req.body?.method || "").trim();
+        if (!method) {
+          error(res, "INVALID_REQUEST", "trace method is required");
+          return;
+        }
+        const args = req.body?.args && typeof req.body.args === "object"
+          ? req.body.args as Record<string, unknown>
+          : {};
+
+        const data = await pluginManager.traceFromWeb({
+          userId,
+          projectKey,
+          pluginId,
+          method,
+          args,
+        });
+        success(res, data);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to handle plugin trace";
+        if (/trace method is required|unknown trace method/i.test(msg)) {
+          error(res, "INVALID_REQUEST", msg, 400);
+          return;
+        }
+        if (/not installed or disabled/i.test(msg) || /not available/i.test(msg)) {
+          error(res, "NOT_FOUND", msg, 404);
+          return;
+        }
+        error(res, "PLUGIN_TRACE_FAILED", msg, 500);
       }
     },
   );
@@ -3863,165 +4423,6 @@ export const buildRouter = () => {
       }
     }
   );
-
-  /**
-   * List available PPT templates (presets only)
-   * GET /ppt-templates
-   */
-  router.get("/ppt-templates", async (_req: Request, res: Response) => {
-    try {
-      const { pptService } = await import("./services/ppt/index.js");
-      const templates = pptService.getPresetTemplates();
-      success(res, { templates });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to list templates";
-      error(res, "LIST_TEMPLATES_FAILED", msg, 500);
-    }
-  });
-
-  /**
-   * List all PPT templates for a project (presets + custom)
-   * GET /projects/:ownerType/:ownerKey/:projectKey/ppt-templates
-   */
-  router.get("/projects/:ownerType/:ownerKey/:projectKey/ppt-templates", async (req: Request, res: Response) => {
-    try {
-      const { projectKey } = req.params;
-      const { templateStore } = await import("./services/ppt/template-store.js");
-      const templates = await templateStore.getAllTemplates(projectKey);
-      success(res, templates);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to list templates";
-      error(res, "LIST_TEMPLATES_FAILED", msg, 500);
-    }
-  });
-
-  /**
-   * Create a custom PPT template
-   * POST /projects/:ownerType/:ownerKey/:projectKey/ppt-templates
-   */
-  router.post("/projects/:ownerType/:ownerKey/:projectKey/ppt-templates", async (req: Request, res: Response) => {
-    try {
-      const { projectKey } = req.params;
-      const { name, description, preview_url, template_images, color_scheme } = req.body as {
-        name?: string;
-        description?: string;
-        preview_url?: string;
-        template_images?: string[];
-        color_scheme?: {
-          primary?: string;
-          secondary?: string;
-          background?: string;
-          text?: string;
-          accent?: string;
-        };
-      };
-
-      if (!name || typeof name !== "string" || !name.trim()) {
-        error(res, "INVALID_REQUEST", "name is required");
-        return;
-      }
-
-      const { templateStore } = await import("./services/ppt/template-store.js");
-      const template = await templateStore.create(projectKey, {
-        name: name.trim(),
-        description,
-        previewUrl: preview_url,
-        templateImages: template_images,
-        colorScheme: color_scheme,
-      });
-
-      success(res, template, 201);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to create template";
-      error(res, "CREATE_TEMPLATE_FAILED", msg, 500);
-    }
-  });
-
-  /**
-   * Get a custom PPT template
-   * GET /projects/:ownerType/:ownerKey/:projectKey/ppt-templates/:templateId
-   */
-  router.get("/projects/:ownerType/:ownerKey/:projectKey/ppt-templates/:templateId", async (req: Request, res: Response) => {
-    try {
-      const { projectKey, templateId } = req.params;
-      const { templateStore } = await import("./services/ppt/template-store.js");
-      const template = await templateStore.resolve(projectKey, templateId);
-
-      if (!template) {
-        error(res, "NOT_FOUND", "Template not found", 404);
-        return;
-      }
-
-      success(res, template);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to get template";
-      error(res, "GET_TEMPLATE_FAILED", msg, 500);
-    }
-  });
-
-  /**
-   * Update a custom PPT template
-   * PUT /projects/:ownerType/:ownerKey/:projectKey/ppt-templates/:templateId
-   */
-  router.put("/projects/:ownerType/:ownerKey/:projectKey/ppt-templates/:templateId", async (req: Request, res: Response) => {
-    try {
-      const { projectKey, templateId } = req.params;
-      const { name, description, preview_url, template_images, color_scheme } = req.body as {
-        name?: string;
-        description?: string;
-        preview_url?: string;
-        template_images?: string[];
-        color_scheme?: {
-          primary?: string;
-          secondary?: string;
-          background?: string;
-          text?: string;
-          accent?: string;
-        };
-      };
-
-      const { templateStore } = await import("./services/ppt/template-store.js");
-      const template = await templateStore.update(projectKey, templateId, {
-        name,
-        description,
-        previewUrl: preview_url,
-        templateImages: template_images,
-        colorScheme: color_scheme,
-      });
-
-      if (!template) {
-        error(res, "NOT_FOUND", "Template not found", 404);
-        return;
-      }
-
-      success(res, template);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to update template";
-      error(res, "UPDATE_TEMPLATE_FAILED", msg, 500);
-    }
-  });
-
-  /**
-   * Delete a custom PPT template
-   * DELETE /projects/:ownerType/:ownerKey/:projectKey/ppt-templates/:templateId
-   */
-  router.delete("/projects/:ownerType/:ownerKey/:projectKey/ppt-templates/:templateId", async (req: Request, res: Response) => {
-    try {
-      const { projectKey, templateId } = req.params;
-      const { templateStore } = await import("./services/ppt/template-store.js");
-      const deleted = await templateStore.delete(projectKey, templateId);
-
-      if (!deleted) {
-        error(res, "NOT_FOUND", "Template not found", 404);
-        return;
-      }
-
-      success(res, { deleted: true });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to delete template";
-      error(res, "DELETE_TEMPLATE_FAILED", msg, 500);
-    }
-  });
 
   /**
    * Check PPT service availability

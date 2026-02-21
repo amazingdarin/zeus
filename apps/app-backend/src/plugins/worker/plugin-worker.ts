@@ -87,6 +87,111 @@ function buildContext(payload: ExecuteContextPayload): BackendPluginContext {
       maxExecutionMs: Number(payload.permissions?.maxExecutionMs || 20000),
     },
     host: {
+      getPluginSettings: async (pluginId) => {
+        const result = await hostCall("getPluginSettings", { pluginId });
+        return (result as Record<string, unknown>) || {};
+      },
+      listPluginDataFiles: async (options) => {
+        const result = await hostCall("listPluginDataFiles", {
+          pluginId: options?.pluginId,
+          projectKey: options?.projectKey,
+          scope: options?.scope,
+          dir: options?.dir,
+          limit: options?.limit,
+        });
+        if (!Array.isArray(result)) {
+          return [];
+        }
+        const normalized: Array<{
+          path: string;
+          name: string;
+          type: "file" | "directory";
+          size?: number;
+          updatedAt?: string;
+        }> = [];
+        for (const item of result) {
+          if (!item || typeof item !== "object") {
+            continue;
+          }
+          const row = item as {
+            path?: unknown;
+            name?: unknown;
+            type?: unknown;
+            size?: unknown;
+            updatedAt?: unknown;
+          };
+          const path = String(row.path || "").trim();
+          const name = String(row.name || "").trim();
+          const type = String(row.type || "").trim() === "directory" ? "directory" : "file";
+          if (!path || !name) {
+            continue;
+          }
+          normalized.push({
+            path,
+            name,
+            type,
+            size: typeof row.size === "number" ? row.size : undefined,
+            updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : undefined,
+          });
+        }
+        return normalized;
+      },
+      readPluginDataFile: async (path, options) => {
+        const result = await hostCall("readPluginDataFile", {
+          pluginId: options?.pluginId,
+          projectKey: options?.projectKey,
+          scope: options?.scope,
+          path,
+          encoding: options?.encoding,
+        });
+        const row = (result as {
+          path?: string;
+          content?: string;
+          encoding?: "utf8" | "base64";
+          size?: number;
+          updatedAt?: string;
+        }) || {};
+        return {
+          path: String(row.path || path),
+          content: typeof row.content === "string" ? row.content : "",
+          encoding: row.encoding === "base64" ? "base64" : "utf8",
+          size: typeof row.size === "number" ? row.size : 0,
+          updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : "",
+        };
+      },
+      writePluginDataFile: async (path, content, options) => {
+        const result = await hostCall("writePluginDataFile", {
+          pluginId: options?.pluginId,
+          projectKey: options?.projectKey,
+          scope: options?.scope,
+          path,
+          content,
+          encoding: options?.encoding,
+          overwrite: options?.overwrite,
+        });
+        const row = (result as {
+          path?: string;
+          size?: number;
+          updatedAt?: string;
+        }) || {};
+        return {
+          path: String(row.path || path),
+          size: Number(row.size || 0),
+          updatedAt: String(row.updatedAt || ""),
+        };
+      },
+      deletePluginDataFile: async (path, options) => {
+        const result = await hostCall("deletePluginDataFile", {
+          pluginId: options?.pluginId,
+          projectKey: options?.projectKey,
+          scope: options?.scope,
+          path,
+        });
+        const row = (result as { deleted?: boolean }) || {};
+        return {
+          deleted: row.deleted === true,
+        };
+      },
       getDocument: async (projectKey, docId) => {
         const result = await hostCall("getDocument", { projectKey, docId });
         return (result as Record<string, unknown> | null) || null;
@@ -133,12 +238,126 @@ function buildContext(payload: ExecuteContextPayload): BackendPluginContext {
         const result = await hostCall("getKnowledgeSources", { projectKey, query, limit });
         return (result as Record<string, unknown>) || {};
       },
+      exportDocumentPpt: async (projectKey, docId, request) => {
+        const result = await hostCall("exportDocumentPpt", { projectKey, docId, request });
+        const row = (result as {
+          taskId?: string;
+          status?: string;
+        }) || {};
+        return {
+          taskId: String(row.taskId || ""),
+          status: String(row.status || ""),
+        };
+      },
+      generatePptFromHtml: async (projectKey, html, options) => {
+        const result = await hostCall("generatePptFromHtml", {
+          projectKey,
+          html,
+          fileName: options?.fileName,
+          style: options?.style,
+          options: options?.options,
+          waitMs: options?.waitMs,
+          pollIntervalMs: options?.pollIntervalMs,
+        });
+        const row = (result as {
+          taskId?: string;
+          status?: string;
+          asset?: {
+            id?: string;
+            filename?: string;
+            mime?: string;
+            size?: number;
+          } | null;
+          error?: string;
+          waitedMs?: number;
+        }) || {};
+        return {
+          taskId: String(row.taskId || ""),
+          status: String(row.status || ""),
+          asset: row.asset
+            ? {
+                id: String(row.asset.id || ""),
+                filename: String(row.asset.filename || ""),
+                mime: String(row.asset.mime || ""),
+                size: typeof row.asset.size === "number" ? row.asset.size : 0,
+              }
+            : null,
+          error: typeof row.error === "string" ? row.error : undefined,
+          waitedMs: typeof row.waitedMs === "number" ? row.waitedMs : undefined,
+        };
+      },
+      getPptTaskStatus: async (taskId) => {
+        const result = await hostCall("getPptTaskStatus", { taskId });
+        const row = (result as {
+          taskId?: string;
+          status?: string;
+          progress?: number;
+          currentSlide?: number;
+          totalSlides?: number;
+          error?: string;
+          createdAt?: string;
+          updatedAt?: string;
+        }) || {};
+        return {
+          taskId: String(row.taskId || ""),
+          status: String(row.status || ""),
+          progress: typeof row.progress === "number" ? row.progress : undefined,
+          currentSlide: typeof row.currentSlide === "number" ? row.currentSlide : undefined,
+          totalSlides: typeof row.totalSlides === "number" ? row.totalSlides : undefined,
+          error: typeof row.error === "string" ? row.error : undefined,
+          createdAt: typeof row.createdAt === "string" ? row.createdAt : undefined,
+          updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : undefined,
+        };
+      },
       fetchUrl: async (url, init) => {
         const result = await hostCall("fetchUrl", {
           url,
           init: init ? JSON.parse(JSON.stringify(init)) as Record<string, unknown> : undefined,
         });
         return (result as Record<string, unknown>) || {};
+      },
+      trace: {
+        isEnabled: async () => {
+          const result = await hostCall("trace.isEnabled", {});
+          return result === true;
+        },
+        startSpan: async (name, input) => {
+          const result = await hostCall("trace.startSpan", { name, input });
+          const row = (result as { spanId?: string } | null) || null;
+          if (!row || typeof row.spanId !== "string" || !row.spanId.trim()) {
+            return null;
+          }
+          return { spanId: row.spanId };
+        },
+        endSpan: async (spanId, output, level) => {
+          const result = await hostCall("trace.endSpan", { spanId, output, level });
+          const row = (result as { ok?: boolean } | null) || null;
+          return { ok: row?.ok === true };
+        },
+        logGeneration: async (params) => {
+          const result = await hostCall("trace.logGeneration", { params });
+          const row = (result as { ok?: boolean } | null) || null;
+          return { ok: row?.ok === true };
+        },
+        startGeneration: async (params) => {
+          const result = await hostCall("trace.startGeneration", { params });
+          const row = (result as { generationId?: string } | null) || null;
+          if (!row || typeof row.generationId !== "string" || !row.generationId.trim()) {
+            return null;
+          }
+          return { generationId: row.generationId };
+        },
+        endGeneration: async (generationId, output, usage, level, statusMessage) => {
+          const result = await hostCall("trace.endGeneration", {
+            generationId,
+            output,
+            usage,
+            level,
+            statusMessage,
+          });
+          const row = (result as { ok?: boolean } | null) || null;
+          return { ok: row?.ok === true };
+        },
       },
     },
   };

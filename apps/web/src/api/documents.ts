@@ -68,6 +68,28 @@ export type DocumentDetail = {
     hierarchy?: DocumentHierarchyItem[];
 };
 
+export type FilterDocumentItem = {
+    id: string;
+    title: string;
+    slug: string;
+    created_at: string;
+    updated_at: string;
+    extra: {
+        doc_type?: string;
+        generated_by?: string;
+        source_doc_ids?: string[];
+        knowledge_queries?: string[];
+    };
+};
+
+export type FilterDocumentsParams = {
+    generatedBy?: string;
+    docType?: string;
+    q?: string;
+    limit?: number;
+    containsBlockType?: string | string[];
+};
+
 export type CreateDocumentMeta = {
     id?: string;
     slug?: string;
@@ -76,6 +98,9 @@ export type CreateDocumentMeta = {
     extra?: {
         status?: string;
         tags?: string[];
+        doc_type?: string;
+        generated_by?: string;
+        [key: string]: unknown;
     };
 };
 
@@ -209,6 +234,43 @@ export const fetchDocument = async (projectKey: string, documentId: string): Pro
     }
     const payload = await response.json();
     return payload?.data ?? null;
+};
+
+export const filterDocuments = async (
+    projectKey: string,
+    params: FilterDocumentsParams = {},
+): Promise<FilterDocumentItem[]> => {
+    const query = new URLSearchParams();
+    if (params.generatedBy) {
+        query.set("generated_by", params.generatedBy);
+    }
+    if (params.docType) {
+        query.set("doc_type", params.docType);
+    }
+    if (params.q) {
+        query.set("q", params.q);
+    }
+    if (typeof params.limit === "number" && Number.isFinite(params.limit)) {
+        query.set("limit", String(Math.trunc(params.limit)));
+    }
+    if (params.containsBlockType) {
+        const normalized = Array.isArray(params.containsBlockType)
+            ? params.containsBlockType.map((item) => String(item || "").trim()).filter(Boolean)
+            : [String(params.containsBlockType || "").trim()].filter(Boolean);
+        if (normalized.length > 0) {
+            query.set("contains_block_type", normalized.join(","));
+        }
+    }
+
+    const url = query.size > 0
+        ? `/api/projects/${encodeProjectRef(projectKey)}/documents/filter?${query.toString()}`
+        : `/api/projects/${encodeProjectRef(projectKey)}/documents/filter`;
+    const response = await apiFetch(url);
+    if (!response.ok) {
+        throw new Error("Failed to filter documents");
+    }
+    const payload = await response.json().catch(() => null);
+    return Array.isArray(payload?.data) ? payload.data as FilterDocumentItem[] : [];
 };
 
 export const fetchDocumentHierarchy = async (
@@ -407,6 +469,10 @@ export type ImportGitRequest = {
   branch?: string;
   subdir?: string;
   parent_id?: string;
+  submodule_parent_repo?: string;
+  submodule_parent_branch?: string;
+  submodule_path?: string;
+  auto_import_submodules?: boolean;
   smart_import?: boolean;
   smart_import_types?: SmartImportType[];
   file_types?: FileTypeFilter[];
@@ -414,18 +480,25 @@ export type ImportGitRequest = {
   enable_format_optimize?: boolean;
 };
 
-export type ImportGitResult = {
-  directories: number;
-  files: number;
-  skipped: number;
-  converted: number;
-  fallback: number;
+export type ImportGitTaskResponse = {
+  taskId: string;
 };
 
-export const importGit = async (
+export type ImportFolderRequest = {
+  parent_id?: string;
+  smart_import?: boolean;
+  smart_import_types?: SmartImportType[];
+  enable_format_optimize?: boolean;
+};
+
+export type ImportFolderTaskResponse = {
+  taskId: string;
+};
+
+export const createImportGitTask = async (
   projectKey: string,
   payload: ImportGitRequest,
-): Promise<ImportGitResult> => {
+): Promise<ImportGitTaskResponse> => {
   const response = await apiFetch(
     `/api/projects/${encodeProjectRef(projectKey)}/documents/import-git`,
     {
@@ -442,13 +515,42 @@ export const importGit = async (
   }
   const data = await response.json().catch(() => null);
   const result = data?.data ?? data ?? {};
-  return {
-    directories: Number(result.directories ?? 0),
-    files: Number(result.files ?? 0),
-    skipped: Number(result.skipped ?? 0),
-    converted: Number(result.converted ?? 0),
-    fallback: Number(result.fallback ?? 0),
-  };
+  return { taskId: String(result.taskId ?? "") };
+};
+
+export const createImportFolderTask = async (
+  projectKey: string,
+  files: File[],
+  payload: ImportFolderRequest,
+): Promise<ImportFolderTaskResponse> => {
+  const form = new FormData();
+  for (const file of files) {
+    const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+    form.append("files", file, relativePath && relativePath.trim() ? relativePath : file.name);
+  }
+  if (payload.parent_id) {
+    form.append("parent_id", payload.parent_id);
+  }
+  form.append("smart_import", payload.smart_import ? "true" : "false");
+  if (payload.smart_import_types && payload.smart_import_types.length > 0) {
+    form.append("smart_import_types", JSON.stringify(payload.smart_import_types));
+  }
+  form.append("enable_format_optimize", payload.enable_format_optimize ? "true" : "false");
+
+  const response = await apiFetch(
+    `/api/projects/${encodeProjectRef(projectKey)}/documents/import-folder`,
+    {
+      method: "POST",
+      body: form,
+    },
+  );
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.message || "Folder import failed");
+  }
+  const data = await response.json().catch(() => null);
+  const result = data?.data ?? data ?? {};
+  return { taskId: String(result.taskId ?? "") };
 };
 
 export type FetchUrlResult = {

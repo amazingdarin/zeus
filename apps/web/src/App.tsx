@@ -4,6 +4,7 @@ import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import AppShell from "./layout/AppShell";
 import DocumentPage from "./pages/DocumentPage";
 import NewDocumentPage from "./pages/NewDocumentPage";
+import EduPluginPage from "./pages/EduPluginPage";
 import ChatPage from "./pages/ChatPage";
 import SystemDocsPage from "./pages/SystemDocsPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -20,13 +21,20 @@ import { usePluginRuntime, type PluginRouteEntry } from "./context/PluginRuntime
 import "./App.css";
 
 function PluginRouteContent({ route }: { route: PluginRouteEntry }) {
-  if (typeof route.render === "function") {
-    return <>{route.render()}</>;
-  }
+  const renderedContent = typeof route.render === "function"
+    ? route.render()
+    : (
+      <div className="plugin-route-empty">
+        <h2>{route.title || route.id}</h2>
+        <p>插件页面已注册，但未提供前端渲染模块。</p>
+      </div>
+    );
+
   return (
-    <div style={{ padding: 24 }}>
-      <h2>{route.title || route.id}</h2>
-      <p>插件页面已注册，但未提供前端渲染模块。</p>
+    <div className="content-inner plugin-route-page">
+      <div className="plugin-route-body">
+        {renderedContent}
+      </div>
     </div>
   );
 }
@@ -111,6 +119,13 @@ function App() {
                 <ProtectedRoute>
                   <AppShell>
                     <NewDocumentPage />
+                  </AppShell>
+                </ProtectedRoute>
+              } />
+              <Route path="/edu" element={
+                <ProtectedRoute>
+                  <AppShell>
+                    <EduPluginPage />
                   </AppShell>
                 </ProtectedRoute>
               } />
