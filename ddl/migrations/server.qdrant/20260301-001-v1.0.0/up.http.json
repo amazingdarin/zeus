@@ -1,0 +1,15 @@
+{
+  "requests": [
+    {
+      "method": "PUT",
+      "path": "/collections/knowledge_index",
+      "body": {
+        "vectors": {
+          "size": 1536,
+          "distance": "Cosine"
+        }
+      },
+      "expectStatus": [200, 201]
+    }
+  ]
+}

@@ -1,6 +1,16 @@
 import { useCallback, useMemo, useState, memo, type DragEvent } from "react";
 import type { JSONContent } from "@tiptap/react";
-import { DownOutlined, RightOutlined, ReloadOutlined, DatabaseOutlined, MenuFoldOutlined, UnorderedListOutlined, ApartmentOutlined } from "@ant-design/icons";
+import {
+  ApartmentOutlined,
+  DatabaseOutlined,
+  DownOutlined,
+  MenuFoldOutlined,
+  MinusSquareOutlined,
+  PlusSquareOutlined,
+  ReloadOutlined,
+  RightOutlined,
+  UnorderedListOutlined,
+} from "@ant-design/icons";
 import { Popconfirm, Tooltip } from "antd";
 import { useToggleTree } from "./KnowledgeBaseLayout";
 
@@ -61,6 +71,8 @@ type KnowledgeBaseSideNavProps = {
   onMove: (request: KnowledgeBaseMoveRequest) => void;
   onRefresh?: () => void;
   onRebuildIndex?: () => void;
+  onExpandAll?: () => void;
+  onCollapseToRoot?: () => void;
   onUnfavorite?: (docId: string) => void;
   onEmptyAreaClick?: () => void;
   onAddDocument?: () => void;
@@ -91,6 +103,8 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
   onMove,
   onRefresh,
   onRebuildIndex,
+  onExpandAll,
+  onCollapseToRoot,
   onUnfavorite,
   onEmptyAreaClick,
   onAddDocument,
@@ -518,6 +532,30 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
           </Tooltip>
         )}
         <div className="kb-sidebar-toolbar-spacer" />
+        {!outlineMode && onExpandAll && onCollapseToRoot && (
+          <>
+            <Tooltip title="全部展开">
+              <button
+                className="kb-sidebar-toolbar-btn"
+                type="button"
+                onClick={onExpandAll}
+                disabled={rootLoading || documents.length === 0}
+              >
+                <PlusSquareOutlined />
+              </button>
+            </Tooltip>
+            <Tooltip title="缩小到根层级">
+              <button
+                className="kb-sidebar-toolbar-btn"
+                type="button"
+                onClick={onCollapseToRoot}
+                disabled={rootLoading || documents.length === 0}
+              >
+                <MinusSquareOutlined />
+              </button>
+            </Tooltip>
+          </>
+        )}
         {onRebuildIndex && (
           <Tooltip 
             title={

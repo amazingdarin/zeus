@@ -4,7 +4,7 @@ HELM_NAMESPACE ?= zeus
 NAMESPACE ?= $(HELM_NAMESPACE)
 CONFIG_PATH ?= /tmp/zeus-$(NAMESPACE)/config.yaml
 
-.PHONY: run-server run-app-backend run-app-web run-app-desktop install uninstall dev-install build-postgres-image build-backend-image build-frontend-image build-paddleocr-image start-deps start-deps-dev stop-deps stop-deps-dev clean-deps start-all stop-all clean-all test-integration setup-python-venv install-paddleocr run-paddleocr-docker stop-paddleocr-docker
+.PHONY: run-server run-app-backend run-app-web run-app-desktop init-app-mobile-android init-app-mobile-ios run-app-mobile-android run-app-mobile-ios build-app-mobile-android build-app-mobile-ios install uninstall dev-install build-postgres-image build-backend-image build-frontend-image build-paddleocr-image download-runtime-binaries package-desktop package-mobile-android package-mobile-ios package-mobile package-all start-deps start-deps-dev stop-deps stop-deps-dev clean-deps start-all stop-all clean-all test-integration setup-python-venv install-paddleocr run-paddleocr-docker stop-paddleocr-docker
 
 # Development run commands
 run-server:
@@ -26,6 +26,24 @@ run-app-web:
 run-app-desktop:
 	cd apps/desktop && cargo tauri dev
 
+init-app-mobile-android:
+	cd apps/desktop && cargo tauri android init --ci --skip-targets-install
+
+init-app-mobile-ios:
+	cd apps/desktop && cargo tauri ios init --ci --skip-targets-install
+
+run-app-mobile-android:
+	cd apps/desktop && cargo tauri android dev
+
+run-app-mobile-ios:
+	cd apps/desktop && cargo tauri ios dev
+
+build-app-mobile-android:
+	cd apps/desktop && cargo tauri android build
+
+build-app-mobile-ios:
+	cd apps/desktop && cargo tauri ios build
+
 install:
 	helm dependency build $(HELM_CHART)
 	helm upgrade --install $(APP_NAME) $(HELM_CHART) --namespace $(HELM_NAMESPACE) --create-namespace
@@ -45,6 +63,22 @@ build-backend-image:
 
 build-frontend-image:
 	docker build -t zeus-web:latest -f apps/web/Dockerfile apps/web
+
+download-runtime-binaries:
+	bash ./scripts/release/download-runtime-binaries.sh
+
+package-desktop: download-runtime-binaries
+	bash ./scripts/release/package-desktop.sh
+
+package-mobile-android: download-runtime-binaries
+	bash ./scripts/release/package-mobile.sh android
+
+package-mobile-ios: download-runtime-binaries
+	bash ./scripts/release/package-mobile.sh ios
+
+package-mobile: package-mobile-android package-mobile-ios
+
+package-all: package-desktop package-mobile
 
 # PaddleOCR Docker commands
 PADDLEOCR_IMAGE := zeus/paddleocr:latest

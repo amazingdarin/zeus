@@ -1,0 +1,46 @@
+version: 1
+description: "Map app versions to per-track target schema versions"
+
+targets:
+  mobile:
+    - mobile.sqlite
+  desktop:
+    - desktop.sqlite
+    - desktop.qdrant
+    - desktop.meili
+  server:
+    - server.postgres
+    - server.qdrant
+    - server.meili
+
+releases:
+  - app_version: v0.0.0
+    tracks:
+      mobile.sqlite: v0.0.0
+      desktop.sqlite: v0.0.0
+      desktop.qdrant: v0.0.0
+      desktop.meili: v0.0.0
+      server.postgres: v0.0.0
+      server.qdrant: v0.0.0
+      server.meili: v0.0.0
+
+  - app_version: v1.0.0
+    tracks:
+      mobile.sqlite: v1.0.0
+      desktop.sqlite: v1.0.0
+      desktop.qdrant: v1.0.0
+      desktop.meili: v1.0.0
+      server.postgres: v1.0.0
+      server.qdrant: v1.0.0
+      server.meili: v1.0.0
+
+  # Example: app v1.1.0 still targets DB schema v1.0.0
+  - app_version: v1.1.0
+    tracks:
+      mobile.sqlite: v1.0.0
+      desktop.sqlite: v1.0.0
+      desktop.qdrant: v1.0.0
+      desktop.meili: v1.0.0
+      server.postgres: v1.0.0
+      server.qdrant: v1.0.0
+      server.meili: v1.0.0

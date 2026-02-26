@@ -237,6 +237,7 @@ test("deep-search PPT topic request orchestrates deep search + create -> outline
     const task3 = result.plan.tasks[2]!;
 
     assert.equal(task1.skillId, "native:doc-create");
+    assert.equal(task1.args.title, "今日全球金融市场综述");
     assert.equal(task1.args.description, DEEP_SEARCH_CONTEXT_PLACEHOLDER);
     assert.equal(task2.skillId, "native:doc-optimize-ppt-outline");
     assert.equal(task3.skillId, "native:doc-render-ppt-html");

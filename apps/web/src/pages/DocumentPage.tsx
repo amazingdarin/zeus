@@ -354,6 +354,27 @@ function DocumentPage() {
     return map;
   }, [childrenByParent, rootDocuments]);
 
+  const allExpandableDocumentIds = useMemo(() => {
+    const ids = new Set<string>();
+    const markDocs = (docs: KnowledgeBaseDocument[]) => {
+      docs.forEach((doc) => {
+        if (doc.hasChild) {
+          ids.add(doc.id);
+        }
+      });
+    };
+
+    markDocs(rootDocuments);
+    Object.entries(childrenByParent).forEach(([parentId, children]) => {
+      if (children.length > 0) {
+        ids.add(parentId);
+      }
+      markDocs(children);
+    });
+
+    return Array.from(ids);
+  }, [childrenByParent, rootDocuments]);
+
   const activeUploadPreset = useMemo(
     () => buildUploadFilterPreset(uploadFilterPresets),
     [uploadFilterPresets],
@@ -828,6 +849,21 @@ function DocumentPage() {
     rootLoadAttemptRef.current = "";
     void loadFullTreeRef.current(resolvedProjectKey);
   }, [resolvedProjectKey, rootLoading]);
+
+  const handleExpandAllTree = useCallback(() => {
+    if (rootLoading || allExpandableDocumentIds.length === 0) {
+      return;
+    }
+    const expanded: Record<string, boolean> = {};
+    allExpandableDocumentIds.forEach((id) => {
+      expanded[id] = true;
+    });
+    setExpandedIds(expanded);
+  }, [allExpandableDocumentIds, rootLoading]);
+
+  const handleCollapseTreeToRoot = useCallback(() => {
+    setExpandedIds({});
+  }, []);
 
   // Stop polling for rebuild status
   const stopRebuildPolling = useCallback(() => {
@@ -2151,6 +2187,8 @@ function DocumentPage() {
           onMove={handleMove}
           onRefresh={handleRefresh}
           onRebuildIndex={handleRebuildIndex}
+          onExpandAll={handleExpandAllTree}
+          onCollapseToRoot={handleCollapseTreeToRoot}
           onUnfavorite={handleUnfavoriteDocument}
           onEmptyAreaClick={() => navigate("/documents")}
           onAddDocument={() => navigate("/documents/new")}

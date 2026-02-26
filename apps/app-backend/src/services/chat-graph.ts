@@ -995,10 +995,35 @@ function cloneOrchestratedTask(task: OrchestratedTask): OrchestratedTask {
 }
 
 function buildDeepSearchDocTitle(query: string): string {
-  const compact = query.replace(/\s+/g, " ").trim();
-  if (!compact) return "深度调研结果";
-  const clipped = compact.length > 36 ? `${compact.slice(0, 36)}…` : compact;
-  return `深度调研：${clipped}`;
+  const topic = inferPptTopicFromQuery(query);
+  if (/综述|简报|报告|洞察|分析|调研$/i.test(topic)) {
+    return topic;
+  }
+  return `${topic}深度调研`;
+}
+
+function inferPptTopicFromQuery(userQuery: string): string {
+  let text = String(userQuery || "").replace(/\s+/g, " ").trim();
+  if (!text) return "主题";
+
+  text = text.replace(/@\S+/g, "").trim();
+  text = text.replace(/^(请|请你|请帮我|帮我|麻烦|麻烦你|帮忙|可以|能否|请协助)\s*/i, "");
+  text = text.replace(/^(查看|分析|调研|研究|总结|整理|汇总|搜集|收集|了解|介绍|观察|盘点|梳理|制作|生成|做|准备|输出|编写|写一份|写一个)\s*/i, "");
+  text = text.replace(/^(一下|下)\s*/i, "");
+  text = text.replace(/[，,。.\s]*(并|然后|再|并且|随后|接着)?\s*(整理成|做成|生成|制作|输出|导出|转换成|转成|写成|整理为|汇报成)?\s*(一份|一个|一套|)?\s*(pptx?|PPT|演示稿|幻灯片|slides?|powerpoint)(文档|文件|稿)?\s*$/i, "");
+  text = text.replace(/^(一个|一份|一套)\s*/i, "");
+  text = text.replace(/\s*(的)?\s*(pptx?|PPT|演示稿|幻灯片|slides?|powerpoint)\s*$/i, "");
+  text = text.replace(/^[，,。.\s]+|[，,。.\s]+$/g, "");
+  text = text.replace(/^(今天|今日)的?/, "今日");
+
+  if (!text) return "主题";
+  if (/全球金融市场/i.test(text) && /^今日/.test(text)) {
+    return "今日全球金融市场综述";
+  }
+  if (text.length > 36) {
+    return `${text.slice(0, 36)}…`;
+  }
+  return text;
 }
 
 async function shouldInjectWebSearchSkill(): Promise<boolean> {
@@ -1063,6 +1088,7 @@ async function buildPptWorkflowTasks(state: GraphState, workflow: WorkflowIntent
   const scopedDocIds = hasDocumentScope(state.docIds)
     ? (state.docIds || [])
     : (state.skillDocIds || []);
+  const inferredTopic = inferPptTopicFromQuery(state.userQuery);
 
   const pptPluginSkill = agentSkillCatalog.getByCommand(PPT_PLUGIN_AGENT_COMMAND, state.userId);
   if (pptPluginSkill && enabledSkillIds.has(pptPluginSkill.id)) {
@@ -1078,7 +1104,7 @@ async function buildPptWorkflowTasks(state: GraphState, workflow: WorkflowIntent
     const topic = typeof pluginArgs.topic === "string" ? pluginArgs.topic.trim() : "";
     const fallbackInput = typeof pluginArgs.input === "string" ? pluginArgs.input.trim() : "";
     if (!topic && !fallbackInput && workflow.kind === "ppt_from_topic") {
-      pluginArgs.topic = state.userQuery.trim();
+      pluginArgs.topic = inferredTopic;
     }
     if (workflow.needsExport) {
       pluginArgs.export_ppt = true;
@@ -1138,6 +1164,10 @@ async function buildPptWorkflowTasks(state: GraphState, workflow: WorkflowIntent
 
   if (workflow.kind === "ppt_from_topic") {
     const createArgs = buildCommandArgs(createSkill!, state.userQuery.trim(), scopedDocIds);
+    createArgs.title = inferredTopic;
+    if (typeof createArgs.description !== "string" || !createArgs.description.trim()) {
+      createArgs.description = inferredTopic;
+    }
     const createTask = buildTask(
       tasks.length,
       createSkill!.id,
@@ -1249,6 +1279,7 @@ async function buildDeepSearchPptWorkflowTasks(
   }
 
   const sourceIntent = state.sourceIntent;
+  const inferredTopic = inferPptTopicFromQuery(state.userQuery);
   const createTask = buildTask(
     0,
     createSkill.id,
@@ -1271,7 +1302,7 @@ async function buildDeepSearchPptWorkflowTasks(
     const topic = typeof pluginArgs.topic === "string" ? pluginArgs.topic.trim() : "";
     const fallbackInput = typeof pluginArgs.input === "string" ? pluginArgs.input.trim() : "";
     if (!topic && !fallbackInput) {
-      pluginArgs.topic = state.userQuery.trim();
+      pluginArgs.topic = inferredTopic;
     }
     if (workflow.needsExport) {
       pluginArgs.export_ppt = true;

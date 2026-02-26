@@ -6,6 +6,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "migrate:manager": "node --import tsx src/scripts/migrate-manager.ts",
     "migrate:user-data-layout": "node --import tsx src/scripts/migrate-user-data-layout.ts",
     "test:agent-skills": "node --import tsx --test --test-force-exit tests/agent-optimize-skills.test.ts",
     "test:doc-guard": "node --import tsx --test --test-force-exit tests/doc-guard.test.ts",

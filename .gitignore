@@ -13,11 +13,13 @@ dist
 apps/app-backend/dist
 apps/web/dist
 apps/desktop/target
+apps/desktop/gen/
 packages/doc-editor/dist
 packages/shared/dist
 
 # App data (runtime generated)
 apps/app-backend/data
+apps/app-backend/.tmp/
 
 # Test fixtures and large files
 resources

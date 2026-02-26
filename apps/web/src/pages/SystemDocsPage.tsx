@@ -281,6 +281,21 @@ function SystemDocsPage() {
 
   const { rootDocuments, childrenByParent } = useMemo(() => toKnowledgeBaseTree(tree), [tree]);
 
+  const allExpandableDocumentIds = useMemo(() => {
+    const ids = new Set<string>();
+    rootDocuments.forEach((doc) => {
+      if (doc.hasChild) {
+        ids.add(doc.id);
+      }
+    });
+    Object.entries(childrenByParent).forEach(([parentId, children]) => {
+      if (children.length > 0) {
+        ids.add(parentId);
+      }
+    });
+    return Array.from(ids);
+  }, [childrenByParent, rootDocuments]);
+
   const updatePathQuery = useCallback(
     (nextPath: string, replace = false) => {
       const params = new URLSearchParams(searchParams);
@@ -385,6 +400,21 @@ function SystemDocsPage() {
       ...prev,
       [doc.id]: !prev[doc.id],
     }));
+  }, []);
+
+  const handleExpandAllTree = useCallback(() => {
+    if (treeLoading || allExpandableDocumentIds.length === 0) {
+      return;
+    }
+    const expandedMap: Record<string, boolean> = {};
+    allExpandableDocumentIds.forEach((id) => {
+      expandedMap[id] = true;
+    });
+    setExpandedIds(expandedMap);
+  }, [allExpandableDocumentIds, treeLoading]);
+
+  const handleCollapseTreeToRoot = useCallback(() => {
+    setExpandedIds({});
   }, []);
 
   const handleSelectDoc = useCallback(
@@ -503,6 +533,8 @@ function SystemDocsPage() {
           onToggle={handleToggleDoc}
           onMove={handleMoveNoop}
           onRefresh={handleRefresh}
+          onExpandAll={handleExpandAllTree}
+          onCollapseToRoot={handleCollapseTreeToRoot}
           outlineMode={outlineMode}
           onToggleOutline={() => setOutlineMode((prev) => !prev)}
           documentContent={viewerContent}
