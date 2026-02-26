@@ -54,6 +54,10 @@ const ACTIVE_STATUSES = new Set(["pending", "running"]);
 const CURSOR_SEPARATOR = "::";
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+const DEFAULT_TIMEOUT_ERROR_MESSAGE = "任务超时（1小时）";
+const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
+const DEFAULT_TIMEOUT_SWEEP_INTERVAL_MS = 60 * 1000;
+const DEFAULT_TIMEOUT_SWEEP_BATCH_SIZE = 200;
 
 export type MessageCenterListener = (item: MessageItem) => void;
 
@@ -106,13 +110,17 @@ type MessageScope = {
 
 function resolveMessageScope(userId: string, projectKey: string): MessageScope {
   const scope = resolveProjectScope(userId, projectKey);
-  const scopeKey = `${userId}${CURSOR_SEPARATOR}${scope.ownerType}${CURSOR_SEPARATOR}${scope.ownerId}${CURSOR_SEPARATOR}${scope.projectKey}`;
+  const scopeKey = buildScopeKey(userId, scope.ownerType, scope.ownerId, scope.projectKey);
   return {
     scopeKey,
     ownerType: scope.ownerType,
     ownerId: scope.ownerId,
     projectKey: scope.projectKey,
   };
+}
+
+function buildScopeKey(userId: string, ownerType: string, ownerId: string, projectKey: string): string {
+  return `${userId}${CURSOR_SEPARATOR}${ownerType}${CURSOR_SEPARATOR}${ownerId}${CURSOR_SEPARATOR}${projectKey}`;
 }
 
 function toIso(value: Date | string | null | undefined): string {
@@ -215,6 +223,20 @@ export type CompleteMessageTaskInput = {
   result?: Record<string, unknown>;
 };
 
+export type FailTimedOutTasksOptions = {
+  timeoutMs?: number;
+  batchSize?: number;
+  errorMessage?: string;
+};
+
+function toPositiveNumber(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return Math.max(1, Math.floor(parsed));
+}
+
 export const messageCenterStore = {
   async createTask(input: CreateMessageTaskInput): Promise<MessageItem> {
     const scope = resolveMessageScope(input.userId, input.projectKey);
@@ -288,6 +310,7 @@ export const messageCenterStore = {
           AND owner_type = $8
           AND owner_id = $9
           AND project_key = $10
+          AND status IN ('pending', 'running')
         RETURNING *`,
       [
         progressCurrent,
@@ -332,6 +355,7 @@ export const messageCenterStore = {
           AND owner_type = $4
           AND owner_id = $5
           AND project_key = $6
+          AND status IN ('pending', 'running')
         RETURNING *`,
       [
         detailPatch,
@@ -373,6 +397,7 @@ export const messageCenterStore = {
           AND owner_type = $5
           AND owner_id = $6
           AND project_key = $7
+          AND status IN ('pending', 'running')
         RETURNING *`,
       [
         errorMessage,
@@ -464,4 +489,104 @@ export const messageCenterStore = {
   isActiveStatus(status: string): boolean {
     return ACTIVE_STATUSES.has(status);
   },
+
+  async failTimedOutTasks(options: FailTimedOutTasksOptions = {}): Promise<{ failed: number; tasks: MessageItem[] }> {
+    const timeoutMs = toPositiveNumber(options.timeoutMs, DEFAULT_TIMEOUT_MS);
+    const batchSize = toPositiveNumber(options.batchSize, DEFAULT_TIMEOUT_SWEEP_BATCH_SIZE);
+    const errorMessage = (options.errorMessage || "").trim() || DEFAULT_TIMEOUT_ERROR_MESSAGE;
+    const detailPatch = {
+      error: errorMessage,
+      timeout: {
+        thresholdMs: timeoutMs,
+        triggeredBy: "message-center-monitor",
+      },
+    };
+
+    const result = await query<MessageTaskRow>(
+      `WITH expired AS (
+          SELECT id
+            FROM message_center_tasks
+           WHERE status IN ('pending', 'running')
+             AND updated_at <= now() - ($1 * interval '1 millisecond')
+           ORDER BY updated_at ASC, id ASC
+           LIMIT $2
+        )
+        UPDATE message_center_tasks AS t
+           SET status = 'failed',
+               error_message = $3,
+               detail_json = COALESCE(t.detail_json, '{}'::jsonb) || $4::jsonb,
+               finished_at = now(),
+               updated_at = now()
+          FROM expired
+         WHERE t.id = expired.id
+         RETURNING t.*`,
+      [timeoutMs, batchSize, errorMessage, detailPatch],
+    );
+
+    if (result.rows.length === 0) {
+      return { failed: 0, tasks: [] };
+    }
+
+    const items = result.rows.map(mapRowToItem);
+    for (let i = 0; i < result.rows.length; i += 1) {
+      const row = result.rows[i];
+      const item = items[i];
+      const scopeKey = buildScopeKey(row.user_id, row.owner_type, row.owner_id, row.project_key);
+      messageCenterBus.publish(scopeKey, item);
+    }
+
+    return { failed: items.length, tasks: items };
+  },
+};
+
+export type MessageCenterTimeoutMonitorOptions = {
+  timeoutMs?: number;
+  intervalMs?: number;
+  batchSize?: number;
+  errorMessage?: string;
+};
+
+export const startMessageCenterTimeoutMonitor = (
+  options: MessageCenterTimeoutMonitorOptions = {},
+): (() => void) => {
+  const timeoutMs = toPositiveNumber(options.timeoutMs, DEFAULT_TIMEOUT_MS);
+  const intervalMs = toPositiveNumber(options.intervalMs, DEFAULT_TIMEOUT_SWEEP_INTERVAL_MS);
+  const batchSize = toPositiveNumber(options.batchSize, DEFAULT_TIMEOUT_SWEEP_BATCH_SIZE);
+  const errorMessage = (options.errorMessage || "").trim() || DEFAULT_TIMEOUT_ERROR_MESSAGE;
+
+  let stopped = false;
+  let running = false;
+  const sweep = async () => {
+    if (stopped || running) {
+      return;
+    }
+    running = true;
+    try {
+      const result = await messageCenterStore.failTimedOutTasks({
+        timeoutMs,
+        batchSize,
+        errorMessage,
+      });
+      if (result.failed > 0) {
+        console.warn(
+          `[message-center] marked ${result.failed} timed out task(s) as failed, timeoutMs=${timeoutMs}`,
+        );
+      }
+    } catch (err) {
+      console.warn("[message-center] timeout sweep failed", err);
+    } finally {
+      running = false;
+    }
+  };
+
+  const timer = setInterval(() => {
+    void sweep();
+  }, intervalMs);
+  timer.unref?.();
+  void sweep();
+
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
 };

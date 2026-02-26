@@ -7,6 +7,7 @@ import { skillRegistry, syncAnthropicSkillConfigs } from "./llm/skills/index.js"
 import { agentSkillCatalog } from "./llm/agent/index.js";
 import { pluginManagerV2 } from "./plugins-v2/index.js";
 import { createMcpRouter, loadMcpServerConfig } from "./mcp/index.js";
+import { startMessageCenterTimeoutMonitor } from "./services/message-center-store.js";
 
 const app = express();
 const port = Number(process.env.APP_BACKEND_PORT ?? 4870);
@@ -47,9 +48,19 @@ app.use("/api", buildRouter());
 
 // Initialize database pool and start server
 const start = async () => {
+  let stopMessageCenterTimeoutMonitor: (() => void) | null = null;
   try {
     await initPool();
     console.log("[app-backend] PostgreSQL pool initialized");
+    const timeoutMs = Number(process.env.MESSAGE_CENTER_TASK_TIMEOUT_MS ?? 60 * 60 * 1000);
+    const intervalMs = Number(process.env.MESSAGE_CENTER_TIMEOUT_SWEEP_INTERVAL_MS ?? 60 * 1000);
+    stopMessageCenterTimeoutMonitor = startMessageCenterTimeoutMonitor({
+      timeoutMs,
+      intervalMs,
+    });
+    console.log(
+      `[app-backend] Message center timeout monitor started (timeout=${timeoutMs}ms, interval=${intervalMs}ms)`,
+    );
   } catch (err) {
     console.warn("[app-backend] PostgreSQL not available, knowledge indexing disabled:", err);
   }
@@ -83,6 +94,15 @@ const start = async () => {
   app.listen(port, () => {
     console.log(`[app-backend] listening on :${port}`);
   });
+
+  const shutdown = () => {
+    if (stopMessageCenterTimeoutMonitor) {
+      stopMessageCenterTimeoutMonitor();
+      stopMessageCenterTimeoutMonitor = null;
+    }
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 };
 
 start();

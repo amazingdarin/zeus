@@ -178,3 +178,58 @@ test("message-center updateTaskProgress persists progress", async (t) => {
     await cleanup(userId, projectKey);
   }
 });
+
+test("message-center timeout sweep marks stale active tasks failed", async (t) => {
+  if (!(await canConnect())) {
+    t.skip("PostgreSQL not available");
+    return;
+  }
+  await ensureTable();
+
+  const userId = randomId("user");
+  const projectKey = randomId("project");
+
+  try {
+    const staleTask = await messageCenterStore.createTask({
+      userId,
+      projectKey,
+      type: "import-folder",
+      title: "Stale Task",
+      status: "running",
+    });
+    const freshTask = await messageCenterStore.createTask({
+      userId,
+      projectKey,
+      type: "import-folder",
+      title: "Fresh Task",
+      status: "running",
+    });
+
+    await query(
+      `UPDATE message_center_tasks
+          SET updated_at = now() - interval '2 hours'
+        WHERE id = $1`,
+      [staleTask.id],
+    );
+
+    const swept = await messageCenterStore.failTimedOutTasks({
+      timeoutMs: 60 * 60 * 1000,
+      errorMessage: "任务超时（监测器）",
+      batchSize: 20,
+    });
+
+    assert.equal(swept.failed, 1);
+    assert.equal(swept.tasks[0]?.id, staleTask.id);
+    assert.equal(swept.tasks[0]?.status, "failed");
+    assert.equal(swept.tasks[0]?.detail?.error, "任务超时（监测器）");
+
+    const list = await messageCenterStore.listTasks(userId, projectKey, { limit: 10 });
+    assert.equal(list.active.length, 1);
+    assert.equal(list.active[0]?.id, freshTask.id);
+    assert.equal(list.history.length, 1);
+    assert.equal(list.history[0]?.id, staleTask.id);
+    assert.equal(list.history[0]?.status, "failed");
+  } finally {
+    await cleanup(userId, projectKey);
+  }
+});
