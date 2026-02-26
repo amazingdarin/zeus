@@ -11,6 +11,11 @@ service:
   port: 5432
   nodePort: null
 
+nodePortService:
+  enabled: false
+  port: 5432
+  nodePort: null
+
 persistence:
   enabled: true
   size: 10Gi

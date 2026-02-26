@@ -16,3 +16,6 @@ persistence:
   enabled: true
   storageClassName: local-path
 
+nodePortService:
+  enabled: true
+  nodePort: 30432

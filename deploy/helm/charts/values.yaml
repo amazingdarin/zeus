@@ -2,6 +2,10 @@ postgres:
   service:
     type: ClusterIP
     port: 5432
+  nodePortService:
+    enabled: false
+    port: 5432
+    nodePort: null
   postgres:
     database: zeus
     user: zeus
