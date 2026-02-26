@@ -75,6 +75,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     inputRef,
     setError,
     setSlashSelectedIndex,
+    handleMessagesScroll,
     handleSend,
     handleStop,
     handleClearHistory,
@@ -500,7 +501,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
           </header>
 
           {/* Messages */}
-          <div className="chat-dock-messages" ref={messagesRef}>
+          <div className="chat-dock-messages" ref={messagesRef} onScroll={handleMessagesScroll}>
             {messages.length === 0 && !assistantBuffer && thinkingSteps.length === 0 ? (
               <div className="chat-dock-empty">
                 <div className="chat-dock-empty-icon">

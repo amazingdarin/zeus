@@ -4,7 +4,7 @@
  * Encapsulates all chat logic for reuse between ChatPanel and ChatPage.
  */
 
-import type { KeyboardEvent, ChangeEvent, RefObject } from "react";
+import type { KeyboardEvent, ChangeEvent, RefObject, UIEvent } from "react";
 import {
   useCallback,
   useEffect,
@@ -302,6 +302,7 @@ export type UseChatLogicReturn = {
   setError: (error: string | null) => void;
   setSlashSelectedIndex: (index: number) => void;
   setDeepSearchEnabled: (enabled: boolean) => void;
+  handleMessagesScroll: (event: UIEvent<HTMLDivElement>) => void;
   handleSend: () => Promise<void>;
   handleStop: () => void;
   handleClearHistory: () => Promise<void>;
@@ -373,6 +374,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   const [assistantBuffer, setAssistantBuffer] = useState("");
   const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([]);
   const [taskTodoItems, setTaskTodoItems] = useState<ChatTaskStatus[]>([]);
+  const [isUserBrowsingHistory, setIsUserBrowsingHistory] = useState(false);
   const [llmConfig, setLlmConfig] = useState<ProviderConfig | null>(null);
   const [internalSessionId, setInternalSessionId] = useState<string>(() => `session-${createId()}`);
 
@@ -450,6 +452,9 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   const eventSourceRef = useRef<EventSource | null>(null);
   const hasCustomEventsRef = useRef(false);
   const assistantBufferRef = useRef("");
+  const programmaticScrollRef = useRef(false);
+  const prevAutoScrollEnabledRef = useRef(autoScrollEnabled);
+  const lastScrollTopRef = useRef(0);
 
   // Track which messages have expanded sources
   const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
@@ -634,16 +639,70 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     }
   }, [historyKey, loadedHistoryKey, commandHistory]);
 
+  const isNearBottom = useCallback((container: HTMLDivElement) => {
+    const distance = container.scrollHeight - container.scrollTop - container.clientHeight;
+    return distance <= 40;
+  }, []);
+
+  const handleMessagesScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+    if (!autoScrollEnabled || programmaticScrollRef.current) {
+      return;
+    }
+    const container = event.currentTarget;
+    const currentTop = container.scrollTop;
+    const scrollingUp = currentTop < lastScrollTopRef.current - 1;
+    lastScrollTopRef.current = currentTop;
+    const nearBottom = isNearBottom(container);
+    setIsUserBrowsingHistory((prev) => {
+      if (nearBottom) {
+        return false;
+      }
+      if (scrollingUp) {
+        return true;
+      }
+      return prev ? prev : true;
+    });
+  }, [autoScrollEnabled, isNearBottom]);
+
+  useEffect(() => {
+    const prev = prevAutoScrollEnabledRef.current;
+    prevAutoScrollEnabledRef.current = autoScrollEnabled;
+    if (autoScrollEnabled && !prev) {
+      setIsUserBrowsingHistory(false);
+      lastScrollTopRef.current = 0;
+    }
+    if (!autoScrollEnabled) {
+      programmaticScrollRef.current = false;
+    }
+  }, [autoScrollEnabled]);
+
+  useEffect(() => {
+    setIsUserBrowsingHistory(false);
+    lastScrollTopRef.current = 0;
+  }, [projectKey, sessionId]);
+
   // Auto scroll to bottom
   useEffect(() => {
-    if (!autoScrollEnabled) return;
+    if (!autoScrollEnabled || isUserBrowsingHistory) return;
     const container = messagesRef.current;
     if (!container) return;
+    let releaseHandle = 0;
     const handle = requestAnimationFrame(() => {
+      programmaticScrollRef.current = true;
       container.scrollTop = container.scrollHeight;
+      lastScrollTopRef.current = container.scrollTop;
+      releaseHandle = requestAnimationFrame(() => {
+        programmaticScrollRef.current = false;
+      });
     });
-    return () => cancelAnimationFrame(handle);
-  }, [messages, assistantBuffer, thinkingSteps, taskTodoItems, autoScrollEnabled]);
+    return () => {
+      cancelAnimationFrame(handle);
+      if (releaseHandle) {
+        cancelAnimationFrame(releaseHandle);
+      }
+      programmaticScrollRef.current = false;
+    };
+  }, [messages, assistantBuffer, thinkingSteps, taskTodoItems, autoScrollEnabled, isUserBrowsingHistory]);
 
   const closeStream = useCallback(() => {
     if (eventSourceRef.current) {
@@ -1630,6 +1689,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     setError,
     setSlashSelectedIndex,
     setDeepSearchEnabled,
+    handleMessagesScroll,
     handleSend,
     handleStop,
     handleClearHistory,

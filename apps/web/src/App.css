@@ -295,6 +295,19 @@ body {
   gap: 10px;
 }
 
+.message-center-history-list {
+  max-height: 320px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.message-center-load-hint {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  padding: 8px 0 2px;
+}
+
 .message-center-item {
   padding: 10px 12px;
   border-radius: 12px;

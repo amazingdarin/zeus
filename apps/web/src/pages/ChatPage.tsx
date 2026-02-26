@@ -178,6 +178,7 @@ function ChatPage() {
     setError,
     setSlashSelectedIndex,
     setDeepSearchEnabled,
+    handleMessagesScroll,
     handleSend,
     handleStop,
     handleClearHistory,
@@ -566,7 +567,7 @@ function ChatPage() {
           </header>
 
       {/* Messages */}
-      <div className="chat-page-messages" ref={messagesRef}>
+      <div className="chat-page-messages" ref={messagesRef} onScroll={handleMessagesScroll}>
         {messages.length === 0 && !assistantBuffer && thinkingSteps.length === 0 ? (
           <div className="chat-page-empty">
             <div className="chat-page-empty-icon">

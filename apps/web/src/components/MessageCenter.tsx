@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import { Popover, Tooltip, message } from "antd";
 import { BellOutlined } from "@ant-design/icons";
 
@@ -10,6 +10,8 @@ import {
 import { publishMessageCenter } from "../lib/message-center-callbacks";
 
 const ACTIVE_STATUSES = new Set(["pending", "running"]);
+const HISTORY_PAGE_SIZE = 10;
+const SCROLL_BOTTOM_THRESHOLD = 24;
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "等待中",
@@ -41,6 +43,18 @@ const mergeItem = (prev: MessageItem, next: MessageItem): MessageItem => {
   };
 };
 
+const mergeItemsById = (prev: MessageItem[], incoming: MessageItem[]): MessageItem[] => {
+  if (incoming.length === 0) {
+    return prev;
+  }
+  const next = new Map(prev.map((item) => [item.id, item]));
+  for (const item of incoming) {
+    const existing = next.get(item.id);
+    next.set(item.id, existing ? mergeItem(existing, item) : item);
+  }
+  return Array.from(next.values());
+};
+
 const computePercent = (item: MessageItem): number => {
   const percent = item.progress?.percent;
   if (typeof percent === "number" && !Number.isNaN(percent)) {
@@ -64,22 +78,73 @@ const formatTime = (value: string | undefined) => {
 function MessageCenter({ projectKey }: MessageCenterProps) {
   const [items, setItems] = useState<MessageItem[]>([]);
   const [open, setOpen] = useState(false);
+  const [historyCursor, setHistoryCursor] = useState<string | undefined>(undefined);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const statusRef = useRef<Map<string, string>>(new Map());
   const sourceRef = useRef<EventSource | null>(null);
+  const requestTokenRef = useRef(0);
+
+  const loadMoreHistory = useCallback(async () => {
+    if (!projectKey || !historyCursor || historyLoadingMore) {
+      return;
+    }
+    const requestToken = requestTokenRef.current;
+    setHistoryLoadingMore(true);
+    try {
+      const data = await fetchMessageCenter(projectKey, {
+        limit: HISTORY_PAGE_SIZE,
+        cursor: historyCursor,
+      });
+      if (requestTokenRef.current !== requestToken) {
+        return;
+      }
+      const merged = [...data.active, ...data.history];
+      setItems((prev) => mergeItemsById(prev, merged));
+      setHistoryCursor(data.nextCursor);
+      merged.forEach((item) => {
+        statusRef.current.set(item.id, item.status);
+      });
+    } catch (err) {
+      console.error("[message-center] load more history failed", err);
+    } finally {
+      if (requestTokenRef.current === requestToken) {
+        setHistoryLoadingMore(false);
+      }
+    }
+  }, [historyCursor, historyLoadingMore, projectKey]);
+
+  const handleHistoryScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+    if (!historyCursor || historyLoadingMore) {
+      return;
+    }
+    const el = event.currentTarget;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceToBottom <= SCROLL_BOTTOM_THRESHOLD) {
+      void loadMoreHistory();
+    }
+  }, [historyCursor, historyLoadingMore, loadMoreHistory]);
 
   useEffect(() => {
+    requestTokenRef.current += 1;
+    const requestToken = requestTokenRef.current;
     statusRef.current.clear();
     setItems([]);
+    setHistoryCursor(undefined);
+    setHistoryLoading(false);
+    setHistoryLoadingMore(false);
     if (!projectKey) {
       return;
     }
 
     let mounted = true;
-    fetchMessageCenter(projectKey)
+    setHistoryLoading(true);
+    fetchMessageCenter(projectKey, { limit: HISTORY_PAGE_SIZE })
       .then((data) => {
-        if (!mounted) return;
+        if (!mounted || requestTokenRef.current !== requestToken) return;
         const merged = [...data.active, ...data.history];
         setItems(merged);
+        setHistoryCursor(data.nextCursor);
         const nextStatus = new Map<string, string>();
         merged.forEach((item) => {
           nextStatus.set(item.id, item.status);
@@ -88,6 +153,11 @@ function MessageCenter({ projectKey }: MessageCenterProps) {
       })
       .catch((err) => {
         console.error("[message-center] load failed", err);
+      })
+      .finally(() => {
+        if (mounted && requestTokenRef.current === requestToken) {
+          setHistoryLoading(false);
+        }
       });
 
     return () => {
@@ -120,12 +190,7 @@ function MessageCenter({ projectKey }: MessageCenterProps) {
 
       publishMessageCenter(payload);
 
-      setItems((prev) => {
-        const next = new Map(prev.map((item) => [item.id, item]));
-        const existing = next.get(payload!.id);
-        next.set(payload!.id, existing ? mergeItem(existing, payload!) : payload!);
-        return Array.from(next.values());
-      });
+      setItems((prev) => mergeItemsById(prev, [payload!]));
 
       const prevStatus = statusRef.current.get(payload.id);
       if (prevStatus && prevStatus !== payload.status && isActiveStatus(prevStatus)) {
@@ -249,9 +314,18 @@ function MessageCenter({ projectKey }: MessageCenterProps) {
       </div>
       <div className="message-center-section">
         <div className="message-center-section-title">历史</div>
-        {historyItems.length > 0 ? (
-          <div className="message-center-list">
-            {historyItems.map(renderItem)}
+        {historyItems.length > 0 || historyLoading ? (
+          <div className="message-center-history-list" onScroll={handleHistoryScroll}>
+            {historyItems.length > 0 ? (
+              <div className="message-center-list">
+                {historyItems.map(renderItem)}
+              </div>
+            ) : null}
+            {historyLoading ? <div className="message-center-load-hint">加载中...</div> : null}
+            {historyLoadingMore ? <div className="message-center-load-hint">加载更多...</div> : null}
+            {!historyLoading && !historyLoadingMore && !historyCursor && historyItems.length > 0 ? (
+              <div className="message-center-load-hint">没有更多历史任务</div>
+            ) : null}
           </div>
         ) : (
           <div className="message-center-empty">暂无历史记录</div>
