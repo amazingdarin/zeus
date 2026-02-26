@@ -35,6 +35,7 @@ import {
   type PendingIntentInfo,
   type PendingPreflightInfo,
   type TaskRuntimeHints,
+  DEEP_SEARCH_CONTEXT_PLACEHOLDER,
 } from "./chat-graph.js";
 import { chatSettingsStore } from "./chat-settings-store.js";
 import { chatSessionStore } from "./chat-session-store.js";
@@ -213,6 +214,7 @@ function parseEnvInt(name: string, defaultValue: number): number {
 const DOC_GUARD_ENABLED = parseEnvBool("DOC_GUARD_ENABLED", true);
 const DOC_GUARD_MAX_ATTEMPTS = parseEnvInt("DOC_GUARD_MAX_ATTEMPTS", 3);
 const THINKING_TRACE_ENABLED = parseEnvBool("CHAT_THINKING_TRACE_ENABLED", true);
+const DEEP_SEARCH_CONTEXT_MAX_CHARS = parseEnvInt("CHAT_DEEP_SEARCH_CONTEXT_MAX_CHARS", 12000);
 
 function intentLabel(type: "command" | "skill" | "deep_search" | "chat"): string {
   switch (type) {
@@ -236,6 +238,8 @@ function planThinkingMessage(plan: ChatExecutionPlan): string | null {
       return `开始执行技能：${plan.skillId}`;
     case "execute_skill_batch":
       return `开始按顺序执行 ${plan.tasks.length} 个子任务。`;
+    case "deep_search_then_skill_batch":
+      return `先执行深度搜索，再执行 ${plan.tasks.length} 个子任务。`;
     case "deep_search":
       return "进入深度搜索流程。";
     case "respond_text":
@@ -251,7 +255,10 @@ function planThinkingMessage(plan: ChatExecutionPlan): string | null {
   }
 }
 
-type BatchTask = Extract<ChatExecutionPlan, { action: "execute_skill_batch" }>['tasks'][number];
+type BatchTask = Extract<
+  ChatExecutionPlan,
+  { action: "execute_skill_batch" } | { action: "deep_search_then_skill_batch" }
+>['tasks'][number];
 
 function formatBatchTaskStatusLine(status: ChatBatchTaskStatus): string {
   const prefix = `${status.index}/${status.total}. ${status.title}`;
@@ -297,6 +304,21 @@ function resolveBatchTaskInputs(
       continue;
     }
 
+    if (binding.toArg === "source_doc_ids") {
+      const sourceDocIds = Array.isArray(value)
+        ? value.map((item) => String(item || "").trim()).filter(Boolean)
+        : [String(value).trim()].filter(Boolean);
+
+      if (sourceDocIds.length === 0) {
+        unresolvedBindings.push(`${binding.fromTaskId}.${binding.fromKey}`);
+        continue;
+      }
+
+      args[binding.toArg] = sourceDocIds;
+      bindingNotes.push(`${binding.toArg} <- ${binding.fromTaskId}.${binding.fromKey}`);
+      continue;
+    }
+
     args[binding.toArg] = value;
     bindingNotes.push(`${binding.toArg} <- ${binding.fromTaskId}.${binding.fromKey}`);
 
@@ -334,6 +356,89 @@ function parseOutputFromDoneMessage(message?: string): Record<string, unknown> {
   }
 
   return output;
+}
+
+function truncateByChars(input: string, maxChars: number): { text: string; truncated: boolean } {
+  if (!input || maxChars <= 0) {
+    return { text: "", truncated: input.length > 0 };
+  }
+  if (input.length <= maxChars) {
+    return { text: input, truncated: false };
+  }
+  return {
+    text: input.slice(0, maxChars),
+    truncated: true,
+  };
+}
+
+function buildDeepSearchTaskContext(
+  userQuery: string,
+  deepSearchMessage: string,
+  sources: SourceReference[] | undefined,
+): string {
+  const normalizedMessage = deepSearchMessage.trim();
+  const { text: clippedMessage, truncated } = truncateByChars(normalizedMessage, DEEP_SEARCH_CONTEXT_MAX_CHARS);
+  const sourceLines = Array.isArray(sources)
+    ? sources
+      .slice(0, 10)
+      .map((source, index) => {
+        if (source.type === "web") {
+          const url = source.url ? ` (${source.url})` : "";
+          return `${index + 1}. ${source.title}${url}`;
+        }
+        const docId = source.docId ? ` (doc:${source.docId})` : "";
+        return `${index + 1}. ${source.title}${docId}`;
+      })
+    : [];
+
+  const sections: string[] = [
+    `用户任务：${userQuery.trim()}`,
+    "",
+    "以下是深度搜索结果，请据此产出结构化文档（含关键信息、时间点、数据与结论）：",
+    clippedMessage || "（深度搜索未返回有效文本）",
+  ];
+
+  if (truncated) {
+    sections.push("", `注：深度搜索结果过长，已截断到前 ${DEEP_SEARCH_CONTEXT_MAX_CHARS} 字符。`);
+  }
+
+  if (sourceLines.length > 0) {
+    sections.push("", "参考来源：", ...sourceLines);
+  }
+
+  return sections.join("\n");
+}
+
+function injectDeepSearchContextValue(value: unknown, context: string): unknown {
+  if (typeof value === "string") {
+    if (!value.includes(DEEP_SEARCH_CONTEXT_PLACEHOLDER)) return value;
+    return value.split(DEEP_SEARCH_CONTEXT_PLACEHOLDER).join(context);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => injectDeepSearchContextValue(item, context));
+  }
+
+  if (value && typeof value === "object") {
+    const replaced: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      replaced[key] = injectDeepSearchContextValue(nested, context);
+    }
+    return replaced;
+  }
+
+  return value;
+}
+
+function injectDeepSearchContextTasks(tasks: BatchTask[], context: string): BatchTask[] {
+  return tasks.map((task) => ({
+    ...task,
+    args: injectDeepSearchContextValue(task.args, context) as Record<string, unknown>,
+    docIds: [...(task.docIds || [])],
+    ...(task.dependsOn ? { dependsOn: [...task.dependsOn] } : {}),
+    ...(task.inputBindings ? { inputBindings: task.inputBindings.map((binding) => ({ ...binding })) } : {}),
+    ...(task.runtimeHints ? { runtimeHints: { ...task.runtimeHints } } : {}),
+  }));
 }
 
 async function getLLMConfig(): Promise<ProviderConfigInternal | null> {
@@ -1239,6 +1344,17 @@ export async function* streamRun(runId: string): AsyncGenerator<ChatStreamChunk>
 
       case "execute_skill_batch":
         yield* executeSkillBatchPlan(run, plan, userQuery, abortSignal, traceContext, chatSettings.fullAccess);
+        return;
+
+      case "deep_search_then_skill_batch":
+        yield* executeDeepSearchThenSkillBatchPlan(
+          run,
+          plan,
+          userQuery,
+          abortSignal,
+          traceContext,
+          chatSettings.fullAccess,
+        );
         return;
 
       case "deep_search":
@@ -2244,6 +2360,123 @@ function buildIntentFromAgentPlan(
     rawMessage,
     docIds,
   };
+}
+
+async function* executeDeepSearchThenSkillBatchPlan(
+  run: ChatRun,
+  plan: Extract<ChatExecutionPlan, { action: "deep_search_then_skill_batch" }>,
+  userQuery: string,
+  abortSignal: AbortSignal,
+  traceContext: TraceContext,
+  fullAccess = false,
+): AsyncGenerator<ChatStreamChunk> {
+  if (!Array.isArray(plan.tasks) || plan.tasks.length === 0) {
+    run.status = "failed";
+    run.updatedAt = Date.now();
+    yield { type: "error", error: "深度搜索编排未生成可执行子任务" };
+    return;
+  }
+
+  const deepSearchSpan = traceManager.startSpan(traceContext, "deep-search-orchestrate", {
+    query: userQuery,
+    docIds: run.docIds,
+    taskCount: plan.tasks.length,
+  });
+
+  let deepSearchMessage = "";
+  let deepSearchSources: SourceReference[] = [];
+
+  try {
+    for await (const chunk of executeDeepSearch(
+      run.userId,
+      run.projectKey,
+      userQuery,
+      run.docIds,
+      undefined,
+      abortSignal,
+    )) {
+      if (abortSignal.aborted) {
+        traceManager.endSpan(deepSearchSpan, { status: "cancelled" }, "WARNING");
+        run.status = "cancelled";
+        run.updatedAt = Date.now();
+        return;
+      }
+
+      if (chunk.type === "done") {
+        deepSearchMessage = chunk.message || "";
+        deepSearchSources = chunk.sources || [];
+        continue;
+      }
+
+      if (chunk.type === "error") {
+        const errorMessage = chunk.error || "Deep search failed";
+        traceManager.endSpan(deepSearchSpan, { error: errorMessage }, "ERROR");
+        run.status = "failed";
+        run.updatedAt = Date.now();
+        yield { type: "error", error: errorMessage };
+        return;
+      }
+
+      yield mapDeepSearchChunkToChatChunk(chunk);
+    }
+  } catch (err) {
+    if (abortSignal.aborted) {
+      traceManager.endSpan(deepSearchSpan, { status: "cancelled" }, "WARNING");
+      run.status = "cancelled";
+      run.updatedAt = Date.now();
+      return;
+    }
+
+    const errorMessage = err instanceof Error ? err.message : "Deep search failed";
+    traceManager.endSpan(deepSearchSpan, { error: errorMessage }, "ERROR");
+    run.status = "failed";
+    run.updatedAt = Date.now();
+    yield { type: "error", error: errorMessage };
+    return;
+  }
+
+  if (!deepSearchMessage.trim()) {
+    const errorMessage = "深度搜索未返回可用内容，无法继续生成文档与 PPT";
+    traceManager.endSpan(deepSearchSpan, { error: errorMessage }, "ERROR");
+    run.status = "failed";
+    run.updatedAt = Date.now();
+    yield { type: "error", error: errorMessage };
+    return;
+  }
+
+  traceManager.endSpan(deepSearchSpan, {
+    status: "completed",
+    outputChars: deepSearchMessage.length,
+    sourceCount: deepSearchSources.length,
+  });
+
+  const deepSearchContext = buildDeepSearchTaskContext(userQuery, deepSearchMessage, deepSearchSources);
+  const preparedTasks = injectDeepSearchContextTasks(plan.tasks, deepSearchContext);
+  const downstreamTasks: Extract<ChatExecutionPlan, { action: "execute_skill_batch" }>["tasks"] = preparedTasks.map((task) => ({
+    ...task,
+    args: { ...(task.args || {}) },
+    docIds: [...(task.docIds || [])],
+    ...(task.dependsOn ? { dependsOn: [...task.dependsOn] } : {}),
+    ...(task.inputBindings ? { inputBindings: task.inputBindings.map((binding) => ({ ...binding })) } : {}),
+    ...(task.runtimeHints ? { runtimeHints: { ...task.runtimeHints } } : {}),
+  }));
+
+  yield {
+    type: "thinking",
+    content: `深度搜索完成，开始执行 ${downstreamTasks.length} 个子任务。`,
+  };
+
+  yield* executeSkillBatchPlan(
+    run,
+    {
+      action: "execute_skill_batch",
+      tasks: downstreamTasks,
+    },
+    userQuery,
+    abortSignal,
+    traceContext,
+    fullAccess,
+  );
 }
 
 /**

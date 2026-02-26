@@ -382,6 +382,25 @@ export const kbSearchSkill: SkillDefinition = {
 };
 
 /**
+ * Web search
+ */
+export const webSearchSkill: SkillDefinition = {
+  name: "web-search",
+  category: "kb",
+  command: "/web-search",
+  description: "执行网络搜索并返回结果摘要（需先在系统设置中启用网络搜索）。",
+  required: false,
+  confirmation: {
+    required: false,
+    riskLevel: "low",
+  },
+  inputSchema: z.object({
+    query: z.string().describe("网络搜索关键词"),
+    limit: z.number().describe("返回结果数量（默认 5，最大 10）").optional(),
+  }),
+};
+
+/**
  * Fetch URL content
  */
 export const docFetchUrlSkill: SkillDefinition = {
@@ -644,6 +663,7 @@ export const documentSkills: SkillDefinition[] = [
   docDeleteSkill,
   docOrganizeSkill,
   kbSearchSkill,
+  webSearchSkill,
   docFetchUrlSkill,
   docImportGitSkill,
   docSmartImportSkill,

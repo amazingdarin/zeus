@@ -50,6 +50,7 @@ import {
   normalizeMediaScope,
 } from "./media-transcribe-context.js";
 import { inspectDocumentSnapshots } from "./document-inspect.js";
+import { webSearchConfigStore } from "./web-search-config.js";
 
 // ============================================================================
 // Types
@@ -207,6 +208,19 @@ export type ChatGraphAttachment = {
   type?: string;
 };
 
+export type ExecutionBatchTask = {
+  taskId: string;
+  title: string;
+  skillId: string;
+  args: Record<string, unknown>;
+  docIds: string[];
+  sourceIntent: "command" | "keyword" | "llm-tool";
+  dependsOn?: string[];
+  inputBindings?: TaskInputBinding[];
+  failurePolicy?: TaskFailurePolicy;
+  runtimeHints?: TaskRuntimeHints;
+};
+
 /** Final execution plan produced by the graph */
 export type ChatExecutionPlan =
   | {
@@ -229,19 +243,9 @@ export type ChatExecutionPlan =
     }
   | {
       action: "execute_skill_batch";
-      tasks: Array<{
-        taskId: string;
-        title: string;
-        skillId: string;
-        args: Record<string, unknown>;
-        docIds: string[];
-        sourceIntent: "command" | "keyword" | "llm-tool";
-        dependsOn?: string[];
-        inputBindings?: TaskInputBinding[];
-        failurePolicy?: TaskFailurePolicy;
-        runtimeHints?: TaskRuntimeHints;
-      }>;
+      tasks: ExecutionBatchTask[];
     }
+  | { action: "deep_search_then_skill_batch"; tasks: ExecutionBatchTask[] }
   | { action: "deep_search" }
   | { action: "clarify_intent" }
   | { action: "respond_text"; text: string }
@@ -375,6 +379,8 @@ const PPT_COMPAT_SKILL_COMMAND = "/doc-optimize-ppt";
 const PPT_OUTLINE_SKILL_COMMAND = "/doc-optimize-ppt-outline";
 const PPT_HTML_RENDER_SKILL_COMMAND = "/doc-render-ppt-html";
 const PPT_EXPORT_SKILL_COMMAND = "/doc-export-ppt";
+const WEB_SEARCH_SKILL_COMMAND = "/web-search";
+export const DEEP_SEARCH_CONTEXT_PLACEHOLDER = "__DEEP_SEARCH_CONTEXT__";
 
 // ============================================================================
 // Node: detect_intent
@@ -401,7 +407,7 @@ const INTENT_SYSTEM_PROMPT = `你是 Zeus 文档管理系统的意图分析器�
 - deep_search: 复杂问题，需要多轮检索和综合分析（"详细分析"、"全面调研"、"深入对比"、"系统整理"等）
 - chat: 简单提问、知识检索、闲聊、或意图不明确的请求
 
-skill_hint 可选值: doc-create, doc-edit, doc-delete, doc-move, doc-read, doc-get, doc-summary, doc-optimize-format, doc-optimize-content, doc-optimize-style, doc-optimize-full, ppt-agent, doc-optimize-ppt, doc-optimize-ppt-outline, doc-render-ppt-html, doc-export-ppt, kb-search, doc-fetch-url, doc-import-git, doc-smart-import, doc-organize, doc-convert, file-parse, image-analyze, media-transcribe, url-extract
+skill_hint 可选值: doc-create, doc-edit, doc-delete, doc-move, doc-read, doc-get, doc-summary, doc-optimize-format, doc-optimize-content, doc-optimize-style, doc-optimize-full, ppt-agent, doc-optimize-ppt, doc-optimize-ppt-outline, doc-render-ppt-html, doc-export-ppt, kb-search, web-search, doc-fetch-url, doc-import-git, doc-smart-import, doc-organize, doc-convert, file-parse, image-analyze, media-transcribe, url-extract
 
 复合任务指导：
 - 当用户请求“从主题制作/生成/做 PPT”时，优先倾向 ppt-agent（插件统一入口）。
@@ -599,6 +605,7 @@ function labelForIntentType(type: ChatIntent["type"], skillHint?: string): strin
       "doc-render-ppt-html": "生成 HTML 演示稿",
       "doc-export-ppt": "导出 PPT",
       "kb-search": "搜索知识库",
+      "web-search": "网络搜索",
       "doc-fetch-url": "抓取网页",
       "doc-import-git": "导入 Git 仓库",
       "doc-smart-import": "智能导入",
@@ -633,6 +640,7 @@ function heuristicIntent(message: string): ChatIntent {
     "提取网页", "提取url", "extract url", "抓取网页",
     "制作ppt", "生成ppt", "做ppt", "演示稿", "幻灯片", "powerpoint",
     "导出ppt", "下载ppt", "pptx",
+    "网络搜索", "联网搜索", "web search",
   ];
   const deepKeywords = [
     "详细分析", "全面调研", "深入了解", "系统整理", "全面分析",
@@ -960,6 +968,84 @@ function buildTask(
   };
 }
 
+function toExecutionBatchTask(task: OrchestratedTask): ExecutionBatchTask {
+  return {
+    taskId: task.taskId,
+    title: task.title,
+    skillId: task.skillId,
+    args: task.args,
+    docIds: task.docIds,
+    sourceIntent: task.sourceIntent,
+    ...(task.dependsOn ? { dependsOn: task.dependsOn } : {}),
+    ...(task.inputBindings ? { inputBindings: task.inputBindings } : {}),
+    ...(task.failurePolicy ? { failurePolicy: task.failurePolicy } : {}),
+    ...(task.runtimeHints ? { runtimeHints: task.runtimeHints } : {}),
+  };
+}
+
+function cloneOrchestratedTask(task: OrchestratedTask): OrchestratedTask {
+  return {
+    ...task,
+    args: { ...(task.args || {}) },
+    docIds: [...(task.docIds || [])],
+    ...(task.dependsOn ? { dependsOn: [...task.dependsOn] } : {}),
+    ...(task.inputBindings ? { inputBindings: task.inputBindings.map((binding) => ({ ...binding })) } : {}),
+    ...(task.runtimeHints ? { runtimeHints: { ...task.runtimeHints } } : {}),
+  };
+}
+
+function buildDeepSearchDocTitle(query: string): string {
+  const compact = query.replace(/\s+/g, " ").trim();
+  if (!compact) return "深度调研结果";
+  const clipped = compact.length > 36 ? `${compact.slice(0, 36)}…` : compact;
+  return `深度调研：${clipped}`;
+}
+
+async function shouldInjectWebSearchSkill(): Promise<boolean> {
+  try {
+    const config = await webSearchConfigStore.get();
+    return config?.enabled === true;
+  } catch {
+    return false;
+  }
+}
+
+async function injectForcedWebSearchTask(
+  state: GraphState,
+  tasks: OrchestratedTask[],
+): Promise<OrchestratedTask[]> {
+  if (!Array.isArray(tasks) || tasks.length === 0) return tasks;
+
+  const enabled = await shouldInjectWebSearchSkill();
+  if (!enabled) return tasks;
+
+  await agentSkillCatalog.initialize();
+  const webSearchSkill = agentSkillCatalog.getByCommand(WEB_SEARCH_SKILL_COMMAND, state.userId);
+  if (!webSearchSkill) return tasks;
+
+  if (tasks.some((task) => task.skillId === webSearchSkill.id)) {
+    return tasks;
+  }
+
+  const rawQuery = state.userQuery.trim();
+  const commandMatch = rawQuery.match(COMMAND_REGEX);
+  const commandRest = commandMatch?.[2]?.trim() || "";
+  const query = commandRest || rawQuery || "最新资讯";
+  const webTask = buildTask(
+    0,
+    webSearchSkill.id,
+    webSearchSkill.displayName || webSearchSkill.id,
+    { query, limit: 5 },
+    [],
+    state.sourceIntent,
+    {
+      failurePolicy: "required",
+    },
+  );
+
+  return [webTask, ...tasks.map(cloneOrchestratedTask)];
+}
+
 type WorkflowBuildResult =
   | { tasks: OrchestratedTask[] }
   | { blockedReason: string }
@@ -1141,6 +1227,103 @@ async function buildPptWorkflowTasks(state: GraphState, workflow: WorkflowIntent
   };
 }
 
+async function buildDeepSearchPptWorkflowTasks(
+  state: GraphState,
+  workflow: WorkflowIntent,
+): Promise<WorkflowBuildResult> {
+  if (workflow.kind !== "ppt_from_topic") {
+    return null;
+  }
+
+  await agentSkillCatalog.initialize();
+  const allSkills = agentSkillCatalog.getAllSkills(state.userId);
+  const enabledSkillIds = new Set(
+    await projectSkillConfigStore.getEnabledSkillIds(state.projectKey, allSkills),
+  );
+
+  const createSkill = agentSkillCatalog.getByCommand(PPT_CREATE_SKILL_COMMAND, state.userId);
+  if (!createSkill || !enabledSkillIds.has(createSkill.id)) {
+    return {
+      blockedReason: `深度搜索生成 PPT 依赖技能 ${PPT_CREATE_SKILL_COMMAND}，但当前未启用。`,
+    };
+  }
+
+  const sourceIntent = state.sourceIntent;
+  const createTask = buildTask(
+    0,
+    createSkill.id,
+    createSkill.displayName || createSkill.id,
+    {
+      title: buildDeepSearchDocTitle(state.userQuery),
+      description: DEEP_SEARCH_CONTEXT_PLACEHOLDER,
+    },
+    [],
+    sourceIntent,
+    {
+      failurePolicy: "required",
+      runtimeHints: { autoApplyDraft: true },
+    },
+  );
+
+  const pptPluginSkill = agentSkillCatalog.getByCommand(PPT_PLUGIN_AGENT_COMMAND, state.userId);
+  if (pptPluginSkill && enabledSkillIds.has(pptPluginSkill.id)) {
+    const pluginArgs: Record<string, unknown> = { ...(state.skillArgs || {}) };
+    const topic = typeof pluginArgs.topic === "string" ? pluginArgs.topic.trim() : "";
+    const fallbackInput = typeof pluginArgs.input === "string" ? pluginArgs.input.trim() : "";
+    if (!topic && !fallbackInput) {
+      pluginArgs.topic = state.userQuery.trim();
+    }
+    if (workflow.needsExport) {
+      pluginArgs.export_ppt = true;
+    }
+
+    const pluginTask = buildTask(
+      1,
+      pptPluginSkill.id,
+      pptPluginSkill.displayName || pptPluginSkill.id,
+      pluginArgs,
+      [],
+      sourceIntent,
+      {
+        dependsOn: [createTask.taskId],
+        inputBindings: [{ fromTaskId: createTask.taskId, fromKey: "docId", toArg: "source_doc_ids" }],
+        failurePolicy: "required",
+      },
+    );
+
+    return {
+      tasks: [createTask, pluginTask].slice(0, MAX_ORCHESTRATED_TASKS),
+    };
+  }
+
+  const fallback = await buildPptWorkflowTasks(state, workflow);
+  if (!fallback) {
+    return {
+      tasks: [createTask],
+    };
+  }
+
+  if ("blockedReason" in fallback) {
+    return fallback;
+  }
+
+  const tasks = fallback.tasks.map(cloneOrchestratedTask);
+  const firstTask = tasks[0];
+  if (firstTask && firstTask.skillId === createSkill.id) {
+    firstTask.args = {
+      ...firstTask.args,
+      title: buildDeepSearchDocTitle(state.userQuery),
+      description: DEEP_SEARCH_CONTEXT_PLACEHOLDER,
+    };
+  } else {
+    tasks.unshift(createTask);
+  }
+
+  return {
+    tasks: tasks.slice(0, MAX_ORCHESTRATED_TASKS),
+  };
+}
+
 async function orchestrateTasks(state: GraphState): Promise<Partial<GraphState>> {
   return withGraphSpan(
     state,
@@ -1251,6 +1434,8 @@ async function orchestrateTasks(state: GraphState): Promise<Partial<GraphState>>
           }
         }
       }
+
+      tasks = await injectForcedWebSearchTask(state, tasks);
 
       const uniqueTasks: OrchestratedTask[] = [];
       const seen = new Set<string>();
@@ -1733,18 +1918,7 @@ ${blockedReasons.map((reason, index) => `${index + 1}. ${reason}`).join("\n")}`,
     reviewWarningMessage: reviewWarnings.length > 0 ? reviewWarnings.join("\n") : undefined,
     plan: {
       action: "execute_skill_batch",
-      tasks: executableTasks.map((task) => ({
-        taskId: task.taskId,
-        title: task.title,
-        skillId: task.skillId,
-        args: task.args,
-        docIds: task.docIds,
-        sourceIntent: task.sourceIntent,
-        ...(task.dependsOn ? { dependsOn: task.dependsOn } : {}),
-        ...(task.inputBindings ? { inputBindings: task.inputBindings } : {}),
-        ...(task.failurePolicy ? { failurePolicy: task.failurePolicy } : {}),
-        ...(task.runtimeHints ? { runtimeHints: task.runtimeHints } : {}),
-      })),
+      tasks: executableTasks.map((task) => toExecutionBatchTask(task)),
     },
   };
     },
@@ -2204,17 +2378,53 @@ async function buildResponse(state: GraphState): Promise<Partial<GraphState>> {
 // ============================================================================
 
 async function prepareDeepSearch(
-  _state: GraphState,
+  state: GraphState,
 ): Promise<Partial<GraphState>> {
   return withGraphSpan(
-    _state,
+    state,
     "graph.prepare_deep_search",
-    undefined,
-    async () => ({
-      plan: { action: "deep_search" },
-    }),
+    {
+      queryLength: state.userQuery.length,
+      docIds: state.docIds?.length || 0,
+    },
+    async () => {
+      const workflow = inferWorkflowIntent(
+        state.userQuery,
+        hasDocumentScope(state.docIds) ? state.docIds : state.skillDocIds,
+        state.intent.skillHint,
+      );
+
+      if (workflow.kind === "ppt_from_topic") {
+        const workflowBuildResult = await buildDeepSearchPptWorkflowTasks(state, workflow);
+        if (workflowBuildResult && "blockedReason" in workflowBuildResult) {
+          return {
+            plannedTasks: [],
+            plan: {
+              action: "respond_blocked",
+              reason: workflowBuildResult.blockedReason,
+            },
+          };
+        }
+
+        if (workflowBuildResult && "tasks" in workflowBuildResult && workflowBuildResult.tasks.length > 0) {
+          const tasks = await injectForcedWebSearchTask(state, workflowBuildResult.tasks);
+          return {
+            plannedTasks: tasks,
+            plan: {
+              action: "deep_search_then_skill_batch",
+              tasks: tasks.map((task) => toExecutionBatchTask(task)),
+            },
+          };
+        }
+      }
+
+      return {
+        plan: { action: "deep_search" },
+      };
+    },
     (result) => ({
       planAction: (result as Partial<GraphState>).plan?.action,
+      taskCount: (result as Partial<GraphState>).plannedTasks?.length || 0,
     }),
   );
 }

@@ -179,87 +179,9 @@ export async function* executeDeepSearch(
       });
     }
 
-    // Phase 3: Evaluate and optionally search web
-    let webResults: WebSearchResult[] = [];
-
-    if (cfg.enableWebSearch) {
-      if (abortSignal?.aborted) return;
-
-      // Determine if we need web search
-      let needWebSearch = false;
-      let reason = "";
-
-      if (kbResults.length < cfg.kbResultThreshold) {
-        // Not enough KB results
-        needWebSearch = true;
-        reason = `知识库结果不足 (${kbResults.length} < ${cfg.kbResultThreshold})`;
-      } else {
-        // Check relevance of KB results
-        yield {
-          type: "thinking",
-          phase: "evaluate",
-          content: `正在评估知识库结果的相关性...`,
-        };
-
-        const relevance = await evaluateResultRelevance(
-          llmConfig,
-          subQuery,
-          kbResults,
-        );
-
-        if (!relevance.isRelevant) {
-          needWebSearch = true;
-          reason = relevance.reason || "知识库结果与问题不相关";
-        }
-      }
-
-      if (needWebSearch) {
-        yield {
-          type: "thinking",
-          phase: "evaluate",
-          content: reason + "，尝试网络搜索...",
-        };
-
-        // Import web search dynamically to avoid circular dependency
-        try {
-          const { webSearch } = await import("./web-search.js");
-          yield {
-            type: "search_start",
-            phase: "search_web",
-            content: `网络搜索: ${subQuery}`,
-            searchQuery: subQuery,
-          };
-
-          webResults = await webSearch(subQuery, { limit: 3 });
-
-          // Collect web sources
-          for (const wr of webResults) {
-            allSources.push({
-              type: "web",
-              url: wr.url,
-              title: wr.title,
-              snippet: wr.snippet,
-              score: 0.5,  // Default score for web results
-            });
-          }
-
-          yield {
-            type: "search_result",
-            phase: "search_web",
-            content: `网络找到 ${webResults.length} 条结果`,
-            searchQuery: subQuery,
-            resultCount: webResults.length,
-          };
-        } catch (err) {
-          console.warn("[deep-search] Web search failed:", err);
-          yield {
-            type: "thinking",
-            phase: "search_web",
-            content: "网络搜索未配置或失败，跳过",
-          };
-        }
-      }
-    }
+    // Web search has been migrated to a dedicated /web-search skill.
+    // Deep search keeps KB retrieval + synthesis only.
+    const webResults: WebSearchResult[] = [];
 
     allResults.push({
       query: subQuery,

@@ -2,6 +2,7 @@ import type { SkillIntent, SkillStreamChunk } from "../types.js";
 import type { TraceContext } from "../../../observability/index.js";
 import { knowledgeSearch } from "../../../knowledge/search.js";
 import { fetchUrl } from "../../../services/fetch-url.js";
+import { webSearch } from "../../../services/web-search.js";
 import { createImportGitTask } from "../../../services/import-git-task.js";
 import { convertDocument } from "../../../services/convert.js";
 import { importAssetAsDocument } from "../../../services/smart-import.js";
@@ -141,6 +142,50 @@ export async function* executeKbSearch(
     yield {
       type: "error",
       error: `知识库检索失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Execute web-search skill
+ */
+export async function* executeWebSearch(
+  _userId: string,
+  _projectKey: string,
+  intent: SkillIntent,
+): AsyncGenerator<SkillStreamChunk> {
+  const queryText = String(intent.args.query || intent.rawMessage || "").trim();
+  const limitInput = Number(intent.args.limit || 5);
+  const limit = Number.isFinite(limitInput)
+    ? Math.max(1, Math.min(10, Math.floor(limitInput)))
+    : 5;
+
+  if (!queryText) {
+    yield { type: "error", error: "请输入网络搜索关键词（query）" };
+    return;
+  }
+
+  try {
+    const results = await webSearch(queryText, { limit });
+    if (results.length === 0) {
+      yield { type: "done", message: "网络搜索完成，但未找到结果" };
+      return;
+    }
+
+    const lines = results.map((r, index) => {
+      const snippet = String(r.snippet || "").slice(0, 200);
+      return `${index + 1}. [${r.title}](${r.url})\n${snippet}`;
+    });
+
+    yield {
+      type: "delta",
+      content: `网络搜索结果（${results.length} 条）：\n\n${lines.join("\n\n---\n\n")}`,
+    };
+    yield { type: "done", message: `网络搜索完成，共 ${results.length} 条结果` };
+  } catch (err) {
+    yield {
+      type: "error",
+      error: `网络搜索失败: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 }

@@ -344,6 +344,17 @@ function buildIntent(
         docIds,
       };
 
+    case "web-search":
+      return {
+        skill: skillName,
+        command,
+        args: {
+          query: trimmedRest,
+        },
+        rawMessage,
+        docIds,
+      };
+
     case "doc-fetch-url":
       return {
         skill: skillName,

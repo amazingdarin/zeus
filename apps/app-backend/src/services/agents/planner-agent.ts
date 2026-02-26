@@ -560,6 +560,8 @@ export function buildCommandArgs(
       return { doc_id: firstDocId, target_parent_id: trimmed || "root" };
     case "kb-search":
       return { query: trimmed };
+    case "web-search":
+      return { query: trimmed };
     case "doc-fetch-url":
       return { url: trimmed };
     case "doc-import-git":

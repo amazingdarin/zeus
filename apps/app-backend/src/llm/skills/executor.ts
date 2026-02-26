@@ -50,6 +50,7 @@ import {
 import {
   executeDocOrganize,
   executeKbSearch,
+  executeWebSearch,
   executeDocFetchUrl,
   executeDocImportGit,
   executeDocSmartImport,
@@ -343,6 +344,17 @@ export function detectSkillIntent(
     };
   }
 
+  if (trimmed.startsWith("/web-search")) {
+    const rest = trimmed.slice("/web-search".length).trim();
+    return {
+      skill: "web-search",
+      command: "/web-search",
+      args: { query: rest },
+      rawMessage: message,
+      docIds,
+    };
+  }
+
   if (trimmed.startsWith("/doc-fetch-url")) {
     const rest = trimmed.slice("/doc-fetch-url".length).trim();
     return {
@@ -557,6 +569,9 @@ export async function* executeSkillWithStream(
         break;
       case "kb-search":
         yield* executeKbSearch(userId, projectKey, intent);
+        break;
+      case "web-search":
+        yield* executeWebSearch(userId, projectKey, intent);
         break;
       case "doc-fetch-url":
         yield* executeDocFetchUrl(userId, projectKey, intent);
