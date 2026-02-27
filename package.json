@@ -1,11 +1,17 @@
 {
   "name": "zeus",
   "private": true,
+  "scripts": {
+    "test:unified-editor": "node --import tsx --test apps/web/tests/save-scheduler.test.ts apps/web/tests/save-state.test.ts apps/web/tests/document-workspace-model.test.ts apps/web/tests/document-workspace-autosave.test.ts apps/web/tests/new-document-compat.test.ts packages/doc-editor/tests/block-add-handle.test.ts packages/doc-editor/tests/block-placeholder.test.ts"
+  },
   "workspaces": [
     "packages/*",
     "apps/*"
   ],
   "dependencies": {
     "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "tsx": "4.21.0"
   }
 }

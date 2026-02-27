@@ -121,6 +121,21 @@ export function resolveNormalizedDropTarget(
   };
 }
 
+export function moveMenuHighlightIndex(input: {
+  current: number;
+  total: number;
+  direction: "up" | "down";
+}): number {
+  if (input.total <= 0) {
+    return 0;
+  }
+  const safeCurrent = ((input.current % input.total) + input.total) % input.total;
+  if (input.direction === "down") {
+    return (safeCurrent + 1) % input.total;
+  }
+  return (safeCurrent - 1 + input.total) % input.total;
+}
+
 export function resolveHoveredBlockId(
   ranges: HoveredBlockRange[],
   clientY: number

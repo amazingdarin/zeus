@@ -1,8 +1,8 @@
 .doc-editor-wrapper {
   width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--surface);
+  border: none;
+  border-radius: 0;
+  background: transparent;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -19,12 +19,192 @@
   overflow: auto;
 }
 
+.doc-editor-content-shell {
+  --doc-editor-rail-left: 4px;
+  --doc-editor-rail-gap: 0px;
+  --doc-editor-rail-button-size: 26px;
+  --doc-editor-left-gutter-default: 72px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 .doc-editor-content .tiptap.ProseMirror.doc-editor {
   flex: 1;
-  padding: 16px 16px 16px 32px; // Extra left padding for heading collapse buttons
+  padding: 16px 16px 16px var(--doc-editor-left-gutter, var(--doc-editor-left-gutter-default));
   min-height: 280px;
   font-family: var(--font-sans);
   color: var(--ink);
+}
+
+.doc-editor-block-add-container {
+  position: absolute;
+  left: var(--doc-editor-rail-left);
+  z-index: 6;
+  transform: translateY(-50%);
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--doc-editor-rail-gap);
+}
+
+.doc-editor-block-add-trigger,
+.doc-editor-block-drag-trigger,
+.doc-editor-block-collapse-trigger {
+  width: var(--doc-editor-rail-button-size);
+  height: var(--doc-editor-rail-button-size);
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  line-height: 1;
+  box-shadow: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.doc-editor-block-add-container:hover .doc-editor-block-add-trigger,
+.doc-editor-block-add-container:hover .doc-editor-block-drag-trigger,
+.doc-editor-block-add-container:hover .doc-editor-block-collapse-trigger,
+.doc-editor-block-add-container:focus-within .doc-editor-block-add-trigger,
+.doc-editor-block-add-container:focus-within .doc-editor-block-drag-trigger,
+.doc-editor-block-add-container:focus-within .doc-editor-block-collapse-trigger,
+.doc-editor-block-add-container[data-visible="true"] .doc-editor-block-add-trigger,
+.doc-editor-block-add-container[data-visible="true"] .doc-editor-block-drag-trigger,
+.doc-editor-block-add-container[data-visible="true"] .doc-editor-block-collapse-trigger {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.doc-editor-block-add-trigger {
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.doc-editor-block-add-trigger:hover,
+.doc-editor-block-add-trigger.active {
+  background: rgba(31, 35, 40, 0.08);
+  color: var(--ink);
+  border-color: rgba(31, 35, 40, 0.16);
+}
+
+.doc-editor-block-drag-trigger {
+  font-size: 14px;
+  letter-spacing: -2px;
+  cursor: grab;
+}
+
+.doc-editor-block-drag-trigger:active,
+.doc-editor-block-drag-trigger.active {
+  cursor: grabbing;
+}
+
+.doc-editor-block-drag-trigger:hover,
+.doc-editor-block-drag-trigger.active,
+.doc-editor-block-collapse-trigger:hover,
+.doc-editor-block-collapse-trigger.active {
+  background: rgba(31, 35, 40, 0.08);
+  color: var(--ink);
+  border-color: rgba(31, 35, 40, 0.16);
+}
+
+.doc-editor-block-add-trigger:disabled,
+.doc-editor-block-drag-trigger:disabled,
+.doc-editor-block-collapse-trigger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.doc-editor-block-add-menu {
+  position: absolute;
+  top: 34px;
+  left: 0;
+  width: 180px;
+  max-height: min(60vh, 360px);
+  overflow: auto;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--tt-dropdown-menu-border-color);
+  background: var(--tt-dropdown-menu-bg-color);
+  box-shadow: var(--tt-shadow-elevated-md);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.doc-editor-slash-menu {
+  z-index: 9;
+}
+
+.doc-editor-block-drop-indicator {
+  position: absolute;
+  left: var(--doc-editor-left-gutter, var(--doc-editor-left-gutter-default));
+  right: 12px;
+  height: 2px;
+  background: #2563eb;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.18);
+  z-index: 7;
+  pointer-events: none;
+}
+
+.doc-editor-collapsed-summary {
+  display: block;
+  width: calc(100% - var(--doc-editor-left-gutter, var(--doc-editor-left-gutter-default)) - 16px);
+  margin-left: var(--doc-editor-left-gutter, var(--doc-editor-left-gutter-default));
+  margin-right: 16px;
+  margin-top: 6px;
+  margin-bottom: 6px;
+  text-align: left;
+  border: 1px dashed rgba(31, 35, 40, 0.18);
+  background: rgba(31, 35, 40, 0.04);
+  color: var(--ink-muted);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.doc-editor-collapsed-summary:hover {
+  color: var(--ink);
+  border-color: rgba(31, 35, 40, 0.28);
+}
+
+.doc-editor-block-collapsed-hidden {
+  display: none !important;
+}
+
+.doc-editor-block-add-menu-item {
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  color: var(--tt-dropdown-menu-text-color);
+  font-size: 13px;
+  line-height: 1.2;
+  text-align: left;
+  padding: 7px 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.doc-editor-block-add-menu-item:hover,
+.doc-editor-block-add-menu-item.active {
+  background: var(--tt-gray-light-a-50);
+}
+
+.doc-editor-block-add-menu-item-hint {
+  font-size: 11px;
+  color: var(--ink-muted);
 }
 
 .doc-editor-content .unsupported-plugin-block {
@@ -117,8 +297,23 @@
   color: var(--tt-gray-dark-a-700);
 }
 
+[data-theme="dark"] .doc-editor-block-add-menu-item:hover,
+[data-theme="dark"] .doc-editor-block-add-menu-item.active {
+  background: var(--tt-gray-dark-a-50);
+}
+
+[data-theme="dark"] .doc-editor-block-add-trigger:hover,
+[data-theme="dark"] .doc-editor-block-add-trigger.active,
+[data-theme="dark"] .doc-editor-block-drag-trigger:hover,
+[data-theme="dark"] .doc-editor-block-drag-trigger.active,
+[data-theme="dark"] .doc-editor-block-collapse-trigger:hover,
+[data-theme="dark"] .doc-editor-block-collapse-trigger.active {
+  background: rgba(240, 246, 252, 0.12);
+  border-color: rgba(240, 246, 252, 0.22);
+}
+
 @media screen and (max-width: 480px) {
   .doc-editor-content .tiptap.ProseMirror.doc-editor {
-    padding: 12px 12px 12px 24px; // Extra left padding for heading collapse buttons
+    padding: 12px 12px 12px 24px;
   }
 }

@@ -76,7 +76,7 @@ import { TableMenu } from "../../ui/table-button"
 import { MathButton } from "../../ui/math-button"
 import { ChartButton } from "../../ui/chart-button"
 import { MindmapButton } from "../../ui/mindmap-button"
-import { BlockAddMenu } from "../../ui/block-add-menu"
+import { BlockAddMenu, getBuiltinBlockItems } from "../../ui/block-add-menu"
 import {
   ColorHighlightPopover,
   ColorHighlightPopoverContent,
@@ -108,12 +108,14 @@ import {
   UnsupportedPluginBlock,
   normalizeUnsupportedPluginBlocks,
 } from "../../extensions/UnsupportedPluginBlockExtension"
+import { BlockTypePlaceholderExtension } from "../../extensions/BlockTypePlaceholderExtension"
 import {
   extractTopLevelBlocks,
 } from "../../extensions/BlockCollapseExtension"
 import { HeadingCollapseExtension } from "../../extensions/HeadingCollapseExtension"
 import {
   isPointerInLeftRail,
+  moveMenuHighlightIndex,
   resolveHandleAnchorBlockId,
   resolveNormalizedDropTarget,
   shouldHideControlsOnPointerExit,
@@ -516,12 +518,14 @@ export function DocEditor({
   const lastContentRef = useRef<string | null>(null)
   const taskCheckChangeRef = useRef(onTaskCheckChange)
   const [blockAddMenuOpen, setBlockAddMenuOpen] = useState(false)
+  const [blockMenuHighlightIndex, setBlockMenuHighlightIndex] = useState(0)
   const [blockControlsVisible, setBlockControlsVisible] = useState(false)
   const [blockHandleTop, setBlockHandleTop] = useState(16)
   const [currentBlockId, setCurrentBlockId] = useState<string | null>(null)
   const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null)
   const [dropIndicatorTop, setDropIndicatorTop] = useState<number | null>(null)
   const [slashMenuOpen, setSlashMenuOpen] = useState(false)
+  const [slashMenuHighlightIndex, setSlashMenuHighlightIndex] = useState(0)
   const [slashMenuPosition, setSlashMenuPosition] = useState({ top: 0, left: 0 })
   const dragSourceIdRef = useRef<string | null>(null)
   const dragDropTargetRef = useRef<{ blockId: string; placement: DropPlacement } | null>(null)
@@ -560,6 +564,7 @@ export function DocEditor({
     () => pluginBlockIdTypes.join("|"),
     [pluginBlockIdTypes]
   )
+  const builtinBlockItems = useMemo(() => getBuiltinBlockItems(), [])
 
   const initialContent = useMemo(
     () =>
@@ -598,6 +603,7 @@ export function DocEditor({
           extraNodeTypes: pluginBlockIdTypes,
         }),
         UnsupportedPluginBlock,
+        ...(isEditable ? [BlockTypePlaceholderExtension] : []),
         HeadingCollapseExtension,
         StarterKit.configure({
           horizontalRule: false,
@@ -708,6 +714,7 @@ export function DocEditor({
         left,
       })
       setBlockAddMenuOpen(false)
+      setSlashMenuHighlightIndex(0)
       setSlashMenuOpen(true)
     } catch {
       closeSlashMenu()
@@ -831,6 +838,24 @@ export function DocEditor({
     }
   }, [currentBlockId, editor])
 
+  const selectBuiltinBlockFromMenu = useCallback(
+    (type: BuiltinBlockType, source: "block" | "slash") => {
+      if (!editor) {
+        return
+      }
+      if (source === "block") {
+        focusCurrentBlockForInsert()
+      } else {
+        removeSlashTriggerCharacter()
+      }
+      insertBuiltinBlock(editor, type)
+      setBlockAddMenuOpen(false)
+      closeSlashMenu()
+      updateBlockHandlePosition()
+    },
+    [closeSlashMenu, editor, focusCurrentBlockForInsert, removeSlashTriggerCharacter, updateBlockHandlePosition]
+  )
+
   useEffect(() => {
     if (!editor || !isEditable) {
       closeSlashMenu()
@@ -838,11 +863,49 @@ export function DocEditor({
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null
-      if (!target || !target.closest(".doc-editor-content .tiptap.ProseMirror")) {
+      if (event.isComposing) {
         return
       }
-      if (event.isComposing) {
+
+      const menuOpen = (blockAddMenuOpen || slashMenuOpenRef.current) && !draggingBlockId
+      if (menuOpen) {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault()
+          event.stopPropagation()
+          const direction = event.key === "ArrowDown" ? "down" : "up"
+          if (blockAddMenuOpen) {
+            setBlockMenuHighlightIndex((prev) =>
+              moveMenuHighlightIndex({
+                current: prev,
+                total: builtinBlockItems.length,
+                direction,
+              })
+            )
+          } else {
+            setSlashMenuHighlightIndex((prev) =>
+              moveMenuHighlightIndex({
+                current: prev,
+                total: builtinBlockItems.length,
+                direction,
+              })
+            )
+          }
+          return
+        }
+        if (event.key === "Enter") {
+          event.preventDefault()
+          event.stopPropagation()
+          const activeIndex = blockAddMenuOpen ? blockMenuHighlightIndex : slashMenuHighlightIndex
+          const item = builtinBlockItems[activeIndex] ?? builtinBlockItems[0]
+          if (item) {
+            selectBuiltinBlockFromMenu(item.id, blockAddMenuOpen ? "block" : "slash")
+          }
+          return
+        }
+      }
+
+      const target = event.target as HTMLElement | null
+      if (!target || !target.closest(".doc-editor-content .tiptap.ProseMirror")) {
         return
       }
       if (
@@ -859,6 +922,12 @@ export function DocEditor({
         event.preventDefault()
         event.stopPropagation()
         closeSlashMenu()
+        return
+      }
+      if (event.key === "Escape" && blockAddMenuOpen) {
+        event.preventDefault()
+        event.stopPropagation()
+        setBlockAddMenuOpen(false)
       }
     }
 
@@ -870,7 +939,7 @@ export function DocEditor({
     return () => {
       shell.removeEventListener("keydown", handleKeyDown, true)
     }
-  }, [closeSlashMenu, editor, isEditable])
+  }, [blockAddMenuOpen, blockMenuHighlightIndex, builtinBlockItems, closeSlashMenu, draggingBlockId, editor, isEditable, selectBuiltinBlockFromMenu, slashMenuHighlightIndex])
 
   const moveBlockRelative = useCallback(
     (
@@ -1000,29 +1069,16 @@ export function DocEditor({
 
   const handleInsertBuiltinBlock = useCallback(
     (type: BuiltinBlockType) => {
-      if (!editor) {
-        return
-      }
-      focusCurrentBlockForInsert()
-      insertBuiltinBlock(editor, type)
-      setBlockAddMenuOpen(false)
-      closeSlashMenu()
-      updateBlockHandlePosition()
+      selectBuiltinBlockFromMenu(type, "block")
     },
-    [closeSlashMenu, editor, focusCurrentBlockForInsert, updateBlockHandlePosition]
+    [selectBuiltinBlockFromMenu]
   )
 
   const handleInsertBuiltinBlockFromSlash = useCallback(
     (type: BuiltinBlockType) => {
-      if (!editor) {
-        return
-      }
-      removeSlashTriggerCharacter()
-      insertBuiltinBlock(editor, type)
-      closeSlashMenu()
-      updateBlockHandlePosition()
+      selectBuiltinBlockFromMenu(type, "slash")
     },
-    [closeSlashMenu, editor, removeSlashTriggerCharacter, updateBlockHandlePosition]
+    [selectBuiltinBlockFromMenu]
   )
 
   const handleControlsPointerLeave = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1324,7 +1380,13 @@ export function DocEditor({
                 onClick={() => {
                   closeSlashMenu()
                   focusCurrentBlockForInsert()
-                  setBlockAddMenuOpen((prev) => !prev)
+                  setBlockAddMenuOpen((prev) => {
+                    const next = !prev
+                    if (next) {
+                      setBlockMenuHighlightIndex(0)
+                    }
+                    return next
+                  })
                 }}
               >
                 +
@@ -1341,6 +1403,8 @@ export function DocEditor({
               <BlockAddMenu
                 open={blockAddMenuOpen && !draggingBlockId}
                 onSelect={handleInsertBuiltinBlock}
+                highlightedIndex={blockMenuHighlightIndex}
+                onHighlightIndexChange={setBlockMenuHighlightIndex}
               />
             </div>
           ) : null}
@@ -1349,6 +1413,8 @@ export function DocEditor({
               open={slashMenuOpen && !draggingBlockId}
               onSelect={handleInsertBuiltinBlockFromSlash}
               className="doc-editor-slash-menu"
+              highlightedIndex={slashMenuHighlightIndex}
+              onHighlightIndexChange={setSlashMenuHighlightIndex}
               style={{
                 top: `${Math.round(slashMenuPosition.top)}px`,
                 left: `${Math.round(slashMenuPosition.left)}px`,

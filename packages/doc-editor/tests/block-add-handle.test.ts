@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   isPointerInLeftRail,
+  moveMenuHighlightIndex,
   resolveNormalizedDropTarget,
   resolveHandleAnchorBlockId,
   shouldHideControlsOnPointerExit,
@@ -176,4 +177,47 @@ test("resolveNormalizedDropTarget uses a single insertion slot between adjacent 
     indicatorTop: 100,
   });
   assert.equal(resolveNormalizedDropTarget([], 20), null);
+});
+
+test("moveMenuHighlightIndex cycles through menu items by arrow direction", () => {
+  assert.equal(
+    moveMenuHighlightIndex({
+      current: 0,
+      total: 4,
+      direction: "down",
+    }),
+    1
+  );
+  assert.equal(
+    moveMenuHighlightIndex({
+      current: 3,
+      total: 4,
+      direction: "down",
+    }),
+    0
+  );
+  assert.equal(
+    moveMenuHighlightIndex({
+      current: 0,
+      total: 4,
+      direction: "up",
+    }),
+    3
+  );
+  assert.equal(
+    moveMenuHighlightIndex({
+      current: 2,
+      total: 4,
+      direction: "up",
+    }),
+    1
+  );
+  assert.equal(
+    moveMenuHighlightIndex({
+      current: 0,
+      total: 0,
+      direction: "down",
+    }),
+    0
+  );
 });
