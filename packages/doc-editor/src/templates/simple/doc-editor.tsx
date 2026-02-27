@@ -1,7 +1,7 @@
 "use client"
 
-import { cloneElement, isValidElement, useEffect, useMemo, useRef, useState } from "react"
-import type { ReactNode, ReactElement } from "react"
+import { cloneElement, isValidElement, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { PointerEvent as ReactPointerEvent, ReactNode, ReactElement } from "react"
 import type { Editor, JSONContent } from "@tiptap/react"
 import { EditorContent, EditorContext, useEditor } from "@tiptap/react"
 import type { Extensions } from "@tiptap/core"
@@ -76,6 +76,7 @@ import { TableMenu } from "../../ui/table-button"
 import { MathButton } from "../../ui/math-button"
 import { ChartButton } from "../../ui/chart-button"
 import { MindmapButton } from "../../ui/mindmap-button"
+import { BlockAddMenu } from "../../ui/block-add-menu"
 import {
   ColorHighlightPopover,
   ColorHighlightPopoverContent,
@@ -107,7 +108,19 @@ import {
   UnsupportedPluginBlock,
   normalizeUnsupportedPluginBlocks,
 } from "../../extensions/UnsupportedPluginBlockExtension"
+import {
+  extractTopLevelBlocks,
+} from "../../extensions/BlockCollapseExtension"
 import { HeadingCollapseExtension } from "../../extensions/HeadingCollapseExtension"
+import {
+  isPointerInLeftRail,
+  resolveHandleAnchorBlockId,
+  resolveNormalizedDropTarget,
+  shouldHideControlsOnPointerExit,
+  isDesktopHandleEnabled,
+  resolveHoveredBlockId,
+  type BuiltinBlockType,
+} from "../../extensions/block-add-handle"
 
 // --- Styles ---
 import "./doc-editor.scss"
@@ -143,6 +156,41 @@ type PluginBlockToolbarGroup = {
   blocks: PluginBlockToolbarAction[]
 }
 
+type DropPlacement = "before" | "after"
+
+type TopLevelBlock = {
+  id: string
+  pos: number
+  endPos: number
+}
+
+function getTopLevelBlocks(editor: Editor): TopLevelBlock[] {
+  return extractTopLevelBlocks(editor.state.doc).map((block) => ({
+    id: block.id,
+    pos: block.pos,
+    endPos: block.endPos,
+  }))
+}
+
+function findCurrentTopLevelBlock(editor: Editor): TopLevelBlock | null {
+  const from = editor.state.selection.from
+  const blocks = getTopLevelBlocks(editor)
+  for (const block of blocks) {
+    if (from >= block.pos && from < block.endPos) {
+      return block
+    }
+  }
+  if (blocks.length === 0) {
+    return null
+  }
+  return blocks[blocks.length - 1]
+}
+
+function findTopLevelBlockById(editor: Editor, blockId: string): TopLevelBlock | null {
+  const blocks = getTopLevelBlocks(editor)
+  return blocks.find((block) => block.id === blockId) ?? null
+}
+
 function collectExtensionNames(extensions: Extensions): string[] {
   const names = new Set<string>()
   for (const extension of extensions) {
@@ -157,6 +205,19 @@ function collectExtensionNames(extensions: Extensions): string[] {
   return Array.from(names)
 }
 
+function scheduleMicrotask(task: () => void) {
+  if (typeof queueMicrotask === "function") {
+    queueMicrotask(task)
+    return
+  }
+  Promise.resolve().then(task)
+}
+
+function parseCssPx(value: string | null | undefined, fallback: number): number {
+  const parsed = Number.parseFloat(value ?? "")
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
 const defaultContent: JSONContent = {
   type: "doc",
   content: [
@@ -164,6 +225,65 @@ const defaultContent: JSONContent = {
       type: "paragraph",
     },
   ],
+}
+
+function insertBuiltinBlock(editor: Editor, type: BuiltinBlockType): void {
+  const chain = editor.chain().focus()
+  switch (type) {
+    case "paragraph":
+      chain.setParagraph().run()
+      return
+    case "heading-1":
+      chain.setHeading({ level: 1 }).run()
+      return
+    case "heading-2":
+      chain.setHeading({ level: 2 }).run()
+      return
+    case "heading-3":
+      chain.setHeading({ level: 3 }).run()
+      return
+    case "toggle-block":
+      chain.insertContent([
+        {
+          type: "heading",
+          attrs: { level: 3, collapsible: true },
+          content: [{ type: "text", text: "可折叠块" }],
+        },
+        {
+          type: "paragraph",
+        },
+      ]).run()
+      return
+    case "bullet-list":
+      chain.toggleBulletList().run()
+      return
+    case "ordered-list":
+      chain.toggleOrderedList().run()
+      return
+    case "task-list":
+      chain.toggleTaskList().run()
+      return
+    case "blockquote":
+      chain.toggleBlockquote().run()
+      return
+    case "horizontal-rule":
+      chain.setHorizontalRule().run()
+      return
+    case "code-block":
+      chain.setCodeBlock().run()
+      return
+    case "image":
+      chain.setImageUploadNode().run()
+      return
+    case "file":
+      chain.insertFileBlock().run()
+      return
+    case "table":
+      chain.insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+      return
+    default:
+      return
+  }
 }
 
 function renderToolbarNodeWithEditor(node: ReactNode, editor: Editor | null): ReactNode {
@@ -384,15 +504,33 @@ export function DocEditor({
   pluginContributions,
 }: DocEditorProps) {
   const isEditable = mode === "edit"
+  const showTopToolbar = false
   const isMobile = useIsBreakpoint()
   const { height } = useWindowSize()
   const [mobileView, setMobileView] = useState<"main" | "highlighter">(
     "main"
   )
   const toolbarRef = useRef<HTMLDivElement>(null)
+  const editorShellRef = useRef<HTMLDivElement>(null)
+  const blockAddContainerRef = useRef<HTMLDivElement>(null)
   const lastContentRef = useRef<string | null>(null)
   const taskCheckChangeRef = useRef(onTaskCheckChange)
+  const [blockAddMenuOpen, setBlockAddMenuOpen] = useState(false)
+  const [blockControlsVisible, setBlockControlsVisible] = useState(false)
+  const [blockHandleTop, setBlockHandleTop] = useState(16)
+  const [currentBlockId, setCurrentBlockId] = useState<string | null>(null)
+  const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null)
+  const [dropIndicatorTop, setDropIndicatorTop] = useState<number | null>(null)
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false)
+  const [slashMenuPosition, setSlashMenuPosition] = useState({ top: 0, left: 0 })
+  const dragSourceIdRef = useRef<string | null>(null)
+  const dragDropTargetRef = useRef<{ blockId: string; placement: DropPlacement } | null>(null)
+  const pendingSlashMenuOpenRef = useRef(false)
+  const slashTriggerPosRef = useRef<number | null>(null)
+  const slashMenuOpenRef = useRef(false)
+  const hoverClientYRef = useRef<number | null>(null)
   taskCheckChangeRef.current = onTaskCheckChange
+  const desktopHandleEnabled = isDesktopHandleEnabled({ isMobile, mode })
 
   const extraExtensions = useMemo<Extensions>(
     () => pluginContributions?.extraExtensions || [],
@@ -517,6 +655,10 @@ export function DocEditor({
     onEditorReady?.(editor)
   }, [editor, onEditorReady])
 
+  useEffect(() => {
+    slashMenuOpenRef.current = slashMenuOpen
+  }, [slashMenuOpen])
+
   const rect = useCursorVisibility({
     editor,
     overlayHeight: toolbarRef.current?.getBoundingClientRect().height ?? 0,
@@ -528,6 +670,488 @@ export function DocEditor({
     }
   }, [isMobile, mobileView])
 
+  const closeSlashMenu = useCallback(() => {
+    pendingSlashMenuOpenRef.current = false
+    slashTriggerPosRef.current = null
+    setSlashMenuOpen(false)
+  }, [])
+
+  const openSlashMenuNearCursor = useCallback(() => {
+    if (!editor) {
+      return
+    }
+    const triggerPos = slashTriggerPosRef.current
+    if (triggerPos == null) {
+      return
+    }
+    const triggerText = editor.state.doc.textBetween(triggerPos, triggerPos + 1, "\0", "\0")
+    if (triggerText !== "/") {
+      closeSlashMenu()
+      return
+    }
+
+    const shell = editorShellRef.current
+    const contentEl = shell?.querySelector(".doc-editor-content") as HTMLElement | null
+    if (!shell || !contentEl) {
+      return
+    }
+
+    try {
+      const coords = editor.view.coordsAtPos(editor.state.selection.from)
+      const shellRect = shell.getBoundingClientRect()
+      const menuWidth = 180
+      const leftRaw = coords.left - shellRect.left + contentEl.scrollLeft
+      const left = Math.max(8, Math.min(leftRaw, shell.clientWidth - menuWidth - 8))
+      const top = coords.bottom - shellRect.top + contentEl.scrollTop + 6
+      setSlashMenuPosition({
+        top: Math.max(8, top),
+        left,
+      })
+      setBlockAddMenuOpen(false)
+      setSlashMenuOpen(true)
+    } catch {
+      closeSlashMenu()
+    }
+  }, [closeSlashMenu, editor])
+
+  const removeSlashTriggerCharacter = useCallback(() => {
+    if (!editor) {
+      return
+    }
+    const triggerPos = slashTriggerPosRef.current
+    if (triggerPos == null) {
+      return
+    }
+    const triggerText = editor.state.doc.textBetween(triggerPos, triggerPos + 1, "\0", "\0")
+    if (triggerText !== "/") {
+      return
+    }
+    const tr = editor.state.tr.delete(triggerPos, triggerPos + 1)
+    editor.view.dispatch(tr)
+  }, [editor])
+
+  const syncBlockHandleToBlock = useCallback((block: TopLevelBlock | null): boolean => {
+    if (!editor || !desktopHandleEnabled || !block) {
+      if (!block) {
+        setCurrentBlockId(null)
+      }
+      return false
+    }
+    const shell = editorShellRef.current
+    if (!shell) {
+      return false
+    }
+    const contentEl = shell.querySelector(".doc-editor-content") as HTMLElement | null
+    if (!contentEl) {
+      return false
+    }
+    try {
+      const topCoords = editor.view.coordsAtPos(block.pos)
+      const bottomCoords = editor.view.coordsAtPos(Math.max(block.pos, block.endPos - 1))
+      const shellRect = shell.getBoundingClientRect()
+      const centerY = (topCoords.top + bottomCoords.bottom) / 2
+      const top = centerY - shellRect.top + contentEl.scrollTop
+      setCurrentBlockId(block.id)
+      setBlockHandleTop(Math.max(12, top))
+      return true
+    } catch {
+      // Ignore transient selection position errors.
+      return false
+    }
+  }, [desktopHandleEnabled, editor])
+
+  const resolveHoveredBlockForClientY = useCallback((clientY: number): TopLevelBlock | null => {
+    if (!editor || !desktopHandleEnabled) {
+      return null
+    }
+    const blocks = getTopLevelBlocks(editor)
+    if (blocks.length === 0) {
+      return null
+    }
+    const ranges = blocks.flatMap((block) => {
+      try {
+        const topCoords = editor.view.coordsAtPos(block.pos)
+        const bottomCoords = editor.view.coordsAtPos(Math.max(block.pos, block.endPos - 1))
+        return [{ id: block.id, top: topCoords.top, bottom: bottomCoords.bottom }]
+      } catch {
+        return []
+      }
+    })
+    const hoveredBlockId = resolveHoveredBlockId(ranges, clientY)
+    if (!hoveredBlockId) {
+      return null
+    }
+    return blocks.find((block) => block.id === hoveredBlockId) ?? null
+  }, [desktopHandleEnabled, editor])
+
+  const updateBlockHandleFromClientY = useCallback((clientY: number): boolean => {
+    const hoveredBlock = resolveHoveredBlockForClientY(clientY)
+    if (!hoveredBlock) {
+      setCurrentBlockId(null)
+      return false
+    }
+    return syncBlockHandleToBlock(hoveredBlock)
+  }, [resolveHoveredBlockForClientY, syncBlockHandleToBlock])
+
+  const updateBlockHandlePosition = useCallback(() => {
+    if (!editor || !desktopHandleEnabled) {
+      return
+    }
+    const hoveredBlockId =
+      hoverClientYRef.current != null && blockControlsVisible
+        ? resolveHoveredBlockForClientY(hoverClientYRef.current)?.id ?? null
+        : null
+    const selectionBlockId = findCurrentTopLevelBlock(editor)?.id ?? null
+    const anchorBlockId = resolveHandleAnchorBlockId({
+      draggingBlockId,
+      hoveredBlockId,
+      selectionBlockId,
+      controlsVisible: blockControlsVisible,
+    })
+    if (!anchorBlockId) {
+      setCurrentBlockId(null)
+      return
+    }
+    const anchorBlock = findTopLevelBlockById(editor, anchorBlockId)
+    syncBlockHandleToBlock(anchorBlock)
+  }, [blockControlsVisible, desktopHandleEnabled, draggingBlockId, editor, resolveHoveredBlockForClientY, syncBlockHandleToBlock])
+
+  const focusCurrentBlockForInsert = useCallback(() => {
+    if (!editor || !currentBlockId) {
+      return
+    }
+    const block = findTopLevelBlockById(editor, currentBlockId)
+    if (!block) {
+      return
+    }
+    try {
+      editor.chain().focus(Math.max(block.pos, block.endPos - 1)).run()
+    } catch {
+      // Ignore transient focus errors.
+    }
+  }, [currentBlockId, editor])
+
+  useEffect(() => {
+    if (!editor || !isEditable) {
+      closeSlashMenu()
+      return
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (!target || !target.closest(".doc-editor-content .tiptap.ProseMirror")) {
+        return
+      }
+      if (event.isComposing) {
+        return
+      }
+      if (
+        event.key === "/" &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey
+      ) {
+        pendingSlashMenuOpenRef.current = true
+        slashTriggerPosRef.current = editor.state.selection.from
+        return
+      }
+      if (event.key === "Escape" && slashMenuOpenRef.current) {
+        event.preventDefault()
+        event.stopPropagation()
+        closeSlashMenu()
+      }
+    }
+
+    const shell = editorShellRef.current
+    if (!shell) {
+      return
+    }
+    shell.addEventListener("keydown", handleKeyDown, true)
+    return () => {
+      shell.removeEventListener("keydown", handleKeyDown, true)
+    }
+  }, [closeSlashMenu, editor, isEditable])
+
+  const moveBlockRelative = useCallback(
+    (
+      sourceBlockId: string,
+      targetBlockId: string,
+      placement: DropPlacement
+    ) => {
+      if (!editor || sourceBlockId === targetBlockId) {
+        return
+      }
+
+      const blocks = getTopLevelBlocks(editor)
+      const source = blocks.find((block) => block.id === sourceBlockId)
+      const target = blocks.find((block) => block.id === targetBlockId)
+      if (!source || !target) {
+        return
+      }
+
+      const sourceSlice = editor.state.doc.slice(source.pos, source.endPos)
+      let tr = editor.state.tr.delete(source.pos, source.endPos)
+      const blocksAfterDelete = extractTopLevelBlocks(tr.doc)
+      const targetAfterDelete = blocksAfterDelete.find((block) => block.id === targetBlockId)
+      if (!targetAfterDelete) {
+        return
+      }
+
+      const insertPos =
+        placement === "before"
+          ? targetAfterDelete.pos
+          : targetAfterDelete.endPos
+
+      tr = tr.insert(insertPos, sourceSlice.content)
+      editor.view.dispatch(tr)
+    },
+    [editor]
+  )
+
+  const resolveDropTarget = useCallback(
+    (clientY: number): { blockId: string; placement: DropPlacement; indicatorTop: number } | null => {
+      if (!editor) {
+        return null
+      }
+
+      const blocks = getTopLevelBlocks(editor)
+      if (blocks.length === 0) {
+        return null
+      }
+
+      const ranges = blocks.flatMap((block) => {
+        try {
+          const topCoords = editor.view.coordsAtPos(block.pos)
+          const bottomCoords = editor.view.coordsAtPos(Math.max(block.pos, block.endPos - 1))
+          return [{ id: block.id, top: topCoords.top, bottom: bottomCoords.bottom }]
+        } catch {
+          return []
+        }
+      })
+      return resolveNormalizedDropTarget(ranges, clientY)
+    },
+    [editor]
+  )
+
+  const handleDragHandlePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>) => {
+      if (!editor || !currentBlockId) {
+        return
+      }
+
+      event.preventDefault()
+      setBlockAddMenuOpen(false)
+      closeSlashMenu()
+      dragSourceIdRef.current = currentBlockId
+      dragDropTargetRef.current = null
+      setDraggingBlockId(currentBlockId)
+      setDropIndicatorTop(null)
+
+      const shell = editorShellRef.current
+      const contentEl = shell?.querySelector(".doc-editor-content") as HTMLElement | null
+
+      const updateDropIndicator = (clientY: number) => {
+        const drop = resolveDropTarget(clientY)
+        if (!drop || drop.blockId === dragSourceIdRef.current) {
+          dragDropTargetRef.current = null
+          setDropIndicatorTop(null)
+          return
+        }
+        dragDropTargetRef.current = {
+          blockId: drop.blockId,
+          placement: drop.placement,
+        }
+        if (!shell || !contentEl) {
+          return
+        }
+        const shellRect = shell.getBoundingClientRect()
+        const top = drop.indicatorTop - shellRect.top + contentEl.scrollTop
+        setDropIndicatorTop(top)
+      }
+
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        moveEvent.preventDefault()
+        updateDropIndicator(moveEvent.clientY)
+      }
+
+      const handlePointerUp = () => {
+        document.removeEventListener("pointermove", handlePointerMove)
+        document.removeEventListener("pointerup", handlePointerUp)
+        document.removeEventListener("pointercancel", handlePointerUp)
+
+        const sourceBlockId = dragSourceIdRef.current
+        const dropTarget = dragDropTargetRef.current
+        if (sourceBlockId && dropTarget && dropTarget.blockId !== sourceBlockId) {
+          moveBlockRelative(sourceBlockId, dropTarget.blockId, dropTarget.placement)
+        }
+        dragSourceIdRef.current = null
+        dragDropTargetRef.current = null
+        setDraggingBlockId(null)
+        setDropIndicatorTop(null)
+        updateBlockHandlePosition()
+      }
+
+      document.addEventListener("pointermove", handlePointerMove)
+      document.addEventListener("pointerup", handlePointerUp)
+      document.addEventListener("pointercancel", handlePointerUp)
+    },
+    [closeSlashMenu, currentBlockId, editor, moveBlockRelative, resolveDropTarget, updateBlockHandlePosition]
+  )
+
+  const handleInsertBuiltinBlock = useCallback(
+    (type: BuiltinBlockType) => {
+      if (!editor) {
+        return
+      }
+      focusCurrentBlockForInsert()
+      insertBuiltinBlock(editor, type)
+      setBlockAddMenuOpen(false)
+      closeSlashMenu()
+      updateBlockHandlePosition()
+    },
+    [closeSlashMenu, editor, focusCurrentBlockForInsert, updateBlockHandlePosition]
+  )
+
+  const handleInsertBuiltinBlockFromSlash = useCallback(
+    (type: BuiltinBlockType) => {
+      if (!editor) {
+        return
+      }
+      removeSlashTriggerCharacter()
+      insertBuiltinBlock(editor, type)
+      closeSlashMenu()
+      updateBlockHandlePosition()
+    },
+    [closeSlashMenu, editor, removeSlashTriggerCharacter, updateBlockHandlePosition]
+  )
+
+  const handleControlsPointerLeave = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const nextTarget = event.relatedTarget as HTMLElement | null
+    const movingToEditorContent = Boolean(nextTarget?.closest(".doc-editor-content .tiptap.ProseMirror"))
+    if (
+      !shouldHideControlsOnPointerExit({
+        dragging: Boolean(draggingBlockId),
+        menuOpen: blockAddMenuOpen,
+        movingIntoControls: movingToEditorContent,
+      })
+    ) {
+      return
+    }
+    setBlockControlsVisible(false)
+    hoverClientYRef.current = null
+  }, [blockAddMenuOpen, draggingBlockId])
+
+  useEffect(() => {
+    if (!editor || !desktopHandleEnabled) {
+      setBlockAddMenuOpen(false)
+      setBlockControlsVisible(false)
+      return
+    }
+    updateBlockHandlePosition()
+    editor.on("selectionUpdate", updateBlockHandlePosition)
+    editor.on("update", updateBlockHandlePosition)
+    const shell = editorShellRef.current
+    const contentEl = shell?.querySelector(".doc-editor-content") as HTMLElement | null
+    contentEl?.addEventListener("scroll", updateBlockHandlePosition, { passive: true })
+    return () => {
+      editor.off("selectionUpdate", updateBlockHandlePosition)
+      editor.off("update", updateBlockHandlePosition)
+      contentEl?.removeEventListener("scroll", updateBlockHandlePosition)
+    }
+  }, [desktopHandleEnabled, editor, updateBlockHandlePosition])
+
+  useEffect(() => {
+    if (!editor || !desktopHandleEnabled) {
+      setBlockControlsVisible(false)
+      hoverClientYRef.current = null
+      return
+    }
+    const shell = editorShellRef.current
+    const contentEl = shell?.querySelector(".doc-editor-content") as HTMLElement | null
+    if (!contentEl || !shell) {
+      return
+    }
+    const shellStyle = window.getComputedStyle(shell)
+    const railLeft = parseCssPx(shellStyle.getPropertyValue("--doc-editor-rail-left"), 4)
+    const railButtonSize = parseCssPx(shellStyle.getPropertyValue("--doc-editor-rail-button-size"), 26)
+    const railGap = parseCssPx(shellStyle.getPropertyValue("--doc-editor-rail-gap"), 0)
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (draggingBlockId) {
+        return
+      }
+      const shellRect = shell.getBoundingClientRect()
+      const relativeX = event.clientX - shellRect.left
+      if (!isPointerInLeftRail({ relativeX, railLeft, railButtonSize, railGap })) {
+        setBlockControlsVisible(false)
+        hoverClientYRef.current = null
+        return
+      }
+      hoverClientYRef.current = event.clientY
+      const hovered = updateBlockHandleFromClientY(event.clientY)
+      setBlockControlsVisible(hovered)
+    }
+
+    const handlePointerLeave = (event: PointerEvent) => {
+      const nextTarget = event.relatedTarget as Node | null
+      const movingIntoControls = Boolean(
+        nextTarget && blockAddContainerRef.current?.contains(nextTarget)
+      )
+      if (
+        !shouldHideControlsOnPointerExit({
+          dragging: Boolean(draggingBlockId),
+          menuOpen: blockAddMenuOpen,
+          movingIntoControls,
+        })
+      ) {
+        return
+      }
+      setBlockControlsVisible(false)
+      hoverClientYRef.current = null
+    }
+
+    contentEl.addEventListener("pointermove", handlePointerMove, { passive: true })
+    contentEl.addEventListener("pointerleave", handlePointerLeave)
+    return () => {
+      contentEl.removeEventListener("pointermove", handlePointerMove)
+      contentEl.removeEventListener("pointerleave", handlePointerLeave)
+    }
+  }, [blockAddMenuOpen, desktopHandleEnabled, draggingBlockId, editor, updateBlockHandleFromClientY])
+
+  useEffect(() => {
+    if (!desktopHandleEnabled || !blockAddMenuOpen) {
+      return
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (blockAddContainerRef.current?.contains(target)) {
+        return
+      }
+      setBlockAddMenuOpen(false)
+    }
+    document.addEventListener("mousedown", handlePointerDown)
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown)
+    }
+  }, [blockAddMenuOpen, desktopHandleEnabled])
+
+  useEffect(() => {
+    if (!slashMenuOpen) {
+      return
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.closest(".doc-editor-slash-menu")) {
+        return
+      }
+      closeSlashMenu()
+    }
+    document.addEventListener("mousedown", handlePointerDown)
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown)
+    }
+  }, [closeSlashMenu, slashMenuOpen])
+
   useEffect(() => {
     if (!editor || !isEditable) {
       return
@@ -535,6 +1159,24 @@ export function DocEditor({
     const handleUpdate = () => {
       const nextContent = editor.getJSON()
       const serialized = JSON.stringify(nextContent)
+
+      if (slashMenuOpenRef.current) {
+        const triggerPos = slashTriggerPosRef.current
+        if (triggerPos == null) {
+          closeSlashMenu()
+        } else {
+          const triggerText = editor.state.doc.textBetween(triggerPos, triggerPos + 1, "\0", "\0")
+          if (triggerText !== "/") {
+            closeSlashMenu()
+          }
+        }
+      }
+
+      if (pendingSlashMenuOpenRef.current) {
+        pendingSlashMenuOpenRef.current = false
+        openSlashMenuNearCursor()
+      }
+
       if (serialized === lastContentRef.current) {
         return
       }
@@ -546,12 +1188,13 @@ export function DocEditor({
     return () => {
       editor.off("update", handleUpdate)
     }
-  }, [editor, isEditable, onChange])
+  }, [closeSlashMenu, editor, isEditable, onChange, openSlashMenuNearCursor])
 
   useEffect(() => {
     if (!editor || !content) {
       return
     }
+    let cancelled = false
 
     const nextContent = ensureBlockIds(
       normalizeUnsupportedPluginBlocks(content, {
@@ -563,8 +1206,23 @@ export function DocEditor({
     if (serialized === lastContentRef.current) {
       return
     }
-    editor.commands.setContent(nextContent)
-    lastContentRef.current = serialized
+    const editorSerialized = JSON.stringify(editor.getJSON())
+    if (serialized === editorSerialized) {
+      lastContentRef.current = serialized
+      return
+    }
+
+    scheduleMicrotask(() => {
+      if (cancelled || editor.isDestroyed) {
+        return
+      }
+      editor.commands.setContent(nextContent, { emitUpdate: false })
+      lastContentRef.current = serialized
+    })
+
+    return () => {
+      cancelled = true
+    }
   }, [content, editor, knownExtensionNodeTypes, pluginBlockIdTypes])
 
   // Store onChange in a ref to avoid it as a dependency
@@ -589,10 +1247,26 @@ export function DocEditor({
             }),
             { extraNodeTypes: pluginBlockIdTypes }
           )
-          editor.commands.setContent(nextContent)
-          lastContentRef.current = JSON.stringify(nextContent)
-          // Notify parent of the loaded content using ref
-          onChangeRef.current?.(nextContent)
+          const serialized = JSON.stringify(nextContent)
+          if (serialized === lastContentRef.current) {
+            return
+          }
+          const editorSerialized = JSON.stringify(editor.getJSON())
+          if (serialized === editorSerialized) {
+            lastContentRef.current = serialized
+            onChangeRef.current?.(nextContent)
+            return
+          }
+
+          scheduleMicrotask(() => {
+            if (!isMounted || editor.isDestroyed) {
+              return
+            }
+            editor.commands.setContent(nextContent, { emitUpdate: false })
+            lastContentRef.current = serialized
+            // Notify parent of the loaded content using ref
+            onChangeRef.current?.(nextContent)
+          })
         }
       } catch (error) {
         console.error("Failed to load document content:", error)
@@ -608,7 +1282,7 @@ export function DocEditor({
   return (
     <div className="doc-editor-wrapper">
       <EditorContext.Provider value={{ editor }}>
-        {isEditable ? (
+        {isEditable && showTopToolbar ? (
           <Toolbar
             ref={toolbarRef}
             style={{
@@ -633,11 +1307,66 @@ export function DocEditor({
           </Toolbar>
         ) : null}
 
-        <EditorContent
-          editor={editor}
-          role="presentation"
-          className="doc-editor-content"
-        />
+        <div className="doc-editor-content-shell" ref={editorShellRef}>
+          {desktopHandleEnabled && isEditable ? (
+            <div
+              className="doc-editor-block-add-container"
+              ref={blockAddContainerRef}
+              onPointerLeave={handleControlsPointerLeave}
+              data-visible={blockControlsVisible || blockAddMenuOpen || Boolean(draggingBlockId) ? "true" : "false"}
+              style={{ top: `${Math.round(blockHandleTop)}px` }}
+            >
+              <button
+                className={`doc-editor-block-add-trigger${blockAddMenuOpen ? " active" : ""}`}
+                type="button"
+                aria-label="插入块"
+                disabled={!currentBlockId || Boolean(draggingBlockId)}
+                onClick={() => {
+                  closeSlashMenu()
+                  focusCurrentBlockForInsert()
+                  setBlockAddMenuOpen((prev) => !prev)
+                }}
+              >
+                +
+              </button>
+              <button
+                className={`doc-editor-block-drag-trigger${draggingBlockId ? " active" : ""}`}
+                type="button"
+                aria-label="移动块"
+                disabled={!currentBlockId}
+                onPointerDown={handleDragHandlePointerDown}
+              >
+                ⋮⋮
+              </button>
+              <BlockAddMenu
+                open={blockAddMenuOpen && !draggingBlockId}
+                onSelect={handleInsertBuiltinBlock}
+              />
+            </div>
+          ) : null}
+          {isEditable ? (
+            <BlockAddMenu
+              open={slashMenuOpen && !draggingBlockId}
+              onSelect={handleInsertBuiltinBlockFromSlash}
+              className="doc-editor-slash-menu"
+              style={{
+                top: `${Math.round(slashMenuPosition.top)}px`,
+                left: `${Math.round(slashMenuPosition.left)}px`,
+              }}
+            />
+          ) : null}
+          {desktopHandleEnabled && dropIndicatorTop != null && draggingBlockId ? (
+            <div
+              className="doc-editor-block-drop-indicator"
+              style={{ top: `${Math.round(dropIndicatorTop)}px` }}
+            />
+          ) : null}
+          <EditorContent
+            editor={editor}
+            role="presentation"
+            className="doc-editor-content"
+          />
+        </div>
       </EditorContext.Provider>
     </div>
   )
