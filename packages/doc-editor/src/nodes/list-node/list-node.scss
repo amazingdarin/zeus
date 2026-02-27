@@ -23,13 +23,9 @@
   // Common list styles
   ol,
   ul {
-    margin-top: 1.5em;
+    margin-top: 0;
     margin-bottom: 1.5em;
     padding-left: 1.5em;
-
-    &:first-child {
-      margin-top: 0;
-    }
 
     &:last-child {
       margin-bottom: 0;
