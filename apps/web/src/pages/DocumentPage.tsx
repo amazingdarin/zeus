@@ -7,21 +7,26 @@ import type { JSONContent } from "@tiptap/react";
 import { Image } from "@tiptap/extension-image";
 import { StarterKit } from "@tiptap/starter-kit";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Checkbox, Input, message } from "antd";
+import { MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
+import { Checkbox, Input, Tooltip, message } from "antd";
 
 import DocumentHeader from "../components/DocumentHeader";
-import KnowledgeBaseLayout from "../components/KnowledgeBaseLayout";
+import type {
+  DocumentEditorSaveStatus,
+  DocumentSyncStatus,
+} from "../components/DocumentHeader";
+import DocumentWorkspace from "../components/DocumentWorkspace";
+import KnowledgeBaseLayout, { useToggleTree } from "../components/KnowledgeBaseLayout";
 import KnowledgeBaseSideNav, {
   type KnowledgeBaseDocument,
   type KnowledgeBaseMoveRequest,
 } from "../components/KnowledgeBaseSideNav";
-import RichTextViewer from "../components/RichTextViewer";
 import DocumentOptimizeModal from "../components/DocumentOptimizeModal";
-import ExportPPTModal from "../components/ExportPPTModal";
 import {
   fetchDocument,
   fetchDocumentHierarchy,
   fetchDocumentTree,
+  syncProjectDocuments,
   fetchFavoriteDocuments,
   fetchRecentEditedDocuments,
   favoriteDocument,
@@ -31,22 +36,22 @@ import {
   moveDocument,
   createDocument,
   deleteDocument,
+  exportDocumentDocx,
   fetchUrlHtml,
   importFileAsDocument,
   createImportGitTask,
   createImportFolderTask,
-  updateBlockAttrs,
   type DocumentDetail,
   type DocumentTreeItem,
   type FavoriteDocumentItem,
   type RecentEditedDocumentItem,
 } from "../api/documents";
+import { fetchMessageCenter, type MessageItem } from "../api/message-center";
 import { rebuildDocumentRag, rebuildProjectRag, getRebuildStatus } from "../api/projects";
 import { uploadAsset } from "../api/assets";
 import { apiFetch, encodeProjectRef } from "../config/api";
 import { sanitizeFileName } from "../utils/fileName";
 import { useProjectContext } from "../context/ProjectContext";
-import { usePluginRuntime } from "../context/PluginRuntimeContext";
 import {
   CodeBlockNode,
   ensureBlockIds,
@@ -54,7 +59,6 @@ import {
   HorizontalRule,
   OpenApiNode,
   OpenApiRefNode,
-  useScrollToBlock,
 } from "@zeus/doc-editor";
 import {
   buildUploadEntries,
@@ -148,6 +152,8 @@ type DocumentCreateMeta = {
   extra?: Record<string, unknown>;
 };
 
+type ExportFormat = "markdown" | "zeus" | "word";
+
 const UPLOAD_FILTER_PRESETS: UploadFilterPreset[] = [
   { id: "all", label: "全部", extensions: [] },
   {
@@ -238,9 +244,24 @@ const buildMarkdownExtensions = (projectKey: string): Extensions => [
   }),
 ];
 
+function DocumentTreeToggleButton() {
+  const { treeCollapsed, toggleTree } = useToggleTree();
+  return (
+    <Tooltip title={treeCollapsed ? "显示文档树" : "隐藏文档树"}>
+      <button
+        className="kb-sidebar-toolbar-btn doc-page-right-topbar-btn"
+        type="button"
+        onClick={toggleTree}
+        aria-label={treeCollapsed ? "显示文档树" : "隐藏文档树"}
+      >
+        {treeCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+      </button>
+    </Tooltip>
+  );
+}
+
 function DocumentPage() {
   const { currentProject } = useProjectContext();
-  const { documentHeaderMenus, runMenuAction } = usePluginRuntime();
   const params = useParams<{ documentId?: string }>();
   const resolvedProjectKey = (currentProject?.projectRef ?? "").trim();
   const resolvedDocumentId = (params.documentId || "").trim();
@@ -262,15 +283,9 @@ function DocumentPage() {
 
   const [document, setDocument] = useState<DocumentData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [viewerReady, setViewerReady] = useState(false);
-  
-  // Scroll to block if specified in URL
-  useScrollToBlock(blockIdParam, viewerReady && !loading);
-  
   const [error, setError] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [refreshingDocument, setRefreshingDocument] = useState(false);
   const [diffData, setDiffData] = useState<{ metaDiff: string; contentDiff: string } | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
@@ -280,7 +295,9 @@ function DocumentPage() {
   >([]);
   const [rebuildModalOpen, setRebuildModalOpen] = useState(false);
   const [optimizeModalOpen, setOptimizeModalOpen] = useState(false);
-  const [exportPPTModalOpen, setExportPPTModalOpen] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("markdown");
+  const [exporting, setExporting] = useState(false);
 
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importMode, setImportMode] = useState<"file" | "folder" | "url" | "git">("file");
@@ -307,12 +324,23 @@ function DocumentPage() {
     () => new Set(ALL_SMART_IMPORT_TYPES),
   );
   const [formatOptimizeEnabled, setFormatOptimizeEnabled] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<DocumentSyncStatus>("idle");
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncLogModalOpen, setSyncLogModalOpen] = useState(false);
+  const [syncLogs, setSyncLogs] = useState<MessageItem[]>([]);
+  const [syncLogsLoading, setSyncLogsLoading] = useState(false);
+  const [syncLogsError, setSyncLogsError] = useState<string | null>(null);
+  const [editorSaveStatus, setEditorSaveStatus] = useState<DocumentEditorSaveStatus>("idle");
+  const [editorSaveError, setEditorSaveError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const inFlightRef = useRef<Map<string, Promise<DocumentData>>>(new Map());
   const currentRequestRef = useRef<string | null>(null);
   const refreshKeyRef = useRef<string>("");
+  const syncRequestIdRef = useRef(0);
+  const workspaceRetryRef = useRef<(() => void) | null>(null);
+  const workspaceFocusRef = useRef<(() => void) | null>(null);
 
   const [rootDocuments, setRootDocuments] = useState<KnowledgeBaseDocument[]>([]);
   const [childrenByParent, setChildrenByParent] = useState<
@@ -742,6 +770,13 @@ function DocumentPage() {
       setDocument(null);
       setError(null);
       setLoading(false);
+      syncRequestIdRef.current += 1;
+      setSyncStatus("idle");
+      setSyncError(null);
+      setSyncLogModalOpen(false);
+      setSyncLogs([]);
+      setSyncLogsLoading(false);
+      setSyncLogsError(null);
       
       // Navigate to blank page when switching projects
       navigate("/documents", { replace: true });
@@ -764,6 +799,96 @@ function DocumentPage() {
     void loadFavorites(projectKey);
     void loadRecentEdits(projectKey);
   }, [loadFavorites, loadRecentEdits, resolvedProjectKey]);
+
+  const runProjectSync = useCallback(
+    async (projectKey: string, options?: { silent?: boolean }) => {
+      const requestId = syncRequestIdRef.current + 1;
+      syncRequestIdRef.current = requestId;
+      setSyncStatus("syncing");
+      setSyncError(null);
+      try {
+        await syncProjectDocuments(projectKey);
+        if (syncRequestIdRef.current !== requestId) {
+          return;
+        }
+        setSyncStatus("synced");
+        setSyncError(null);
+        if (!options?.silent) {
+          message.success("文档已同步");
+        }
+      } catch (err) {
+        if (syncRequestIdRef.current !== requestId) {
+          return;
+        }
+        setSyncStatus("failed");
+        const syncErrorMessage = err instanceof Error ? err.message : "文档同步失败";
+        setSyncError(syncErrorMessage);
+        if (options?.silent) {
+          console.warn("Failed to sync project documents:", err);
+        } else {
+          message.error(syncErrorMessage);
+        }
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const projectKey = resolvedProjectKey || null;
+    if (!projectKey) {
+      setSyncStatus("idle");
+      setSyncError(null);
+      setSyncLogModalOpen(false);
+      setSyncLogs([]);
+      setSyncLogsError(null);
+      setSyncLogsLoading(false);
+      return;
+    }
+    void runProjectSync(projectKey, { silent: true });
+  }, [resolvedProjectKey, runProjectSync]);
+
+  const handleSyncNow = useCallback(() => {
+    if (!resolvedProjectKey) {
+      return;
+    }
+    void runProjectSync(resolvedProjectKey, { silent: false });
+  }, [resolvedProjectKey, runProjectSync]);
+
+  const loadRecentSyncLogs = useCallback(async () => {
+    if (!resolvedProjectKey) {
+      setSyncLogs([]);
+      setSyncLogsError(null);
+      setSyncLogsLoading(false);
+      return;
+    }
+    setSyncLogsLoading(true);
+    setSyncLogsError(null);
+    try {
+      const data = await fetchMessageCenter(resolvedProjectKey, {
+        limit: 20,
+        type: "document-sync",
+      });
+      const merged = [...data.active, ...data.history].sort(
+        (a, b) =>
+          new Date(b.updatedAt || b.createdAt).getTime()
+          - new Date(a.updatedAt || a.createdAt).getTime(),
+      );
+      setSyncLogs(merged.slice(0, 20));
+    } catch (err) {
+      setSyncLogs([]);
+      setSyncLogsError(err instanceof Error ? err.message : "加载同步日志失败");
+    } finally {
+      setSyncLogsLoading(false);
+    }
+  }, [resolvedProjectKey]);
+
+  const handleOpenSyncLogs = useCallback(() => {
+    if (!resolvedProjectKey) {
+      return;
+    }
+    setSyncLogModalOpen(true);
+    void loadRecentSyncLogs();
+  }, [loadRecentSyncLogs, resolvedProjectKey]);
 
   useEffect(() => {
     const projectKey = resolvedProjectKey || null;
@@ -1051,13 +1176,6 @@ function DocumentPage() {
     [favoritePendingIds, resolvedProjectKey],
   );
 
-  const handleFavoriteCurrentDocument = useCallback(() => {
-    if (!activeDocument?.id) {
-      return;
-    }
-    void handleFavoriteMutation(activeDocument.id, "favorite");
-  }, [activeDocument?.id, handleFavoriteMutation]);
-
   const handleUnfavoriteDocument = useCallback(
     (docId: string) => {
       if (!docId) {
@@ -1068,54 +1186,8 @@ function DocumentPage() {
     [handleFavoriteMutation],
   );
 
-  const favoriteIdSet = useMemo(() => {
-    const idSet = new Set<string>();
-    favorites.forEach((item) => {
-      if (item.docId) {
-        idSet.add(item.docId);
-      }
-    });
-    return idSet;
-  }, [favorites]);
-
-  const activeDocumentFavorited = activeDocument ? favoriteIdSet.has(activeDocument.id) : false;
-  const activeFavoriteLoading = activeDocument ? Boolean(favoritePendingIds[activeDocument.id]) : false;
   const allowChildActions = activeDocument ? activeDocument.docType !== "overview" : true;
   const hasProposal = Boolean(proposalId);
-
-  const pluginMenuItems = useMemo(() => {
-    return documentHeaderMenus.map((item) => ({
-      id: `${item.pluginId}:${item.id}`,
-      title: item.title,
-      onClick: () => {
-        if (item.route) {
-          navigate(item.route);
-          return;
-        }
-
-        const input = activeDocument ? { doc_id: activeDocument.id } : {};
-        const projectRef = (currentProject?.projectRef || resolvedProjectKey || "").trim();
-        void runMenuAction(item, input, projectRef)
-          .then((result) => {
-            const msg = typeof result?.message === "string" ? result.message.trim() : "";
-            if (msg) {
-              message.success(msg);
-            }
-          })
-          .catch((err) => {
-            const msg = err instanceof Error ? err.message : "插件菜单执行失败";
-            message.error(msg);
-          });
-      },
-    }));
-  }, [
-    documentHeaderMenus,
-    navigate,
-    runMenuAction,
-    activeDocument,
-    currentProject?.projectRef,
-    resolvedProjectKey,
-  ]);
 
   useEffect(() => {
     if (!resolvedProjectKey || !resolvedDocumentId) {
@@ -1293,180 +1365,131 @@ function DocumentPage() {
     setBreadcrumbItems(trimBreadcrumbItems(items));
   }, [document, resolvedDocumentId]);
 
-  const handleEdit = () => {
-    if (!activeDocument) {
+  useEffect(() => {
+    setEditorSaveStatus("idle");
+    setEditorSaveError(null);
+  }, [activeDocument?.id, resolvedProjectKey]);
+
+  useEffect(() => {
+    if (activeDocument) {
       return;
     }
-    navigate(`/documents/new?document_id=${encodeURIComponent(activeDocument.id)}`);
-  };
+    setEditorSaveStatus("idle");
+    setEditorSaveError(null);
+    workspaceRetryRef.current = null;
+    workspaceFocusRef.current = null;
+  }, [activeDocument]);
 
-  const handleRefreshDocument = useCallback(async () => {
-    if (!resolvedProjectKey || !resolvedDocumentId || refreshingDocument) {
-      return;
-    }
-    setRefreshingDocument(true);
-    try {
-      // Clear cache for this document
-      const requestKey = `${resolvedProjectKey}:${resolvedDocumentId}`;
-      documentCache.delete(requestKey);
-      documentPromiseCache.delete(requestKey);
-      documentHierarchyCache.delete(requestKey);
-      documentHierarchyPromiseCache.delete(requestKey);
-      
-      // Fetch fresh document
-      const detail = await fetchDocument(resolvedProjectKey, resolvedDocumentId);
-      const mapped = mapDocumentDetail(detail, resolvedDocumentId, {
-        markdownExtensions,
-      });
-      
-      // Update cache and state
-      documentCache.set(requestKey, mapped);
-      setDocument(mapped);
-    } catch (err) {
-      console.error("Refresh document failed:", err);
-    } finally {
-      setRefreshingDocument(false);
-    }
-  }, [resolvedProjectKey, resolvedDocumentId, refreshingDocument]);
+  const handleEdit = useCallback(() => {
+    workspaceFocusRef.current?.();
+  }, []);
 
-  /**
-   * Handle task item checkbox toggle in view mode
-   */
-  const handleTaskCheckChange = useCallback(
-    async (blockId: string, checked: boolean) => {
-      if (!resolvedProjectKey || !activeDocument) {
-        return;
-      }
-
-      const findTaskChecked = (content: JSONContent): boolean | undefined => {
-        if (content.attrs?.id === blockId) {
-          const current = content.attrs?.checked;
-          return typeof current === "boolean" ? current : undefined;
-        }
-        if (!content.content || !Array.isArray(content.content)) {
-          return undefined;
-        }
-        for (const child of content.content) {
-          const value = findTaskChecked(child);
-          if (value !== undefined) {
-            return value;
-          }
-        }
-        return undefined;
-      };
-
-      const currentChecked = activeDocument.content
-        ? findTaskChecked(activeDocument.content)
-        : undefined;
-      if (currentChecked === checked) {
-        return;
-      }
-
-      try {
-        // Call API to persist the change
-        await updateBlockAttrs(resolvedProjectKey, activeDocument.id, blockId, { checked });
-        touchRecentEditInState(activeDocument.id, activeDocument.title);
-        scheduleRecentEditsRefresh(resolvedProjectKey);
-
-        // Optimistically update local content state
-        if (activeDocument.content) {
-          const updateBlockInContent = (
-            content: JSONContent,
-          ): { next: JSONContent; changed: boolean } => {
-            if (content.attrs?.id === blockId) {
-              return {
-                next: {
-                  ...content,
-                  attrs: { ...content.attrs, checked },
-                },
-                changed: true,
-              };
-            }
-            if (!content.content || !Array.isArray(content.content)) {
-              return { next: content, changed: false };
-            }
-
-            let changed = false;
-            const nextChildren = content.content.map((child) => {
-              const updated = updateBlockInContent(child);
-              if (updated.changed) {
-                changed = true;
-              }
-              return updated.next;
-            });
-
-            if (!changed) {
-              return { next: content, changed: false };
-            }
-
-            return {
-              next: {
-                ...content,
-                content: nextChildren,
-              },
-              changed: true,
-            };
-          };
-
-          const updated = updateBlockInContent(activeDocument.content);
-          if (!updated.changed) {
-            return;
-          }
-
-          setDocument((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  content: updated.next,
-                }
-              : null,
-          );
-
-          // Also update cache
-          const requestKey = `${resolvedProjectKey}:${activeDocument.id}`;
-          const cached = documentCache.get(requestKey);
-          if (cached) {
-            documentCache.set(requestKey, {
-              ...cached,
-              content: updated.next,
-            });
-          }
-        }
-      } catch (err) {
-        console.error("Failed to update task check state:", err);
-      }
+  const handleWorkspaceSaveStateChange = useCallback(
+    (state: { status: DocumentEditorSaveStatus; error: string }) => {
+      setEditorSaveStatus(state.status);
+      setEditorSaveError(state.error || null);
     },
-    [
-      resolvedProjectKey,
-      activeDocument,
-      scheduleRecentEditsRefresh,
-      touchRecentEditInState,
-    ],
+    [],
   );
 
-  const handleExport = useCallback(() => {
+  const handleWorkspaceRetryBind = useCallback((handler: (() => void) | null) => {
+    workspaceRetryRef.current = handler;
+  }, []);
+
+  const handleWorkspaceFocusBind = useCallback((handler: (() => void) | null) => {
+    workspaceFocusRef.current = handler;
+  }, []);
+
+  const handleRetryEditorSave = useCallback(() => {
+    workspaceRetryRef.current?.();
+  }, []);
+
+  const handleWorkspaceSaved = useCallback(
+    (payload: { title: string; content: JSONContent }) => {
+      if (!activeDocument || !resolvedProjectKey) {
+        return;
+      }
+      setDocument((prev) =>
+        prev
+          ? {
+              ...prev,
+              title: payload.title,
+              content: payload.content,
+            }
+          : null,
+      );
+      const requestKey = `${resolvedProjectKey}:${activeDocument.id}`;
+      const cached = documentCache.get(requestKey);
+      if (cached) {
+        documentCache.set(requestKey, {
+          ...cached,
+          title: payload.title,
+          content: payload.content,
+        });
+      }
+      touchRecentEditInState(activeDocument.id, payload.title || activeDocument.title);
+      scheduleRecentEditsRefresh(resolvedProjectKey);
+    },
+    [activeDocument, resolvedProjectKey, scheduleRecentEditsRefresh, touchRecentEditInState],
+  );
+
+  const handleOpenExport = useCallback(() => {
     if (!activeDocument) {
       return;
     }
-    const content = activeDocument.content ?? { type: "doc", content: [] };
-    const markdown = tiptapJsonToMarkdown(content);
-    const safeTitle = sanitizeFileName(activeDocument.title || "document");
-    const filename = `${safeTitle || "document"}.md`;
-    downloadTextFile(markdown, filename, "text/markdown;charset=utf-8");
+    setExportFormat("markdown");
+    setExportModalOpen(true);
   }, [activeDocument]);
+
+  const handleExportSubmit = useCallback(async () => {
+    if (!activeDocument || exporting) {
+      return;
+    }
+
+    const content = activeDocument.content ?? { type: "doc", content: [] };
+    const safeTitle = sanitizeFileName(activeDocument.title || "document");
+
+    try {
+      setExporting(true);
+
+      if (exportFormat === "word") {
+        if (!resolvedProjectKey) {
+          throw new Error("项目未就绪，无法导出 Word");
+        }
+        const blob = await exportDocumentDocx(resolvedProjectKey, activeDocument.id);
+        const filename = `${safeTitle || "document"}.docx`;
+        downloadBlobFile(blob, filename);
+        setExportModalOpen(false);
+        return;
+      }
+
+      if (exportFormat === "markdown") {
+        const markdown = tiptapJsonToMarkdown(content);
+        const filename = `${safeTitle || "document"}.md`;
+        downloadTextFile(markdown, filename, "text/markdown;charset=utf-8");
+      } else {
+        const payload = exportContentJson(content, null);
+        const filename = `${safeTitle || "document"}.zeus.json`;
+        downloadTextFile(
+          JSON.stringify(payload, null, 2),
+          filename,
+          "application/json;charset=utf-8",
+        );
+      }
+      setExportModalOpen(false);
+    } catch (err) {
+      console.error("Failed to export document:", err);
+      message.error(err instanceof Error ? err.message : "导出失败");
+    } finally {
+      setExporting(false);
+    }
+  }, [activeDocument, exportFormat, exporting, resolvedProjectKey]);
 
   const handleOpenOptimize = useCallback(() => {
     if (!activeDocument) {
       return;
     }
     setOptimizeModalOpen(true);
-  }, [activeDocument]);
-
-  const handleOpenExportPPT = useCallback(() => {
-    if (!activeDocument) {
-      return;
-    }
-    setExportPPTModalOpen(true);
   }, [activeDocument]);
 
   const handleOptimizeApply = useCallback(
@@ -2100,7 +2123,6 @@ function DocumentPage() {
     }
     return (
       <div className="doc-page-body">
-        {showDocumentTitle ? <div className="doc-page-title">{activeDocument.title}</div> : null}
         {hasProposal ? (
           <div className="doc-diff-panel">
             <div className="doc-diff-header">
@@ -2149,24 +2171,26 @@ function DocumentPage() {
             ) : null}
           </div>
         ) : null}
-        {activeDocument.content ? (
-          <RichTextViewer
-            content={activeDocument.content}
-            projectKey={resolvedProjectKey}
-            onEditorReady={(editor) => setViewerReady(!!editor)}
-            onTaskCheckChange={
-              activeDocument.bodyFormat === "tiptap" ? handleTaskCheckChange : undefined
-            }
-          />
-        ) : (
-          <div className="doc-viewer-state">No document content</div>
-        )}
+        <DocumentWorkspace
+          key={`${resolvedProjectKey}:${activeDocument.id}`}
+          projectKey={resolvedProjectKey}
+          documentId={activeDocument.id}
+          title={activeDocument.title}
+          content={activeDocument.content}
+          blockId={blockIdParam}
+          showTitle={showDocumentTitle}
+          onSaved={handleWorkspaceSaved}
+          onSaveStateChange={handleWorkspaceSaveStateChange}
+          onRetryBind={handleWorkspaceRetryBind}
+          onFocusBind={handleWorkspaceFocusBind}
+        />
       </div>
     );
   };
 
   return (
     <KnowledgeBaseLayout
+      contentClassName="content-inner--flat"
       sideNav={
         <KnowledgeBaseSideNav
           documents={rootDocuments}
@@ -2199,35 +2223,42 @@ function DocumentPage() {
       }
     >
       <>
-        {showBreadcrumb || showHeaderActions ? (
-          <DocumentHeader
-            breadcrumbItems={breadcrumbItems}
-            mode="view"
-            showBreadcrumb={showBreadcrumb}
-            showActions={showHeaderActions}
-            allowChildActions={allowChildActions}
-            allowEdit={Boolean(activeDocument)}
-            allowDelete={Boolean(activeDocument)}
-            allowOptimize={Boolean(activeDocument)}
-            allowRefresh={Boolean(activeDocument)}
-            favorited={activeDocumentFavorited}
-            favoriteLoading={activeFavoriteLoading}
-            deleting={deleting}
-            refreshing={refreshingDocument}
-            onEdit={handleEdit}
-            onSave={() => { }}
-            onCancel={() => { }}
-            onNew={handleOpenNew}
-            onImport={() => handleOpenImportWithMode("file")}
-            onDelete={handleDelete}
-            onExport={activeDocument ? handleExport : undefined}
-            onExportPPT={activeDocument ? handleOpenExportPPT : undefined}
-            onOptimize={activeDocument ? handleOpenOptimize : undefined}
-            onRefresh={activeDocument ? handleRefreshDocument : undefined}
-            onFavorite={activeDocument ? handleFavoriteCurrentDocument : undefined}
-            pluginMenuItems={pluginMenuItems}
-          />
-        ) : null}
+        <div className="doc-page-right-head">
+          <div className="doc-page-right-topbar">
+            <div className="doc-page-right-topbar-actions">
+              <DocumentTreeToggleButton />
+            </div>
+          </div>
+          {showBreadcrumb || showHeaderActions ? (
+            <DocumentHeader
+              breadcrumbItems={breadcrumbItems}
+              mode="view"
+              showBreadcrumb={showBreadcrumb}
+              showActions={showHeaderActions}
+              allowChildActions={allowChildActions}
+              allowEdit={Boolean(activeDocument)}
+              allowDelete={Boolean(activeDocument)}
+              allowOptimize={Boolean(activeDocument)}
+              deleting={deleting}
+              onEdit={handleEdit}
+              onSave={() => { }}
+              onCancel={() => { }}
+              onNew={handleOpenNew}
+              onImport={() => handleOpenImportWithMode("file")}
+              onDelete={handleDelete}
+              onExport={activeDocument ? handleOpenExport : undefined}
+              onOptimize={activeDocument ? handleOpenOptimize : undefined}
+              syncStatus={syncStatus}
+              syncError={syncError}
+              syncDisabled={!resolvedProjectKey || syncStatus === "syncing"}
+              editorSaveStatus={editorSaveStatus}
+              editorSaveError={editorSaveError}
+              onRetryEditorSave={activeDocument ? handleRetryEditorSave : undefined}
+              onSync={resolvedProjectKey ? handleSyncNow : undefined}
+              onViewSyncLogs={resolvedProjectKey ? handleOpenSyncLogs : undefined}
+            />
+          ) : null}
+        </div>
         <div className="doc-viewer-page">{bodyContent()}</div>
         {importModalOpen ? (
           <div className="modal-overlay" role="presentation">
@@ -2606,6 +2637,197 @@ function DocumentPage() {
             </div>
           </div>
         ) : null}
+        {syncLogModalOpen ? (
+          <div className="modal-overlay" role="presentation">
+            <button
+              className="modal-overlay-button"
+              type="button"
+              aria-label="关闭同步日志对话框"
+              onClick={() => setSyncLogModalOpen(false)}
+            />
+            <div
+              className="modal-card"
+              role="dialog"
+              aria-modal="true"
+              tabIndex={-1}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <div className="modal-header">
+                <h2>最近同步日志</h2>
+                <button
+                  className="modal-close"
+                  type="button"
+                  onClick={() => setSyncLogModalOpen(false)}
+                >
+                  关闭
+                </button>
+              </div>
+              <div className="modal-body">
+                {syncLogsLoading ? (
+                  <div className="doc-viewer-state">加载中...</div>
+                ) : syncLogsError ? (
+                  <div className="modal-error">{syncLogsError}</div>
+                ) : syncLogs.length === 0 ? (
+                  <div className="doc-viewer-state">暂无同步日志</div>
+                ) : (
+                  <div className="kb-sync-log-list">
+                    {syncLogs.map((item) => {
+                      const detail = item.detail && typeof item.detail === "object"
+                        ? item.detail as Record<string, unknown>
+                        : {};
+                      const errorText = typeof detail.error === "string" ? detail.error.trim() : "";
+                      const syncMode = typeof detail.syncMode === "string" ? detail.syncMode.trim() : "";
+                      const trigger = typeof detail.trigger === "string" ? detail.trigger.trim() : "";
+                      const event = typeof detail.event === "string" ? detail.event.trim() : "";
+                      const docId = typeof detail.docId === "string" ? detail.docId.trim() : "";
+                      const metaParts: string[] = [];
+                      if (syncMode) {
+                        metaParts.push(`模式：${formatSyncModeLabel(syncMode)}`);
+                      }
+                      if (trigger) {
+                        metaParts.push(`触发：${formatSyncTriggerLabel(trigger)}`);
+                      }
+                      if (event) {
+                        metaParts.push(`事件：${event}`);
+                      }
+                      if (docId) {
+                        metaParts.push(`文档：${docId}`);
+                      }
+
+                      return (
+                        <div key={item.id} className="kb-sync-log-item">
+                          <div className="kb-sync-log-item-header">
+                            <span className={`kb-sync-log-status status-${item.status}`}>
+                              {formatMessageStatusLabel(item.status)}
+                            </span>
+                            <span className="kb-sync-log-time">
+                              {formatSyncLogTime(item.updatedAt || item.createdAt)}
+                            </span>
+                          </div>
+                          {errorText ? (
+                            <div className="kb-sync-log-error">{errorText}</div>
+                          ) : null}
+                          {metaParts.length > 0 ? (
+                            <div className="kb-sync-log-meta">{metaParts.join(" · ")}</div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <div className="modal-actions">
+                <button
+                  className="btn ghost"
+                  type="button"
+                  onClick={() => setSyncLogModalOpen(false)}
+                >
+                  关闭
+                </button>
+                <button
+                  className={`btn primary${syncLogsLoading ? " loading" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    void loadRecentSyncLogs();
+                  }}
+                  disabled={syncLogsLoading}
+                >
+                  {syncLogsLoading ? "刷新中..." : "刷新"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {exportModalOpen ? (
+          <div className="modal-overlay" role="presentation">
+            <button
+              className="modal-overlay-button"
+              type="button"
+              aria-label="关闭导出对话框"
+              onClick={() => setExportModalOpen(false)}
+            />
+            <div
+              className="modal-card"
+              role="dialog"
+              aria-modal="true"
+              tabIndex={-1}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <div className="modal-header">
+                <h2>导出文档</h2>
+                <button
+                  className="modal-close"
+                  type="button"
+                  onClick={() => setExportModalOpen(false)}
+                >
+                  关闭
+                </button>
+              </div>
+              <div className="modal-body">
+                <div className="kb-export-options" role="radiogroup" aria-label="导出格式">
+                  <label className="kb-export-option">
+                    <input
+                      type="radio"
+                      name="export-format"
+                      value="markdown"
+                      checked={exportFormat === "markdown"}
+                      onChange={() => setExportFormat("markdown")}
+                    />
+                    <span>Markdown (.md)</span>
+                  </label>
+                  <label className="kb-export-option">
+                    <input
+                      type="radio"
+                      name="export-format"
+                      value="zeus"
+                      checked={exportFormat === "zeus"}
+                      onChange={() => setExportFormat("zeus")}
+                    />
+                    <span>Zeus 原生文档 (.zeus.json)</span>
+                  </label>
+                  <label className="kb-export-option">
+                    <input
+                      type="radio"
+                      name="export-format"
+                      value="word"
+                      checked={exportFormat === "word"}
+                      onChange={() => setExportFormat("word")}
+                    />
+                    <span className="kb-export-option-content">
+                      <span>Word (.docx)</span>
+                      <small className="kb-export-option-hint">有损导出（部分格式会降级）</small>
+                    </span>
+                  </label>
+                </div>
+                {exportFormat === "word" ? (
+                  <p className="kb-export-warning">
+                    提示：Word 导出为有损导出，复杂样式、插件块和部分嵌套结构可能无法完全保留。
+                  </p>
+                ) : null}
+              </div>
+              <div className="modal-actions">
+                <button
+                  className="btn ghost"
+                  type="button"
+                  onClick={() => setExportModalOpen(false)}
+                  disabled={exporting}
+                >
+                  取消
+                </button>
+                <button
+                  className={`btn primary${exporting ? " loading" : ""}`}
+                  type="button"
+                  onClick={handleExportSubmit}
+                  disabled={exporting}
+                >
+                  {exporting ? "导出中..." : "导出"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {rebuildModalOpen ? (
           <div className="modal-overlay" role="presentation">
             <button
@@ -2671,13 +2893,6 @@ function DocumentPage() {
           docTitle={activeDocument?.title || ""}
           onClose={() => setOptimizeModalOpen(false)}
           onApply={handleOptimizeApply}
-        />
-        <ExportPPTModal
-          open={exportPPTModalOpen}
-          projectKey={resolvedProjectKey}
-          docId={activeDocument?.id || ""}
-          docTitle={activeDocument?.title}
-          onClose={() => setExportPPTModalOpen(false)}
         />
         <input
           ref={fileInputRef}
@@ -2941,6 +3156,56 @@ function mapRecentEditedDocuments(items: RecentEditedDocumentItem[]): RecentEdit
     .filter((item) => item.docId);
 }
 
+function formatMessageStatusLabel(status: string): string {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === "pending") {
+    return "等待中";
+  }
+  if (normalized === "running") {
+    return "进行中";
+  }
+  if (normalized === "completed") {
+    return "已完成";
+  }
+  if (normalized === "failed") {
+    return "失败";
+  }
+  return status || "未知";
+}
+
+function formatSyncModeLabel(syncMode: string): string {
+  const normalized = syncMode.trim().toLowerCase();
+  if (normalized === "remote_enabled") {
+    return "远程优先";
+  }
+  if (normalized === "local_only") {
+    return "本地优先";
+  }
+  return syncMode || "未知";
+}
+
+function formatSyncTriggerLabel(trigger: string): string {
+  const normalized = trigger.trim().toLowerCase();
+  if (normalized === "sync-on-open") {
+    return "打开文档";
+  }
+  if (normalized === "record-version") {
+    return "文档变更";
+  }
+  return trigger || "未知";
+}
+
+function formatSyncLogTime(value: string | undefined): string {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString();
+}
+
 async function uploadSingleFile(
   projectKey: string,
   file: File,
@@ -3072,6 +3337,10 @@ function stripExtension(filename: string): string {
 
 function downloadTextFile(content: string, filename: string, mime: string) {
   const blob = new Blob([content], { type: mime });
+  downloadBlobFile(blob, filename);
+}
+
+function downloadBlobFile(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

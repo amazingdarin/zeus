@@ -7,7 +7,6 @@ import Sidebar from "../components/Sidebar";
 import SettingsModal from "../components/SettingsModal";
 import ChatPanel from "../components/ChatPanel";
 import CommandPalette from "../components/CommandPalette";
-import MessageCenter from "../components/MessageCenter";
 import { useAuth } from "../context/AuthContext";
 import { useProjectContext } from "../context/ProjectContext";
 import { usePluginRuntime } from "../context/PluginRuntimeContext";
@@ -54,6 +53,16 @@ function AppShell({ children }: AppShellProps) {
     return index === -1 ? -1 : index;
   }, [location.pathname]);
 
+  const isDocumentPageRoute = useMemo(() => {
+    if (location.pathname === "/documents") {
+      return true;
+    }
+    if (location.pathname === "/documents/new") {
+      return false;
+    }
+    return /^\/documents\/[^/]+$/.test(location.pathname);
+  }, [location.pathname]);
+
   // Don't show ChatPanel on the dedicated chat page
   const isChatPage = location.pathname === "/chat";
 
@@ -69,18 +78,15 @@ function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <div className="topbar-logo">Zeus</div>
-        <div className="topbar-spacer" />
-        <div className="topbar-actions">
-          <MessageCenter projectKey={currentProject?.projectRef ?? null} />
-        </div>
-      </header>
       <div className="app-body compact">
         <Sidebar
           items={navItems}
           activeIndex={activeIndex}
           settingsActive={settingsOpen}
+          onLoginClick={() => {
+            setSettingsOpen(false);
+            navigate("/login");
+          }}
           onTeamsClick={() => {
             setSettingsOpen(false);
             navigate("/teams");
@@ -91,9 +97,10 @@ function AppShell({ children }: AppShellProps) {
             navigate("/system-docs");
           }}
           user={isAuthenticated ? user : null}
+          messageCenterProjectKey={currentProject?.projectRef ?? null}
           onLogout={handleLogout}
         />
-        <main className="content">{children}</main>
+        <main className={`content${isDocumentPageRoute ? " content--flush" : ""}`}>{children}</main>
       </div>
 
       {/* Bottom Chat Panel - hidden on dedicated chat page */}

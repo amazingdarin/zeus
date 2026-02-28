@@ -7,14 +7,11 @@ import {
   useContext,
   type ReactNode,
 } from "react";
-import { MenuUnfoldOutlined } from "@ant-design/icons";
-import { Tooltip } from "antd";
 
 // ─── Constants ───────────────────────────────────────────
 const DEFAULT_WIDTH = 240;
 const MIN_WIDTH = 160;
 const MAX_WIDTH = 480;
-const COLLAPSED_WIDTH = 36;
 const STORAGE_KEY = "zeus-sidebar-width";
 
 // ─── Context ─────────────────────────────────────────────
@@ -34,9 +31,10 @@ export function useToggleTree() {
 type KnowledgeBaseLayoutProps = {
   sideNav: ReactNode;
   children: ReactNode;
+  contentClassName?: string;
 };
 
-function KnowledgeBaseLayout({ sideNav, children }: KnowledgeBaseLayoutProps) {
+function KnowledgeBaseLayout({ sideNav, children, contentClassName }: KnowledgeBaseLayoutProps) {
   const [treeCollapsed, setTreeCollapsed] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
@@ -99,12 +97,11 @@ function KnowledgeBaseLayout({ sideNav, children }: KnowledgeBaseLayoutProps) {
     };
   }, [sidebarWidth]);
 
-  const activeWidth = treeCollapsed ? COLLAPSED_WIDTH : sidebarWidth;
-  const showCollapsed = treeCollapsed;
+  const activeWidth = treeCollapsed ? 0 : sidebarWidth;
 
   return (
     <ToggleTreeContext.Provider value={{ treeCollapsed, toggleTree }}>
-      <div className="content-inner">
+      <div className={`content-inner${contentClassName ? ` ${contentClassName}` : ""}`}>
         <div
           ref={layoutRef}
           className={`kb-layout${treeCollapsed ? " kb-layout--collapsed" : ""}${isAnimating ? " kb-layout--animating" : ""}`}
@@ -114,22 +111,7 @@ function KnowledgeBaseLayout({ sideNav, children }: KnowledgeBaseLayoutProps) {
             className={`kb-sidebar-wrapper${treeCollapsed ? " kb-sidebar-wrapper--collapsed" : ""}${isAnimating ? " kb-sidebar-wrapper--animating" : ""}`}
             style={{ width: activeWidth }}
           >
-            {showCollapsed ? (
-              /* Collapsed: only show expand button */
-              <div className="kb-sidebar-collapsed">
-                <Tooltip title="显示文档树" placement="right">
-                  <button
-                    className="kb-sidebar-toolbar-btn"
-                    type="button"
-                    onClick={toggleTree}
-                  >
-                    <MenuUnfoldOutlined />
-                  </button>
-                </Tooltip>
-              </div>
-            ) : (
-              sideNav
-            )}
+            {sideNav}
           </div>
 
           {/* Resize handle */}

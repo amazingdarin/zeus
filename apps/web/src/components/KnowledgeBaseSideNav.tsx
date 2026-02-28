@@ -4,7 +4,6 @@ import {
   ApartmentOutlined,
   DatabaseOutlined,
   DownOutlined,
-  MenuFoldOutlined,
   MinusSquareOutlined,
   PlusSquareOutlined,
   ReloadOutlined,
@@ -12,7 +11,6 @@ import {
   UnorderedListOutlined,
 } from "@ant-design/icons";
 import { Popconfirm, Tooltip } from "antd";
-import { useToggleTree } from "./KnowledgeBaseLayout";
 
 export type KnowledgeBaseDocument = {
   id: string;
@@ -356,8 +354,6 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
     </div>
   );
 
-  const { toggleTree } = useToggleTree();
-
   const favoriteDocs = useMemo(
     () => favorites.filter((item) => docMap.has(item.docId)),
     [docMap, favorites],
@@ -519,82 +515,75 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
       }}
       onDrop={handleRootDrop}
     >
-      <div className="kb-sidebar-toolbar">
-        {onToggleOutline && documentContent && (
-          <Tooltip title={outlineMode ? "文档树" : "文档结构"}>
-            <button
-              className={`kb-sidebar-toolbar-btn${outlineMode ? " active" : ""}`}
-              type="button"
-              onClick={onToggleOutline}
+      <div className="kb-sidebar-topbar">
+        <div className="kb-sidebar-toolbar">
+          {onToggleOutline && (
+            <Tooltip title={outlineMode ? "文档树" : "文档结构"}>
+              <button
+                className={`kb-sidebar-toolbar-btn${outlineMode ? " active" : ""}`}
+                type="button"
+                onClick={onToggleOutline}
+              >
+                {outlineMode ? <ApartmentOutlined /> : <UnorderedListOutlined />}
+              </button>
+            </Tooltip>
+          )}
+          <div className="kb-sidebar-toolbar-spacer" />
+          {!outlineMode && onExpandAll && onCollapseToRoot && (
+            <>
+              <Tooltip title="全部展开">
+                <button
+                  className="kb-sidebar-toolbar-btn"
+                  type="button"
+                  onClick={onExpandAll}
+                  disabled={rootLoading || documents.length === 0}
+                >
+                  <PlusSquareOutlined />
+                </button>
+              </Tooltip>
+              <Tooltip title="缩小到根层级">
+                <button
+                  className="kb-sidebar-toolbar-btn"
+                  type="button"
+                  onClick={onCollapseToRoot}
+                  disabled={rootLoading || documents.length === 0}
+                >
+                  <MinusSquareOutlined />
+                </button>
+              </Tooltip>
+            </>
+          )}
+          {onRebuildIndex && (
+            <Tooltip 
+              title={
+                rebuildingIndex && rebuildProgress
+                  ? `重建中：${rebuildProgress.processed}/${rebuildProgress.total}`
+                  : "重建索引"
+              }
             >
-              {outlineMode ? <ApartmentOutlined /> : <UnorderedListOutlined />}
-            </button>
-          </Tooltip>
-        )}
-        <div className="kb-sidebar-toolbar-spacer" />
-        {!outlineMode && onExpandAll && onCollapseToRoot && (
-          <>
-            <Tooltip title="全部展开">
+              <button
+                className={`kb-sidebar-toolbar-btn${rebuildingIndex ? " rebuilding" : ""}`}
+                type="button"
+                onClick={onRebuildIndex}
+                disabled={rebuildingIndex || rootLoading}
+              >
+                <DatabaseOutlined spin={rebuildingIndex} />
+              </button>
+            </Tooltip>
+          )}
+          {onRefresh && (
+            <Tooltip title="刷新文档树">
               <button
                 className="kb-sidebar-toolbar-btn"
                 type="button"
-                onClick={onExpandAll}
-                disabled={rootLoading || documents.length === 0}
+                onClick={onRefresh}
+                disabled={rootLoading}
               >
-                <PlusSquareOutlined />
+                <ReloadOutlined spin={rootLoading} />
               </button>
             </Tooltip>
-            <Tooltip title="缩小到根层级">
-              <button
-                className="kb-sidebar-toolbar-btn"
-                type="button"
-                onClick={onCollapseToRoot}
-                disabled={rootLoading || documents.length === 0}
-              >
-                <MinusSquareOutlined />
-              </button>
-            </Tooltip>
-          </>
-        )}
-        {onRebuildIndex && (
-          <Tooltip 
-            title={
-              rebuildingIndex && rebuildProgress
-                ? `重建中：${rebuildProgress.processed}/${rebuildProgress.total}`
-                : "重建索引"
-            }
-          >
-            <button
-              className={`kb-sidebar-toolbar-btn${rebuildingIndex ? " rebuilding" : ""}`}
-              type="button"
-              onClick={onRebuildIndex}
-              disabled={rebuildingIndex || rootLoading}
-            >
-              <DatabaseOutlined spin={rebuildingIndex} />
-            </button>
-          </Tooltip>
-        )}
-        {onRefresh && (
-          <Tooltip title="刷新文档树">
-            <button
-              className="kb-sidebar-toolbar-btn"
-              type="button"
-              onClick={onRefresh}
-              disabled={rootLoading}
-            >
-              <ReloadOutlined spin={rootLoading} />
-            </button>
-          </Tooltip>
-        )}
-        <Tooltip title="隐藏文档树">
-          <button
-            className="kb-sidebar-toolbar-btn"
-            type="button"
-            onClick={toggleTree}
-          >
-            <MenuFoldOutlined />
-          </button>
-        </Tooltip>
+          )}
+        </div>
       </div>
       <div
         className="kb-sidebar-content"
@@ -605,7 +594,7 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
           }
         }}
       >
-        {outlineMode && documentContent ? (
+        {outlineMode ? (
           <DocumentOutlineContent content={documentContent} />
         ) : rootLoading ? (
           <div className="kb-doc-loading">加载中...</div>
