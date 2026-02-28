@@ -1,7 +1,10 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { getBlockTypePlaceholderText } from "../src/extensions/BlockTypePlaceholderExtension"
+import {
+  getBlockTypePlaceholderText,
+  shouldDecorateBlockTypePlaceholder,
+} from "../src/extensions/BlockTypePlaceholderExtension"
 
 test("maps empty paragraph to paragraph placeholder", () => {
   assert.equal(
@@ -62,3 +65,33 @@ test("returns null for unsupported node types", () => {
   )
 })
 
+test("only decorates top-level paragraph/heading placeholders", () => {
+  assert.equal(
+    shouldDecorateBlockTypePlaceholder({
+      nodeType: "paragraph",
+      parentType: "doc",
+    }),
+    true
+  )
+  assert.equal(
+    shouldDecorateBlockTypePlaceholder({
+      nodeType: "paragraph",
+      parentType: "listItem",
+    }),
+    false
+  )
+  assert.equal(
+    shouldDecorateBlockTypePlaceholder({
+      nodeType: "heading",
+      parentType: "doc",
+    }),
+    true
+  )
+  assert.equal(
+    shouldDecorateBlockTypePlaceholder({
+      nodeType: "heading",
+      parentType: "blockquote",
+    }),
+    false
+  )
+})

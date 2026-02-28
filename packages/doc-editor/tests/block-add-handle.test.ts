@@ -11,7 +11,7 @@ import {
   isDesktopHandleEnabled,
   type BuiltinBlockType,
 } from "../src/extensions/block-add-handle";
-import { getBuiltinBlockItems } from "../src/ui/block-add-menu";
+import { getBuiltinBlockItems, groupBuiltinBlockItems } from "../src/ui/block-add-menu";
 
 test("only desktop edit mode enables block add handle", () => {
   assert.equal(isDesktopHandleEnabled({ isMobile: false, mode: "edit" }), true);
@@ -38,6 +38,23 @@ test("builtin block menu exposes expected first-phase blocks", () => {
     "table",
   ];
   assert.deepEqual(ids, expected);
+});
+
+test("builtin block menu groups upload-related blocks into media section", () => {
+  const sections = groupBuiltinBlockItems(getBuiltinBlockItems());
+  const basicSection = sections.find((section) => section.id === "basic");
+  const mediaSection = sections.find((section) => section.id === "media");
+
+  assert.ok(basicSection);
+  assert.ok(mediaSection);
+  assert.deepEqual(
+    mediaSection?.items.map(({ item }) => item.id),
+    ["image", "file"]
+  );
+  assert.equal(
+    basicSection?.items.some(({ item }) => item.id === "image"),
+    false
+  );
 });
 
 test("resolveHoveredBlockId picks the block nearest to hovered row", () => {

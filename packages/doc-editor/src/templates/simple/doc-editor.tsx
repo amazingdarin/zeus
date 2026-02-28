@@ -5,6 +5,7 @@ import type { PointerEvent as ReactPointerEvent, ReactNode, ReactElement } from 
 import type { Editor, JSONContent } from "@tiptap/react"
 import { EditorContent, EditorContext, useEditor } from "@tiptap/react"
 import type { Extensions } from "@tiptap/core"
+import { Fragment } from "@tiptap/pm/model"
 
 // --- Tiptap Core Extensions ---
 import { StarterKit } from "@tiptap/starter-kit"
@@ -113,6 +114,7 @@ import {
   extractTopLevelBlocks,
 } from "../../extensions/BlockCollapseExtension"
 import { HeadingCollapseExtension } from "../../extensions/HeadingCollapseExtension"
+import { TextEnterBehaviorExtension } from "../../extensions/TextEnterBehaviorExtension"
 import {
   isPointerInLeftRail,
   moveMenuHighlightIndex,
@@ -123,6 +125,11 @@ import {
   resolveHoveredBlockId,
   type BuiltinBlockType,
 } from "../../extensions/block-add-handle"
+import {
+  matchSlashShortcutToken,
+  resolveDocumentBlockShortcuts,
+} from "../../extensions/block-shortcuts"
+import { buildStandaloneBuiltinBlockContent } from "../../extensions/builtin-block-content"
 
 // --- Styles ---
 import "./doc-editor.scss"
@@ -144,6 +151,7 @@ type DocEditorProps = {
     blockIdNodeTypes?: string[]
     pluginBlockGroups?: PluginBlockToolbarGroup[]
   }
+  documentBlockShortcuts?: Record<string, string | undefined>
 }
 
 type PluginBlockToolbarAction = {
@@ -285,6 +293,93 @@ function insertBuiltinBlock(editor: Editor, type: BuiltinBlockType): void {
       return
     default:
       return
+  }
+}
+
+function insertStandaloneBuiltinBlockAtPos(
+  editor: Editor,
+  type: BuiltinBlockType,
+  insertPos: number,
+): boolean {
+  try {
+    const content = buildStandaloneBuiltinBlockContent(type)
+    const contentItems = Array.isArray(content) ? content : [content]
+    const lastInsertedType = String(contentItems[contentItems.length - 1]?.type ?? "")
+    const insertedEndsWithParagraph = lastInsertedType === "paragraph"
+    const beforeDoc = editor.state.doc
+    const beforeTrailingEmptyParagraph =
+      beforeDoc.lastChild?.type.name === "paragraph" &&
+      beforeDoc.lastChild.content.size === 0
+
+    const schema = editor.state.schema
+    const nodes = contentItems.map((item) =>
+      schema.nodeFromJSON(item)
+    )
+    const fragment = Fragment.fromArray(nodes)
+    const tr = editor.state.tr.insert(insertPos, fragment)
+    editor.view.dispatch(tr)
+
+    if (!insertedEndsWithParagraph && !beforeTrailingEmptyParagraph) {
+      const afterDoc = editor.state.doc
+      const afterLast = afterDoc.lastChild
+      if (
+        afterDoc.childCount >= 2 &&
+        afterLast?.type.name === "paragraph" &&
+        afterLast.content.size === 0
+      ) {
+        const removeFrom = afterDoc.content.size - afterLast.nodeSize
+        editor.view.dispatch(editor.state.tr.delete(removeFrom, afterDoc.content.size))
+      }
+    }
+
+    editor.view.focus()
+    return true
+  } catch {
+    return false
+  }
+}
+
+function replaceRangeWithStandaloneBuiltinBlock(
+  editor: Editor,
+  type: BuiltinBlockType,
+  from: number,
+  to: number,
+): boolean {
+  try {
+    const content = buildStandaloneBuiltinBlockContent(type)
+    const contentItems = Array.isArray(content) ? content : [content]
+    const lastInsertedType = String(contentItems[contentItems.length - 1]?.type ?? "")
+    const insertedEndsWithParagraph = lastInsertedType === "paragraph"
+    const beforeDoc = editor.state.doc
+    const beforeTrailingEmptyParagraph =
+      beforeDoc.lastChild?.type.name === "paragraph" &&
+      beforeDoc.lastChild.content.size === 0
+
+    const schema = editor.state.schema
+    const nodes = contentItems.map((item) =>
+      schema.nodeFromJSON(item)
+    )
+    const fragment = Fragment.fromArray(nodes)
+    const tr = editor.state.tr.replaceWith(from, to, fragment)
+    editor.view.dispatch(tr)
+
+    if (!insertedEndsWithParagraph && !beforeTrailingEmptyParagraph) {
+      const afterDoc = editor.state.doc
+      const afterLast = afterDoc.lastChild
+      if (
+        afterDoc.childCount >= 2 &&
+        afterLast?.type.name === "paragraph" &&
+        afterLast.content.size === 0
+      ) {
+        const removeFrom = afterDoc.content.size - afterLast.nodeSize
+        editor.view.dispatch(editor.state.tr.delete(removeFrom, afterDoc.content.size))
+      }
+    }
+
+    editor.view.focus()
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -504,6 +599,7 @@ export function DocEditor({
   linkPreviewFetchHtml,
   onTaskCheckChange,
   pluginContributions,
+  documentBlockShortcuts,
 }: DocEditorProps) {
   const isEditable = mode === "edit"
   const showTopToolbar = false
@@ -533,6 +629,7 @@ export function DocEditor({
   const slashTriggerPosRef = useRef<number | null>(null)
   const slashMenuOpenRef = useRef(false)
   const hoverClientYRef = useRef<number | null>(null)
+  const applyingInlineSlashShortcutRef = useRef(false)
   taskCheckChangeRef.current = onTaskCheckChange
   const desktopHandleEnabled = isDesktopHandleEnabled({ isMobile, mode })
 
@@ -564,7 +661,14 @@ export function DocEditor({
     () => pluginBlockIdTypes.join("|"),
     [pluginBlockIdTypes]
   )
-  const builtinBlockItems = useMemo(() => getBuiltinBlockItems(), [])
+  const resolvedBlockShortcuts = useMemo(
+    () => resolveDocumentBlockShortcuts(documentBlockShortcuts),
+    [documentBlockShortcuts]
+  )
+  const builtinBlockItems = useMemo(
+    () => getBuiltinBlockItems(resolvedBlockShortcuts.blockToKeyMap),
+    [resolvedBlockShortcuts.blockToKeyMap]
+  )
 
   const initialContent = useMemo(
     () =>
@@ -604,10 +708,12 @@ export function DocEditor({
         }),
         UnsupportedPluginBlock,
         ...(isEditable ? [BlockTypePlaceholderExtension] : []),
+        ...(isEditable ? [TextEnterBehaviorExtension] : []),
         HeadingCollapseExtension,
         StarterKit.configure({
           horizontalRule: false,
           codeBlock: false,
+          trailingNode: false,
           link: {
             openOnClick: false,
             enableClickSelection: true,
@@ -823,20 +929,49 @@ export function DocEditor({
     syncBlockHandleToBlock(anchorBlock)
   }, [blockControlsVisible, desktopHandleEnabled, draggingBlockId, editor, resolveHoveredBlockForClientY, syncBlockHandleToBlock])
 
-  const focusCurrentBlockForInsert = useCallback(() => {
-    if (!editor || !currentBlockId) {
-      return
-    }
-    const block = findTopLevelBlockById(editor, currentBlockId)
-    if (!block) {
-      return
-    }
-    try {
-      editor.chain().focus(Math.max(block.pos, block.endPos - 1)).run()
-    } catch {
-      // Ignore transient focus errors.
-    }
-  }, [currentBlockId, editor])
+  const insertBuiltinBlockFromHandle = useCallback(
+    (type: BuiltinBlockType) => {
+      if (!editor) {
+        return
+      }
+      const anchorBlock =
+        (currentBlockId ? findTopLevelBlockById(editor, currentBlockId) : null) ??
+        findCurrentTopLevelBlock(editor)
+      const insertPos = anchorBlock ? anchorBlock.endPos : editor.state.selection.to
+      const inserted = insertStandaloneBuiltinBlockAtPos(editor, type, insertPos)
+      if (!inserted) {
+        insertBuiltinBlock(editor, type)
+      }
+    },
+    [currentBlockId, editor]
+  )
+
+  const insertBuiltinBlockFromSlash = useCallback(
+    (type: BuiltinBlockType) => {
+      if (!editor) {
+        return
+      }
+      const currentBlock = findCurrentTopLevelBlock(editor)
+      if (currentBlock) {
+        const currentNode = editor.state.doc.nodeAt(currentBlock.pos)
+        const shouldReplaceCurrentParagraph =
+          currentNode?.type.name === "paragraph" && currentNode.content.size === 0
+        if (shouldReplaceCurrentParagraph) {
+          const replaced = replaceRangeWithStandaloneBuiltinBlock(
+            editor,
+            type,
+            currentBlock.pos,
+            currentBlock.endPos,
+          )
+          if (replaced) {
+            return
+          }
+        }
+      }
+      insertBuiltinBlock(editor, type)
+    },
+    [editor]
+  )
 
   const selectBuiltinBlockFromMenu = useCallback(
     (type: BuiltinBlockType, source: "block" | "slash") => {
@@ -844,16 +979,16 @@ export function DocEditor({
         return
       }
       if (source === "block") {
-        focusCurrentBlockForInsert()
+        insertBuiltinBlockFromHandle(type)
       } else {
         removeSlashTriggerCharacter()
+        insertBuiltinBlockFromSlash(type)
       }
-      insertBuiltinBlock(editor, type)
       setBlockAddMenuOpen(false)
       closeSlashMenu()
       updateBlockHandlePosition()
     },
-    [closeSlashMenu, editor, focusCurrentBlockForInsert, removeSlashTriggerCharacter, updateBlockHandlePosition]
+    [closeSlashMenu, editor, insertBuiltinBlockFromHandle, insertBuiltinBlockFromSlash, removeSlashTriggerCharacter, updateBlockHandlePosition]
   )
 
   useEffect(() => {
@@ -869,6 +1004,23 @@ export function DocEditor({
 
       const menuOpen = (blockAddMenuOpen || slashMenuOpenRef.current) && !draggingBlockId
       if (menuOpen) {
+        const mappedShortcutType =
+          !event.metaKey &&
+          !event.ctrlKey &&
+          !event.altKey &&
+          !event.shiftKey &&
+          event.key.length === 1
+            ? resolvedBlockShortcuts.keyToBlockMap[event.key]
+            : undefined
+        if (mappedShortcutType) {
+          event.preventDefault()
+          event.stopPropagation()
+          selectBuiltinBlockFromMenu(
+            mappedShortcutType,
+            blockAddMenuOpen ? "block" : "slash"
+          )
+          return
+        }
         if (event.key === "ArrowDown" || event.key === "ArrowUp") {
           event.preventDefault()
           event.stopPropagation()
@@ -939,7 +1091,7 @@ export function DocEditor({
     return () => {
       shell.removeEventListener("keydown", handleKeyDown, true)
     }
-  }, [blockAddMenuOpen, blockMenuHighlightIndex, builtinBlockItems, closeSlashMenu, draggingBlockId, editor, isEditable, selectBuiltinBlockFromMenu, slashMenuHighlightIndex])
+  }, [blockAddMenuOpen, blockMenuHighlightIndex, builtinBlockItems, closeSlashMenu, draggingBlockId, editor, isEditable, resolvedBlockShortcuts.keyToBlockMap, selectBuiltinBlockFromMenu, slashMenuHighlightIndex])
 
   const moveBlockRelative = useCallback(
     (
@@ -1233,6 +1385,43 @@ export function DocEditor({
         openSlashMenuNearCursor()
       }
 
+      if (!applyingInlineSlashShortcutRef.current) {
+        const selection = editor.state.selection
+        const keyToBlockMap = resolvedBlockShortcuts.keyToBlockMap
+        const tokenStart = selection.from - 2
+        const view = editor.view as { composing?: boolean }
+        if (
+          selection.from === selection.to &&
+          tokenStart >= 1 &&
+          Object.keys(keyToBlockMap).length > 0 &&
+          !view.composing
+        ) {
+          const token = editor.state.doc.textBetween(
+            tokenStart,
+            selection.from,
+            "\0",
+            "\0"
+          )
+          const slashShortcutType = matchSlashShortcutToken({
+            token,
+            keyToBlockMap,
+          })
+          if (slashShortcutType) {
+            applyingInlineSlashShortcutRef.current = true
+            try {
+              editor.view.dispatch(editor.state.tr.delete(tokenStart, selection.from))
+              insertBuiltinBlockFromSlash(slashShortcutType)
+              closeSlashMenu()
+              setBlockAddMenuOpen(false)
+              updateBlockHandlePosition()
+            } finally {
+              applyingInlineSlashShortcutRef.current = false
+            }
+            return
+          }
+        }
+      }
+
       if (serialized === lastContentRef.current) {
         return
       }
@@ -1244,7 +1433,7 @@ export function DocEditor({
     return () => {
       editor.off("update", handleUpdate)
     }
-  }, [closeSlashMenu, editor, isEditable, onChange, openSlashMenuNearCursor])
+  }, [closeSlashMenu, editor, insertBuiltinBlockFromSlash, isEditable, onChange, openSlashMenuNearCursor, resolvedBlockShortcuts.keyToBlockMap, updateBlockHandlePosition])
 
   useEffect(() => {
     if (!editor || !content) {
@@ -1379,7 +1568,6 @@ export function DocEditor({
                 disabled={!currentBlockId || Boolean(draggingBlockId)}
                 onClick={() => {
                   closeSlashMenu()
-                  focusCurrentBlockForInsert()
                   setBlockAddMenuOpen((prev) => {
                     const next = !prev
                     if (next) {
@@ -1403,6 +1591,7 @@ export function DocEditor({
               <BlockAddMenu
                 open={blockAddMenuOpen && !draggingBlockId}
                 onSelect={handleInsertBuiltinBlock}
+                items={builtinBlockItems}
                 highlightedIndex={blockMenuHighlightIndex}
                 onHighlightIndexChange={setBlockMenuHighlightIndex}
               />
@@ -1412,6 +1601,7 @@ export function DocEditor({
             <BlockAddMenu
               open={slashMenuOpen && !draggingBlockId}
               onSelect={handleInsertBuiltinBlockFromSlash}
+              items={builtinBlockItems}
               className="doc-editor-slash-menu"
               highlightedIndex={slashMenuHighlightIndex}
               onHighlightIndexChange={setSlashMenuHighlightIndex}

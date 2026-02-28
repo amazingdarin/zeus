@@ -14,6 +14,23 @@ export type BuiltinBlockType =
   | "file"
   | "table";
 
+export const BUILTIN_BLOCK_TYPES: BuiltinBlockType[] = [
+  "paragraph",
+  "heading-1",
+  "heading-2",
+  "heading-3",
+  "toggle-block",
+  "bullet-list",
+  "ordered-list",
+  "task-list",
+  "blockquote",
+  "horizontal-rule",
+  "code-block",
+  "image",
+  "file",
+  "table",
+];
+
 export type HoveredBlockRange = {
   id: string;
   top: number;

@@ -33,13 +33,21 @@
   outline: none;
   caret-color: var(--tt-cursor-color);
 
-  // Paragraph spacing
-  p:not(:last-child):not(td p):not(th p) {
+  // Keep paragraph typography stable for all paragraph nodes.
+  p:not(td p):not(th p) {
     font-size: 1rem;
     line-height: 1.6;
     font-weight: normal;
     margin-top: 0;
+  }
+
+  // Paragraph spacing
+  p:not(:last-child):not(td p):not(th p) {
     margin-bottom: 12px;
+  }
+
+  p:last-child:not(td p):not(th p) {
+    margin-bottom: 0;
   }
 
   // Selection styles

@@ -7,6 +7,11 @@ type PlaceholderContext = {
   level?: number
 }
 
+type PlaceholderNodeContext = {
+  nodeType: string
+  parentType?: string
+}
+
 export function getBlockTypePlaceholderText(ctx: PlaceholderContext): string | null {
   if (ctx.nodeType === "paragraph") {
     return "段落"
@@ -18,6 +23,15 @@ export function getBlockTypePlaceholderText(ctx: PlaceholderContext): string | n
   return null
 }
 
+export function shouldDecorateBlockTypePlaceholder(
+  ctx: PlaceholderNodeContext
+): boolean {
+  if (ctx.parentType !== "doc") {
+    return false
+  }
+  return ctx.nodeType === "paragraph" || ctx.nodeType === "heading"
+}
+
 export const BlockTypePlaceholderExtension = Extension.create({
   name: "blockTypePlaceholder",
 
@@ -27,11 +41,14 @@ export const BlockTypePlaceholderExtension = Extension.create({
         props: {
           decorations: (state) => {
             const decorations: Decoration[] = []
-            state.doc.descendants((node, pos) => {
+            state.doc.descendants((node, pos, parent) => {
               if (node.content.size > 0) {
                 return
               }
-              if (node.type.name !== "paragraph" && node.type.name !== "heading") {
+              if (!shouldDecorateBlockTypePlaceholder({
+                nodeType: node.type.name,
+                parentType: parent?.type?.name,
+              })) {
                 return
               }
               const placeholder = getBlockTypePlaceholderText({
@@ -55,4 +72,3 @@ export const BlockTypePlaceholderExtension = Extension.create({
     ]
   },
 })
-

@@ -14,6 +14,7 @@ type HeadingInfo = {
   pos: number
   endPos: number
   textContent: string
+  collapsible: boolean
 }
 
 type CollapseRange = {
@@ -57,6 +58,7 @@ function extractHeadings(doc: ProsemirrorNode): HeadingInfo[] {
           pos,
           endPos: pos + node.nodeSize,
           textContent: node.textContent,
+          collapsible: node.attrs.collapsible === true,
         })
       }
     }
@@ -64,18 +66,41 @@ function extractHeadings(doc: ProsemirrorNode): HeadingInfo[] {
   return headings
 }
 
+function getCollapsibleHeadingIds(doc: ProsemirrorNode): Set<string> {
+  const ids = new Set<string>()
+  for (const heading of extractHeadings(doc)) {
+    if (heading.collapsible) {
+      ids.add(heading.id)
+    }
+  }
+  return ids
+}
+
+function filterCollapsedHeadingIds(doc: ProsemirrorNode, source: Set<string>): Set<string> {
+  if (source.size === 0) {
+    return source
+  }
+  const collapsibleIds = getCollapsibleHeadingIds(doc)
+  const next = new Set<string>()
+  for (const id of source) {
+    if (collapsibleIds.has(id)) {
+      next.add(id)
+    }
+  }
+  return next
+}
+
 /**
  * Calculate which content ranges should be collapsed
  */
 function calculateCollapseRanges(
   doc: ProsemirrorNode,
+  headings: HeadingInfo[],
   collapsedIds: Set<string>
 ): CollapseRange[] {
   if (collapsedIds.size === 0) {
     return []
   }
-
-  const headings = extractHeadings(doc)
   const ranges: CollapseRange[] = []
 
   for (let i = 0; i < headings.length; i++) {
@@ -94,7 +119,6 @@ function calculateCollapseRanges(
         break
       }
     }
-
     // Only add range if there's content to hide
     if (heading.endPos < endPos) {
       ranges.push({
@@ -134,8 +158,9 @@ function createDecorations(
   _view: EditorView | null
 ): DecorationSet {
   const decorations: Decoration[] = []
-  const headings = extractHeadings(doc)
-  const collapseRanges = calculateCollapseRanges(doc, collapsedIds)
+  const allHeadings = extractHeadings(doc)
+  const headings = allHeadings.filter((heading) => heading.collapsible)
+  const collapseRanges = calculateCollapseRanges(doc, allHeadings, collapsedIds)
 
   // Add toggle button decorations to each heading (unless it's inside a collapsed range)
   for (const heading of headings) {
@@ -256,6 +281,29 @@ export const HeadingCollapseExtension = Extension.create<HeadingCollapseOptions>
     }
   },
 
+  addGlobalAttributes() {
+    return [
+      {
+        types: ["heading"],
+        attributes: {
+          collapsible: {
+            default: false,
+            parseHTML: (element: HTMLElement) =>
+              element.getAttribute("data-collapsible") === "true",
+            renderHTML: (attributes: { collapsible?: boolean }) => {
+              if (attributes.collapsible !== true) {
+                return {}
+              }
+              return {
+                "data-collapsible": "true",
+              }
+            },
+          },
+        },
+      },
+    ]
+  },
+
   addCommands() {
     return {
       toggleHeadingCollapse:
@@ -274,8 +322,7 @@ export const HeadingCollapseExtension = Extension.create<HeadingCollapseOptions>
         () =>
         ({ tr, dispatch, state }) => {
           if (dispatch) {
-            const headings = extractHeadings(state.doc)
-            const allIds = headings.map((h) => h.id)
+            const allIds = Array.from(getCollapsibleHeadingIds(state.doc))
             tr.setMeta(headingCollapsePluginKey, {
               type: "collapseAll",
               headingIds: allIds,
@@ -313,9 +360,10 @@ export const HeadingCollapseExtension = Extension.create<HeadingCollapseOptions>
 
         state: {
           init(_, state): CollapsePluginState {
+            const normalizedInitialIds = filterCollapsedHeadingIds(state.doc, initialCollapsedIds)
             return {
-              collapsedIds: initialCollapsedIds,
-              decorations: createDecorations(state.doc, initialCollapsedIds, null),
+              collapsedIds: normalizedInitialIds,
+              decorations: createDecorations(state.doc, normalizedInitialIds, null),
             }
           },
 
@@ -344,9 +392,10 @@ export const HeadingCollapseExtension = Extension.create<HeadingCollapseOptions>
 
             // Also update if document changed
             if (tr.docChanged || needsUpdate) {
+              const normalizedIds = filterCollapsedHeadingIds(newState.doc, collapsedIds)
               return {
-                collapsedIds,
-                decorations: createDecorations(newState.doc, collapsedIds, null),
+                collapsedIds: normalizedIds,
+                decorations: createDecorations(newState.doc, normalizedIds, null),
               }
             }
 

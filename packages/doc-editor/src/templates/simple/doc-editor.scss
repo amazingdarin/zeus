@@ -140,6 +140,25 @@
   gap: 2px;
 }
 
+.doc-editor-block-add-menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.doc-editor-block-add-menu-section + .doc-editor-block-add-menu-section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--tt-dropdown-menu-border-color);
+}
+
+.doc-editor-block-add-menu-section-title {
+  font-size: 11px;
+  line-height: 1;
+  color: var(--ink-muted);
+  padding: 2px 8px 4px;
+}
+
 .doc-editor-slash-menu {
   z-index: 9;
 }
@@ -195,6 +214,23 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.doc-editor-block-add-menu-item-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.doc-editor-block-add-menu-item-shortcut {
+  font-size: 11px;
+  line-height: 1;
+  color: var(--ink-muted);
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  border: 1px solid rgba(15, 23, 42, 0.12);
 }
 
 .doc-editor-block-add-menu-item:hover,
@@ -300,6 +336,11 @@
 [data-theme="dark"] .doc-editor-block-add-menu-item:hover,
 [data-theme="dark"] .doc-editor-block-add-menu-item.active {
   background: var(--tt-gray-dark-a-50);
+}
+
+[data-theme="dark"] .doc-editor-block-add-menu-item-shortcut {
+  background: rgba(240, 246, 252, 0.08);
+  border-color: rgba(240, 246, 252, 0.16);
 }
 
 [data-theme="dark"] .doc-editor-block-add-trigger:hover,
