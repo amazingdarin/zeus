@@ -3332,6 +3332,22 @@ body {
   overflow: hidden;
 }
 
+.doc-page-workspace-stack {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.doc-page-workspace-pane {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .doc-page-right-head {
   display: flex;
   flex-direction: column;
@@ -3347,6 +3363,7 @@ body {
   flex-shrink: 0;
   display: flex;
   align-items: center;
+  gap: 8px;
   padding: 0 8px;
 }
 
@@ -3354,11 +3371,86 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .doc-page-right-topbar-btn {
   width: 26px;
   height: 26px;
+}
+
+.doc-page-tabbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.doc-page-tabbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.doc-page-tab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-secondary);
+  border-radius: 8px;
+  height: calc(var(--doc-page-topbar-height) - 10px);
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 220px;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.doc-page-tab:hover {
+  background: var(--active-bg);
+  color: var(--ink);
+}
+
+.doc-page-tab.active {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.doc-page-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.doc-page-tab-dirty {
+  color: #ca8a04;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.doc-page-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.doc-page-tab-close:hover {
+  background: var(--hover-bg);
+  color: var(--ink);
 }
 
 .doc-page-title {

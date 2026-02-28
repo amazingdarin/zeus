@@ -15,6 +15,7 @@ import type {
   DocumentEditorSaveStatus,
   DocumentSyncStatus,
 } from "../components/DocumentHeader";
+import DocumentTabBar from "../components/DocumentTabBar";
 import DocumentWorkspace from "../components/DocumentWorkspace";
 import KnowledgeBaseLayout, { useToggleTree } from "../components/KnowledgeBaseLayout";
 import KnowledgeBaseSideNav, {
@@ -76,6 +77,24 @@ import {
 import { exportContentJson } from "../utils/exportContentJson";
 import { convertDocument } from "../api/convert";
 import { ocrApi } from "../api/ocr";
+import {
+  DOCUMENT_TAB_MAX,
+  activateTab,
+  closeTab,
+  createInitialSessionState,
+  getLruTabId,
+  hasTab,
+  openTab,
+  updateTabTitle,
+  type TabSessionState,
+} from "../features/document-tabs/session-model";
+import {
+  createSnapshotStore,
+  removeSnapshot,
+  upsertSnapshot,
+  type SnapshotStore,
+} from "../features/document-tabs/snapshot-store";
+import type { WorkspaceBridge } from "../features/document-tabs/workspace-bridge";
 
 type DocumentData = {
   id: string;
@@ -282,6 +301,16 @@ function DocumentPage() {
   })();
 
   const [document, setDocument] = useState<DocumentData | null>(null);
+  const [documentsById, setDocumentsById] = useState<Record<string, DocumentData>>({});
+  const [tabSessionState, setTabSessionState] = useState<TabSessionState>(() =>
+    createInitialSessionState(),
+  );
+  const [snapshotStore, setSnapshotStore] = useState<SnapshotStore>(() =>
+    createSnapshotStore(),
+  );
+  const [workspaceSaveStateByDoc, setWorkspaceSaveStateByDoc] = useState<
+    Record<string, { status: DocumentEditorSaveStatus; error: string | null }>
+  >({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
@@ -339,8 +368,12 @@ function DocumentPage() {
   const currentRequestRef = useRef<string | null>(null);
   const refreshKeyRef = useRef<string>("");
   const syncRequestIdRef = useRef(0);
-  const workspaceRetryRef = useRef<(() => void) | null>(null);
-  const workspaceFocusRef = useRef<(() => void) | null>(null);
+  const tabSessionRef = useRef<TabSessionState>(createInitialSessionState());
+  const snapshotStoreRef = useRef<SnapshotStore>(createSnapshotStore());
+  const workspaceBridgeMapRef = useRef<Map<string, WorkspaceBridge>>(new Map());
+  const workspaceRetryMapRef = useRef<Map<string, () => void>>(new Map());
+  const workspaceFocusMapRef = useRef<Map<string, () => void>>(new Map());
+  const previousActiveDocIdRef = useRef<string | null>(null);
 
   const [rootDocuments, setRootDocuments] = useState<KnowledgeBaseDocument[]>([]);
   const [childrenByParent, setChildrenByParent] = useState<
@@ -368,6 +401,209 @@ function DocumentPage() {
   const loadingIdsRef = useRef<Record<string, boolean>>({});
   const rootLoadAttemptRef = useRef<string | null>(null);
   const recentEditsRefreshTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    tabSessionRef.current = tabSessionState;
+  }, [tabSessionState]);
+
+  useEffect(() => {
+    snapshotStoreRef.current = snapshotStore;
+  }, [snapshotStore]);
+
+  const applyTabSessionState = useCallback((nextState: TabSessionState) => {
+    tabSessionRef.current = nextState;
+    setTabSessionState(nextState);
+  }, []);
+
+  const applySnapshotStore = useCallback((nextStore: SnapshotStore) => {
+    snapshotStoreRef.current = nextStore;
+    setSnapshotStore(nextStore);
+  }, []);
+
+  const removeWorkspaceStateForDoc = useCallback((docId: string) => {
+    const normalizedDocId = docId.trim();
+    if (!normalizedDocId) {
+      return;
+    }
+    workspaceBridgeMapRef.current.delete(normalizedDocId);
+    workspaceRetryMapRef.current.delete(normalizedDocId);
+    workspaceFocusMapRef.current.delete(normalizedDocId);
+    setDocumentsById((prev) => {
+      if (!(normalizedDocId in prev)) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[normalizedDocId];
+      return next;
+    });
+    setWorkspaceSaveStateByDoc((prev) => {
+      if (!(normalizedDocId in prev)) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[normalizedDocId];
+      return next;
+    });
+    const nextSnapshotStore = removeSnapshot(snapshotStoreRef.current, normalizedDocId);
+    applySnapshotStore(nextSnapshotStore);
+  }, [applySnapshotStore]);
+
+  const captureWorkspaceSnapshot = useCallback((docId: string) => {
+    const normalizedDocId = docId.trim();
+    if (!normalizedDocId) {
+      return;
+    }
+    const bridge = workspaceBridgeMapRef.current.get(normalizedDocId);
+    if (!bridge) {
+      return;
+    }
+    const snapshot = bridge.captureSnapshot();
+    const nextSnapshotStore = upsertSnapshot(
+      snapshotStoreRef.current,
+      normalizedDocId,
+      snapshot,
+    );
+    applySnapshotStore(nextSnapshotStore);
+  }, [applySnapshotStore]);
+
+  const restoreWorkspaceSnapshot = useCallback((docId: string) => {
+    const normalizedDocId = docId.trim();
+    if (!normalizedDocId) {
+      return;
+    }
+    const bridge = workspaceBridgeMapRef.current.get(normalizedDocId);
+    const snapshot = snapshotStoreRef.current[normalizedDocId];
+    if (!bridge || !snapshot) {
+      return;
+    }
+    bridge.restoreSnapshot(snapshot);
+  }, []);
+
+  const flushWorkspaceBeforeClose = useCallback(
+    async (docId: string): Promise<boolean> => {
+      const normalizedDocId = docId.trim();
+      if (!normalizedDocId) {
+        return true;
+      }
+      const bridge = workspaceBridgeMapRef.current.get(normalizedDocId);
+      if (!bridge) {
+        return true;
+      }
+      try {
+        await bridge.flush();
+        return true;
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : "保存失败";
+        message.error(`文档保存失败，无法关闭：${errorMessage}`);
+        return false;
+      }
+    },
+    [],
+  );
+
+  const resolveTabTitle = useCallback(
+    (docId: string, fallback?: string): string => {
+      const normalizedDocId = docId.trim();
+      if (!normalizedDocId) {
+        return fallback?.trim() || "无标题文档";
+      }
+      const fromSession = documentsById[normalizedDocId]?.title?.trim();
+      if (fromSession) {
+        return fromSession;
+      }
+      const fromRoots = rootDocuments.find((item) => item.id === normalizedDocId)?.title?.trim();
+      if (fromRoots) {
+        return fromRoots;
+      }
+      const fromChildren = Object.values(childrenByParent)
+        .flat()
+        .find((item) => item.id === normalizedDocId)?.title?.trim();
+      if (fromChildren) {
+        return fromChildren;
+      }
+      const fromFavorites = favorites.find((item) => item.docId === normalizedDocId)?.title?.trim();
+      if (fromFavorites) {
+        return fromFavorites;
+      }
+      const fromRecent = recentEdits.find((item) => item.docId === normalizedDocId)?.title?.trim();
+      if (fromRecent) {
+        return fromRecent;
+      }
+      const fallbackTitle = fallback?.trim();
+      return fallbackTitle || "无标题文档";
+    },
+    [childrenByParent, documentsById, favorites, recentEdits, rootDocuments],
+  );
+
+  const ensureTabOpenedForDoc = useCallback(
+    async (docId: string, titleHint?: string): Promise<boolean> => {
+      const normalizedDocId = docId.trim();
+      if (!normalizedDocId) {
+        return false;
+      }
+      const now = Date.now();
+      let currentState = tabSessionRef.current;
+      const title = resolveTabTitle(normalizedDocId, titleHint);
+
+      if (hasTab(currentState, normalizedDocId)) {
+        currentState = activateTab(
+          updateTabTitle(currentState, { docId: normalizedDocId, title }),
+          { docId: normalizedDocId, now },
+        );
+        applyTabSessionState(currentState);
+        return true;
+      }
+
+      if (currentState.tabs.length >= DOCUMENT_TAB_MAX) {
+        const victimId = getLruTabId(currentState);
+        if (victimId) {
+          const canCloseVictim = await flushWorkspaceBeforeClose(victimId);
+          if (!canCloseVictim) {
+            return false;
+          }
+          captureWorkspaceSnapshot(victimId);
+          currentState = closeTab(currentState, { docId: victimId });
+          applyTabSessionState(currentState);
+          removeWorkspaceStateForDoc(victimId);
+        }
+      }
+
+      const nextState = openTab(currentState, {
+        docId: normalizedDocId,
+        title,
+        now,
+        maxTabs: DOCUMENT_TAB_MAX,
+      });
+      applyTabSessionState(nextState);
+      return true;
+    },
+    [
+      applyTabSessionState,
+      captureWorkspaceSnapshot,
+      flushWorkspaceBeforeClose,
+      removeWorkspaceStateForDoc,
+      resolveTabTitle,
+    ],
+  );
+
+  const syncTabTitleFromDocument = useCallback(
+    (docId: string, title: string) => {
+      const normalizedDocId = docId.trim();
+      if (!normalizedDocId) {
+        return;
+      }
+      const currentState = tabSessionRef.current;
+      if (!hasTab(currentState, normalizedDocId)) {
+        return;
+      }
+      const nextState = updateTabTitle(currentState, {
+        docId: normalizedDocId,
+        title: title.trim() || "无标题文档",
+      });
+      applyTabSessionState(nextState);
+    },
+    [applyTabSessionState],
+  );
 
   const docParentMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -768,8 +1004,18 @@ function DocumentPage() {
       
       // Clear current document state
       setDocument(null);
+      setDocumentsById({});
       setError(null);
       setLoading(false);
+      const emptyTabState = createInitialSessionState();
+      applyTabSessionState(emptyTabState);
+      const emptySnapshotStore = createSnapshotStore();
+      applySnapshotStore(emptySnapshotStore);
+      workspaceBridgeMapRef.current.clear();
+      workspaceRetryMapRef.current.clear();
+      workspaceFocusMapRef.current.clear();
+      setWorkspaceSaveStateByDoc({});
+      previousActiveDocIdRef.current = null;
       syncRequestIdRef.current += 1;
       setSyncStatus("idle");
       setSyncError(null);
@@ -1137,17 +1383,79 @@ function DocumentPage() {
     [refreshParent, resolvedProjectKey],
   );
 
+  const openDocumentById = useCallback(
+    async (docId: string, titleHint?: string, options?: { replace?: boolean }) => {
+      const normalizedDocId = docId.trim();
+      if (!normalizedDocId) {
+        return;
+      }
+      const canOpen = await ensureTabOpenedForDoc(normalizedDocId, titleHint);
+      if (!canOpen) {
+        return;
+      }
+      navigate(`/documents/${encodeURIComponent(normalizedDocId)}`, {
+        replace: Boolean(options?.replace),
+      });
+    },
+    [ensureTabOpenedForDoc, navigate],
+  );
+
+  const handleActivateTab = useCallback(
+    (docId: string) => {
+      void openDocumentById(docId);
+    },
+    [openDocumentById],
+  );
+
+  const handleCloseTab = useCallback(
+    async (docId: string) => {
+      const normalizedDocId = docId.trim();
+      if (!normalizedDocId) {
+        return;
+      }
+      const canClose = await flushWorkspaceBeforeClose(normalizedDocId);
+      if (!canClose) {
+        return;
+      }
+      captureWorkspaceSnapshot(normalizedDocId);
+      const nextState = closeTab(tabSessionRef.current, { docId: normalizedDocId });
+      applyTabSessionState(nextState);
+      removeWorkspaceStateForDoc(normalizedDocId);
+
+      if (resolvedDocumentId === normalizedDocId) {
+        if (nextState.activeDocId) {
+          navigate(`/documents/${encodeURIComponent(nextState.activeDocId)}`, { replace: true });
+          window.requestAnimationFrame(() => {
+            restoreWorkspaceSnapshot(nextState.activeDocId as string);
+          });
+        } else {
+          navigate("/documents", { replace: true });
+        }
+      }
+    },
+    [
+      applyTabSessionState,
+      captureWorkspaceSnapshot,
+      flushWorkspaceBeforeClose,
+      navigate,
+      removeWorkspaceStateForDoc,
+      resolvedDocumentId,
+      restoreWorkspaceSnapshot,
+    ],
+  );
+
   const handleSelectDocument = useCallback(
     (doc: KnowledgeBaseDocument) => {
       if (!doc.id) {
         return;
       }
-      navigate(`/documents/${encodeURIComponent(doc.id)}`);
+      void openDocumentById(doc.id, doc.title);
     },
-    [navigate],
+    [openDocumentById],
   );
 
-  const activeDocument = document;
+  const activeDocument =
+    (resolvedDocumentId ? documentsById[resolvedDocumentId] : null) ?? document;
 
   const handleFavoriteMutation = useCallback(
     async (docId: string, action: "favorite" | "unfavorite") => {
@@ -1190,6 +1498,44 @@ function DocumentPage() {
   const hasProposal = Boolean(proposalId);
 
   useEffect(() => {
+    const nextActiveId = resolvedDocumentId || null;
+    const prevActiveId = previousActiveDocIdRef.current;
+    if (prevActiveId && prevActiveId !== nextActiveId) {
+      captureWorkspaceSnapshot(prevActiveId);
+    }
+    previousActiveDocIdRef.current = nextActiveId;
+  }, [captureWorkspaceSnapshot, resolvedDocumentId]);
+
+  useEffect(() => {
+    if (!resolvedDocumentId) {
+      return;
+    }
+    let cancelled = false;
+    const syncRouteTab = async () => {
+      const opened = await ensureTabOpenedForDoc(resolvedDocumentId);
+      if (cancelled) {
+        return;
+      }
+      if (!opened) {
+        const fallbackDocId = tabSessionRef.current.activeDocId;
+        if (fallbackDocId && fallbackDocId !== resolvedDocumentId) {
+          navigate(`/documents/${encodeURIComponent(fallbackDocId)}`, { replace: true });
+        } else {
+          navigate("/documents", { replace: true });
+        }
+        return;
+      }
+      window.requestAnimationFrame(() => {
+        restoreWorkspaceSnapshot(resolvedDocumentId);
+      });
+    };
+    void syncRouteTab();
+    return () => {
+      cancelled = true;
+    };
+  }, [ensureTabOpenedForDoc, navigate, resolvedDocumentId, restoreWorkspaceSnapshot]);
+
+  useEffect(() => {
     if (!resolvedProjectKey || !resolvedDocumentId) {
       setDocument(null);
       setLoading(false);
@@ -1216,6 +1562,11 @@ function DocumentPage() {
     const cached = shouldBypassCache ? null : documentCache.get(requestKey);
     if (cached) {
       setDocument(cached);
+      setDocumentsById((prev) => ({
+        ...prev,
+        [cached.id]: cached,
+      }));
+      syncTabTitleFromDocument(cached.id, cached.title);
       setLoading(false);
       setError(null);
       currentRequestRef.current = requestKey;
@@ -1260,6 +1611,11 @@ function DocumentPage() {
         }
         documentCache.set(requestKey, mapped);
         setDocument(mapped);
+        setDocumentsById((prev) => ({
+          ...prev,
+          [mapped.id]: mapped,
+        }));
+        syncTabTitleFromDocument(mapped.id, mapped.title);
       })
       .catch((err) => {
         if (!isActive || currentRequestRef.current !== requestKey) {
@@ -1278,7 +1634,7 @@ function DocumentPage() {
     return () => {
       isActive = false;
     };
-  }, [refreshKey, resolvedDocumentId, resolvedProjectKey]);
+  }, [refreshKey, resolvedDocumentId, resolvedProjectKey, syncTabTitleFromDocument]);
 
   useEffect(() => {
     if (!resolvedProjectKey || !resolvedDocumentId) {
@@ -1291,6 +1647,10 @@ function DocumentPage() {
         }
         const updated = { ...prev, hierarchy };
         documentCache.set(`${resolvedProjectKey}:${resolvedDocumentId}`, updated);
+        setDocumentsById((prevDocs) => ({
+          ...prevDocs,
+          [resolvedDocumentId]: updated,
+        }));
         return updated;
       });
     };
@@ -1366,9 +1726,15 @@ function DocumentPage() {
   }, [document, resolvedDocumentId]);
 
   useEffect(() => {
-    setEditorSaveStatus("idle");
-    setEditorSaveError(null);
-  }, [activeDocument?.id, resolvedProjectKey]);
+    if (!resolvedDocumentId) {
+      setEditorSaveStatus("idle");
+      setEditorSaveError(null);
+      return;
+    }
+    const saveState = workspaceSaveStateByDoc[resolvedDocumentId];
+    setEditorSaveStatus(saveState?.status ?? "idle");
+    setEditorSaveError(saveState?.error ?? null);
+  }, [resolvedDocumentId, resolvedProjectKey, workspaceSaveStateByDoc]);
 
   useEffect(() => {
     if (activeDocument) {
@@ -1376,49 +1742,118 @@ function DocumentPage() {
     }
     setEditorSaveStatus("idle");
     setEditorSaveError(null);
-    workspaceRetryRef.current = null;
-    workspaceFocusRef.current = null;
   }, [activeDocument]);
 
   const handleEdit = useCallback(() => {
-    workspaceFocusRef.current?.();
-  }, []);
+    const currentDocId = (resolvedDocumentId || "").trim();
+    if (!currentDocId) {
+      return;
+    }
+    workspaceFocusMapRef.current.get(currentDocId)?.();
+  }, [resolvedDocumentId]);
 
   const handleWorkspaceSaveStateChange = useCallback(
-    (state: { status: DocumentEditorSaveStatus; error: string }) => {
-      setEditorSaveStatus(state.status);
-      setEditorSaveError(state.error || null);
+    (docId: string, state: { status: DocumentEditorSaveStatus; error: string }) => {
+      const normalizedDocId = docId.trim();
+      if (!normalizedDocId) {
+        return;
+      }
+      setWorkspaceSaveStateByDoc((prev) => ({
+        ...prev,
+        [normalizedDocId]: {
+          status: state.status,
+          error: state.error || null,
+        },
+      }));
+      if (normalizedDocId === resolvedDocumentId) {
+        setEditorSaveStatus(state.status);
+        setEditorSaveError(state.error || null);
+      }
     },
-    [],
+    [resolvedDocumentId],
   );
 
-  const handleWorkspaceRetryBind = useCallback((handler: (() => void) | null) => {
-    workspaceRetryRef.current = handler;
+  const handleWorkspaceRetryBind = useCallback((docId: string, handler: (() => void) | null) => {
+    const normalizedDocId = docId.trim();
+    if (!normalizedDocId) {
+      return;
+    }
+    if (handler) {
+      workspaceRetryMapRef.current.set(normalizedDocId, handler);
+    } else {
+      workspaceRetryMapRef.current.delete(normalizedDocId);
+    }
   }, []);
 
-  const handleWorkspaceFocusBind = useCallback((handler: (() => void) | null) => {
-    workspaceFocusRef.current = handler;
+  const handleWorkspaceFocusBind = useCallback((docId: string, handler: (() => void) | null) => {
+    const normalizedDocId = docId.trim();
+    if (!normalizedDocId) {
+      return;
+    }
+    if (handler) {
+      workspaceFocusMapRef.current.set(normalizedDocId, handler);
+    } else {
+      workspaceFocusMapRef.current.delete(normalizedDocId);
+    }
   }, []);
+
+  const handleWorkspaceBridgeBind = useCallback((docId: string, bridge: WorkspaceBridge | null) => {
+    const normalizedDocId = docId.trim();
+    if (!normalizedDocId) {
+      return;
+    }
+    if (bridge) {
+      workspaceBridgeMapRef.current.set(normalizedDocId, bridge);
+      if (resolvedDocumentId === normalizedDocId) {
+        window.requestAnimationFrame(() => {
+          restoreWorkspaceSnapshot(normalizedDocId);
+        });
+      }
+      return;
+    }
+    workspaceBridgeMapRef.current.delete(normalizedDocId);
+  }, [resolvedDocumentId, restoreWorkspaceSnapshot]);
 
   const handleRetryEditorSave = useCallback(() => {
-    workspaceRetryRef.current?.();
-  }, []);
+    const currentDocId = (resolvedDocumentId || "").trim();
+    if (!currentDocId) {
+      return;
+    }
+    workspaceRetryMapRef.current.get(currentDocId)?.();
+  }, [resolvedDocumentId]);
 
   const handleWorkspaceSaved = useCallback(
-    (payload: { title: string; content: JSONContent }) => {
-      if (!activeDocument || !resolvedProjectKey) {
+    (docId: string, payload: { title: string; content: JSONContent }) => {
+      const normalizedDocId = docId.trim();
+      if (!normalizedDocId || !resolvedProjectKey) {
         return;
       }
       setDocument((prev) =>
-        prev
+        prev && prev.id === normalizedDocId
           ? {
               ...prev,
               title: payload.title,
               content: payload.content,
             }
-          : null,
+          : prev,
       );
-      const requestKey = `${resolvedProjectKey}:${activeDocument.id}`;
+      setDocumentsById((prev) => {
+        const previous = prev[normalizedDocId];
+        if (!previous) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [normalizedDocId]: {
+            ...previous,
+            title: payload.title,
+            content: payload.content,
+          },
+        };
+      });
+      syncTabTitleFromDocument(normalizedDocId, payload.title);
+
+      const requestKey = `${resolvedProjectKey}:${normalizedDocId}`;
       const cached = documentCache.get(requestKey);
       if (cached) {
         documentCache.set(requestKey, {
@@ -1427,10 +1862,17 @@ function DocumentPage() {
           content: payload.content,
         });
       }
-      touchRecentEditInState(activeDocument.id, payload.title || activeDocument.title);
+      const currentTitle = documentsById[normalizedDocId]?.title || payload.title;
+      touchRecentEditInState(normalizedDocId, payload.title || currentTitle);
       scheduleRecentEditsRefresh(resolvedProjectKey);
     },
-    [activeDocument, resolvedProjectKey, scheduleRecentEditsRefresh, touchRecentEditInState],
+    [
+      documentsById,
+      resolvedProjectKey,
+      scheduleRecentEditsRefresh,
+      syncTabTitleFromDocument,
+      touchRecentEditInState,
+    ],
   );
 
   const handleOpenExport = useCallback(() => {
@@ -1522,6 +1964,19 @@ function DocumentPage() {
             ? { ...prev, content: updatedContent }
             : null,
         );
+        setDocumentsById((prev) => {
+          const current = prev[activeDocument.id];
+          if (!current) {
+            return prev;
+          }
+          return {
+            ...prev,
+            [activeDocument.id]: {
+              ...current,
+              content: updatedContent,
+            },
+          };
+        });
         touchRecentEditInState(activeDocument.id, activeDocument.title);
         scheduleRecentEditsRefresh(resolvedProjectKey);
         // Trigger index rebuild for the updated document
@@ -1573,6 +2028,11 @@ function DocumentPage() {
         markdownExtensions,
       });
       setDocument(updated);
+      setDocumentsById((prev) => ({
+        ...prev,
+        [updated.id]: updated,
+      }));
+      syncTabTitleFromDocument(updated.id, updated.title);
       touchRecentEditInState(updated.id, updated.title);
       scheduleRecentEditsRefresh(resolvedProjectKey);
       await handleDocumentsChanged(updated.parentId || "");
@@ -1676,8 +2136,50 @@ function DocumentPage() {
         }
         return next;
       });
-      // Navigate to /documents (blank page)
-      navigate("/documents");
+      const deletedSet = new Set(result.deleted_ids.map((id) => String(id).trim()).filter(Boolean));
+      setDocumentsById((prev) => {
+        const next = { ...prev };
+        deletedSet.forEach((docId) => {
+          delete next[docId];
+        });
+        return next;
+      });
+      setWorkspaceSaveStateByDoc((prev) => {
+        const next = { ...prev };
+        deletedSet.forEach((docId) => {
+          delete next[docId];
+        });
+        return next;
+      });
+      deletedSet.forEach((docId) => {
+        workspaceBridgeMapRef.current.delete(docId);
+        workspaceRetryMapRef.current.delete(docId);
+        workspaceFocusMapRef.current.delete(docId);
+      });
+
+      let nextSnapshotStore = snapshotStoreRef.current;
+      deletedSet.forEach((docId) => {
+        nextSnapshotStore = removeSnapshot(nextSnapshotStore, docId);
+      });
+      applySnapshotStore(nextSnapshotStore);
+
+      let nextTabState = tabSessionRef.current;
+      deletedSet.forEach((docId) => {
+        if (hasTab(nextTabState, docId)) {
+          nextTabState = closeTab(nextTabState, { docId });
+        }
+      });
+      applyTabSessionState(nextTabState);
+
+      const currentDocDeleted = Boolean(resolvedDocumentId) && deletedSet.has(resolvedDocumentId);
+      if (currentDocDeleted) {
+        if (nextTabState.activeDocId) {
+          navigate(`/documents/${encodeURIComponent(nextTabState.activeDocId)}`, { replace: true });
+        } else {
+          navigate("/documents", { replace: true });
+        }
+      }
+
       // Refresh the full document tree
       await loadFullTree(resolvedProjectKey);
       // Keep the parent expanded if it still has children
@@ -1693,8 +2195,11 @@ function DocumentPage() {
   }, [
     resolvedProjectKey,
     activeDocument,
+    applySnapshotStore,
+    applyTabSessionState,
     deleting,
     navigate,
+    resolvedDocumentId,
     loadFavorites,
     loadFullTree,
     removeRecentEditsInState,
@@ -2102,6 +2607,68 @@ function DocumentPage() {
   const uploadProgress =
     uploadTotal > 0 ? Math.round((uploadCompleted / uploadTotal) * 100) : 0;
 
+  const activeTabDocId = (resolvedDocumentId || tabSessionState.activeDocId || "").trim() || null;
+
+  const tabItems = useMemo(
+    () =>
+      tabSessionState.tabs.map((tab) => {
+        const doc = documentsById[tab.docId];
+        const saveState = workspaceSaveStateByDoc[tab.docId];
+        return {
+          docId: tab.docId,
+          title: doc?.title ?? tab.title,
+          dirty: saveState?.status === "dirty" || saveState?.status === "error",
+        };
+      }),
+    [documentsById, tabSessionState.tabs, workspaceSaveStateByDoc],
+  );
+
+  const renderWorkspaceStack = () => {
+    if (tabSessionState.tabs.length === 0) {
+      return null;
+    }
+    return (
+      <div className="doc-page-workspace-stack">
+        {tabSessionState.tabs.map((tab) => {
+          const tabDocument =
+            documentsById[tab.docId] ??
+            (activeDocument && activeDocument.id === tab.docId ? activeDocument : null);
+          const isActive = tab.docId === activeTabDocId;
+          return (
+            <div
+              key={`${resolvedProjectKey}:${tab.docId}`}
+              className={`doc-page-workspace-pane${isActive ? " active" : ""}`}
+              style={{ display: isActive ? "flex" : "none" }}
+            >
+              {tabDocument ? (
+                <DocumentWorkspace
+                  projectKey={resolvedProjectKey}
+                  documentId={tabDocument.id}
+                  title={tabDocument.title}
+                  content={tabDocument.content}
+                  blockId={isActive ? blockIdParam : null}
+                  showTitle={showDocumentTitle}
+                  onSaved={(payload) => handleWorkspaceSaved(tabDocument.id, payload)}
+                  onSaveStateChange={(state) =>
+                    handleWorkspaceSaveStateChange(tabDocument.id, {
+                      status: state.status as DocumentEditorSaveStatus,
+                      error: state.error,
+                    })
+                  }
+                  onRetryBind={(handler) => handleWorkspaceRetryBind(tabDocument.id, handler)}
+                  onFocusBind={(handler) => handleWorkspaceFocusBind(tabDocument.id, handler)}
+                  onBridgeBind={(bridge) => handleWorkspaceBridgeBind(tabDocument.id, bridge)}
+                />
+              ) : (
+                <div className="doc-viewer-state">加载文档中...</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   const bodyContent = () => {
     if (!resolvedDocumentId) {
       return (
@@ -2171,19 +2738,7 @@ function DocumentPage() {
             ) : null}
           </div>
         ) : null}
-        <DocumentWorkspace
-          key={`${resolvedProjectKey}:${activeDocument.id}`}
-          projectKey={resolvedProjectKey}
-          documentId={activeDocument.id}
-          title={activeDocument.title}
-          content={activeDocument.content}
-          blockId={blockIdParam}
-          showTitle={showDocumentTitle}
-          onSaved={handleWorkspaceSaved}
-          onSaveStateChange={handleWorkspaceSaveStateChange}
-          onRetryBind={handleWorkspaceRetryBind}
-          onFocusBind={handleWorkspaceFocusBind}
-        />
+        {renderWorkspaceStack()}
       </div>
     );
   };
@@ -2228,6 +2783,14 @@ function DocumentPage() {
             <div className="doc-page-right-topbar-actions">
               <DocumentTreeToggleButton />
             </div>
+            <DocumentTabBar
+              tabs={tabItems}
+              activeDocId={activeTabDocId}
+              onActivate={handleActivateTab}
+              onClose={(docId) => {
+                void handleCloseTab(docId);
+              }}
+            />
           </div>
           {showBreadcrumb || showHeaderActions ? (
             <DocumentHeader
