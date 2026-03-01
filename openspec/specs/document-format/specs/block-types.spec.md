@@ -4,6 +4,36 @@
 
 本规范定义了 Zeus 文档编辑器支持的所有 Block 类型及其属性。
 
+## 文本类块通用样式属性
+
+以下属性适用于文本类块：
+
+- `paragraph`、`heading`、`blockquote`
+- `bulletList`、`orderedList`、`taskList`
+- `listItem`、`taskItem`
+- `tableCell`、`tableHeader`
+
+| 属性 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `backgroundColor` | `string` | 否 | `null` | 块背景色（仅支持预设 token，如 `var(--tt-color-highlight-blue)`） |
+| `textColor` | `string` | 否 | `null` | 块级文本颜色（仅支持预设 token，如 `var(--tt-color-text-red)`） |
+
+示例：
+
+```json
+{
+  "type": "paragraph",
+  "attrs": {
+    "id": "p-uuid-color",
+    "backgroundColor": "var(--tt-color-highlight-yellow)",
+    "textColor": "var(--tt-color-text-blue)"
+  },
+  "content": [
+    { "type": "text", "text": "带块样式的段落" }
+  ]
+}
+```
+
 ---
 
 ## paragraph

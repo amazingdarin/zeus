@@ -1,8 +1,11 @@
 export type BuiltinBlockType =
   | "paragraph"
   | "heading-1"
+  | "collapsible-heading-1"
   | "heading-2"
+  | "collapsible-heading-2"
   | "heading-3"
+  | "collapsible-heading-3"
   | "toggle-block"
   | "bullet-list"
   | "ordered-list"
@@ -10,15 +13,27 @@ export type BuiltinBlockType =
   | "blockquote"
   | "horizontal-rule"
   | "code-block"
+  | "math"
+  | "chart"
+  | "mindmap"
+  | "toc"
+  | "link-preview"
   | "image"
   | "file"
-  | "table";
+  | "table"
+  | "columns-2"
+  | "columns-3"
+  | "columns-4"
+  | "columns-5";
 
 export const BUILTIN_BLOCK_TYPES: BuiltinBlockType[] = [
   "paragraph",
   "heading-1",
+  "collapsible-heading-1",
   "heading-2",
+  "collapsible-heading-2",
   "heading-3",
+  "collapsible-heading-3",
   "toggle-block",
   "bullet-list",
   "ordered-list",
@@ -26,9 +41,18 @@ export const BUILTIN_BLOCK_TYPES: BuiltinBlockType[] = [
   "blockquote",
   "horizontal-rule",
   "code-block",
+  "math",
+  "chart",
+  "mindmap",
+  "toc",
+  "link-preview",
   "image",
   "file",
   "table",
+  "columns-2",
+  "columns-3",
+  "columns-4",
+  "columns-5",
 ];
 
 export type HoveredBlockRange = {
@@ -50,6 +74,71 @@ export type NormalizedDropTarget = {
   placement: BlockDropPlacement;
   indicatorTop: number;
 };
+
+export type FloatingMenuPlacement = {
+  left: number;
+  top: number;
+  horizontal: "right" | "left";
+  vertical: "down" | "up";
+};
+
+export function resolveFloatingMenuPlacement(input: {
+  anchorX: number;
+  anchorY: number;
+  menuWidth: number;
+  menuHeight: number;
+  viewportLeft: number;
+  viewportTop: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  offsetX?: number;
+  offsetY?: number;
+  margin?: number;
+}): FloatingMenuPlacement {
+  const margin = input.margin ?? 8;
+  const offsetX = input.offsetX ?? 0;
+  const offsetY = input.offsetY ?? 0;
+  const viewportRight = input.viewportLeft + Math.max(0, input.viewportWidth);
+  const viewportBottom = input.viewportTop + Math.max(0, input.viewportHeight);
+
+  const fitsRight = input.anchorX + offsetX + input.menuWidth <= viewportRight - margin;
+  const fitsLeft = input.anchorX - offsetX - input.menuWidth >= input.viewportLeft + margin;
+  const horizontal: "right" | "left" = fitsRight || !fitsLeft ? "right" : "left";
+
+  const fitsDown = input.anchorY + offsetY + input.menuHeight <= viewportBottom - margin;
+  const fitsUp = input.anchorY - offsetY - input.menuHeight >= input.viewportTop + margin;
+  const vertical: "down" | "up" = fitsDown || !fitsUp ? "down" : "up";
+
+  const rawLeft =
+    horizontal === "right"
+      ? input.anchorX + offsetX
+      : input.anchorX - input.menuWidth - offsetX;
+  const rawTop =
+    vertical === "down"
+      ? input.anchorY + offsetY
+      : input.anchorY - input.menuHeight - offsetY;
+
+  const minLeft = input.viewportLeft + margin;
+  const maxLeft = viewportRight - input.menuWidth - margin;
+  const minTop = input.viewportTop + margin;
+  const maxTop = viewportBottom - input.menuHeight - margin;
+
+  const left = Math.min(
+    Math.max(rawLeft, Math.min(minLeft, maxLeft)),
+    Math.max(minLeft, maxLeft)
+  );
+  const top = Math.min(
+    Math.max(rawTop, Math.min(minTop, maxTop)),
+    Math.max(minTop, maxTop)
+  );
+
+  return {
+    left,
+    top,
+    horizontal,
+    vertical,
+  };
+}
 
 export function isPointerInLeftRail(input: {
   relativeX: number;
@@ -179,4 +268,21 @@ export function isDesktopHandleEnabled(input: {
   mode: "edit" | "view";
 }): boolean {
   return !input.isMobile && input.mode === "edit";
+}
+
+export function isBlockActionMenuShortcut(input: {
+  key: string;
+  code?: string;
+  metaKey: boolean;
+  altKey: boolean;
+  ctrlKey: boolean;
+}): boolean {
+  if (input.ctrlKey) {
+    return false;
+  }
+  const isSlashKey = input.code === "Slash" || input.key === "/";
+  if (!isSlashKey) {
+    return false;
+  }
+  return input.metaKey || input.altKey;
 }

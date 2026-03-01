@@ -5,7 +5,7 @@ import type { PointerEvent as ReactPointerEvent, ReactNode, ReactElement } from 
 import type { Editor, JSONContent } from "@tiptap/react"
 import { EditorContent, EditorContext, useEditor } from "@tiptap/react"
 import type { Extensions } from "@tiptap/core"
-import { Fragment } from "@tiptap/pm/model"
+import { Fragment, type Node as ProsemirrorNode } from "@tiptap/pm/model"
 
 // --- Tiptap Core Extensions ---
 import { StarterKit } from "@tiptap/starter-kit"
@@ -44,6 +44,7 @@ import { TocNode } from "../../nodes/toc-node/toc-node-extension"
 import { MathNode } from "../../nodes/math-node/math-node-extension"
 import { ChartNode } from "../../nodes/chart-node/chart-node-extension"
 import { MindmapNode } from "../../nodes/mindmap-node/mindmap-node-extension"
+import { ColumnNode, ColumnsNode } from "../../nodes/columns-node/columns-node-extension"
 import { createTableExtensions } from "../../nodes/table-node/table-node-extension"
 import "../../nodes/blockquote-node/blockquote-node.scss"
 import "../../nodes/code-block-node/code-block-node.scss"
@@ -58,6 +59,7 @@ import "../../nodes/table-node/table-node.scss"
 import "../../nodes/math-node/math-node.scss"
 import "../../nodes/chart-node/chart-node.scss"
 import "../../nodes/mindmap-node/mindmap-node.scss"
+import "../../nodes/columns-node/columns-node.scss"
 import "../../nodes/edu-question-set-node/edu-question-set-node.scss"
 import "../../ui/table-button/table-menu.scss"
 import "../../ui/chart-button/chart-button.scss"
@@ -77,7 +79,13 @@ import { TableMenu } from "../../ui/table-button"
 import { MathButton } from "../../ui/math-button"
 import { ChartButton } from "../../ui/chart-button"
 import { MindmapButton } from "../../ui/mindmap-button"
-import { BlockAddMenu, getBuiltinBlockItems } from "../../ui/block-add-menu"
+import {
+  BlockAddMenu,
+  getBuiltinBlockItems,
+  getPluginBlockItems,
+  type BlockMenuItem,
+  type PluginBlockItem,
+} from "../../ui/block-add-menu"
 import {
   ColorHighlightPopover,
   ColorHighlightPopoverContent,
@@ -86,6 +94,12 @@ import {
 import { MarkButton } from "../../ui/mark-button"
 import { TextAlignButton } from "../../ui/text-align-button"
 import { UndoRedoButton } from "../../ui/undo-redo-button"
+import {
+  buildBlockStyleMenuState,
+  collectNodeStyleValues,
+  type BlockStyleAttrName,
+  type BlockStyleMenuState,
+} from "../../ui/block-style-menu"
 
 // --- Icons ---
 import { ArrowLeftIcon } from "../../icons/arrow-left-icon"
@@ -100,7 +114,11 @@ import { useCursorVisibility } from "../../hooks/use-cursor-visibility"
 // --- Components ---
 
 // --- Lib ---
-import { handleImageUpload, MAX_FILE_SIZE } from "../../lib/tiptap-utils"
+import {
+  getSelectedNodesOfType,
+  handleImageUpload,
+  MAX_FILE_SIZE,
+} from "../../lib/tiptap-utils"
 import {
   BlockIdExtension,
   ensureBlockIds,
@@ -113,22 +131,38 @@ import { BlockTypePlaceholderExtension } from "../../extensions/BlockTypePlaceho
 import {
   extractTopLevelBlocks,
 } from "../../extensions/BlockCollapseExtension"
+import { NodeBackground } from "../../extensions/node-background-extension"
+import {
+  BLOCK_BACKGROUND_COLOR_OPTIONS,
+  BLOCK_TEXT_COLOR_OPTIONS,
+} from "../../extensions/block-style-palette"
 import { HeadingCollapseExtension } from "../../extensions/HeadingCollapseExtension"
 import { TextEnterBehaviorExtension } from "../../extensions/TextEnterBehaviorExtension"
 import {
   isPointerInLeftRail,
   moveMenuHighlightIndex,
   resolveHandleAnchorBlockId,
+  resolveFloatingMenuPlacement,
   resolveNormalizedDropTarget,
   shouldHideControlsOnPointerExit,
   isDesktopHandleEnabled,
+  isBlockActionMenuShortcut,
   resolveHoveredBlockId,
   type BuiltinBlockType,
 } from "../../extensions/block-add-handle"
 import {
+  hasLongerShortcutPrefix,
   matchSlashShortcutToken,
   resolveDocumentBlockShortcuts,
 } from "../../extensions/block-shortcuts"
+import { shouldApplyIncomingContentSync } from "../../extensions/content-sync"
+import {
+  convertTopLevelTextBlock,
+  getConvertibleTargetTypes,
+  resolveCurrentBlockConvertType,
+  type ConvertibleTextBlockType,
+} from "../../extensions/block-conversion"
+import { cloneBlockNodeForDuplicate } from "../../extensions/block-duplicate"
 import { buildStandaloneBuiltinBlockContent } from "../../extensions/builtin-block-content"
 
 // --- Styles ---
@@ -156,6 +190,7 @@ type DocEditorProps = {
 
 type PluginBlockToolbarAction = {
   id: string
+  blockType?: string
   title: string
   toolbarButton: ReactNode
 }
@@ -172,6 +207,7 @@ type TopLevelBlock = {
   id: string
   pos: number
   endPos: number
+  node: ProsemirrorNode
 }
 
 function getTopLevelBlocks(editor: Editor): TopLevelBlock[] {
@@ -179,6 +215,7 @@ function getTopLevelBlocks(editor: Editor): TopLevelBlock[] {
     id: block.id,
     pos: block.pos,
     endPos: block.endPos,
+    node: block.node,
   }))
 }
 
@@ -228,6 +265,41 @@ function parseCssPx(value: string | null | undefined, fallback: number): number 
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
+function estimateBlockMenuHeight(itemCount: number): number {
+  const count = Math.max(0, itemCount)
+  return Math.min(360, Math.max(120, 56 + count * 34))
+}
+
+const DOC_EDITOR_BLOCK_STYLE_TYPES = [
+  "paragraph",
+  "heading",
+  "blockquote",
+  "bulletList",
+  "orderedList",
+  "taskList",
+  "listItem",
+  "taskItem",
+  "tableCell",
+  "tableHeader",
+] as const
+
+function resolveBlockStyleSelectionState(
+  editor: Editor | null,
+  attrName: BlockStyleAttrName
+): BlockStyleMenuState {
+  if (!editor) {
+    return { kind: "empty" }
+  }
+  const targets = getSelectedNodesOfType(
+    editor.state.selection,
+    Array.from(DOC_EDITOR_BLOCK_STYLE_TYPES)
+  )
+  if (targets.length === 0) {
+    return { kind: "empty" }
+  }
+  return buildBlockStyleMenuState(collectNodeStyleValues(targets, attrName))
+}
+
 const defaultContent: JSONContent = {
   type: "doc",
   content: [
@@ -246,11 +318,29 @@ function insertBuiltinBlock(editor: Editor, type: BuiltinBlockType): void {
     case "heading-1":
       chain.setHeading({ level: 1 }).run()
       return
+    case "collapsible-heading-1":
+      chain
+        .setHeading({ level: 1 })
+        .updateAttributes("heading", { collapsible: true })
+        .run()
+      return
     case "heading-2":
       chain.setHeading({ level: 2 }).run()
       return
+    case "collapsible-heading-2":
+      chain
+        .setHeading({ level: 2 })
+        .updateAttributes("heading", { collapsible: true })
+        .run()
+      return
     case "heading-3":
       chain.setHeading({ level: 3 }).run()
+      return
+    case "collapsible-heading-3":
+      chain
+        .setHeading({ level: 3 })
+        .updateAttributes("heading", { collapsible: true })
+        .run()
       return
     case "toggle-block":
       chain.insertContent([
@@ -282,6 +372,21 @@ function insertBuiltinBlock(editor: Editor, type: BuiltinBlockType): void {
     case "code-block":
       chain.setCodeBlock().run()
       return
+    case "math":
+      chain.insertMath({ latex: "", display: true }).run()
+      return
+    case "chart":
+      chain.insertChart({ chartType: "bar", mode: "simple" }).run()
+      return
+    case "mindmap":
+      chain.insertMindmap().run()
+      return
+    case "toc":
+      chain.insertToc().run()
+      return
+    case "link-preview":
+      chain.insertLinkPreview({ url: "", status: "idle" }).run()
+      return
     case "image":
       chain.setImageUploadNode().run()
       return
@@ -290,6 +395,18 @@ function insertBuiltinBlock(editor: Editor, type: BuiltinBlockType): void {
       return
     case "table":
       chain.insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+      return
+    case "columns-2":
+      chain.insertColumns({ count: 2 }).run()
+      return
+    case "columns-3":
+      chain.insertColumns({ count: 3 }).run()
+      return
+    case "columns-4":
+      chain.insertColumns({ count: 4 }).run()
+      return
+    case "columns-5":
+      chain.insertColumns({ count: 5 }).run()
       return
     default:
       return
@@ -391,6 +508,42 @@ function renderToolbarNodeWithEditor(node: ReactNode, editor: Editor | null): Re
     )
   }
   return node
+}
+
+function tryInvokeToolbarButton(node: ReactNode, editor: Editor): boolean {
+  const rendered = renderToolbarNodeWithEditor(node, editor)
+  if (!isValidElement(rendered)) {
+    return false
+  }
+  const onClick = (rendered.props as { onClick?: unknown }).onClick
+  if (typeof onClick !== "function") {
+    return false
+  }
+  try {
+    onClick({
+      preventDefault: () => {},
+      stopPropagation: () => {},
+      defaultPrevented: false,
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+function tryInsertPluginBlock(editor: Editor, action: PluginBlockToolbarAction): boolean {
+  const blockType = String(action.blockType || "").trim()
+  if (blockType) {
+    const insertedByBlockType = editor
+      .chain()
+      .focus()
+      .insertContent({ type: blockType })
+      .run()
+    if (insertedByBlockType) {
+      return true
+    }
+  }
+  return tryInvokeToolbarButton(action.toolbarButton, editor)
 }
 
 const PluginBlockDropdown = ({
@@ -614,6 +767,10 @@ export function DocEditor({
   const lastContentRef = useRef<string | null>(null)
   const taskCheckChangeRef = useRef(onTaskCheckChange)
   const [blockAddMenuOpen, setBlockAddMenuOpen] = useState(false)
+  const [blockActionMenuOpen, setBlockActionMenuOpen] = useState(false)
+  const [blockActionConvertMenuOpen, setBlockActionConvertMenuOpen] = useState(false)
+  const [blockActionBackgroundMenuOpen, setBlockActionBackgroundMenuOpen] = useState(false)
+  const [blockActionTextMenuOpen, setBlockActionTextMenuOpen] = useState(false)
   const [blockMenuHighlightIndex, setBlockMenuHighlightIndex] = useState(0)
   const [blockControlsVisible, setBlockControlsVisible] = useState(false)
   const [blockHandleTop, setBlockHandleTop] = useState(16)
@@ -622,12 +779,15 @@ export function DocEditor({
   const [dropIndicatorTop, setDropIndicatorTop] = useState<number | null>(null)
   const [slashMenuOpen, setSlashMenuOpen] = useState(false)
   const [slashMenuHighlightIndex, setSlashMenuHighlightIndex] = useState(0)
+  const [slashMenuQuery, setSlashMenuQuery] = useState("")
   const [slashMenuPosition, setSlashMenuPosition] = useState({ top: 0, left: 0 })
+  const [blockAddMenuPosition, setBlockAddMenuPosition] = useState({ top: 34, left: 0 })
   const dragSourceIdRef = useRef<string | null>(null)
   const dragDropTargetRef = useRef<{ blockId: string; placement: DropPlacement } | null>(null)
   const pendingSlashMenuOpenRef = useRef(false)
   const slashTriggerPosRef = useRef<number | null>(null)
   const slashMenuOpenRef = useRef(false)
+  const slashShortcutCommitTimerRef = useRef<number | null>(null)
   const hoverClientYRef = useRef<number | null>(null)
   const applyingInlineSlashShortcutRef = useRef(false)
   taskCheckChangeRef.current = onTaskCheckChange
@@ -669,6 +829,51 @@ export function DocEditor({
     () => getBuiltinBlockItems(resolvedBlockShortcuts.blockToKeyMap),
     [resolvedBlockShortcuts.blockToKeyMap]
   )
+  const pluginBlockMenuItems = useMemo<PluginBlockItem[]>(
+    () =>
+      getPluginBlockItems(
+        pluginBlockGroups.map((group) => ({
+          pluginId: group.pluginId,
+          pluginTitle: group.pluginTitle,
+          blocks: group.blocks.map((block) => ({
+            id: block.id,
+            title: block.title,
+          })),
+        }))
+      ),
+    [pluginBlockGroups]
+  )
+  const blockMenuItems = useMemo<BlockMenuItem[]>(
+    () => [...builtinBlockItems, ...pluginBlockMenuItems],
+    [builtinBlockItems, pluginBlockMenuItems]
+  )
+  const slashMenuItems = useMemo<BlockMenuItem[]>(
+    () => {
+      const query = slashMenuQuery.trim()
+      if (!query) {
+        return blockMenuItems
+      }
+      return blockMenuItems.filter((item) => {
+        const shortcut = String(item.shortcut ?? "").trim()
+        return Boolean(shortcut) && shortcut.startsWith(query)
+      })
+    },
+    [blockMenuItems, slashMenuQuery]
+  )
+  const builtinBlockLabelMap = useMemo(
+    () => new Map(builtinBlockItems.map((item) => [item.id, item.label] as const)),
+    [builtinBlockItems]
+  )
+  const pluginBlockActionMap = useMemo(() => {
+    const map = new Map<string, PluginBlockToolbarAction>()
+    for (const group of pluginBlockGroups) {
+      for (const block of group.blocks) {
+        const key = `${group.pluginId}:${block.id}`
+        map.set(key, block)
+      }
+    }
+    return map
+  }, [pluginBlockGroups])
 
   const initialContent = useMemo(
     () =>
@@ -733,6 +938,9 @@ export function DocEditor({
             return true // Allow visual update
           },
         }),
+        NodeBackground.configure({
+          types: Array.from(DOC_EDITOR_BLOCK_STYLE_TYPES),
+        }),
         Highlight.configure({ multicolor: true }),
         Image,
         Typography,
@@ -753,6 +961,8 @@ export function DocEditor({
         MathNode,
         ChartNode,
         MindmapNode,
+        ColumnNode,
+        ColumnsNode,
         ...createTableExtensions(),
         ...extensions,
         ...extraExtensions,
@@ -763,6 +973,77 @@ export function DocEditor({
     [extensionSignature, pluginBlockIdSignature]
   )
 
+  const currentBlockConvertType: ConvertibleTextBlockType | null = (() => {
+    if (!editor || !currentBlockId) {
+      return null
+    }
+    const currentBlock = findTopLevelBlockById(editor, currentBlockId)
+    if (!currentBlock) {
+      return null
+    }
+    return resolveCurrentBlockConvertType(currentBlock.node.toJSON() as JSONContent)
+  })()
+
+  const blockConvertTargetItems = useMemo<
+    Array<{ type: ConvertibleTextBlockType; label: string }>
+  >(() => {
+    if (!currentBlockConvertType) {
+      return []
+    }
+    return getConvertibleTargetTypes(currentBlockConvertType).map((type) => ({
+      type,
+      label: builtinBlockLabelMap.get(type) ?? type,
+    }))
+  }, [builtinBlockLabelMap, currentBlockConvertType])
+
+  const blockBackgroundStyleState = useMemo(
+    () => resolveBlockStyleSelectionState(editor, "backgroundColor"),
+    [editor, blockActionMenuOpen, currentBlockId]
+  )
+  const blockTextStyleState = useMemo(
+    () => resolveBlockStyleSelectionState(editor, "textColor"),
+    [editor, blockActionMenuOpen, currentBlockId]
+  )
+
+  const closeBlockActionSubmenus = useCallback(() => {
+    setBlockActionConvertMenuOpen(false)
+    setBlockActionBackgroundMenuOpen(false)
+    setBlockActionTextMenuOpen(false)
+  }, [])
+
+  const handleToggleBlockActionConvertMenu = useCallback(() => {
+    setBlockActionConvertMenuOpen((prev) => {
+      const next = !prev
+      if (next) {
+        setBlockActionBackgroundMenuOpen(false)
+        setBlockActionTextMenuOpen(false)
+      }
+      return next
+    })
+  }, [])
+
+  const handleToggleBlockActionBackgroundMenu = useCallback(() => {
+    setBlockActionBackgroundMenuOpen((prev) => {
+      const next = !prev
+      if (next) {
+        setBlockActionConvertMenuOpen(false)
+        setBlockActionTextMenuOpen(false)
+      }
+      return next
+    })
+  }, [])
+
+  const handleToggleBlockActionTextMenu = useCallback(() => {
+    setBlockActionTextMenuOpen((prev) => {
+      const next = !prev
+      if (next) {
+        setBlockActionConvertMenuOpen(false)
+        setBlockActionBackgroundMenuOpen(false)
+      }
+      return next
+    })
+  }, [])
+
   useEffect(() => {
     onEditorReady?.(editor)
   }, [editor, onEditorReady])
@@ -770,6 +1051,15 @@ export function DocEditor({
   useEffect(() => {
     slashMenuOpenRef.current = slashMenuOpen
   }, [slashMenuOpen])
+
+  useEffect(() => {
+    return () => {
+      if (slashShortcutCommitTimerRef.current != null) {
+        window.clearTimeout(slashShortcutCommitTimerRef.current)
+        slashShortcutCommitTimerRef.current = null
+      }
+    }
+  }, [])
 
   const rect = useCursorVisibility({
     editor,
@@ -782,11 +1072,53 @@ export function DocEditor({
     }
   }, [isMobile, mobileView])
 
+  const clearPendingSlashShortcutCommit = useCallback(() => {
+    if (slashShortcutCommitTimerRef.current != null) {
+      window.clearTimeout(slashShortcutCommitTimerRef.current)
+      slashShortcutCommitTimerRef.current = null
+    }
+  }, [])
+
+  const readActiveSlashToken = useCallback((): {
+    triggerPos: number
+    selectionPos: number
+    token: string
+    shortcut: string
+  } | null => {
+    if (!editor) {
+      return null
+    }
+    const triggerPos = slashTriggerPosRef.current
+    if (triggerPos == null) {
+      return null
+    }
+    const selection = editor.state.selection
+    if (selection.from !== selection.to || selection.from < triggerPos + 1) {
+      return null
+    }
+    const slashText = editor.state.doc.textBetween(triggerPos, triggerPos + 1, "\0", "\0")
+    if (slashText !== "/") {
+      return null
+    }
+    const token = editor.state.doc.textBetween(triggerPos, selection.from, "\0", "\0")
+    if (!token.startsWith("/")) {
+      return null
+    }
+    return {
+      triggerPos,
+      selectionPos: selection.from,
+      token,
+      shortcut: token.slice(1),
+    }
+  }, [editor])
+
   const closeSlashMenu = useCallback(() => {
+    clearPendingSlashShortcutCommit()
     pendingSlashMenuOpenRef.current = false
     slashTriggerPosRef.current = null
+    setSlashMenuQuery("")
     setSlashMenuOpen(false)
-  }, [])
+  }, [clearPendingSlashShortcutCommit])
 
   const openSlashMenuNearCursor = useCallback(() => {
     if (!editor) {
@@ -811,21 +1143,79 @@ export function DocEditor({
     try {
       const coords = editor.view.coordsAtPos(editor.state.selection.from)
       const shellRect = shell.getBoundingClientRect()
-      const menuWidth = 180
-      const leftRaw = coords.left - shellRect.left + contentEl.scrollLeft
-      const left = Math.max(8, Math.min(leftRaw, shell.clientWidth - menuWidth - 8))
-      const top = coords.bottom - shellRect.top + contentEl.scrollTop + 6
-      setSlashMenuPosition({
-        top: Math.max(8, top),
-        left,
+      const leftRaw = coords.left - shellRect.left
+      const topRaw = coords.bottom - shellRect.top
+      const placement = resolveFloatingMenuPlacement({
+        anchorX: leftRaw,
+        anchorY: topRaw,
+        menuWidth: 236,
+        menuHeight: estimateBlockMenuHeight(slashMenuItems.length),
+        viewportLeft: 0,
+        viewportTop: 0,
+        viewportWidth: shell.clientWidth,
+        viewportHeight: shell.clientHeight,
+        offsetX: 0,
+        offsetY: 6,
+        margin: 8,
       })
+      setSlashMenuPosition({
+        top: placement.top,
+        left: placement.left,
+      })
+      const tokenInfo = readActiveSlashToken()
+      setSlashMenuQuery(tokenInfo?.shortcut ?? "")
       setBlockAddMenuOpen(false)
+      setBlockActionMenuOpen(false)
+      closeBlockActionSubmenus()
       setSlashMenuHighlightIndex(0)
       setSlashMenuOpen(true)
     } catch {
       closeSlashMenu()
     }
-  }, [closeSlashMenu, editor])
+  }, [
+    closeBlockActionSubmenus,
+    closeSlashMenu,
+    editor,
+    readActiveSlashToken,
+    slashMenuItems.length,
+  ])
+
+  const updateBlockAddMenuPosition = useCallback((force = false) => {
+    if ((!blockAddMenuOpen && !force) || draggingBlockId) {
+      return
+    }
+    const shell = editorShellRef.current
+    const contentEl = shell?.querySelector(".doc-editor-content") as HTMLElement | null
+    const container = blockAddContainerRef.current
+    if (!shell || !contentEl || !container) {
+      return
+    }
+
+    const shellRect = shell.getBoundingClientRect()
+    const containerRect = container.getBoundingClientRect()
+    const anchorX = containerRect.right - shellRect.left + contentEl.scrollLeft
+    const anchorY = containerRect.top - shellRect.top + contentEl.scrollTop + containerRect.height / 2
+    const placement = resolveFloatingMenuPlacement({
+      anchorX,
+      anchorY,
+      menuWidth: 236,
+      menuHeight: estimateBlockMenuHeight(blockMenuItems.length),
+      viewportLeft: contentEl.scrollLeft,
+      viewportTop: contentEl.scrollTop,
+      viewportWidth: shell.clientWidth,
+      viewportHeight: shell.clientHeight,
+      offsetX: 6,
+      offsetY: 16,
+      margin: 8,
+    })
+
+    const containerOriginLeft = containerRect.left - shellRect.left + contentEl.scrollLeft
+    const containerOriginTop = containerRect.top - shellRect.top + contentEl.scrollTop
+    setBlockAddMenuPosition({
+      left: placement.left - containerOriginLeft,
+      top: placement.top - containerOriginTop,
+    })
+  }, [blockAddMenuOpen, blockMenuItems.length, draggingBlockId])
 
   const removeSlashTriggerCharacter = useCallback(() => {
     if (!editor) {
@@ -835,11 +1225,15 @@ export function DocEditor({
     if (triggerPos == null) {
       return
     }
+    const selection = editor.state.selection
+    if (selection.from !== selection.to || selection.from < triggerPos + 1) {
+      return
+    }
     const triggerText = editor.state.doc.textBetween(triggerPos, triggerPos + 1, "\0", "\0")
     if (triggerText !== "/") {
       return
     }
-    const tr = editor.state.tr.delete(triggerPos, triggerPos + 1)
+    const tr = editor.state.tr.delete(triggerPos, selection.from)
     editor.view.dispatch(tr)
   }, [editor])
 
@@ -929,6 +1323,33 @@ export function DocEditor({
     syncBlockHandleToBlock(anchorBlock)
   }, [blockControlsVisible, desktopHandleEnabled, draggingBlockId, editor, resolveHoveredBlockForClientY, syncBlockHandleToBlock])
 
+  const handleApplyBlockColorStyle = useCallback(
+    (attrName: BlockStyleAttrName, value: string | null) => {
+      if (!editor) {
+        return
+      }
+      const command = editor.chain().focus()
+      const success =
+        attrName === "backgroundColor"
+          ? value
+            ? command.setNodeBackgroundColor(value).run()
+            : command.unsetNodeBackgroundColor().run()
+          : value
+            ? command.setNodeTextColor(value).run()
+            : command.unsetNodeTextColor().run()
+
+      if (!success) {
+        return
+      }
+      closeBlockActionSubmenus()
+      setBlockActionMenuOpen(false)
+      setBlockAddMenuOpen(false)
+      closeSlashMenu()
+      updateBlockHandlePosition()
+    },
+    [closeBlockActionSubmenus, closeSlashMenu, editor, updateBlockHandlePosition]
+  )
+
   const insertBuiltinBlockFromHandle = useCallback(
     (type: BuiltinBlockType) => {
       if (!editor) {
@@ -973,22 +1394,80 @@ export function DocEditor({
     [editor]
   )
 
-  const selectBuiltinBlockFromMenu = useCallback(
-    (type: BuiltinBlockType, source: "block" | "slash") => {
+  const findBuiltinMenuItem = useCallback(
+    (type: BuiltinBlockType): BlockMenuItem | null =>
+      blockMenuItems.find(
+        (item) => item.kind === "builtin" && item.id === type
+      ) ?? null,
+    [blockMenuItems]
+  )
+
+  const selectBlockMenuItem = useCallback(
+    (item: BlockMenuItem, source: "block" | "slash") => {
       if (!editor) {
         return
       }
-      if (source === "block") {
-        insertBuiltinBlockFromHandle(type)
+
+      if (item.kind === "builtin") {
+        if (source === "block") {
+          insertBuiltinBlockFromHandle(item.id)
+        } else {
+          removeSlashTriggerCharacter()
+          insertBuiltinBlockFromSlash(item.id)
+        }
       } else {
-        removeSlashTriggerCharacter()
-        insertBuiltinBlockFromSlash(type)
+        if (source === "slash") {
+          removeSlashTriggerCharacter()
+        }
+        const pluginAction = pluginBlockActionMap.get(item.id)
+        if (pluginAction) {
+          tryInsertPluginBlock(editor, pluginAction)
+        }
       }
+
       setBlockAddMenuOpen(false)
+      setBlockActionMenuOpen(false)
+      closeBlockActionSubmenus()
       closeSlashMenu()
       updateBlockHandlePosition()
     },
-    [closeSlashMenu, editor, insertBuiltinBlockFromHandle, insertBuiltinBlockFromSlash, removeSlashTriggerCharacter, updateBlockHandlePosition]
+    [
+      closeBlockActionSubmenus,
+      closeSlashMenu,
+      editor,
+      insertBuiltinBlockFromHandle,
+      insertBuiltinBlockFromSlash,
+      pluginBlockActionMap,
+      removeSlashTriggerCharacter,
+      updateBlockHandlePosition,
+    ]
+  )
+
+  const applyInlineSlashShortcut = useCallback(
+    (tokenInfo: { triggerPos: number; selectionPos: number }, type: BuiltinBlockType) => {
+      if (!editor) {
+        return
+      }
+      applyingInlineSlashShortcutRef.current = true
+      try {
+        editor.view.dispatch(editor.state.tr.delete(tokenInfo.triggerPos, tokenInfo.selectionPos))
+        insertBuiltinBlockFromSlash(type)
+        closeSlashMenu()
+        setBlockAddMenuOpen(false)
+        setBlockActionMenuOpen(false)
+        closeBlockActionSubmenus()
+        updateBlockHandlePosition()
+      } finally {
+        applyingInlineSlashShortcutRef.current = false
+      }
+    },
+    [
+      closeBlockActionSubmenus,
+      closeSlashMenu,
+      editor,
+      insertBuiltinBlockFromSlash,
+      updateBlockHandlePosition,
+    ]
   )
 
   useEffect(() => {
@@ -1002,34 +1481,68 @@ export function DocEditor({
         return
       }
 
+      const target = event.target as HTMLElement | null
+      const inEditorContent = Boolean(
+        target?.closest(".doc-editor-content .tiptap.ProseMirror")
+      )
+
+      if (
+        inEditorContent &&
+        desktopHandleEnabled &&
+        !draggingBlockId &&
+        currentBlockId &&
+        isBlockActionMenuShortcut({
+          key: event.key,
+          code: event.code,
+          metaKey: event.metaKey,
+          altKey: event.altKey,
+          ctrlKey: event.ctrlKey,
+        })
+      ) {
+        event.preventDefault()
+        event.stopPropagation()
+        closeSlashMenu()
+        setBlockAddMenuOpen(false)
+        setBlockActionMenuOpen((prev) => !prev)
+        closeBlockActionSubmenus()
+        setBlockControlsVisible(true)
+        updateBlockHandlePosition()
+        return
+      }
+
       const menuOpen = (blockAddMenuOpen || slashMenuOpenRef.current) && !draggingBlockId
       if (menuOpen) {
-        const mappedShortcutType =
-          !event.metaKey &&
-          !event.ctrlKey &&
-          !event.altKey &&
-          !event.shiftKey &&
-          event.key.length === 1
-            ? resolvedBlockShortcuts.keyToBlockMap[event.key]
-            : undefined
-        if (mappedShortcutType) {
-          event.preventDefault()
-          event.stopPropagation()
-          selectBuiltinBlockFromMenu(
-            mappedShortcutType,
-            blockAddMenuOpen ? "block" : "slash"
-          )
-          return
+        if (blockAddMenuOpen) {
+          const mappedShortcutType =
+            !event.metaKey &&
+            !event.ctrlKey &&
+            !event.altKey &&
+            !event.shiftKey &&
+            event.key.length >= 1
+              ? resolvedBlockShortcuts.keyToBlockMap[event.key]
+              : undefined
+          if (mappedShortcutType) {
+            event.preventDefault()
+            event.stopPropagation()
+            const mappedItem = findBuiltinMenuItem(mappedShortcutType)
+            if (mappedItem) {
+              selectBlockMenuItem(mappedItem, "block")
+            }
+            return
+          }
         }
         if (event.key === "ArrowDown" || event.key === "ArrowUp") {
           event.preventDefault()
           event.stopPropagation()
+          if (!blockAddMenuOpen) {
+            clearPendingSlashShortcutCommit()
+          }
           const direction = event.key === "ArrowDown" ? "down" : "up"
           if (blockAddMenuOpen) {
             setBlockMenuHighlightIndex((prev) =>
               moveMenuHighlightIndex({
                 current: prev,
-                total: builtinBlockItems.length,
+                total: blockMenuItems.length,
                 direction,
               })
             )
@@ -1037,7 +1550,7 @@ export function DocEditor({
             setSlashMenuHighlightIndex((prev) =>
               moveMenuHighlightIndex({
                 current: prev,
-                total: builtinBlockItems.length,
+                total: slashMenuItems.length,
                 direction,
               })
             )
@@ -1047,17 +1560,40 @@ export function DocEditor({
         if (event.key === "Enter") {
           event.preventDefault()
           event.stopPropagation()
+          if (!blockAddMenuOpen) {
+            clearPendingSlashShortcutCommit()
+          }
           const activeIndex = blockAddMenuOpen ? blockMenuHighlightIndex : slashMenuHighlightIndex
-          const item = builtinBlockItems[activeIndex] ?? builtinBlockItems[0]
+          const currentItems = blockAddMenuOpen ? blockMenuItems : slashMenuItems
+          const item = currentItems[activeIndex] ?? currentItems[0]
           if (item) {
-            selectBuiltinBlockFromMenu(item.id, blockAddMenuOpen ? "block" : "slash")
+            selectBlockMenuItem(item, blockAddMenuOpen ? "block" : "slash")
           }
           return
         }
       }
 
-      const target = event.target as HTMLElement | null
-      if (!target || !target.closest(".doc-editor-content .tiptap.ProseMirror")) {
+      if (event.key === "Escape" && slashMenuOpenRef.current) {
+        event.preventDefault()
+        event.stopPropagation()
+        closeSlashMenu()
+        return
+      }
+      if (event.key === "Escape" && blockAddMenuOpen) {
+        event.preventDefault()
+        event.stopPropagation()
+        setBlockAddMenuOpen(false)
+        return
+      }
+      if (event.key === "Escape" && blockActionMenuOpen) {
+        event.preventDefault()
+        event.stopPropagation()
+        setBlockActionMenuOpen(false)
+        closeBlockActionSubmenus()
+        return
+      }
+
+      if (!inEditorContent) {
         return
       }
       if (
@@ -1070,17 +1606,6 @@ export function DocEditor({
         slashTriggerPosRef.current = editor.state.selection.from
         return
       }
-      if (event.key === "Escape" && slashMenuOpenRef.current) {
-        event.preventDefault()
-        event.stopPropagation()
-        closeSlashMenu()
-        return
-      }
-      if (event.key === "Escape" && blockAddMenuOpen) {
-        event.preventDefault()
-        event.stopPropagation()
-        setBlockAddMenuOpen(false)
-      }
     }
 
     const shell = editorShellRef.current
@@ -1091,7 +1616,35 @@ export function DocEditor({
     return () => {
       shell.removeEventListener("keydown", handleKeyDown, true)
     }
-  }, [blockAddMenuOpen, blockMenuHighlightIndex, builtinBlockItems, closeSlashMenu, draggingBlockId, editor, isEditable, resolvedBlockShortcuts.keyToBlockMap, selectBuiltinBlockFromMenu, slashMenuHighlightIndex])
+  }, [blockActionMenuOpen, blockAddMenuOpen, blockMenuHighlightIndex, blockMenuItems, clearPendingSlashShortcutCommit, closeBlockActionSubmenus, closeSlashMenu, currentBlockId, desktopHandleEnabled, draggingBlockId, editor, findBuiltinMenuItem, isEditable, resolvedBlockShortcuts.keyToBlockMap, selectBlockMenuItem, slashMenuHighlightIndex, slashMenuItems, updateBlockHandlePosition])
+
+  useEffect(() => {
+    if (slashMenuHighlightIndex < slashMenuItems.length) {
+      return
+    }
+    setSlashMenuHighlightIndex(0)
+  }, [slashMenuHighlightIndex, slashMenuItems.length])
+
+  useEffect(() => {
+    if (!blockAddMenuOpen || draggingBlockId) {
+      return
+    }
+    updateBlockAddMenuPosition()
+    const shell = editorShellRef.current
+    const contentEl = shell?.querySelector(".doc-editor-content") as HTMLElement | null
+    if (!contentEl) {
+      return
+    }
+    const handleLayout = () => {
+      updateBlockAddMenuPosition()
+    }
+    contentEl.addEventListener("scroll", handleLayout, { passive: true })
+    window.addEventListener("resize", handleLayout)
+    return () => {
+      contentEl.removeEventListener("scroll", handleLayout)
+      window.removeEventListener("resize", handleLayout)
+    }
+  }, [blockAddMenuOpen, currentBlockId, draggingBlockId, blockHandleTop, updateBlockAddMenuPosition])
 
   const moveBlockRelative = useCallback(
     (
@@ -1129,6 +1682,118 @@ export function DocEditor({
     [editor]
   )
 
+  const handleDeleteCurrentBlock = useCallback(() => {
+    if (!editor || !currentBlockId) {
+      return
+    }
+
+    const blocks = getTopLevelBlocks(editor)
+    const targetBlock = blocks.find((block) => block.id === currentBlockId)
+    if (!targetBlock) {
+      return
+    }
+
+    if (blocks.length <= 1) {
+      editor.commands.setContent(defaultContent)
+    } else {
+      const tr = editor.state.tr.delete(targetBlock.pos, targetBlock.endPos)
+      editor.view.dispatch(tr)
+    }
+
+    setBlockActionMenuOpen(false)
+    closeBlockActionSubmenus()
+    setBlockAddMenuOpen(false)
+    closeSlashMenu()
+    updateBlockHandlePosition()
+  }, [
+    closeBlockActionSubmenus,
+    closeSlashMenu,
+    currentBlockId,
+    editor,
+    updateBlockHandlePosition,
+  ])
+
+  const handleDuplicateCurrentBlock = useCallback(() => {
+    if (!editor || !currentBlockId) {
+      return
+    }
+
+    const sourceBlock = findTopLevelBlockById(editor, currentBlockId)
+    if (!sourceBlock) {
+      return
+    }
+
+    try {
+      const sourceJson = sourceBlock.node.toJSON() as JSONContent
+      const duplicatedJson = cloneBlockNodeForDuplicate(sourceJson)
+      const duplicatedNode = editor.state.schema.nodeFromJSON(duplicatedJson)
+      const tr = editor.state.tr.insert(sourceBlock.endPos, duplicatedNode)
+      editor.view.dispatch(tr)
+      editor.commands.focus()
+    } catch (error) {
+      console.warn("[doc-editor] duplicate block failed", error)
+      return
+    }
+
+    setBlockActionMenuOpen(false)
+    closeBlockActionSubmenus()
+    setBlockAddMenuOpen(false)
+    closeSlashMenu()
+    updateBlockHandlePosition()
+  }, [
+    closeBlockActionSubmenus,
+    closeSlashMenu,
+    currentBlockId,
+    editor,
+    updateBlockHandlePosition,
+  ])
+
+  const handleConvertCurrentBlock = useCallback(
+    (targetType: ConvertibleTextBlockType) => {
+      if (!editor || !currentBlockId) {
+        return
+      }
+
+      const sourceBlock = findTopLevelBlockById(editor, currentBlockId)
+      if (!sourceBlock) {
+        return
+      }
+
+      const sourceNodeJson = sourceBlock.node.toJSON() as JSONContent
+      const convertedJson = convertTopLevelTextBlock({
+        source: sourceNodeJson,
+        targetType,
+      })
+
+      try {
+        const convertedNode = editor.state.schema.nodeFromJSON(convertedJson)
+        const tr = editor.state.tr.replaceWith(
+          sourceBlock.pos,
+          sourceBlock.endPos,
+          convertedNode
+        )
+        editor.view.dispatch(tr)
+        editor.commands.focus()
+      } catch (error) {
+        console.warn("[doc-editor] block conversion failed", error)
+        return
+      }
+
+      setBlockActionMenuOpen(false)
+      closeBlockActionSubmenus()
+      setBlockAddMenuOpen(false)
+      closeSlashMenu()
+      updateBlockHandlePosition()
+    },
+    [
+      closeBlockActionSubmenus,
+      closeSlashMenu,
+      currentBlockId,
+      editor,
+      updateBlockHandlePosition,
+    ]
+  )
+
   const resolveDropTarget = useCallback(
     (clientY: number): { blockId: string; placement: DropPlacement; indicatorTop: number } | null => {
       if (!editor) {
@@ -1159,14 +1824,21 @@ export function DocEditor({
       if (!editor || !currentBlockId) {
         return
       }
+      if (event.button !== 0) {
+        return
+      }
 
       event.preventDefault()
+      const wasActionMenuOpen = blockActionMenuOpen
+      const pointerStartX = event.clientX
+      const pointerStartY = event.clientY
+      let dragging = false
+      const sourceBlockId = currentBlockId
+      const DRAG_START_DISTANCE = 4
       setBlockAddMenuOpen(false)
+      setBlockActionMenuOpen(false)
+      closeBlockActionSubmenus()
       closeSlashMenu()
-      dragSourceIdRef.current = currentBlockId
-      dragDropTargetRef.current = null
-      setDraggingBlockId(currentBlockId)
-      setDropIndicatorTop(null)
 
       const shell = editorShellRef.current
       const contentEl = shell?.querySelector(".doc-editor-content") as HTMLElement | null
@@ -1190,15 +1862,49 @@ export function DocEditor({
         setDropIndicatorTop(top)
       }
 
+      const startDragging = (clientY: number) => {
+        if (dragging) {
+          return
+        }
+        dragging = true
+        dragSourceIdRef.current = sourceBlockId
+        dragDropTargetRef.current = null
+        setDraggingBlockId(sourceBlockId)
+        setDropIndicatorTop(null)
+        updateDropIndicator(clientY)
+      }
+
       const handlePointerMove = (moveEvent: PointerEvent) => {
+        if (!dragging) {
+          const deltaX = Math.abs(moveEvent.clientX - pointerStartX)
+          const deltaY = Math.abs(moveEvent.clientY - pointerStartY)
+          if (Math.max(deltaX, deltaY) < DRAG_START_DISTANCE) {
+            return
+          }
+          startDragging(moveEvent.clientY)
+        }
+        if (!dragging) {
+          return
+        }
         moveEvent.preventDefault()
         updateDropIndicator(moveEvent.clientY)
       }
 
-      const handlePointerUp = () => {
+      const cleanupListeners = () => {
         document.removeEventListener("pointermove", handlePointerMove)
         document.removeEventListener("pointerup", handlePointerUp)
-        document.removeEventListener("pointercancel", handlePointerUp)
+        document.removeEventListener("pointercancel", handlePointerCancel)
+      }
+
+      const handlePointerUp = () => {
+        cleanupListeners()
+
+        if (!dragging) {
+          setBlockActionMenuOpen(!wasActionMenuOpen)
+          closeBlockActionSubmenus()
+          updateBlockHandlePosition()
+          return
+        }
 
         const sourceBlockId = dragSourceIdRef.current
         const dropTarget = dragDropTargetRef.current
@@ -1212,25 +1918,37 @@ export function DocEditor({
         updateBlockHandlePosition()
       }
 
+      const handlePointerCancel = () => {
+        cleanupListeners()
+        if (!dragging) {
+          return
+        }
+        dragSourceIdRef.current = null
+        dragDropTargetRef.current = null
+        setDraggingBlockId(null)
+        setDropIndicatorTop(null)
+        updateBlockHandlePosition()
+      }
+
       document.addEventListener("pointermove", handlePointerMove)
       document.addEventListener("pointerup", handlePointerUp)
-      document.addEventListener("pointercancel", handlePointerUp)
+      document.addEventListener("pointercancel", handlePointerCancel)
     },
-    [closeSlashMenu, currentBlockId, editor, moveBlockRelative, resolveDropTarget, updateBlockHandlePosition]
+    [blockActionMenuOpen, closeBlockActionSubmenus, closeSlashMenu, currentBlockId, editor, moveBlockRelative, resolveDropTarget, updateBlockHandlePosition]
   )
 
-  const handleInsertBuiltinBlock = useCallback(
-    (type: BuiltinBlockType) => {
-      selectBuiltinBlockFromMenu(type, "block")
+  const handleInsertBlockFromHandleMenu = useCallback(
+    (item: BlockMenuItem) => {
+      selectBlockMenuItem(item, "block")
     },
-    [selectBuiltinBlockFromMenu]
+    [selectBlockMenuItem]
   )
 
-  const handleInsertBuiltinBlockFromSlash = useCallback(
-    (type: BuiltinBlockType) => {
-      selectBuiltinBlockFromMenu(type, "slash")
+  const handleInsertBlockFromSlashMenu = useCallback(
+    (item: BlockMenuItem) => {
+      selectBlockMenuItem(item, "slash")
     },
-    [selectBuiltinBlockFromMenu]
+    [selectBlockMenuItem]
   )
 
   const handleControlsPointerLeave = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1239,7 +1957,7 @@ export function DocEditor({
     if (
       !shouldHideControlsOnPointerExit({
         dragging: Boolean(draggingBlockId),
-        menuOpen: blockAddMenuOpen,
+        menuOpen: blockAddMenuOpen || blockActionMenuOpen,
         movingIntoControls: movingToEditorContent,
       })
     ) {
@@ -1247,11 +1965,13 @@ export function DocEditor({
     }
     setBlockControlsVisible(false)
     hoverClientYRef.current = null
-  }, [blockAddMenuOpen, draggingBlockId])
+  }, [blockActionMenuOpen, blockAddMenuOpen, draggingBlockId])
 
   useEffect(() => {
     if (!editor || !desktopHandleEnabled) {
       setBlockAddMenuOpen(false)
+      setBlockActionMenuOpen(false)
+      closeBlockActionSubmenus()
       setBlockControlsVisible(false)
       return
     }
@@ -1266,7 +1986,7 @@ export function DocEditor({
       editor.off("update", updateBlockHandlePosition)
       contentEl?.removeEventListener("scroll", updateBlockHandlePosition)
     }
-  }, [desktopHandleEnabled, editor, updateBlockHandlePosition])
+  }, [closeBlockActionSubmenus, desktopHandleEnabled, editor, updateBlockHandlePosition])
 
   useEffect(() => {
     if (!editor || !desktopHandleEnabled) {
@@ -1308,7 +2028,7 @@ export function DocEditor({
       if (
         !shouldHideControlsOnPointerExit({
           dragging: Boolean(draggingBlockId),
-          menuOpen: blockAddMenuOpen,
+          menuOpen: blockAddMenuOpen || blockActionMenuOpen,
           movingIntoControls,
         })
       ) {
@@ -1324,10 +2044,10 @@ export function DocEditor({
       contentEl.removeEventListener("pointermove", handlePointerMove)
       contentEl.removeEventListener("pointerleave", handlePointerLeave)
     }
-  }, [blockAddMenuOpen, desktopHandleEnabled, draggingBlockId, editor, updateBlockHandleFromClientY])
+  }, [blockActionMenuOpen, blockAddMenuOpen, desktopHandleEnabled, draggingBlockId, editor, updateBlockHandleFromClientY])
 
   useEffect(() => {
-    if (!desktopHandleEnabled || !blockAddMenuOpen) {
+    if (!desktopHandleEnabled || (!blockAddMenuOpen && !blockActionMenuOpen)) {
       return
     }
     const handlePointerDown = (event: MouseEvent) => {
@@ -1336,12 +2056,14 @@ export function DocEditor({
         return
       }
       setBlockAddMenuOpen(false)
+      setBlockActionMenuOpen(false)
+      closeBlockActionSubmenus()
     }
     document.addEventListener("mousedown", handlePointerDown)
     return () => {
       document.removeEventListener("mousedown", handlePointerDown)
     }
-  }, [blockAddMenuOpen, desktopHandleEnabled])
+  }, [blockActionMenuOpen, blockAddMenuOpen, closeBlockActionSubmenus, desktopHandleEnabled])
 
   useEffect(() => {
     if (!slashMenuOpen) {
@@ -1367,16 +2089,15 @@ export function DocEditor({
     const handleUpdate = () => {
       const nextContent = editor.getJSON()
       const serialized = JSON.stringify(nextContent)
+      const keyToBlockMap = resolvedBlockShortcuts.keyToBlockMap
+      const view = editor.view as { composing?: boolean }
 
       if (slashMenuOpenRef.current) {
-        const triggerPos = slashTriggerPosRef.current
-        if (triggerPos == null) {
+        const tokenInfo = readActiveSlashToken()
+        if (!tokenInfo) {
           closeSlashMenu()
         } else {
-          const triggerText = editor.state.doc.textBetween(triggerPos, triggerPos + 1, "\0", "\0")
-          if (triggerText !== "/") {
-            closeSlashMenu()
-          }
+          setSlashMenuQuery(tokenInfo.shortcut)
         }
       }
 
@@ -1386,39 +2107,51 @@ export function DocEditor({
       }
 
       if (!applyingInlineSlashShortcutRef.current) {
-        const selection = editor.state.selection
-        const keyToBlockMap = resolvedBlockShortcuts.keyToBlockMap
-        const tokenStart = selection.from - 2
-        const view = editor.view as { composing?: boolean }
+        const tokenInfo = readActiveSlashToken()
         if (
-          selection.from === selection.to &&
-          tokenStart >= 1 &&
+          tokenInfo &&
           Object.keys(keyToBlockMap).length > 0 &&
           !view.composing
         ) {
-          const token = editor.state.doc.textBetween(
-            tokenStart,
-            selection.from,
-            "\0",
-            "\0"
-          )
           const slashShortcutType = matchSlashShortcutToken({
-            token,
+            token: tokenInfo.token,
             keyToBlockMap,
           })
           if (slashShortcutType) {
-            applyingInlineSlashShortcutRef.current = true
-            try {
-              editor.view.dispatch(editor.state.tr.delete(tokenStart, selection.from))
-              insertBuiltinBlockFromSlash(slashShortcutType)
-              closeSlashMenu()
-              setBlockAddMenuOpen(false)
-              updateBlockHandlePosition()
-            } finally {
-              applyingInlineSlashShortcutRef.current = false
+            const hasLongerPrefix = hasLongerShortcutPrefix({
+              shortcut: tokenInfo.shortcut,
+              keyToBlockMap,
+            })
+            if (hasLongerPrefix) {
+              clearPendingSlashShortcutCommit()
+              const tokenSnapshot = tokenInfo.token
+              slashShortcutCommitTimerRef.current = window.setTimeout(() => {
+                if (!editor || editor.isDestroyed) {
+                  return
+                }
+                const latestTokenInfo = readActiveSlashToken()
+                if (!latestTokenInfo || latestTokenInfo.token !== tokenSnapshot) {
+                  return
+                }
+                const latestShortcutType = matchSlashShortcutToken({
+                  token: latestTokenInfo.token,
+                  keyToBlockMap,
+                })
+                if (latestShortcutType) {
+                  applyInlineSlashShortcut(latestTokenInfo, latestShortcutType)
+                }
+              }, 180)
+              // Keep normal update flow for slash query filtering while waiting for disambiguation.
+            } else {
+              clearPendingSlashShortcutCommit()
+              applyInlineSlashShortcut(tokenInfo, slashShortcutType)
+              return
             }
-            return
+          } else {
+            clearPendingSlashShortcutCommit()
           }
+        } else {
+          clearPendingSlashShortcutCommit()
         }
       }
 
@@ -1433,7 +2166,7 @@ export function DocEditor({
     return () => {
       editor.off("update", handleUpdate)
     }
-  }, [closeSlashMenu, editor, insertBuiltinBlockFromSlash, isEditable, onChange, openSlashMenuNearCursor, resolvedBlockShortcuts.keyToBlockMap, updateBlockHandlePosition])
+  }, [applyInlineSlashShortcut, clearPendingSlashShortcutCommit, closeSlashMenu, editor, isEditable, onChange, openSlashMenuNearCursor, readActiveSlashToken, resolvedBlockShortcuts.keyToBlockMap])
 
   useEffect(() => {
     if (!editor || !content) {
@@ -1448,12 +2181,18 @@ export function DocEditor({
       { extraNodeTypes: pluginBlockIdTypes }
     )
     const serialized = JSON.stringify(nextContent)
-    if (serialized === lastContentRef.current) {
-      return
-    }
     const editorSerialized = JSON.stringify(editor.getJSON())
-    if (serialized === editorSerialized) {
-      lastContentRef.current = serialized
+    if (
+      !shouldApplyIncomingContentSync({
+        incomingSerialized: serialized,
+        lastSerialized: lastContentRef.current,
+        editorSerialized,
+        editorHasFocus: Boolean(editor.isFocused),
+      })
+    ) {
+      if (serialized === editorSerialized) {
+        lastContentRef.current = serialized
+      }
       return
     }
 
@@ -1468,7 +2207,7 @@ export function DocEditor({
     return () => {
       cancelled = true
     }
-  }, [content, editor, knownExtensionNodeTypes, pluginBlockIdTypes])
+  }, [content, editor, extensionSignature, pluginBlockIdSignature])
 
   // Store onChange in a ref to avoid it as a dependency
   const onChangeRef = useRef(onChange)
@@ -1493,13 +2232,18 @@ export function DocEditor({
             { extraNodeTypes: pluginBlockIdTypes }
           )
           const serialized = JSON.stringify(nextContent)
-          if (serialized === lastContentRef.current) {
-            return
-          }
           const editorSerialized = JSON.stringify(editor.getJSON())
-          if (serialized === editorSerialized) {
-            lastContentRef.current = serialized
-            onChangeRef.current?.(nextContent)
+          if (
+            !shouldApplyIncomingContentSync({
+              incomingSerialized: serialized,
+              lastSerialized: lastContentRef.current,
+              editorSerialized,
+              editorHasFocus: Boolean(editor.isFocused),
+            })
+          ) {
+            if (serialized === editorSerialized) {
+              lastContentRef.current = serialized
+            }
             return
           }
 
@@ -1522,7 +2266,7 @@ export function DocEditor({
     return () => {
       isMounted = false
     }
-  }, [docId, onLoadDocument, editor, knownExtensionNodeTypes, pluginBlockIdTypes])
+  }, [docId, onLoadDocument, editor, extensionSignature, pluginBlockIdSignature])
 
   return (
     <div className="doc-editor-wrapper">
@@ -1558,7 +2302,7 @@ export function DocEditor({
               className="doc-editor-block-add-container"
               ref={blockAddContainerRef}
               onPointerLeave={handleControlsPointerLeave}
-              data-visible={blockControlsVisible || blockAddMenuOpen || Boolean(draggingBlockId) ? "true" : "false"}
+              data-visible={blockControlsVisible || blockAddMenuOpen || blockActionMenuOpen || Boolean(draggingBlockId) ? "true" : "false"}
               style={{ top: `${Math.round(blockHandleTop)}px` }}
             >
               <button
@@ -1568,10 +2312,15 @@ export function DocEditor({
                 disabled={!currentBlockId || Boolean(draggingBlockId)}
                 onClick={() => {
                   closeSlashMenu()
+                  setBlockActionMenuOpen(false)
+                  closeBlockActionSubmenus()
                   setBlockAddMenuOpen((prev) => {
                     const next = !prev
                     if (next) {
                       setBlockMenuHighlightIndex(0)
+                      scheduleMicrotask(() => {
+                        updateBlockAddMenuPosition(true)
+                      })
                     }
                     return next
                   })
@@ -1580,7 +2329,7 @@ export function DocEditor({
                 +
               </button>
               <button
-                className={`doc-editor-block-drag-trigger${draggingBlockId ? " active" : ""}`}
+                className={`doc-editor-block-drag-trigger${draggingBlockId || blockActionMenuOpen ? " active" : ""}`}
                 type="button"
                 aria-label="移动块"
                 disabled={!currentBlockId}
@@ -1590,18 +2339,245 @@ export function DocEditor({
               </button>
               <BlockAddMenu
                 open={blockAddMenuOpen && !draggingBlockId}
-                onSelect={handleInsertBuiltinBlock}
-                items={builtinBlockItems}
+                onSelect={handleInsertBlockFromHandleMenu}
+                items={blockMenuItems}
                 highlightedIndex={blockMenuHighlightIndex}
                 onHighlightIndexChange={setBlockMenuHighlightIndex}
+                style={{
+                  top: `${Math.round(blockAddMenuPosition.top)}px`,
+                  left: `${Math.round(blockAddMenuPosition.left)}px`,
+                }}
               />
+              {blockActionMenuOpen && !draggingBlockId ? (
+                <div className="doc-editor-block-action-menu" role="menu" aria-label="块菜单">
+                  {blockConvertTargetItems.length > 0 ? (
+                    <>
+                      <button
+                        className={
+                          blockActionConvertMenuOpen
+                            ? "doc-editor-block-action-menu-item active"
+                            : "doc-editor-block-action-menu-item"
+                        }
+                        type="button"
+                        role="menuitem"
+                        aria-haspopup="menu"
+                        aria-expanded={blockActionConvertMenuOpen}
+                        onClick={handleToggleBlockActionConvertMenu}
+                      >
+                        <span className="doc-editor-block-action-menu-item-main">
+                          <span>转换为</span>
+                          <span className="doc-editor-block-action-menu-item-arrow" aria-hidden>
+                            ›
+                          </span>
+                        </span>
+                      </button>
+                      {blockActionConvertMenuOpen ? (
+                        <div className="doc-editor-block-action-menu-submenu" role="menu" aria-label="转换为">
+                          {blockConvertTargetItems.map((item) => (
+                            <button
+                              key={`block-convert-target-${item.type}`}
+                              className="doc-editor-block-action-menu-item"
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                handleConvertCurrentBlock(item.type)
+                              }}
+                            >
+                              {item.label}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : null}
+                  <button
+                    className={
+                      blockActionBackgroundMenuOpen
+                        ? "doc-editor-block-action-menu-item active"
+                        : "doc-editor-block-action-menu-item"
+                    }
+                    type="button"
+                    role="menuitem"
+                    aria-haspopup="menu"
+                    aria-expanded={blockActionBackgroundMenuOpen}
+                    onClick={handleToggleBlockActionBackgroundMenu}
+                  >
+                    <span className="doc-editor-block-action-menu-item-main">
+                      <span>
+                        块背景色
+                        {blockBackgroundStyleState.kind === "mixed"
+                          ? "（混合）"
+                          : ""}
+                      </span>
+                      <span
+                        className="doc-editor-block-action-menu-item-arrow"
+                        aria-hidden
+                      >
+                        ›
+                      </span>
+                    </span>
+                  </button>
+                  {blockActionBackgroundMenuOpen ? (
+                    <div
+                      className="doc-editor-block-action-menu-submenu"
+                      role="menu"
+                      aria-label="块背景色"
+                    >
+                      <div
+                        className="doc-editor-block-action-menu-color-grid"
+                        role="list"
+                      >
+                        {BLOCK_BACKGROUND_COLOR_OPTIONS.map((color) => {
+                          const active =
+                            blockBackgroundStyleState.kind === "single" &&
+                            blockBackgroundStyleState.value === color.value
+                          return (
+                            <button
+                              key={`block-background-color-${color.value}`}
+                              className={`doc-editor-block-color-swatch${active ? " active" : ""}`}
+                              type="button"
+                              role="menuitem"
+                              aria-label={color.label}
+                              title={color.label}
+                              onClick={() => {
+                                handleApplyBlockColorStyle(
+                                  "backgroundColor",
+                                  color.value
+                                )
+                              }}
+                            >
+                              <span
+                                className="doc-editor-block-color-swatch-fill"
+                                style={{
+                                  backgroundColor: color.value,
+                                  borderColor:
+                                    color.border ??
+                                    "var(--tt-dropdown-menu-border-color)",
+                                }}
+                              />
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <button
+                        className="doc-editor-block-action-menu-item"
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          handleApplyBlockColorStyle("backgroundColor", null)
+                        }}
+                      >
+                        清除背景色
+                      </button>
+                    </div>
+                  ) : null}
+                  <button
+                    className={
+                      blockActionTextMenuOpen
+                        ? "doc-editor-block-action-menu-item active"
+                        : "doc-editor-block-action-menu-item"
+                    }
+                    type="button"
+                    role="menuitem"
+                    aria-haspopup="menu"
+                    aria-expanded={blockActionTextMenuOpen}
+                    onClick={handleToggleBlockActionTextMenu}
+                  >
+                    <span className="doc-editor-block-action-menu-item-main">
+                      <span>
+                        块文字色
+                        {blockTextStyleState.kind === "mixed" ? "（混合）" : ""}
+                      </span>
+                      <span
+                        className="doc-editor-block-action-menu-item-arrow"
+                        aria-hidden
+                      >
+                        ›
+                      </span>
+                    </span>
+                  </button>
+                  {blockActionTextMenuOpen ? (
+                    <div
+                      className="doc-editor-block-action-menu-submenu"
+                      role="menu"
+                      aria-label="块文字色"
+                    >
+                      <div
+                        className="doc-editor-block-action-menu-color-grid"
+                        role="list"
+                      >
+                        {BLOCK_TEXT_COLOR_OPTIONS.map((color) => {
+                          const active =
+                            blockTextStyleState.kind === "single" &&
+                            blockTextStyleState.value === color.value
+                          return (
+                            <button
+                              key={`block-text-color-${color.value}`}
+                              className={`doc-editor-block-color-swatch text${active ? " active" : ""}`}
+                              type="button"
+                              role="menuitem"
+                              aria-label={color.label}
+                              title={color.label}
+                              onClick={() => {
+                                handleApplyBlockColorStyle(
+                                  "textColor",
+                                  color.value
+                                )
+                              }}
+                            >
+                              <span
+                                className="doc-editor-block-color-swatch-fill text"
+                                style={{
+                                  color: color.value,
+                                  borderColor:
+                                    color.border ??
+                                    "var(--tt-dropdown-menu-border-color)",
+                                }}
+                              >
+                                A
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <button
+                        className="doc-editor-block-action-menu-item"
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          handleApplyBlockColorStyle("textColor", null)
+                        }}
+                      >
+                        清除文字色
+                      </button>
+                    </div>
+                  ) : null}
+                  <button
+                    className="doc-editor-block-action-menu-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={handleDuplicateCurrentBlock}
+                  >
+                    创建副本
+                  </button>
+                  <div className="doc-editor-block-action-menu-divider" />
+                  <button
+                    className="doc-editor-block-action-menu-item danger"
+                    type="button"
+                    role="menuitem"
+                    onClick={handleDeleteCurrentBlock}
+                  >
+                    删除块
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : null}
           {isEditable ? (
             <BlockAddMenu
               open={slashMenuOpen && !draggingBlockId}
-              onSelect={handleInsertBuiltinBlockFromSlash}
-              items={builtinBlockItems}
+              onSelect={handleInsertBlockFromSlashMenu}
+              items={slashMenuItems}
               className="doc-editor-slash-menu"
               highlightedIndex={slashMenuHighlightIndex}
               onHighlightIndexChange={setSlashMenuHighlightIndex}

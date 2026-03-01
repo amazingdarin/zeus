@@ -11,7 +11,7 @@ test("maps empty paragraph to paragraph placeholder", () => {
     getBlockTypePlaceholderText({
       nodeType: "paragraph",
     }),
-    "段落"
+    "可以通过/唤醒命令"
   )
 })
 
@@ -65,21 +65,43 @@ test("returns null for unsupported node types", () => {
   )
 })
 
-test("only decorates top-level paragraph/heading placeholders", () => {
+test("only decorates empty paragraph placeholder when cursor is inside the paragraph", () => {
   assert.equal(
     shouldDecorateBlockTypePlaceholder({
       nodeType: "paragraph",
       parentType: "doc",
+      nodePos: 5,
+      nodeSize: 2,
+      selectionFrom: 6,
+      selectionTo: 6,
     }),
     true
   )
   assert.equal(
     shouldDecorateBlockTypePlaceholder({
       nodeType: "paragraph",
-      parentType: "listItem",
+      parentType: "doc",
+      nodePos: 5,
+      nodeSize: 2,
+      selectionFrom: 4,
+      selectionTo: 4,
     }),
     false
   )
+  assert.equal(
+    shouldDecorateBlockTypePlaceholder({
+      nodeType: "paragraph",
+      parentType: "doc",
+      nodePos: 5,
+      nodeSize: 2,
+      selectionFrom: 6,
+      selectionTo: 7,
+    }),
+    false
+  )
+})
+
+test("only decorates top-level heading placeholders", () => {
   assert.equal(
     shouldDecorateBlockTypePlaceholder({
       nodeType: "heading",

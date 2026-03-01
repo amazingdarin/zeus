@@ -1,0 +1,109 @@
+.doc-editor-columns {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 6px 0;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 10px;
+  background: rgba(248, 250, 252, 0.7);
+  overflow-x: auto;
+}
+
+.doc-editor-columns-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.doc-editor-columns-toolbar-btn {
+  height: 26px;
+  min-width: 38px;
+  padding: 0 8px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 7px;
+  background: #fff;
+  color: rgba(15, 23, 42, 0.86);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.doc-editor-columns-toolbar-btn:hover:not(:disabled) {
+  border-color: rgba(37, 99, 235, 0.36);
+  color: #1d4ed8;
+}
+
+.doc-editor-columns-toolbar-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.doc-editor-columns-toolbar-btn.active {
+  border-color: rgba(37, 99, 235, 0.5);
+  color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.doc-editor-columns-track {
+  display: grid;
+  align-items: start;
+  gap: 12px;
+}
+
+.doc-editor-columns[data-count="2"] .doc-editor-columns-track {
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  min-width: calc(220px * 2 + 12px);
+}
+
+.doc-editor-columns[data-count="3"] .doc-editor-columns-track {
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  min-width: calc(220px * 3 + 12px * 2);
+}
+
+.doc-editor-columns[data-count="4"] .doc-editor-columns-track {
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  min-width: calc(220px * 4 + 12px * 3);
+}
+
+.doc-editor-columns[data-count="5"] .doc-editor-columns-track {
+  grid-template-columns: repeat(5, minmax(220px, 1fr));
+  min-width: calc(220px * 5 + 12px * 4);
+}
+
+.doc-editor-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 86px;
+  padding: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.doc-editor-column > :last-child {
+  margin-bottom: 0;
+}
+
+[data-theme="dark"] .doc-editor-columns {
+  border-color: rgba(226, 232, 240, 0.2);
+  background: rgba(15, 23, 42, 0.42);
+}
+
+[data-theme="dark"] .doc-editor-columns-toolbar-btn {
+  background: rgba(15, 23, 42, 0.7);
+  border-color: rgba(148, 163, 184, 0.28);
+  color: rgba(226, 232, 240, 0.92);
+}
+
+[data-theme="dark"] .doc-editor-columns-toolbar-btn.active {
+  background: rgba(59, 130, 246, 0.18);
+  border-color: rgba(96, 165, 250, 0.55);
+}
+
+[data-theme="dark"] .doc-editor-column {
+  border-color: rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.62);
+}
+

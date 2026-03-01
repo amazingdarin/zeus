@@ -7,6 +7,9 @@ const BASE_BLOCK_ID_NODE_TYPES = [
   "paragraph",
   "heading",
   "codeBlock",
+  "bulletList",
+  "orderedList",
+  "taskList",
   "plantuml",
   "listItem",
   "taskItem",
@@ -21,6 +24,8 @@ const BASE_BLOCK_ID_NODE_TYPES = [
   "openapiRef",
   "toc",
   "unsupportedPluginBlock",
+  "columns",
+  "column",
 ] as const
 
 const extraBlockIdNodeTypes = new Set<string>()

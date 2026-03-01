@@ -37,6 +37,8 @@ const DEFAULT_KNOWN_NODE_TYPES = new Set<string>([
   "math",
   "chart",
   "mindmap",
+  "columns",
+  "column",
   "unsupportedPluginBlock",
 ])
 
@@ -47,6 +49,7 @@ const BLOCK_CONTAINER_NODE_TYPES = new Set<string>([
   "taskItem",
   "tableCell",
   "tableHeader",
+  "column",
 ])
 
 const INLINE_SAFE_PARENT_TYPES = new Set<string>([

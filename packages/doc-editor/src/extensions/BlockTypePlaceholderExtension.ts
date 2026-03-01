@@ -10,11 +10,15 @@ type PlaceholderContext = {
 type PlaceholderNodeContext = {
   nodeType: string
   parentType?: string
+  nodePos?: number
+  nodeSize?: number
+  selectionFrom?: number
+  selectionTo?: number
 }
 
 export function getBlockTypePlaceholderText(ctx: PlaceholderContext): string | null {
   if (ctx.nodeType === "paragraph") {
-    return "段落"
+    return "可以通过/唤醒命令"
   }
   if (ctx.nodeType === "heading") {
     const level = typeof ctx.level === "number" ? Math.max(1, Math.min(6, ctx.level)) : 1
@@ -29,7 +33,26 @@ export function shouldDecorateBlockTypePlaceholder(
   if (ctx.parentType !== "doc") {
     return false
   }
-  return ctx.nodeType === "paragraph" || ctx.nodeType === "heading"
+  if (ctx.nodeType === "heading") {
+    return true
+  }
+  if (ctx.nodeType !== "paragraph") {
+    return false
+  }
+  if (
+    typeof ctx.nodePos !== "number" ||
+    typeof ctx.nodeSize !== "number" ||
+    typeof ctx.selectionFrom !== "number" ||
+    typeof ctx.selectionTo !== "number"
+  ) {
+    return false
+  }
+  if (ctx.selectionFrom !== ctx.selectionTo) {
+    return false
+  }
+  const textStart = ctx.nodePos + 1
+  const textEnd = Math.max(textStart, ctx.nodePos + ctx.nodeSize - 1)
+  return ctx.selectionFrom >= textStart && ctx.selectionFrom <= textEnd
 }
 
 export const BlockTypePlaceholderExtension = Extension.create({
@@ -48,6 +71,10 @@ export const BlockTypePlaceholderExtension = Extension.create({
               if (!shouldDecorateBlockTypePlaceholder({
                 nodeType: node.type.name,
                 parentType: parent?.type?.name,
+                nodePos: pos,
+                nodeSize: node.nodeSize,
+                selectionFrom: state.selection.from,
+                selectionTo: state.selection.to,
               })) {
                 return
               }

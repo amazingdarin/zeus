@@ -6,11 +6,16 @@ function paragraphNode(): JSONContent {
   return { type: "paragraph" }
 }
 
-function headingNode(level: 1 | 2 | 3): JSONContent {
-  return {
-    type: "heading",
-    attrs: { level },
-  }
+function headingNode(level: 1 | 2 | 3, collapsible = false): JSONContent {
+  return collapsible
+    ? {
+        type: "heading",
+        attrs: { level, collapsible: true },
+      }
+    : {
+        type: "heading",
+        attrs: { level },
+      }
 }
 
 function listItemNode(): JSONContent {
@@ -52,6 +57,17 @@ function tableNode(rows: number, columns: number): JSONContent {
   }
 }
 
+function columnsNode(count: 2 | 3 | 4 | 5): JSONContent {
+  return {
+    type: "columns",
+    attrs: { count },
+    content: Array.from({ length: count }, () => ({
+      type: "column",
+      content: [paragraphNode()],
+    })),
+  }
+}
+
 export function buildStandaloneBuiltinBlockContent(
   type: BuiltinBlockType,
 ): JSONContent | JSONContent[] {
@@ -60,10 +76,16 @@ export function buildStandaloneBuiltinBlockContent(
       return paragraphNode()
     case "heading-1":
       return headingNode(1)
+    case "collapsible-heading-1":
+      return headingNode(1, true)
     case "heading-2":
       return headingNode(2)
+    case "collapsible-heading-2":
+      return headingNode(2, true)
     case "heading-3":
       return headingNode(3)
+    case "collapsible-heading-3":
+      return headingNode(3, true)
     case "toggle-block":
       return [
         {
@@ -97,12 +119,44 @@ export function buildStandaloneBuiltinBlockContent(
       return { type: "horizontalRule" }
     case "code-block":
       return { type: "codeBlock" }
+    case "math":
+      return {
+        type: "paragraph",
+        content: [
+          {
+            type: "math",
+            attrs: { latex: "", display: true },
+          },
+        ],
+      }
+    case "chart":
+      return { type: "chart" }
+    case "mindmap":
+      return { type: "mindmap" }
+    case "toc":
+      return { type: "toc" }
+    case "link-preview":
+      return {
+        type: "link_preview",
+        attrs: {
+          url: "",
+          status: "idle",
+        },
+      }
     case "image":
       return { type: "imageUpload" }
     case "file":
       return { type: "file_block" }
     case "table":
       return tableNode(3, 3)
+    case "columns-2":
+      return columnsNode(2)
+    case "columns-3":
+      return columnsNode(3)
+    case "columns-4":
+      return columnsNode(4)
+    case "columns-5":
+      return columnsNode(5)
     default:
       return paragraphNode()
   }

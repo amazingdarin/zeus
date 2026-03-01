@@ -18,6 +18,7 @@ import { createTableExtensions } from "../nodes/table-node/table-node-extension"
 import { MathNode } from "../nodes/math-node/math-node-extension"
 import { MusicNode } from "../nodes/music-node/music-node-extension"
 import { ChartNode } from "../nodes/chart-node/chart-node-extension"
+import { ColumnNode, ColumnsNode } from "../nodes/columns-node/columns-node-extension"
 
 export type MarkdownConversionOptions = {
   extensions?: Extensions
@@ -40,6 +41,8 @@ const DEFAULT_EXTENSIONS: Extensions = [
   MathNode,
   MusicNode,
   ChartNode,
+  ColumnNode,
+  ColumnsNode,
   ...createTableExtensions(),
 ]
 
@@ -525,6 +528,22 @@ const createMarkdownSerializer = (_schema: ReturnType<typeof createMarkdownSchem
         state.ensureNewLine()
         state.write("```")
         state.closeBlock(node)
+      },
+      columns: (state: any, node: any) => {
+        node.forEach((column: any, _offset: number, index: number) => {
+          column.forEach((child: any) => {
+            state.render(child, node, index)
+          })
+          if (index < node.childCount - 1) {
+            state.ensureNewLine()
+          }
+        })
+        state.closeBlock(node)
+      },
+      column: (state: any, node: any) => {
+        node.forEach((child: any) => {
+          state.render(child, node, 0)
+        })
       },
     },
     {
