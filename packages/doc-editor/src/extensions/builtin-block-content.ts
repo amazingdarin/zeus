@@ -1,6 +1,7 @@
 import type { JSONContent } from "@tiptap/react"
 
 import type { BuiltinBlockType } from "./block-add-handle"
+import { normalizeColumnsCount, normalizeColumnsWidths } from "../nodes/columns-node/columns-transform"
 
 function paragraphNode(): JSONContent {
   return { type: "paragraph" }
@@ -57,10 +58,12 @@ function tableNode(rows: number, columns: number): JSONContent {
   }
 }
 
-function columnsNode(count: 2 | 3 | 4 | 5): JSONContent {
+function columnsNode(countInput: unknown, widthsInput?: unknown): JSONContent {
+  const count = normalizeColumnsCount(countInput)
+  const widths = normalizeColumnsWidths(widthsInput, count)
   return {
     type: "columns",
-    attrs: { count },
+    attrs: { count, widths },
     content: Array.from({ length: count }, () => ({
       type: "column",
       content: [paragraphNode()],
@@ -70,6 +73,7 @@ function columnsNode(count: 2 | 3 | 4 | 5): JSONContent {
 
 export function buildStandaloneBuiltinBlockContent(
   type: BuiltinBlockType,
+  options?: { columns?: { count?: number; widths?: unknown } },
 ): JSONContent | JSONContent[] {
   switch (type) {
     case "paragraph":
@@ -149,6 +153,8 @@ export function buildStandaloneBuiltinBlockContent(
       return { type: "file_block" }
     case "table":
       return tableNode(3, 3)
+    case "columns":
+      return columnsNode(options?.columns?.count ?? 2, options?.columns?.widths)
     case "columns-2":
       return columnsNode(2)
     case "columns-3":

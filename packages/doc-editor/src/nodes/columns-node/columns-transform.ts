@@ -1,6 +1,10 @@
 import type { JSONContent } from "@tiptap/react"
 
-type ColumnsCount = 2 | 3 | 4 | 5
+type ColumnsCount = 2 | 3 | 4 | 5 | 6 | 7 | 8
+
+const MIN_COLUMNS = 2
+const MAX_COLUMNS = 8
+const DEFAULT_COLUMN_WIDTH = 1
 
 function paragraphNode(): JSONContent {
   return { type: "paragraph" }
@@ -20,29 +24,69 @@ function cloneContent<T>(value: T): T {
 
 export function normalizeColumnsCount(value: unknown): ColumnsCount {
   const parsed = Number.parseInt(String(value ?? ""), 10)
-  if (parsed <= 2 || Number.isNaN(parsed)) {
-    return 2
+  if (parsed <= MIN_COLUMNS || Number.isNaN(parsed)) {
+    return MIN_COLUMNS
   }
-  if (parsed >= 5) {
-    return 5
+  if (parsed >= MAX_COLUMNS) {
+    return MAX_COLUMNS
   }
   return parsed as ColumnsCount
 }
 
+function normalizeSingleColumnWidth(value: unknown): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_COLUMN_WIDTH
+  }
+  return Number(parsed.toFixed(4))
+}
+
+export function createDefaultColumnWidths(countInput: unknown): number[] {
+  const count = normalizeColumnsCount(countInput)
+  return Array.from({ length: count }, () => DEFAULT_COLUMN_WIDTH)
+}
+
+export function normalizeColumnsWidths(value: unknown, countInput: unknown): number[] {
+  const count = normalizeColumnsCount(countInput)
+  const source = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(",")
+      : []
+  const normalized = source
+    .map((item) => normalizeSingleColumnWidth(item))
+    .slice(0, count)
+  while (normalized.length < count) {
+    normalized.push(DEFAULT_COLUMN_WIDTH)
+  }
+  return normalized
+}
+
 export function buildColumnsNodeJson(countInput: unknown): JSONContent {
   const count = normalizeColumnsCount(countInput)
+  const widths = createDefaultColumnWidths(count)
   return {
     type: "columns",
-    attrs: { count },
+    attrs: { count, widths },
     content: Array.from({ length: count }, () => columnNode()),
   }
 }
 
-export function resizeColumnsJson(node: JSONContent, nextCountInput: unknown): JSONContent {
+export function resizeColumnsJson(
+  node: JSONContent,
+  nextCountInput: unknown,
+  nextWidthsInput?: unknown
+): JSONContent {
   const nextCount = normalizeColumnsCount(nextCountInput)
+  const currentCount = normalizeColumnsCount(node?.attrs?.count ?? nextCount)
+  const currentWidths = normalizeColumnsWidths(node?.attrs?.widths, currentCount)
+  const nextWidths = nextWidthsInput === undefined
+    ? normalizeColumnsWidths(currentWidths, nextCount)
+    : normalizeColumnsWidths(nextWidthsInput, nextCount)
   const attrs = {
     ...(node.attrs ?? {}),
     count: nextCount,
+    widths: nextWidths,
   }
   const sourceColumns = Array.isArray(node.content)
     ? node.content.filter((item) => item?.type === "column")
@@ -97,4 +141,3 @@ export function resizeColumnsJson(node: JSONContent, nextCountInput: unknown): J
     content: kept,
   }
 }
-

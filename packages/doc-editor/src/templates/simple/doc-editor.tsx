@@ -45,6 +45,11 @@ import { MathNode } from "../../nodes/math-node/math-node-extension"
 import { ChartNode } from "../../nodes/chart-node/chart-node-extension"
 import { MindmapNode } from "../../nodes/mindmap-node/mindmap-node-extension"
 import { ColumnNode, ColumnsNode } from "../../nodes/columns-node/columns-node-extension"
+import {
+  createDefaultColumnWidths,
+  normalizeColumnsCount,
+  normalizeColumnsWidths,
+} from "../../nodes/columns-node/columns-transform"
 import { createTableExtensions } from "../../nodes/table-node/table-node-extension"
 import "../../nodes/blockquote-node/blockquote-node.scss"
 import "../../nodes/code-block-node/code-block-node.scss"
@@ -309,7 +314,28 @@ const defaultContent: JSONContent = {
   ],
 }
 
-function insertBuiltinBlock(editor: Editor, type: BuiltinBlockType): void {
+type BuiltinColumnsLayout = {
+  count?: number
+  widths?: unknown
+}
+
+function resolveBuiltinColumnsLayout(
+  layout: BuiltinColumnsLayout | undefined,
+  fallbackCount = 2
+): { count: number; widths: number[] } {
+  const count = normalizeColumnsCount(layout?.count ?? fallbackCount)
+  const widths = normalizeColumnsWidths(
+    layout?.widths ?? createDefaultColumnWidths(count),
+    count
+  )
+  return { count, widths }
+}
+
+function insertBuiltinBlock(
+  editor: Editor,
+  type: BuiltinBlockType,
+  options?: { columns?: BuiltinColumnsLayout }
+): void {
   const chain = editor.chain().focus()
   switch (type) {
     case "paragraph":
@@ -396,17 +422,22 @@ function insertBuiltinBlock(editor: Editor, type: BuiltinBlockType): void {
     case "table":
       chain.insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
       return
+    case "columns": {
+      const { count, widths } = resolveBuiltinColumnsLayout(options?.columns, 2)
+      chain.insertColumns({ count, widths }).run()
+      return
+    }
     case "columns-2":
-      chain.insertColumns({ count: 2 }).run()
+      chain.insertColumns({ count: 2, widths: createDefaultColumnWidths(2) }).run()
       return
     case "columns-3":
-      chain.insertColumns({ count: 3 }).run()
+      chain.insertColumns({ count: 3, widths: createDefaultColumnWidths(3) }).run()
       return
     case "columns-4":
-      chain.insertColumns({ count: 4 }).run()
+      chain.insertColumns({ count: 4, widths: createDefaultColumnWidths(4) }).run()
       return
     case "columns-5":
-      chain.insertColumns({ count: 5 }).run()
+      chain.insertColumns({ count: 5, widths: createDefaultColumnWidths(5) }).run()
       return
     default:
       return
@@ -417,9 +448,10 @@ function insertStandaloneBuiltinBlockAtPos(
   editor: Editor,
   type: BuiltinBlockType,
   insertPos: number,
+  options?: { columns?: BuiltinColumnsLayout },
 ): boolean {
   try {
-    const content = buildStandaloneBuiltinBlockContent(type)
+    const content = buildStandaloneBuiltinBlockContent(type, options)
     const contentItems = Array.isArray(content) ? content : [content]
     const lastInsertedType = String(contentItems[contentItems.length - 1]?.type ?? "")
     const insertedEndsWithParagraph = lastInsertedType === "paragraph"
@@ -461,9 +493,10 @@ function replaceRangeWithStandaloneBuiltinBlock(
   type: BuiltinBlockType,
   from: number,
   to: number,
+  options?: { columns?: BuiltinColumnsLayout },
 ): boolean {
   try {
-    const content = buildStandaloneBuiltinBlockContent(type)
+    const content = buildStandaloneBuiltinBlockContent(type, options)
     const contentItems = Array.isArray(content) ? content : [content]
     const lastInsertedType = String(contentItems[contentItems.length - 1]?.type ?? "")
     const insertedEndsWithParagraph = lastInsertedType === "paragraph"
@@ -782,6 +815,12 @@ export function DocEditor({
   const [slashMenuQuery, setSlashMenuQuery] = useState("")
   const [slashMenuPosition, setSlashMenuPosition] = useState({ top: 0, left: 0 })
   const [blockAddMenuPosition, setBlockAddMenuPosition] = useState({ top: 34, left: 0 })
+  const [columnsConfigOpen, setColumnsConfigOpen] = useState(false)
+  const [columnsConfigCount, setColumnsConfigCount] = useState(2)
+  const [columnsConfigWidths, setColumnsConfigWidths] = useState<number[]>(() =>
+    createDefaultColumnWidths(2)
+  )
+  const columnsConfigSourceRef = useRef<"block" | "slash">("block")
   const dragSourceIdRef = useRef<string | null>(null)
   const dragDropTargetRef = useRef<{ blockId: string; placement: DropPlacement } | null>(null)
   const pendingSlashMenuOpenRef = useRef(false)
@@ -1120,6 +1159,30 @@ export function DocEditor({
     setSlashMenuOpen(false)
   }, [clearPendingSlashShortcutCommit])
 
+  const handleColumnsConfigCountChange = useCallback((nextRaw: string) => {
+    const nextCount = normalizeColumnsCount(nextRaw)
+    setColumnsConfigCount(nextCount)
+    setColumnsConfigWidths((prev) => normalizeColumnsWidths(prev, nextCount))
+  }, [])
+
+  const handleColumnsConfigWidthChange = useCallback(
+    (index: number, nextRaw: string) => {
+      setColumnsConfigWidths((prev) => {
+        const next = normalizeColumnsWidths(prev, columnsConfigCount)
+        const parsed = Number(nextRaw)
+        next[index] = Number.isFinite(parsed) && parsed > 0
+          ? Number(parsed.toFixed(4))
+          : 1
+        return normalizeColumnsWidths(next, columnsConfigCount)
+      })
+    },
+    [columnsConfigCount]
+  )
+
+  const handleResetColumnsConfigWidths = useCallback(() => {
+    setColumnsConfigWidths(createDefaultColumnWidths(columnsConfigCount))
+  }, [columnsConfigCount])
+
   const openSlashMenuNearCursor = useCallback(() => {
     if (!editor) {
       return
@@ -1351,7 +1414,7 @@ export function DocEditor({
   )
 
   const insertBuiltinBlockFromHandle = useCallback(
-    (type: BuiltinBlockType) => {
+    (type: BuiltinBlockType, options?: { columns?: BuiltinColumnsLayout }) => {
       if (!editor) {
         return
       }
@@ -1359,16 +1422,16 @@ export function DocEditor({
         (currentBlockId ? findTopLevelBlockById(editor, currentBlockId) : null) ??
         findCurrentTopLevelBlock(editor)
       const insertPos = anchorBlock ? anchorBlock.endPos : editor.state.selection.to
-      const inserted = insertStandaloneBuiltinBlockAtPos(editor, type, insertPos)
+      const inserted = insertStandaloneBuiltinBlockAtPos(editor, type, insertPos, options)
       if (!inserted) {
-        insertBuiltinBlock(editor, type)
+        insertBuiltinBlock(editor, type, options)
       }
     },
     [currentBlockId, editor]
   )
 
   const insertBuiltinBlockFromSlash = useCallback(
-    (type: BuiltinBlockType) => {
+    (type: BuiltinBlockType, options?: { columns?: BuiltinColumnsLayout }) => {
       if (!editor) {
         return
       }
@@ -1383,13 +1446,14 @@ export function DocEditor({
             type,
             currentBlock.pos,
             currentBlock.endPos,
+            options,
           )
           if (replaced) {
             return
           }
         }
       }
-      insertBuiltinBlock(editor, type)
+      insertBuiltinBlock(editor, type, options)
     },
     [editor]
   )
@@ -1402,6 +1466,50 @@ export function DocEditor({
     [blockMenuItems]
   )
 
+  const openColumnsConfigDialog = useCallback(
+    (source: "block" | "slash") => {
+      columnsConfigSourceRef.current = source
+      setColumnsConfigCount(2)
+      setColumnsConfigWidths(createDefaultColumnWidths(2))
+      setColumnsConfigOpen(true)
+      setBlockAddMenuOpen(false)
+      setBlockActionMenuOpen(false)
+      closeBlockActionSubmenus()
+      closeSlashMenu()
+      setBlockControlsVisible(true)
+    },
+    [closeBlockActionSubmenus, closeSlashMenu]
+  )
+
+  const closeColumnsConfigDialog = useCallback(() => {
+    setColumnsConfigOpen(false)
+  }, [])
+
+  const confirmColumnsConfigInsert = useCallback(() => {
+    const source = columnsConfigSourceRef.current
+    const count = normalizeColumnsCount(columnsConfigCount)
+    const widths = normalizeColumnsWidths(columnsConfigWidths, count)
+
+    if (source === "block") {
+      insertBuiltinBlockFromHandle("columns", {
+        columns: { count, widths },
+      })
+    } else {
+      insertBuiltinBlockFromSlash("columns", {
+        columns: { count, widths },
+      })
+    }
+
+    setColumnsConfigOpen(false)
+    updateBlockHandlePosition()
+  }, [
+    columnsConfigCount,
+    columnsConfigWidths,
+    insertBuiltinBlockFromHandle,
+    insertBuiltinBlockFromSlash,
+    updateBlockHandlePosition,
+  ])
+
   const selectBlockMenuItem = useCallback(
     (item: BlockMenuItem, source: "block" | "slash") => {
       if (!editor) {
@@ -1409,6 +1517,13 @@ export function DocEditor({
       }
 
       if (item.kind === "builtin") {
+        if (item.id === "columns") {
+          if (source === "slash") {
+            removeSlashTriggerCharacter()
+          }
+          openColumnsConfigDialog(source)
+          return
+        }
         if (source === "block") {
           insertBuiltinBlockFromHandle(item.id)
         } else {
@@ -1437,6 +1552,7 @@ export function DocEditor({
       editor,
       insertBuiltinBlockFromHandle,
       insertBuiltinBlockFromSlash,
+      openColumnsConfigDialog,
       pluginBlockActionMap,
       removeSlashTriggerCharacter,
       updateBlockHandlePosition,
@@ -1451,6 +1567,10 @@ export function DocEditor({
       applyingInlineSlashShortcutRef.current = true
       try {
         editor.view.dispatch(editor.state.tr.delete(tokenInfo.triggerPos, tokenInfo.selectionPos))
+        if (type === "columns") {
+          openColumnsConfigDialog("slash")
+          return
+        }
         insertBuiltinBlockFromSlash(type)
         closeSlashMenu()
         setBlockAddMenuOpen(false)
@@ -1466,6 +1586,7 @@ export function DocEditor({
       closeSlashMenu,
       editor,
       insertBuiltinBlockFromSlash,
+      openColumnsConfigDialog,
       updateBlockHandlePosition,
     ]
   )
@@ -1479,6 +1600,20 @@ export function DocEditor({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing) {
         return
+      }
+      if (columnsConfigOpen) {
+        if (event.key === "Escape") {
+          event.preventDefault()
+          event.stopPropagation()
+          closeColumnsConfigDialog()
+          return
+        }
+        if (event.key === "Enter") {
+          event.preventDefault()
+          event.stopPropagation()
+          confirmColumnsConfigInsert()
+          return
+        }
       }
 
       const target = event.target as HTMLElement | null
@@ -1616,7 +1751,7 @@ export function DocEditor({
     return () => {
       shell.removeEventListener("keydown", handleKeyDown, true)
     }
-  }, [blockActionMenuOpen, blockAddMenuOpen, blockMenuHighlightIndex, blockMenuItems, clearPendingSlashShortcutCommit, closeBlockActionSubmenus, closeSlashMenu, currentBlockId, desktopHandleEnabled, draggingBlockId, editor, findBuiltinMenuItem, isEditable, resolvedBlockShortcuts.keyToBlockMap, selectBlockMenuItem, slashMenuHighlightIndex, slashMenuItems, updateBlockHandlePosition])
+  }, [blockActionMenuOpen, blockAddMenuOpen, blockMenuHighlightIndex, blockMenuItems, clearPendingSlashShortcutCommit, closeBlockActionSubmenus, closeColumnsConfigDialog, closeSlashMenu, columnsConfigOpen, confirmColumnsConfigInsert, currentBlockId, desktopHandleEnabled, draggingBlockId, editor, findBuiltinMenuItem, isEditable, resolvedBlockShortcuts.keyToBlockMap, selectBlockMenuItem, slashMenuHighlightIndex, slashMenuItems, updateBlockHandlePosition])
 
   useEffect(() => {
     if (slashMenuHighlightIndex < slashMenuItems.length) {
@@ -1972,6 +2107,7 @@ export function DocEditor({
       setBlockAddMenuOpen(false)
       setBlockActionMenuOpen(false)
       closeBlockActionSubmenus()
+      setColumnsConfigOpen(false)
       setBlockControlsVisible(false)
       return
     }
@@ -2571,6 +2707,96 @@ export function DocEditor({
                   </button>
                 </div>
               ) : null}
+            </div>
+          ) : null}
+          {columnsConfigOpen ? (
+            <div
+              className="doc-editor-columns-config-overlay"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget) {
+                  closeColumnsConfigDialog()
+                }
+              }}
+            >
+              <div
+                className="doc-editor-columns-config-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-label="多列块配置"
+                onMouseDown={(event) => {
+                  event.stopPropagation()
+                }}
+              >
+                <div className="doc-editor-columns-config-title">多列块配置</div>
+                <div className="doc-editor-columns-config-row">
+                  <label
+                    className="doc-editor-columns-config-label"
+                    htmlFor="doc-editor-columns-config-count"
+                  >
+                    列数（2-8）
+                  </label>
+                  <input
+                    id="doc-editor-columns-config-count"
+                    className="doc-editor-columns-config-input"
+                    type="number"
+                    min={2}
+                    max={8}
+                    step={1}
+                    value={columnsConfigCount}
+                    onChange={(event) => {
+                      handleColumnsConfigCountChange(event.target.value)
+                    }}
+                  />
+                </div>
+                <div className="doc-editor-columns-config-widths">
+                  <div className="doc-editor-columns-config-widths-header">
+                    <span>列宽权重（默认 1）</span>
+                    <button
+                      type="button"
+                      className="doc-editor-columns-config-reset"
+                      onClick={handleResetColumnsConfigWidths}
+                    >
+                      恢复默认
+                    </button>
+                  </div>
+                  <div className="doc-editor-columns-config-grid">
+                    {Array.from({ length: columnsConfigCount }, (_, index) => (
+                      <label
+                        key={`columns-width-${index}`}
+                        className="doc-editor-columns-config-width-item"
+                      >
+                        <span>第 {index + 1} 列</span>
+                        <input
+                          className="doc-editor-columns-config-input"
+                          type="number"
+                          min={0.1}
+                          step={0.1}
+                          value={String(columnsConfigWidths[index] ?? 1)}
+                          onChange={(event) => {
+                            handleColumnsConfigWidthChange(index, event.target.value)
+                          }}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="doc-editor-columns-config-actions">
+                  <button
+                    type="button"
+                    className="doc-editor-columns-config-btn secondary"
+                    onClick={closeColumnsConfigDialog}
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    className="doc-editor-columns-config-btn"
+                    onClick={confirmColumnsConfigInsert}
+                  >
+                    插入多列块
+                  </button>
+                </div>
+              </div>
             </div>
           ) : null}
           {isEditable ? (

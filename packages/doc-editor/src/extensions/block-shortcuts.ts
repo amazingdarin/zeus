@@ -19,16 +19,25 @@ export const DEFAULT_DOCUMENT_BLOCK_SHORTCUTS: Record<string, BuiltinBlockType> 
   "3>": "collapsible-heading-3",
   "0": "paragraph",
   "4": "toggle-block",
-  "2col": "columns-2",
-  "3col": "columns-3",
-  "4col": "columns-4",
-  "5col": "columns-5",
+  col: "columns",
 }
 
 const BUILTIN_BLOCK_TYPE_SET = new Set<string>(BUILTIN_BLOCK_TYPES)
 
 function isBuiltinBlockType(value: string): value is BuiltinBlockType {
   return BUILTIN_BLOCK_TYPE_SET.has(value)
+}
+
+function normalizeLegacyBlockType(value: string): string {
+  if (
+    value === "columns-2"
+    || value === "columns-3"
+    || value === "columns-4"
+    || value === "columns-5"
+  ) {
+    return "columns"
+  }
+  return value
 }
 
 function normalizeShortcutKey(value: unknown): string | null {
@@ -55,7 +64,7 @@ export function resolveDocumentBlockShortcuts(
 
   for (const [rawKey, rawBlockType] of Object.entries(source)) {
     const key = normalizeShortcutKey(rawKey)
-    const blockType = String(rawBlockType ?? "").trim()
+    const blockType = normalizeLegacyBlockType(String(rawBlockType ?? "").trim())
     if (!key || !isBuiltinBlockType(blockType)) {
       continue
     }

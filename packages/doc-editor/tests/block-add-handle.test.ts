@@ -51,10 +51,7 @@ test("builtin block menu exposes expected first-phase blocks", () => {
     "image",
     "file",
     "table",
-    "columns-2",
-    "columns-3",
-    "columns-4",
-    "columns-5",
+    "columns",
   ];
   assert.deepEqual(ids, expected);
 });

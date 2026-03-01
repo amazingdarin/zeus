@@ -27,10 +27,7 @@ test("standalone insertion: non-toggle block content is a single top-level node"
     "image",
     "file",
     "table",
-    "columns-2",
-    "columns-3",
-    "columns-4",
-    "columns-5",
+    "columns",
   ]
 
   for (const type of types) {
@@ -88,12 +85,13 @@ test("standalone insertion: collapsible heading carries collapsible attr", () =>
   assert.equal(content.attrs?.collapsible, true)
 })
 
-test("standalone insertion: columns-3 creates columns container with 3 columns", () => {
-  const content = buildStandaloneBuiltinBlockContent("columns-3")
+test("standalone insertion: columns creates container with default 2 columns", () => {
+  const content = buildStandaloneBuiltinBlockContent("columns")
   assert.equal(Array.isArray(content), false)
   assert.equal(content.type, "columns")
-  assert.equal(content.attrs?.count, 3)
-  assert.equal(content.content?.length, 3)
+  assert.equal(content.attrs?.count, 2)
+  assert.deepEqual(content.attrs?.widths, [1, 1])
+  assert.equal(content.content?.length, 2)
   assert.equal(content.content?.[0]?.type, "column")
   assert.equal(content.content?.[0]?.content?.[0]?.type, "paragraph")
 })

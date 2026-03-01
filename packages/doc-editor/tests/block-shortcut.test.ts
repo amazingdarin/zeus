@@ -16,7 +16,7 @@ test("document block shortcuts: defaults are provided when input is empty", () =
   assert.equal(resolved.keyToBlockMap["3"], "heading-3");
   assert.equal(resolved.keyToBlockMap["0"], "paragraph");
   assert.equal(resolved.keyToBlockMap["4"], "toggle-block");
-  assert.equal(resolved.keyToBlockMap["2col"], "columns-2");
+  assert.equal(resolved.keyToBlockMap.col, "columns");
   assert.equal(DEFAULT_DOCUMENT_BLOCK_SHORTCUTS["1"], "heading-1");
 });
 
@@ -68,7 +68,7 @@ test("document block shortcuts: slash token resolves mapped block", () => {
     "1": "heading-1",
     "1>": "collapsible-heading-1",
     p: "paragraph",
-    "2col": "columns-2",
+    col: "columns",
   });
 
   assert.equal(
@@ -94,10 +94,10 @@ test("document block shortcuts: slash token resolves mapped block", () => {
   );
   assert.equal(
     matchSlashShortcutToken({
-      token: "/2col",
+      token: "/col",
       keyToBlockMap: resolved.keyToBlockMap,
     }),
-    "columns-2"
+    "columns"
   );
   assert.equal(
     matchSlashShortcutToken({

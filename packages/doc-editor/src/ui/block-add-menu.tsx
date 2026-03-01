@@ -84,7 +84,7 @@ function MindmapBlockIcon() {
 }
 
 function ColumnsBlockIcon({ count }: { count: number }) {
-  const safeCount = Math.max(2, Math.min(5, count));
+  const safeCount = Math.max(2, Math.min(8, count));
   const width = 16;
   const height = 16;
   const gutter = 1;
@@ -267,31 +267,10 @@ const BUILTIN_BLOCK_ITEMS: BuiltinBlockItem[] = [
   },
   {
     kind: "builtin",
-    id: "columns-2",
-    label: "2列",
-    icon: <ColumnsBlockIcon count={2} />,
-    hint: "双列布局，适合并排展示内容",
-  },
-  {
-    kind: "builtin",
-    id: "columns-3",
-    label: "3列",
+    id: "columns",
+    label: "多列块",
     icon: <ColumnsBlockIcon count={3} />,
-    hint: "三列布局，适合信息对照展示",
-  },
-  {
-    kind: "builtin",
-    id: "columns-4",
-    label: "4列",
-    icon: <ColumnsBlockIcon count={4} />,
-    hint: "四列布局，适合卡片型排版",
-  },
-  {
-    kind: "builtin",
-    id: "columns-5",
-    label: "5列",
-    icon: <ColumnsBlockIcon count={5} />,
-    hint: "五列布局，适合高密度信息展示",
+    hint: "可配置列数（最多 8 列）和每列宽度的横向布局容器",
   },
 ];
 

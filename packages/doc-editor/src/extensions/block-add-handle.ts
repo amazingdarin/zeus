@@ -21,6 +21,8 @@ export type BuiltinBlockType =
   | "image"
   | "file"
   | "table"
+  | "columns"
+  // Legacy aliases kept for backward compatibility with stored shortcuts.
   | "columns-2"
   | "columns-3"
   | "columns-4"
@@ -49,6 +51,7 @@ export const BUILTIN_BLOCK_TYPES: BuiltinBlockType[] = [
   "image",
   "file",
   "table",
+  "columns",
   "columns-2",
   "columns-3",
   "columns-4",

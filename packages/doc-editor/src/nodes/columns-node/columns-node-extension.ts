@@ -3,13 +3,18 @@ import { ReactNodeViewRenderer } from "@tiptap/react"
 import type { JSONContent } from "@tiptap/react"
 
 import { ColumnsNodeView } from "./columns-node"
-import { buildColumnsNodeJson, normalizeColumnsCount, resizeColumnsJson } from "./columns-transform"
+import {
+  buildColumnsNodeJson,
+  normalizeColumnsCount,
+  normalizeColumnsWidths,
+  resizeColumnsJson,
+} from "./columns-transform"
 
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
     columns: {
-      insertColumns: (options?: { count?: number }) => ReturnType
-      setColumnsCount: (options: { pos: number; count: number }) => ReturnType
+      insertColumns: (options?: { count?: number; widths?: unknown }) => ReturnType
+      setColumnsCount: (options: { pos: number; count: number; widths?: unknown }) => ReturnType
     }
   }
 }
@@ -63,6 +68,20 @@ export const ColumnsNode = Node.create({
           "data-columns-count": String(normalizeColumnsCount(attributes.count)),
         }),
       },
+      widths: {
+        default: [1, 1],
+        parseHTML: (element) => {
+          const count = normalizeColumnsCount(element.getAttribute("data-columns-count"))
+          return normalizeColumnsWidths(element.getAttribute("data-column-widths"), count)
+        },
+        renderHTML: (attributes) => {
+          const count = normalizeColumnsCount(attributes.count)
+          const widths = normalizeColumnsWidths(attributes.widths, count)
+          return {
+            "data-column-widths": widths.join(","),
+          }
+        },
+      },
     }
   },
 
@@ -93,7 +112,16 @@ export const ColumnsNode = Node.create({
             return false
           }
           const count = normalizeColumnsCount(options.count ?? 2)
-          return commands.insertContent(buildColumnsNodeJson(count))
+          const json = buildColumnsNodeJson(count)
+          const widths = normalizeColumnsWidths(options.widths, count)
+          return commands.insertContent({
+            ...json,
+            attrs: {
+              ...(json.attrs ?? {}),
+              count,
+              widths,
+            },
+          })
         },
       setColumnsCount:
         (options) =>
@@ -106,7 +134,11 @@ export const ColumnsNode = Node.create({
           if (!current || current.type.name !== "columns") {
             return false
           }
-          const nextJson = resizeColumnsJson(current.toJSON() as JSONContent, options.count)
+          const nextJson = resizeColumnsJson(
+            current.toJSON() as JSONContent,
+            options.count,
+            options.widths
+          )
           const nextNode = state.schema.nodeFromJSON(nextJson)
           if (!dispatch) {
             return true
@@ -122,4 +154,3 @@ export const ColumnsNode = Node.create({
     return ReactNodeViewRenderer(ColumnsNodeView)
   },
 })
-

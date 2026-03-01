@@ -1,75 +1,118 @@
 .doc-editor-columns {
+  --doc-editor-columns-grid-template: repeat(2, minmax(220px, 1fr));
+  --doc-editor-columns-min-width: calc(220px * 2 + 12px);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 10px 12px;
+  margin: 6px 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  overflow-x: auto;
+  transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.doc-editor-columns:hover,
+.doc-editor-columns:focus-within,
+.doc-editor-columns.is-editing {
+  border-color: rgba(15, 23, 42, 0.16);
+}
+
+.doc-editor-columns-config-panel {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 2;
+  width: 232px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.16);
+  padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 12px;
-  margin: 6px 0;
-  border: 1px solid rgba(15, 23, 42, 0.16);
-  border-radius: 10px;
-  background: rgba(248, 250, 252, 0.7);
-  overflow-x: auto;
 }
 
-.doc-editor-columns-toolbar {
+.doc-editor-columns-config-panel-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex-wrap: nowrap;
+  justify-content: space-between;
+  gap: 8px;
 }
 
-.doc-editor-columns-toolbar-btn {
-  height: 26px;
-  min-width: 38px;
-  padding: 0 8px;
+.doc-editor-columns-config-panel-label {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.72);
+}
+
+.doc-editor-columns-config-panel-widths {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 8px;
+}
+
+.doc-editor-columns-config-panel-width-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: rgba(15, 23, 42, 0.68);
+}
+
+.doc-editor-columns-config-panel-input {
+  width: 64px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 7px;
+  background: #fff;
+  color: rgba(15, 23, 42, 0.88);
+  padding: 3px 6px;
+  font-size: 11px;
+}
+
+.doc-editor-columns-config-panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.doc-editor-columns-config-panel-btn {
   border: 1px solid rgba(15, 23, 42, 0.14);
   border-radius: 7px;
   background: #fff;
   color: rgba(15, 23, 42, 0.86);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1;
+  padding: 6px 8px;
   cursor: pointer;
 }
 
-.doc-editor-columns-toolbar-btn:hover:not(:disabled) {
+.doc-editor-columns-config-panel-btn:hover {
   border-color: rgba(37, 99, 235, 0.36);
   color: #1d4ed8;
 }
 
-.doc-editor-columns-toolbar-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.doc-editor-columns-toolbar-btn.active {
-  border-color: rgba(37, 99, 235, 0.5);
-  color: #1d4ed8;
-  background: rgba(37, 99, 235, 0.08);
+.doc-editor-columns-config-panel-btn.secondary {
+  color: rgba(15, 23, 42, 0.66);
 }
 
 .doc-editor-columns-track {
   display: grid;
   align-items: start;
   gap: 12px;
+  grid-template-columns: var(--doc-editor-columns-grid-template);
+  min-width: var(--doc-editor-columns-min-width);
 }
 
-.doc-editor-columns[data-count="2"] .doc-editor-columns-track {
-  grid-template-columns: repeat(2, minmax(220px, 1fr));
-  min-width: calc(220px * 2 + 12px);
-}
-
-.doc-editor-columns[data-count="3"] .doc-editor-columns-track {
-  grid-template-columns: repeat(3, minmax(220px, 1fr));
-  min-width: calc(220px * 3 + 12px * 2);
-}
-
-.doc-editor-columns[data-count="4"] .doc-editor-columns-track {
-  grid-template-columns: repeat(4, minmax(220px, 1fr));
-  min-width: calc(220px * 4 + 12px * 3);
-}
-
-.doc-editor-columns[data-count="5"] .doc-editor-columns-track {
-  grid-template-columns: repeat(5, minmax(220px, 1fr));
-  min-width: calc(220px * 5 + 12px * 4);
+.doc-editor-columns-track > [data-node-view-content-react] {
+  display: grid;
+  align-items: inherit;
+  gap: inherit;
+  grid-template-columns: inherit;
+  min-width: inherit;
 }
 
 .doc-editor-column {
@@ -77,9 +120,16 @@
   flex-direction: column;
   min-height: 86px;
   padding: 10px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
+  border: 1px solid transparent;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.88);
+  background: transparent;
+  transition: border-color 0.16s ease;
+}
+
+.doc-editor-columns:hover .doc-editor-column,
+.doc-editor-columns:focus-within .doc-editor-column,
+.doc-editor-columns.is-editing .doc-editor-column {
+  border-color: rgba(15, 23, 42, 0.12);
 }
 
 .doc-editor-column > :last-child {
@@ -87,23 +137,44 @@
 }
 
 [data-theme="dark"] .doc-editor-columns {
-  border-color: rgba(226, 232, 240, 0.2);
-  background: rgba(15, 23, 42, 0.42);
+  background: transparent;
 }
 
-[data-theme="dark"] .doc-editor-columns-toolbar-btn {
+[data-theme="dark"] .doc-editor-columns:hover,
+[data-theme="dark"] .doc-editor-columns:focus-within,
+[data-theme="dark"] .doc-editor-columns.is-editing {
+  border-color: rgba(226, 232, 240, 0.2);
+}
+
+[data-theme="dark"] .doc-editor-columns-config-panel {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.95);
+  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.55);
+}
+
+[data-theme="dark"] .doc-editor-columns-config-panel-label,
+[data-theme="dark"] .doc-editor-columns-config-panel-width-item {
+  color: rgba(226, 232, 240, 0.82);
+}
+
+[data-theme="dark"] .doc-editor-columns-config-panel-input,
+[data-theme="dark"] .doc-editor-columns-config-panel-btn {
   background: rgba(15, 23, 42, 0.7);
   border-color: rgba(148, 163, 184, 0.28);
   color: rgba(226, 232, 240, 0.92);
 }
 
-[data-theme="dark"] .doc-editor-columns-toolbar-btn.active {
-  background: rgba(59, 130, 246, 0.18);
+[data-theme="dark"] .doc-editor-columns-config-panel-btn:hover {
   border-color: rgba(96, 165, 250, 0.55);
+  color: rgba(147, 197, 253, 0.96);
 }
 
 [data-theme="dark"] .doc-editor-column {
-  border-color: rgba(148, 163, 184, 0.24);
-  background: rgba(15, 23, 42, 0.62);
+  background: transparent;
 }
 
+[data-theme="dark"] .doc-editor-columns:hover .doc-editor-column,
+[data-theme="dark"] .doc-editor-columns:focus-within .doc-editor-column,
+[data-theme="dark"] .doc-editor-columns.is-editing .doc-editor-column {
+  border-color: rgba(148, 163, 184, 0.24);
+}
