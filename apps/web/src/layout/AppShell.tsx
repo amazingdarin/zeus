@@ -58,7 +58,7 @@ function AppShell({ children }: AppShellProps) {
       return true;
     }
     if (location.pathname === "/documents/new") {
-      return false;
+      return true;
     }
     return /^\/documents\/[^/]+$/.test(location.pathname);
   }, [location.pathname]);

@@ -25,6 +25,7 @@ import KnowledgeBaseSideNav, {
 import DocumentOptimizeModal from "../components/DocumentOptimizeModal";
 import {
   fetchDocument,
+  isDocumentNotFoundError,
   fetchDocumentHierarchy,
   fetchDocumentTree,
   syncProjectDocuments,
@@ -36,6 +37,7 @@ import {
   applyProposal,
   moveDocument,
   createDocument,
+  duplicateDocument,
   deleteDocument,
   exportDocumentDocx,
   fetchUrlHtml,
@@ -95,6 +97,19 @@ import {
   type SnapshotStore,
 } from "../features/document-tabs/snapshot-store";
 import type { WorkspaceBridge } from "../features/document-tabs/workspace-bridge";
+import {
+  EPHEMERAL_DRAFT_ID,
+  EPHEMERAL_DRAFT_TITLE,
+  countProjectDocuments,
+  shouldEnterEphemeralDraftMode,
+  shouldRedirectToEphemeralDraft,
+} from "../features/document-page/ephemeral-draft-model";
+import {
+  mapHierarchyToBreadcrumb,
+  normalizeDocumentDisplayTitle,
+  updateTitleInTree,
+} from "../features/document-page/title-sync";
+import { insertDuplicateIntoTree } from "../features/document-page/duplicate-state";
 
 type DocumentData = {
   id: string;
@@ -301,6 +316,7 @@ function DocumentPage() {
   })();
 
   const [document, setDocument] = useState<DocumentData | null>(null);
+  const [ephemeralDraftDoc, setEphemeralDraftDoc] = useState<DocumentData | null>(null);
   const [documentsById, setDocumentsById] = useState<Record<string, DocumentData>>({});
   const [tabSessionState, setTabSessionState] = useState<TabSessionState>(() =>
     createInitialSessionState(),
@@ -315,6 +331,7 @@ function DocumentPage() {
   const [error, setError] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [creatingChildDoc, setCreatingChildDoc] = useState(false);
   const [diffData, setDiffData] = useState<{ metaDiff: string; contentDiff: string } | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
@@ -374,6 +391,7 @@ function DocumentPage() {
   const workspaceRetryMapRef = useRef<Map<string, () => void>>(new Map());
   const workspaceFocusMapRef = useRef<Map<string, () => void>>(new Map());
   const previousActiveDocIdRef = useRef<string | null>(null);
+  const materializingDraftRef = useRef(false);
 
   const [rootDocuments, setRootDocuments] = useState<KnowledgeBaseDocument[]>([]);
   const [childrenByParent, setChildrenByParent] = useState<
@@ -507,9 +525,8 @@ function DocumentPage() {
       if (!normalizedDocId) {
         return fallback?.trim() || "无标题文档";
       }
-      const fromSession = documentsById[normalizedDocId]?.title?.trim();
-      if (fromSession) {
-        return fromSession;
+      if (normalizedDocId === EPHEMERAL_DRAFT_ID) {
+        return ephemeralDraftDoc?.title?.trim() || EPHEMERAL_DRAFT_TITLE;
       }
       const fromRoots = rootDocuments.find((item) => item.id === normalizedDocId)?.title?.trim();
       if (fromRoots) {
@@ -520,6 +537,10 @@ function DocumentPage() {
         .find((item) => item.id === normalizedDocId)?.title?.trim();
       if (fromChildren) {
         return fromChildren;
+      }
+      const fromSession = documentsById[normalizedDocId]?.title?.trim();
+      if (fromSession) {
+        return fromSession;
       }
       const fromFavorites = favorites.find((item) => item.docId === normalizedDocId)?.title?.trim();
       if (fromFavorites) {
@@ -532,7 +553,7 @@ function DocumentPage() {
       const fallbackTitle = fallback?.trim();
       return fallbackTitle || "无标题文档";
     },
-    [childrenByParent, documentsById, favorites, recentEdits, rootDocuments],
+    [childrenByParent, documentsById, ephemeralDraftDoc, favorites, recentEdits, rootDocuments],
   );
 
   const ensureTabOpenedForDoc = useCallback(
@@ -603,6 +624,15 @@ function DocumentPage() {
       applyTabSessionState(nextState);
     },
     [applyTabSessionState],
+  );
+
+  const totalDocumentCount = useMemo(
+    () =>
+      countProjectDocuments({
+        rootDocuments,
+        childrenByParent,
+      }),
+    [childrenByParent, rootDocuments],
   );
 
   const docParentMap = useMemo(() => {
@@ -1004,6 +1034,7 @@ function DocumentPage() {
       
       // Clear current document state
       setDocument(null);
+      setEphemeralDraftDoc(null);
       setDocumentsById({});
       setError(null);
       setLoading(false);
@@ -1023,6 +1054,7 @@ function DocumentPage() {
       setSyncLogs([]);
       setSyncLogsLoading(false);
       setSyncLogsError(null);
+      materializingDraftRef.current = false;
       
       // Navigate to blank page when switching projects
       navigate("/documents", { replace: true });
@@ -1148,10 +1180,103 @@ function DocumentPage() {
     // Only depend on resolvedProjectKey - use ref for the function
   }, [resolvedProjectKey]);
 
+  useEffect(() => {
+    const projectKey = resolvedProjectKey || null;
+    if (!projectKey) {
+      return;
+    }
+    if (rootLoadAttemptRef.current !== projectKey || rootLoading) {
+      return;
+    }
+
+    const emptyProject = shouldEnterEphemeralDraftMode(totalDocumentCount);
+    if (!emptyProject) {
+      if (ephemeralDraftDoc || resolvedDocumentId === EPHEMERAL_DRAFT_ID) {
+        setEphemeralDraftDoc(null);
+      }
+      workspaceBridgeMapRef.current.delete(EPHEMERAL_DRAFT_ID);
+      workspaceRetryMapRef.current.delete(EPHEMERAL_DRAFT_ID);
+      workspaceFocusMapRef.current.delete(EPHEMERAL_DRAFT_ID);
+      setDocument((prev) => (prev?.id === EPHEMERAL_DRAFT_ID ? null : prev));
+      setDocumentsById((prev) => {
+        if (!(EPHEMERAL_DRAFT_ID in prev)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[EPHEMERAL_DRAFT_ID];
+        return next;
+      });
+      setWorkspaceSaveStateByDoc((prev) => {
+        if (!(EPHEMERAL_DRAFT_ID in prev)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[EPHEMERAL_DRAFT_ID];
+        return next;
+      });
+      const nextSnapshots = removeSnapshot(snapshotStoreRef.current, EPHEMERAL_DRAFT_ID);
+      if (nextSnapshots !== snapshotStoreRef.current) {
+        applySnapshotStore(nextSnapshots);
+      }
+      if (hasTab(tabSessionRef.current, EPHEMERAL_DRAFT_ID)) {
+        const nextTabs = closeTab(tabSessionRef.current, { docId: EPHEMERAL_DRAFT_ID });
+        applyTabSessionState(nextTabs);
+      }
+      if (resolvedDocumentId === EPHEMERAL_DRAFT_ID) {
+        const fallbackDocId = tabSessionRef.current.activeDocId;
+        if (fallbackDocId && fallbackDocId !== EPHEMERAL_DRAFT_ID) {
+          navigate(`/documents/${encodeURIComponent(fallbackDocId)}`, { replace: true });
+        } else {
+          navigate("/documents", { replace: true });
+        }
+      }
+      return;
+    }
+
+    const draftDoc = ephemeralDraftDoc ?? createEphemeralDraftDocument();
+    if (!ephemeralDraftDoc) {
+      setEphemeralDraftDoc(draftDoc);
+    }
+    setDocumentsById((prev) => {
+      const current = prev[EPHEMERAL_DRAFT_ID];
+      if (current && current.title === draftDoc.title) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [EPHEMERAL_DRAFT_ID]: current ?? draftDoc,
+      };
+    });
+    if (!resolvedDocumentId || resolvedDocumentId === EPHEMERAL_DRAFT_ID) {
+      setDocument(draftDoc);
+    }
+
+    void ensureTabOpenedForDoc(EPHEMERAL_DRAFT_ID, draftDoc.title);
+
+    const shouldRedirect =
+      shouldRedirectToEphemeralDraft({
+        totalDocumentCount,
+        routeDocId: resolvedDocumentId,
+      }) || !resolvedDocumentId;
+    if (shouldRedirect) {
+      navigate(`/documents/${encodeURIComponent(EPHEMERAL_DRAFT_ID)}`, { replace: true });
+    }
+  }, [
+    applySnapshotStore,
+    applyTabSessionState,
+    ensureTabOpenedForDoc,
+    ephemeralDraftDoc,
+    navigate,
+    resolvedDocumentId,
+    resolvedProjectKey,
+    rootLoading,
+    totalDocumentCount,
+  ]);
+
   // Expand to the selected document (runs after tree is loaded)
   useEffect(() => {
     const projectKey = resolvedProjectKey || null;
-    if (!projectKey || !resolvedDocumentId) {
+    if (!projectKey || !resolvedDocumentId || resolvedDocumentId === EPHEMERAL_DRAFT_ID) {
       return;
     }
     // Wait until tree is loaded for this project
@@ -1456,6 +1581,7 @@ function DocumentPage() {
 
   const activeDocument =
     (resolvedDocumentId ? documentsById[resolvedDocumentId] : null) ?? document;
+  const isEphemeralActive = activeDocument?.id === EPHEMERAL_DRAFT_ID;
 
   const handleFavoriteMutation = useCallback(
     async (docId: string, action: "favorite" | "unfavorite") => {
@@ -1494,7 +1620,8 @@ function DocumentPage() {
     [handleFavoriteMutation],
   );
 
-  const allowChildActions = activeDocument ? activeDocument.docType !== "overview" : true;
+  const allowChildActions =
+    activeDocument && !isEphemeralActive ? activeDocument.docType !== "overview" : true;
   const hasProposal = Boolean(proposalId);
 
   useEffect(() => {
@@ -1538,6 +1665,13 @@ function DocumentPage() {
   useEffect(() => {
     if (!resolvedProjectKey || !resolvedDocumentId) {
       setDocument(null);
+      setLoading(false);
+      setError(null);
+      currentRequestRef.current = null;
+      return;
+    }
+    if (resolvedDocumentId === EPHEMERAL_DRAFT_ID) {
+      setDocument(ephemeralDraftDoc);
       setLoading(false);
       setError(null);
       currentRequestRef.current = null;
@@ -1621,6 +1755,27 @@ function DocumentPage() {
         if (!isActive || currentRequestRef.current !== requestKey) {
           return;
         }
+        if (isDocumentNotFoundError(err)) {
+          const emptyProject = shouldEnterEphemeralDraftMode(totalDocumentCount);
+          setError(null);
+          setDocument(null);
+          if (emptyProject) {
+            navigate(`/documents/${encodeURIComponent(EPHEMERAL_DRAFT_ID)}`, { replace: true });
+            return;
+          }
+          const fallbackDocId =
+            tabSessionRef.current.tabs.find(
+              (tab) => tab.docId !== resolvedDocumentId && tab.docId !== EPHEMERAL_DRAFT_ID,
+            )?.docId
+            ?? rootDocuments[0]?.id
+            ?? null;
+          if (fallbackDocId) {
+            navigate(`/documents/${encodeURIComponent(fallbackDocId)}`, { replace: true });
+          } else {
+            navigate("/documents", { replace: true });
+          }
+          return;
+        }
         setError((err as Error).message || "加载文档失败");
         setDocument(null);
       })
@@ -1634,10 +1789,19 @@ function DocumentPage() {
     return () => {
       isActive = false;
     };
-  }, [refreshKey, resolvedDocumentId, resolvedProjectKey, syncTabTitleFromDocument]);
+  }, [
+    ephemeralDraftDoc,
+    navigate,
+    refreshKey,
+    resolvedDocumentId,
+    resolvedProjectKey,
+    rootDocuments,
+    syncTabTitleFromDocument,
+    totalDocumentCount,
+  ]);
 
   useEffect(() => {
-    if (!resolvedProjectKey || !resolvedDocumentId) {
+    if (!resolvedProjectKey || !resolvedDocumentId || resolvedDocumentId === EPHEMERAL_DRAFT_ID) {
       return;
     }
     const applyHierarchy = (hierarchy: Array<{ id: string; name: string }>) => {
@@ -1672,7 +1836,12 @@ function DocumentPage() {
   }, [getDocumentHierarchy, resolvedDocumentId, resolvedProjectKey]);
 
   useEffect(() => {
-    if (!proposalId || !resolvedProjectKey || !resolvedDocumentId) {
+    if (
+      !proposalId
+      || !resolvedProjectKey
+      || !resolvedDocumentId
+      || resolvedDocumentId === EPHEMERAL_DRAFT_ID
+    ) {
       setDiffData(null);
       setDiffError(null);
       setDiffLoading(false);
@@ -1718,17 +1887,29 @@ function DocumentPage() {
       setBreadcrumbItems([]);
       return;
     }
-    if (!document || document.id !== resolvedDocumentId) {
-      return;
-    }
-    const items = mapHierarchyToBreadcrumb(document.hierarchy, document.id, document.title);
+    const hierarchy =
+      activeDocument && activeDocument.id === resolvedDocumentId
+        ? activeDocument.hierarchy
+        : [];
+    const currentTitle = resolveTabTitle(resolvedDocumentId, activeDocument?.title);
+    const items = mapHierarchyToBreadcrumb(
+      hierarchy,
+      resolvedDocumentId,
+      currentTitle,
+    );
     setBreadcrumbItems(trimBreadcrumbItems(items));
-  }, [document, resolvedDocumentId]);
+  }, [activeDocument, resolveTabTitle, resolvedDocumentId]);
 
   useEffect(() => {
     if (!resolvedDocumentId) {
       setEditorSaveStatus("idle");
       setEditorSaveError(null);
+      return;
+    }
+    if (resolvedDocumentId === EPHEMERAL_DRAFT_ID) {
+      const draftState = workspaceSaveStateByDoc[EPHEMERAL_DRAFT_ID];
+      setEditorSaveStatus(draftState?.status ?? "draft");
+      setEditorSaveError(draftState?.error ?? null);
       return;
     }
     const saveState = workspaceSaveStateByDoc[resolvedDocumentId];
@@ -1744,30 +1925,29 @@ function DocumentPage() {
     setEditorSaveError(null);
   }, [activeDocument]);
 
-  const handleEdit = useCallback(() => {
-    const currentDocId = (resolvedDocumentId || "").trim();
-    if (!currentDocId) {
-      return;
-    }
-    workspaceFocusMapRef.current.get(currentDocId)?.();
-  }, [resolvedDocumentId]);
-
   const handleWorkspaceSaveStateChange = useCallback(
     (docId: string, state: { status: DocumentEditorSaveStatus; error: string }) => {
       const normalizedDocId = docId.trim();
       if (!normalizedDocId) {
         return;
       }
-      setWorkspaceSaveStateByDoc((prev) => ({
-        ...prev,
-        [normalizedDocId]: {
-          status: state.status,
-          error: state.error || null,
-        },
-      }));
+      const nextError = state.error || null;
+      setWorkspaceSaveStateByDoc((prev) => {
+        const previous = prev[normalizedDocId];
+        if (previous && previous.status === state.status && previous.error === nextError) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [normalizedDocId]: {
+            status: state.status,
+            error: nextError,
+          },
+        };
+      });
       if (normalizedDocId === resolvedDocumentId) {
-        setEditorSaveStatus(state.status);
-        setEditorSaveError(state.error || null);
+        setEditorSaveStatus((prev) => (prev === state.status ? prev : state.status));
+        setEditorSaveError((prev) => (prev === nextError ? prev : nextError));
       }
     },
     [resolvedDocumentId],
@@ -1797,6 +1977,112 @@ function DocumentPage() {
     }
   }, []);
 
+  const handleWorkspaceTitleChange = useCallback(
+    (docId: string, nextTitle: string) => {
+      const normalizedDocId = docId.trim();
+      if (!normalizedDocId) {
+        return;
+      }
+      const displayTitle = normalizeDocumentDisplayTitle(nextTitle);
+      if (normalizedDocId === EPHEMERAL_DRAFT_ID) {
+        setEphemeralDraftDoc((prev) =>
+          prev
+            ? {
+                ...prev,
+                title: displayTitle,
+              }
+            : prev,
+        );
+      }
+
+      setDocument((prev) =>
+        prev && prev.id === normalizedDocId
+          ? {
+              ...prev,
+              title: displayTitle,
+            }
+          : prev,
+      );
+      setDocumentsById((prevDocs) => {
+        const current =
+          prevDocs[normalizedDocId]
+          ?? (activeDocument && activeDocument.id === normalizedDocId ? activeDocument : null);
+        if (!current) {
+          return prevDocs;
+        }
+        if (current.title === displayTitle && prevDocs[normalizedDocId]) {
+          return prevDocs;
+        }
+        return {
+          ...prevDocs,
+          [normalizedDocId]: {
+            ...current,
+            title: displayTitle,
+          },
+        };
+      });
+
+      setRootDocuments((prevRoot) => {
+        const treeUpdate = updateTitleInTree(
+          prevRoot,
+          {},
+          normalizedDocId,
+          displayTitle,
+        );
+        return treeUpdate.rootDocuments;
+      });
+      setChildrenByParent((prevChildren) => {
+        const treeUpdate = updateTitleInTree(
+          [] as KnowledgeBaseDocument[],
+          prevChildren,
+          normalizedDocId,
+          displayTitle,
+        );
+        childrenByParentRef.current = treeUpdate.childrenByParent;
+        return treeUpdate.childrenByParent;
+      });
+
+      setBreadcrumbItems((prev) => {
+        if (resolvedDocumentId !== normalizedDocId) {
+          return prev;
+        }
+        if (prev.length === 0) {
+          const hierarchy =
+            activeDocument && activeDocument.id === normalizedDocId
+              ? activeDocument.hierarchy
+              : [];
+          const items = mapHierarchyToBreadcrumb(hierarchy, normalizedDocId, displayTitle);
+          return trimBreadcrumbItems(items);
+        }
+        const next = prev.slice();
+        const lastIndex = next.length - 1;
+        const current = next[lastIndex];
+        if (current?.label === displayTitle) {
+          return prev;
+        }
+        next[lastIndex] = {
+          ...current,
+          label: displayTitle,
+        };
+        return next;
+      });
+
+      syncTabTitleFromDocument(normalizedDocId, displayTitle);
+
+      if (resolvedProjectKey) {
+        const requestKey = `${resolvedProjectKey}:${normalizedDocId}`;
+        const cached = documentCache.get(requestKey);
+        if (cached && cached.title !== displayTitle) {
+          documentCache.set(requestKey, {
+            ...cached,
+            title: displayTitle,
+          });
+        }
+      }
+    },
+    [activeDocument, resolvedDocumentId, resolvedProjectKey, syncTabTitleFromDocument],
+  );
+
   const handleWorkspaceBridgeBind = useCallback((docId: string, bridge: WorkspaceBridge | null) => {
     const normalizedDocId = docId.trim();
     if (!normalizedDocId) {
@@ -1822,10 +2108,138 @@ function DocumentPage() {
     workspaceRetryMapRef.current.get(currentDocId)?.();
   }, [resolvedDocumentId]);
 
+  const handleMaterializeEphemeralDraft = useCallback(
+    async (payload: { title: string; content: JSONContent }) => {
+      if (!resolvedProjectKey) {
+        throw new Error("项目未就绪，无法创建文档");
+      }
+      if (materializingDraftRef.current) {
+        return;
+      }
+      materializingDraftRef.current = true;
+      try {
+        const normalizedTitle = normalizeDocumentDisplayTitle(payload.title);
+        const data = await createDocument(
+          resolvedProjectKey,
+          {
+            title: normalizedTitle,
+            parent_id: "root",
+            extra: {
+              status: "draft",
+              tags: [],
+            },
+          },
+          {
+            type: "tiptap",
+            content: exportContentJson(payload.content, null),
+          },
+        );
+        const mapped = mapDocumentDetail(data, "");
+        const createdDocId = mapped.id.trim();
+        if (!createdDocId) {
+          throw new Error("创建文档失败：未返回文档 ID");
+        }
+        const createdTitle = normalizeDocumentDisplayTitle(mapped.title || normalizedTitle);
+        const createdDocument: DocumentData = {
+          ...mapped,
+          id: createdDocId,
+          title: createdTitle,
+          parentId: mapped.parentId || "root",
+          content: payload.content,
+        };
+
+        setEphemeralDraftDoc(null);
+        setDocument((prev) => {
+          if (!prev) {
+            return prev;
+          }
+          if (prev.id === EPHEMERAL_DRAFT_ID || prev.id === createdDocId) {
+            return createdDocument;
+          }
+          return prev;
+        });
+        setDocumentsById((prev) => {
+          const next = { ...prev };
+          delete next[EPHEMERAL_DRAFT_ID];
+          next[createdDocId] = createdDocument;
+          return next;
+        });
+        setWorkspaceSaveStateByDoc((prev) => {
+          const draftState = prev[EPHEMERAL_DRAFT_ID];
+          const next = { ...prev };
+          delete next[EPHEMERAL_DRAFT_ID];
+          if (draftState) {
+            next[createdDocId] = draftState;
+          }
+          return next;
+        });
+
+        const draftSnapshot = snapshotStoreRef.current[EPHEMERAL_DRAFT_ID];
+        let nextSnapshots = removeSnapshot(snapshotStoreRef.current, EPHEMERAL_DRAFT_ID);
+        if (draftSnapshot) {
+          nextSnapshots = upsertSnapshot(nextSnapshots, createdDocId, draftSnapshot);
+        }
+        applySnapshotStore(nextSnapshots);
+
+        const now = Date.now();
+        const currentState = tabSessionRef.current;
+        const replaced = currentState.tabs.map((tab) =>
+          tab.docId === EPHEMERAL_DRAFT_ID
+            ? {
+                ...tab,
+                docId: createdDocId,
+                title: createdTitle,
+                lastAccessAt: now,
+              }
+            : tab,
+        );
+        const dedupedTabs = replaced.filter(
+          (tab, index, list) => list.findIndex((item) => item.docId === tab.docId) === index,
+        );
+        const nextState = {
+          tabs: dedupedTabs,
+          activeDocId:
+            currentState.activeDocId === EPHEMERAL_DRAFT_ID
+              ? createdDocId
+              : currentState.activeDocId,
+        };
+        applyTabSessionState(nextState);
+        syncTabTitleFromDocument(createdDocId, createdTitle);
+
+        const oldRequestKey = `${resolvedProjectKey}:${EPHEMERAL_DRAFT_ID}`;
+        const newRequestKey = `${resolvedProjectKey}:${createdDocId}`;
+        documentCache.delete(oldRequestKey);
+        documentPromiseCache.delete(oldRequestKey);
+        inFlightRef.current.delete(oldRequestKey);
+        documentHierarchyCache.delete(oldRequestKey);
+        documentHierarchyPromiseCache.delete(oldRequestKey);
+        documentCache.set(newRequestKey, createdDocument);
+
+        touchRecentEditInState(createdDocId, createdTitle);
+        scheduleRecentEditsRefresh(resolvedProjectKey, 0);
+        void loadFullTree(resolvedProjectKey);
+
+        navigate(`/documents/${encodeURIComponent(createdDocId)}`, { replace: true });
+      } finally {
+        materializingDraftRef.current = false;
+      }
+    },
+    [
+      applySnapshotStore,
+      applyTabSessionState,
+      loadFullTree,
+      navigate,
+      resolvedProjectKey,
+      scheduleRecentEditsRefresh,
+      syncTabTitleFromDocument,
+      touchRecentEditInState,
+    ],
+  );
+
   const handleWorkspaceSaved = useCallback(
     (docId: string, payload: { title: string; content: JSONContent }) => {
       const normalizedDocId = docId.trim();
-      if (!normalizedDocId || !resolvedProjectKey) {
+      if (!normalizedDocId || !resolvedProjectKey || normalizedDocId === EPHEMERAL_DRAFT_ID) {
         return;
       }
       setDocument((prev) =>
@@ -1874,6 +2288,81 @@ function DocumentPage() {
       touchRecentEditInState,
     ],
   );
+
+  const handleDuplicate = useCallback(async () => {
+    if (!resolvedProjectKey || !activeDocument) {
+      return;
+    }
+    try {
+      const data = await duplicateDocument(resolvedProjectKey, activeDocument.id);
+      const mapped = mapDocumentDetail(data, "", { markdownExtensions });
+      const duplicatedId = mapped.id.trim();
+      if (!duplicatedId) {
+        throw new Error("创建副本失败：未返回文档 ID");
+      }
+
+      const duplicatedTitle = normalizeDocumentDisplayTitle(mapped.title);
+      const duplicatedParentId = String(mapped.parentId || activeDocument.parentId || "root").trim() || "root";
+      const duplicatedDocument: DocumentData = {
+        ...mapped,
+        id: duplicatedId,
+        title: duplicatedTitle,
+        parentId: duplicatedParentId,
+      };
+      const duplicatedTreeNode: KnowledgeBaseDocument = {
+        id: duplicatedId,
+        title: duplicatedTitle,
+        type: duplicatedDocument.docType || "document",
+        parentId: isRootDocumentId(duplicatedParentId) ? "" : duplicatedParentId,
+        kind: "file",
+        hasChild: false,
+        order: 0,
+        storageObjectId: "",
+      };
+
+      setDocumentsById((prev) => ({
+        ...prev,
+        [duplicatedId]: duplicatedDocument,
+      }));
+
+      setRootDocuments((prevRoot) => {
+        const treeUpdate = insertDuplicateIntoTree(
+          prevRoot,
+          childrenByParentRef.current,
+          activeDocument.id,
+          duplicatedTreeNode,
+        );
+        if (treeUpdate.childrenByParent !== childrenByParentRef.current) {
+          childrenByParentRef.current = treeUpdate.childrenByParent;
+          setChildrenByParent(treeUpdate.childrenByParent);
+        }
+        return treeUpdate.rootDocuments;
+      });
+
+      if (!isRootDocumentId(duplicatedParentId)) {
+        setExpandedIds((prev) => ({
+          ...prev,
+          [duplicatedParentId]: true,
+        }));
+      }
+
+      documentCache.set(`${resolvedProjectKey}:${duplicatedId}`, duplicatedDocument);
+      syncTabTitleFromDocument(duplicatedId, duplicatedTitle);
+      touchRecentEditInState(duplicatedId, duplicatedTitle);
+      scheduleRecentEditsRefresh(resolvedProjectKey);
+      message.success("已创建副本");
+    } catch (err) {
+      console.error("Duplicate failed:", err);
+      message.error(err instanceof Error ? err.message : "创建副本失败");
+    }
+  }, [
+    activeDocument,
+    markdownExtensions,
+    resolvedProjectKey,
+    scheduleRecentEditsRefresh,
+    syncTabTitleFromDocument,
+    touchRecentEditInState,
+  ]);
 
   const handleOpenExport = useCallback(() => {
     if (!activeDocument) {
@@ -2206,16 +2695,44 @@ function DocumentPage() {
     scheduleRecentEditsRefresh,
   ]);
 
-  const handleOpenNew = () => {
-    if (!allowChildActions) {
+  const handleOpenNew = useCallback(async () => {
+    if (!allowChildActions || !resolvedProjectKey || creatingChildDoc) {
       return;
     }
-    const parentID = activeDocument?.id ?? "";
-    const target = parentID
-      ? `/documents/new?parent_id=${encodeURIComponent(parentID)}`
-      : "/documents/new";
-    navigate(target);
-  };
+    setCreatingChildDoc(true);
+    try {
+      const parentId =
+        activeDocument && activeDocument.id !== EPHEMERAL_DRAFT_ID
+          ? activeDocument.id
+          : "root";
+      const created = await createDocumentRecord(
+        resolvedProjectKey,
+        {
+          title: "无标题文档",
+          parentId,
+        },
+        { type: "doc", content: [] },
+      );
+      const createdDocId = String(created.id || "").trim();
+      if (!createdDocId) {
+        throw new Error("创建文档失败：未返回文档 ID");
+      }
+      await handleDocumentsChanged(parentId);
+      await openDocumentById(createdDocId, created.title, { replace: false });
+    } catch (err) {
+      console.error("Create child document failed:", err);
+      alert(err instanceof Error ? err.message : "创建文档失败");
+    } finally {
+      setCreatingChildDoc(false);
+    }
+  }, [
+    activeDocument,
+    allowChildActions,
+    creatingChildDoc,
+    handleDocumentsChanged,
+    openDocumentById,
+    resolvedProjectKey,
+  ]);
 
   const handleOpenImportWithMode = (mode: "file" | "folder" | "url" | "git") => {
     if (!allowChildActions) {
@@ -2634,6 +3151,7 @@ function DocumentPage() {
             documentsById[tab.docId] ??
             (activeDocument && activeDocument.id === tab.docId ? activeDocument : null);
           const isActive = tab.docId === activeTabDocId;
+          const isEphemeralTab = tabDocument?.id === EPHEMERAL_DRAFT_ID;
           return (
             <div
               key={`${resolvedProjectKey}:${tab.docId}`}
@@ -2648,12 +3166,19 @@ function DocumentPage() {
                   content={tabDocument.content}
                   blockId={isActive ? blockIdParam : null}
                   showTitle={showDocumentTitle}
+                  persistMode={isEphemeralTab ? "ephemeral" : "persisted"}
+                  onFirstMeaningfulChange={
+                    isEphemeralTab ? handleMaterializeEphemeralDraft : undefined
+                  }
                   onSaved={(payload) => handleWorkspaceSaved(tabDocument.id, payload)}
                   onSaveStateChange={(state) =>
                     handleWorkspaceSaveStateChange(tabDocument.id, {
                       status: state.status as DocumentEditorSaveStatus,
                       error: state.error,
                     })
+                  }
+                  onTitleChange={(nextTitle) =>
+                    handleWorkspaceTitleChange(tabDocument.id, nextTitle)
                   }
                   onRetryBind={(handler) => handleWorkspaceRetryBind(tabDocument.id, handler)}
                   onFocusBind={(handler) => handleWorkspaceFocusBind(tabDocument.id, handler)}
@@ -2756,7 +3281,7 @@ function DocumentPage() {
           recentEdits={recentEdits}
           recentEditsLoading={recentEditsLoading}
           expandedIds={expandedIds}
-          activeId={resolvedDocumentId || null}
+          activeId={resolvedDocumentId === EPHEMERAL_DRAFT_ID ? null : (resolvedDocumentId || null)}
           loadingIds={loadingIds}
           rootLoading={rootLoading}
           rebuildingIndex={rebuildingIndex}
@@ -2770,7 +3295,9 @@ function DocumentPage() {
           onCollapseToRoot={handleCollapseTreeToRoot}
           onUnfavorite={handleUnfavoriteDocument}
           onEmptyAreaClick={() => navigate("/documents")}
-          onAddDocument={() => navigate("/documents/new")}
+          onAddDocument={() => {
+            void handleOpenNew();
+          }}
           outlineMode={outlineMode}
           onToggleOutline={() => setOutlineMode((v) => !v)}
           documentContent={activeDocument?.content ?? null}
@@ -2799,18 +3326,17 @@ function DocumentPage() {
               showBreadcrumb={showBreadcrumb}
               showActions={showHeaderActions}
               allowChildActions={allowChildActions}
-              allowEdit={Boolean(activeDocument)}
-              allowDelete={Boolean(activeDocument)}
-              allowOptimize={Boolean(activeDocument)}
+              allowDelete={Boolean(activeDocument) && !isEphemeralActive}
+              allowOptimize={Boolean(activeDocument) && !isEphemeralActive}
               deleting={deleting}
-              onEdit={handleEdit}
               onSave={() => { }}
               onCancel={() => { }}
               onNew={handleOpenNew}
               onImport={() => handleOpenImportWithMode("file")}
               onDelete={handleDelete}
-              onExport={activeDocument ? handleOpenExport : undefined}
-              onOptimize={activeDocument ? handleOpenOptimize : undefined}
+              onDuplicate={activeDocument && !isEphemeralActive ? handleDuplicate : undefined}
+              onExport={activeDocument && !isEphemeralActive ? handleOpenExport : undefined}
+              onOptimize={activeDocument && !isEphemeralActive ? handleOpenOptimize : undefined}
               syncStatus={syncStatus}
               syncError={syncError}
               syncDisabled={!resolvedProjectKey || syncStatus === "syncing"}
@@ -3479,24 +4005,20 @@ function DocumentPage() {
 
 export default DocumentPage;
 
-const mapHierarchyToBreadcrumb = (
-  hierarchy: Array<{ id: string; name: string }>,
-  fallbackId: string,
-  fallbackTitle: string,
-) => {
-  if (!hierarchy || hierarchy.length === 0) {
-    return [
-      {
-        label: fallbackTitle || "文档",
-        to: `/documents/${encodeURIComponent(fallbackId)}`,
-      },
-    ];
-  }
-  return hierarchy.map((item) => ({
-    label: item.name || "文档",
-    to: `/documents/${encodeURIComponent(item.id)}`,
-  }));
-};
+function createEphemeralDraftDocument(): DocumentData {
+  return {
+    id: EPHEMERAL_DRAFT_ID,
+    title: EPHEMERAL_DRAFT_TITLE,
+    docType: "document",
+    parentId: "root",
+    bodyFormat: "tiptap",
+    content: {
+      type: "doc",
+      content: [],
+    },
+    hierarchy: [],
+  };
+}
 
 const trimBreadcrumbItems = (items: Array<{ label: string; to?: string }>) => {
   if (items.length <= 4) {

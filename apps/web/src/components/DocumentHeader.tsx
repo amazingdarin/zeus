@@ -6,6 +6,9 @@ type BreadcrumbItem = {
   to?: string;
 };
 
+export type DocumentSyncStatus = "idle" | "syncing" | "synced" | "failed";
+export type DocumentEditorSaveStatus = "draft" | "idle" | "dirty" | "saving" | "error";
+
 const MAX_BREADCRUMB_LENGTH_CN = 7;
 const MAX_BREADCRUMB_LENGTH_EN = 15;
 
@@ -28,32 +31,42 @@ type DocumentHeaderProps = {
   showBreadcrumb?: boolean;
   showActions?: boolean;
   allowChildActions?: boolean;
-  allowEdit?: boolean;
   allowDelete?: boolean;
   allowOptimize?: boolean;
-  allowRefresh?: boolean;
-  favorited?: boolean;
-  favoriteLoading?: boolean;
   deleting?: boolean;
-  refreshing?: boolean;
-  onEdit: () => void;
+  syncStatus?: DocumentSyncStatus;
+  syncError?: string | null;
+  syncDisabled?: boolean;
+  editorSaveStatus?: DocumentEditorSaveStatus;
+  editorSaveError?: string | null;
   onSave: () => void;
   onCancel: () => void;
   onNew: () => void;
   onImport: () => void;
   onDelete?: () => void;
+  onDuplicate?: () => void;
   onExport?: () => void;
-  onExportPPT?: () => void;
   onOptimize?: () => void;
-  onRefresh?: () => void;
-  onFavorite?: () => void;
-  pluginMenuItems?: Array<{
-    id: string;
-    title: string;
-    disabled?: boolean;
-    onClick: () => void;
-  }>;
+  onSync?: () => void;
+  onViewSyncLogs?: () => void;
+  onRetryEditorSave?: () => void;
 };
+
+export function mapEditorSaveBadge(status: DocumentEditorSaveStatus): string {
+  if (status === "draft") {
+    return "草稿";
+  }
+  if (status === "saving") {
+    return "保存中";
+  }
+  if (status === "error") {
+    return "保存失败";
+  }
+  if (status === "dirty") {
+    return "待保存";
+  }
+  return "已保存";
+}
 
 function DocumentHeader({
   breadcrumbItems,
@@ -61,26 +74,25 @@ function DocumentHeader({
   showBreadcrumb = true,
   showActions = true,
   allowChildActions = true,
-  allowEdit = true,
   allowDelete = false,
   allowOptimize = false,
-  allowRefresh = false,
-  favorited = false,
-  favoriteLoading = false,
   deleting = false,
-  refreshing = false,
-  onEdit,
+  syncStatus = "idle",
+  syncError = null,
+  syncDisabled = false,
+  editorSaveStatus = "idle",
+  editorSaveError = null,
   onSave,
   onCancel,
   onNew,
   onImport,
   onDelete,
+  onDuplicate,
   onExport,
-  onExportPPT,
   onOptimize,
-  onRefresh,
-  onFavorite,
-  pluginMenuItems = [],
+  onSync,
+  onViewSyncLogs,
+  onRetryEditorSave,
 }: DocumentHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -102,11 +114,6 @@ function DocumentHeader({
     onImport();
   };
 
-  const handleEdit = () => {
-    handleCloseMenu();
-    onEdit();
-  };
-
   const handleSave = () => {
     handleCloseMenu();
     onSave();
@@ -125,20 +132,20 @@ function DocumentHeader({
     onDelete();
   };
 
+  const handleDuplicate = () => {
+    if (!onDuplicate) {
+      return;
+    }
+    handleCloseMenu();
+    onDuplicate();
+  };
+
   const handleExport = () => {
     if (!onExport) {
       return;
     }
     handleCloseMenu();
     onExport();
-  };
-
-  const handleExportPPT = () => {
-    if (!onExportPPT) {
-      return;
-    }
-    handleCloseMenu();
-    onExportPPT();
   };
 
   const handleOptimize = () => {
@@ -149,10 +156,34 @@ function DocumentHeader({
     onOptimize();
   };
 
-  const handlePluginMenuClick = (action: () => void) => {
+  const handleSync = () => {
+    if (!onSync) {
+      return;
+    }
     handleCloseMenu();
-    action();
+    onSync();
   };
+
+  const handleViewSyncLogs = () => {
+    if (!onViewSyncLogs) {
+      return;
+    }
+    onViewSyncLogs();
+  };
+
+  const syncStatusLabel = (() => {
+    switch (syncStatus) {
+      case "syncing":
+        return "同步中";
+      case "synced":
+        return "已同步";
+      case "failed":
+        return "同步失败";
+      default:
+        return "待同步";
+    }
+  })();
+  const editorSaveLabel = mapEditorSaveBadge(editorSaveStatus);
 
   return (
     <div className="kb-main-header">
@@ -176,45 +207,56 @@ function DocumentHeader({
       ) : null}
       {showActions ? (
         <div className="kb-header-menu">
-          {mode === "view" && onFavorite ? (
-            <button
-              className={`kb-favorite-button${favorited ? " active" : ""}`}
-              type="button"
-              aria-label={favorited ? "已收藏" : "收藏文档"}
-              onClick={onFavorite}
-              disabled={favoriteLoading || favorited}
-              title={favorited ? "已收藏（请在左侧列表取消）" : "收藏文档"}
+          <div className="kb-editor-save-group">
+            <span
+              className={`kb-editor-save-badge kb-editor-save-badge-${editorSaveStatus}`}
+              title={editorSaveStatus === "error" && editorSaveError ? editorSaveError : undefined}
             >
-              <span className="kb-favorite-icon" aria-hidden="true">
-                {favorited ? "★" : "☆"}
-              </span>
-            </button>
-          ) : null}
-          {allowRefresh && onRefresh ? (
-            <button
-              className="kb-refresh-button"
-              type="button"
-              aria-label="刷新文档"
-              onClick={onRefresh}
-              disabled={refreshing}
-              title="刷新文档"
-            >
-              <svg
-                className={`kb-refresh-icon${refreshing ? " spinning" : ""}`}
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+              {editorSaveLabel}
+            </span>
+            {editorSaveStatus === "error" && onRetryEditorSave ? (
+              <button
+                className="kb-editor-save-retry"
+                type="button"
+                onClick={onRetryEditorSave}
               >
-                <path d="M23 4v6h-6" />
-                <path d="M1 20v-6h6" />
-                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-              </svg>
-            </button>
+                重试
+              </button>
+            ) : null}
+          </div>
+          {onSync ? (
+            <div className="kb-sync-group">
+              <div className="kb-sync-meta">
+                <span
+                  className={`kb-sync-status kb-sync-status-${syncStatus}`}
+                  title={syncStatus === "failed" && syncError ? syncError : undefined}
+                >
+                  {syncStatusLabel}
+                </span>
+                {syncStatus === "failed" && syncError ? (
+                  <span className="kb-sync-error" title={syncError}>
+                    {syncError}
+                  </span>
+                ) : null}
+                {syncStatus === "failed" && onViewSyncLogs ? (
+                  <button
+                    className="kb-sync-log-link"
+                    type="button"
+                    onClick={handleViewSyncLogs}
+                  >
+                    查看最近同步日志
+                  </button>
+                ) : null}
+              </div>
+              <button
+                className="kb-sync-button"
+                type="button"
+                onClick={handleSync}
+                disabled={syncDisabled}
+              >
+                {syncStatus === "syncing" ? "同步中..." : "立即同步"}
+              </button>
+            </div>
           ) : null}
           <button
             className="kb-menu-button"
@@ -242,9 +284,9 @@ function DocumentHeader({
                       新建
                     </button>
                   ) : null}
-                  {allowEdit ? (
-                    <button className="kb-menu-item" type="button" onClick={handleEdit}>
-                      编辑
+                  {onDuplicate ? (
+                    <button className="kb-menu-item" type="button" onClick={handleDuplicate}>
+                      创建副本
                     </button>
                   ) : null}
                   {allowChildActions ? (
@@ -254,12 +296,7 @@ function DocumentHeader({
                   ) : null}
                   {onExport ? (
                     <button className="kb-menu-item" type="button" onClick={handleExport}>
-                      导出 Markdown
-                    </button>
-                  ) : null}
-                  {onExportPPT ? (
-                    <button className="kb-menu-item" type="button" onClick={handleExportPPT}>
-                      导出 PPT
+                      导出
                     </button>
                   ) : null}
                   {allowOptimize && onOptimize ? (
@@ -277,17 +314,6 @@ function DocumentHeader({
                       {deleting ? "删除中..." : "删除"}
                     </button>
                   ) : null}
-                  {pluginMenuItems.map((item) => (
-                    <button
-                      key={item.id}
-                      className="kb-menu-item"
-                      type="button"
-                      onClick={() => handlePluginMenuClick(item.onClick)}
-                      disabled={item.disabled}
-                    >
-                      {item.title}
-                    </button>
-                  ))}
                 </>
               )}
             </div>

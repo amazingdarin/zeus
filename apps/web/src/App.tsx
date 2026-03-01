@@ -3,7 +3,6 @@ import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import AppShell from "./layout/AppShell";
 import DocumentPage from "./pages/DocumentPage";
-import NewDocumentPage from "./pages/NewDocumentPage";
 import EduPluginPage from "./pages/EduPluginPage";
 import ChatPage from "./pages/ChatPage";
 import SystemDocsPage from "./pages/SystemDocsPage";
@@ -16,8 +15,9 @@ import { ProjectProvider } from "./context/ProjectContext";
 import { AuthProvider } from "./context/AuthContext";
 import { ThemeProvider } from "./context/ThemeContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
-import { ensureSystemSession } from "./config/api";
+import { bootstrapGeneralSettings, ensureSystemSession } from "./config/api";
 import { usePluginRuntime, type PluginRouteEntry } from "./context/PluginRuntimeContext";
+import { requiresAuthForCoreRoutes } from "./utils/runtime";
 import "./App.css";
 
 function PluginRouteContent({ route }: { route: PluginRouteEntry }) {
@@ -42,6 +42,7 @@ function PluginRouteContent({ route }: { route: PluginRouteEntry }) {
 function App() {
   const [sessionReady, setSessionReady] = useState(false);
   const { routes } = usePluginRuntime();
+  const requireCoreAuth = requiresAuthForCoreRoutes();
 
   const pluginRoutes = useMemo(() => {
     const seen = new Set<string>();
@@ -59,8 +60,10 @@ function App() {
 
   useEffect(() => {
     let mounted = true;
-    ensureSystemSession()
-      .catch(() => undefined)
+    Promise.allSettled([
+      ensureSystemSession(),
+      bootstrapGeneralSettings(),
+    ])
       .finally(() => {
         if (mounted) {
           setSessionReady(true);
@@ -84,65 +87,73 @@ function App() {
               {/* Public routes */}
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
-              <Route path="/invite/:token" element={<InviteJoinPage />} />
+              <Route
+                path="/invite/:token"
+                element={
+                  <ProtectedRoute>
+                    <InviteJoinPage />
+                  </ProtectedRoute>
+                }
+              />
 
-              {/* Protected routes */}
+              {/* Core routes */}
               <Route path="/" element={
-                <ProtectedRoute>
+                <ProtectedRoute requireAuth={requireCoreAuth}>
                   <AppShell>
                     <Navigate to="/documents" replace />
                   </AppShell>
                 </ProtectedRoute>
               } />
               <Route path="/documents" element={
-                <ProtectedRoute>
+                <ProtectedRoute requireAuth={requireCoreAuth}>
                   <AppShell>
                     <DocumentPage />
                   </AppShell>
                 </ProtectedRoute>
               } />
               <Route path="/documents/:documentId" element={
-                <ProtectedRoute>
+                <ProtectedRoute requireAuth={requireCoreAuth}>
                   <AppShell>
                     <DocumentPage />
                   </AppShell>
                 </ProtectedRoute>
               } />
               <Route path="/knowledge" element={
-                <ProtectedRoute>
+                <ProtectedRoute requireAuth={requireCoreAuth}>
                   <AppShell>
                     <Navigate to="/documents" replace />
                   </AppShell>
                 </ProtectedRoute>
               } />
               <Route path="/documents/new" element={
-                <ProtectedRoute>
+                <ProtectedRoute requireAuth={requireCoreAuth}>
                   <AppShell>
-                    <NewDocumentPage />
+                    <Navigate to="/documents" replace />
                   </AppShell>
                 </ProtectedRoute>
               } />
               <Route path="/edu" element={
-                <ProtectedRoute>
+                <ProtectedRoute requireAuth={requireCoreAuth}>
                   <AppShell>
                     <EduPluginPage />
                   </AppShell>
                 </ProtectedRoute>
               } />
               <Route path="/chat" element={
-                <ProtectedRoute>
+                <ProtectedRoute requireAuth={requireCoreAuth}>
                   <AppShell>
                     <ChatPage />
                   </AppShell>
                 </ProtectedRoute>
               } />
               <Route path="/system-docs" element={
-                <ProtectedRoute>
+                <ProtectedRoute requireAuth={requireCoreAuth}>
                   <AppShell>
                     <SystemDocsPage />
                   </AppShell>
                 </ProtectedRoute>
               } />
+              {/* Team routes (always require login) */}
               <Route path="/teams" element={
                 <ProtectedRoute>
                   <AppShell>
@@ -169,7 +180,7 @@ function App() {
                   key={`plugin-route-${route.pluginId}-${route.id}-${route.path}`}
                   path={route.path}
                   element={
-                    <ProtectedRoute>
+                    <ProtectedRoute requireAuth={requireCoreAuth}>
                       <AppShell>
                         <PluginRouteContent route={route} />
                       </AppShell>
