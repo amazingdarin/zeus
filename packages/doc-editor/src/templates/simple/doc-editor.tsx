@@ -46,9 +46,7 @@ import { ChartNode } from "../../nodes/chart-node/chart-node-extension"
 import { MindmapNode } from "../../nodes/mindmap-node/mindmap-node-extension"
 import { ColumnNode, ColumnsNode } from "../../nodes/columns-node/columns-node-extension"
 import {
-  createDefaultColumnWidths,
   normalizeColumnsCount,
-  normalizeColumnsWidths,
 } from "../../nodes/columns-node/columns-transform"
 import { createTableExtensions } from "../../nodes/table-node/table-node-extension"
 import "../../nodes/blockquote-node/blockquote-node.scss"
@@ -316,19 +314,14 @@ const defaultContent: JSONContent = {
 
 type BuiltinColumnsLayout = {
   count?: number
-  widths?: unknown
 }
 
 function resolveBuiltinColumnsLayout(
   layout: BuiltinColumnsLayout | undefined,
-  fallbackCount = 2
-): { count: number; widths: number[] } {
+  fallbackCount = 2,
+): { count: number } {
   const count = normalizeColumnsCount(layout?.count ?? fallbackCount)
-  const widths = normalizeColumnsWidths(
-    layout?.widths ?? createDefaultColumnWidths(count),
-    count
-  )
-  return { count, widths }
+  return { count }
 }
 
 function insertBuiltinBlock(
@@ -423,21 +416,21 @@ function insertBuiltinBlock(
       chain.insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
       return
     case "columns": {
-      const { count, widths } = resolveBuiltinColumnsLayout(options?.columns, 2)
-      chain.insertColumns({ count, widths }).run()
+      const { count } = resolveBuiltinColumnsLayout(options?.columns, 2)
+      chain.insertColumns({ count }).run()
       return
     }
     case "columns-2":
-      chain.insertColumns({ count: 2, widths: createDefaultColumnWidths(2) }).run()
+      chain.insertColumns({ count: 2 }).run()
       return
     case "columns-3":
-      chain.insertColumns({ count: 3, widths: createDefaultColumnWidths(3) }).run()
+      chain.insertColumns({ count: 3 }).run()
       return
     case "columns-4":
-      chain.insertColumns({ count: 4, widths: createDefaultColumnWidths(4) }).run()
+      chain.insertColumns({ count: 4 }).run()
       return
     case "columns-5":
-      chain.insertColumns({ count: 5, widths: createDefaultColumnWidths(5) }).run()
+      chain.insertColumns({ count: 5 }).run()
       return
     default:
       return
@@ -817,9 +810,6 @@ export function DocEditor({
   const [blockAddMenuPosition, setBlockAddMenuPosition] = useState({ top: 34, left: 0 })
   const [columnsConfigOpen, setColumnsConfigOpen] = useState(false)
   const [columnsConfigCount, setColumnsConfigCount] = useState(2)
-  const [columnsConfigWidths, setColumnsConfigWidths] = useState<number[]>(() =>
-    createDefaultColumnWidths(2)
-  )
   const columnsConfigSourceRef = useRef<"block" | "slash">("block")
   const dragSourceIdRef = useRef<string | null>(null)
   const dragDropTargetRef = useRef<{ blockId: string; placement: DropPlacement } | null>(null)
@@ -1160,28 +1150,8 @@ export function DocEditor({
   }, [clearPendingSlashShortcutCommit])
 
   const handleColumnsConfigCountChange = useCallback((nextRaw: string) => {
-    const nextCount = normalizeColumnsCount(nextRaw)
-    setColumnsConfigCount(nextCount)
-    setColumnsConfigWidths((prev) => normalizeColumnsWidths(prev, nextCount))
+    setColumnsConfigCount(normalizeColumnsCount(nextRaw))
   }, [])
-
-  const handleColumnsConfigWidthChange = useCallback(
-    (index: number, nextRaw: string) => {
-      setColumnsConfigWidths((prev) => {
-        const next = normalizeColumnsWidths(prev, columnsConfigCount)
-        const parsed = Number(nextRaw)
-        next[index] = Number.isFinite(parsed) && parsed > 0
-          ? Number(parsed.toFixed(4))
-          : 1
-        return normalizeColumnsWidths(next, columnsConfigCount)
-      })
-    },
-    [columnsConfigCount]
-  )
-
-  const handleResetColumnsConfigWidths = useCallback(() => {
-    setColumnsConfigWidths(createDefaultColumnWidths(columnsConfigCount))
-  }, [columnsConfigCount])
 
   const openSlashMenuNearCursor = useCallback(() => {
     if (!editor) {
@@ -1470,7 +1440,6 @@ export function DocEditor({
     (source: "block" | "slash") => {
       columnsConfigSourceRef.current = source
       setColumnsConfigCount(2)
-      setColumnsConfigWidths(createDefaultColumnWidths(2))
       setColumnsConfigOpen(true)
       setBlockAddMenuOpen(false)
       setBlockActionMenuOpen(false)
@@ -1488,15 +1457,14 @@ export function DocEditor({
   const confirmColumnsConfigInsert = useCallback(() => {
     const source = columnsConfigSourceRef.current
     const count = normalizeColumnsCount(columnsConfigCount)
-    const widths = normalizeColumnsWidths(columnsConfigWidths, count)
 
     if (source === "block") {
       insertBuiltinBlockFromHandle("columns", {
-        columns: { count, widths },
+        columns: { count },
       })
     } else {
       insertBuiltinBlockFromSlash("columns", {
-        columns: { count, widths },
+        columns: { count },
       })
     }
 
@@ -1504,7 +1472,6 @@ export function DocEditor({
     updateBlockHandlePosition()
   }, [
     columnsConfigCount,
-    columnsConfigWidths,
     insertBuiltinBlockFromHandle,
     insertBuiltinBlockFromSlash,
     updateBlockHandlePosition,
@@ -2747,38 +2714,6 @@ export function DocEditor({
                       handleColumnsConfigCountChange(event.target.value)
                     }}
                   />
-                </div>
-                <div className="doc-editor-columns-config-widths">
-                  <div className="doc-editor-columns-config-widths-header">
-                    <span>列宽权重（默认 1）</span>
-                    <button
-                      type="button"
-                      className="doc-editor-columns-config-reset"
-                      onClick={handleResetColumnsConfigWidths}
-                    >
-                      恢复默认
-                    </button>
-                  </div>
-                  <div className="doc-editor-columns-config-grid">
-                    {Array.from({ length: columnsConfigCount }, (_, index) => (
-                      <label
-                        key={`columns-width-${index}`}
-                        className="doc-editor-columns-config-width-item"
-                      >
-                        <span>第 {index + 1} 列</span>
-                        <input
-                          className="doc-editor-columns-config-input"
-                          type="number"
-                          min={0.1}
-                          step={0.1}
-                          value={String(columnsConfigWidths[index] ?? 1)}
-                          onChange={(event) => {
-                            handleColumnsConfigWidthChange(index, event.target.value)
-                          }}
-                        />
-                      </label>
-                    ))}
-                  </div>
                 </div>
                 <div className="doc-editor-columns-config-actions">
                   <button

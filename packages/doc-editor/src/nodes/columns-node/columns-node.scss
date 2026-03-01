@@ -1,6 +1,5 @@
 .doc-editor-columns {
-  --doc-editor-columns-grid-template: repeat(2, minmax(220px, 1fr));
-  --doc-editor-columns-min-width: calc(220px * 2 + 12px);
+  --doc-editor-columns-grid-template: repeat(2, minmax(0, 1fr));
   position: relative;
   display: flex;
   flex-direction: column;
@@ -10,7 +9,7 @@
   border: 1px solid transparent;
   border-radius: 10px;
   background: transparent;
-  overflow-x: auto;
+  overflow: visible;
   transition: border-color 0.16s ease, background-color 0.16s ease;
 }
 
@@ -46,21 +45,6 @@
 .doc-editor-columns-config-panel-label {
   font-size: 12px;
   color: rgba(15, 23, 42, 0.72);
-}
-
-.doc-editor-columns-config-panel-widths {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 8px;
-}
-
-.doc-editor-columns-config-panel-width-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  font-size: 11px;
-  color: rgba(15, 23, 42, 0.68);
 }
 
 .doc-editor-columns-config-panel-input {
@@ -100,19 +84,65 @@
 }
 
 .doc-editor-columns-track {
-  display: grid;
-  align-items: start;
-  gap: 12px;
-  grid-template-columns: var(--doc-editor-columns-grid-template);
-  min-width: var(--doc-editor-columns-min-width);
+  display: block;
+  width: 100%;
+  min-width: 0;
 }
 
 .doc-editor-columns-track > [data-node-view-content-react] {
   display: grid;
-  align-items: inherit;
-  gap: inherit;
-  grid-template-columns: inherit;
-  min-width: inherit;
+  width: 100%;
+  min-width: 0;
+  align-items: start;
+  gap: 12px;
+  grid-template-columns: var(--doc-editor-columns-grid-template);
+}
+
+.doc-editor-columns-resize-handles {
+  position: absolute;
+  inset: 10px 12px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.doc-editor-columns-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  margin-left: -5px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  pointer-events: auto;
+  cursor: col-resize;
+}
+
+.doc-editor-columns-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 50%;
+  width: 2px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.18);
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity 0.16s ease, background-color 0.16s ease;
+}
+
+.doc-editor-columns:hover .doc-editor-columns-resize-handle::before,
+.doc-editor-columns:focus-within .doc-editor-columns-resize-handle::before,
+.doc-editor-columns.is-editing .doc-editor-columns-resize-handle::before,
+.doc-editor-columns.is-resizing .doc-editor-columns-resize-handle::before {
+  opacity: 1;
+}
+
+.doc-editor-columns-resize-handle:hover::before,
+.doc-editor-columns-resize-handle.is-active::before {
+  background: rgba(37, 99, 235, 0.62);
+  opacity: 1;
 }
 
 .doc-editor-column {
@@ -152,8 +182,7 @@
   box-shadow: 0 8px 18px rgba(2, 6, 23, 0.55);
 }
 
-[data-theme="dark"] .doc-editor-columns-config-panel-label,
-[data-theme="dark"] .doc-editor-columns-config-panel-width-item {
+[data-theme="dark"] .doc-editor-columns-config-panel-label {
   color: rgba(226, 232, 240, 0.82);
 }
 
@@ -177,4 +206,13 @@
 [data-theme="dark"] .doc-editor-columns:focus-within .doc-editor-column,
 [data-theme="dark"] .doc-editor-columns.is-editing .doc-editor-column {
   border-color: rgba(148, 163, 184, 0.24);
+}
+
+[data-theme="dark"] .doc-editor-columns-resize-handle::before {
+  background: rgba(148, 163, 184, 0.42);
+}
+
+[data-theme="dark"] .doc-editor-columns-resize-handle:hover::before,
+[data-theme="dark"] .doc-editor-columns-resize-handle.is-active::before {
+  background: rgba(96, 165, 250, 0.72);
 }

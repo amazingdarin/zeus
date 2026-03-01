@@ -5,6 +5,9 @@ import {
   createDefaultColumnWidths,
   normalizeColumnsCount,
   normalizeColumnsWidths,
+  resolveColumnResizeHandleLayouts,
+  resizeAdjacentColumnsWidths,
+  resolveColumnResizeHandlePercents,
   resizeColumnsJson,
 } from "../src/nodes/columns-node/columns-transform"
 
@@ -64,4 +67,60 @@ test("resizeColumnsJson shrinks and merges removed column content into last kept
   assert.equal(next.content?.[1]?.content?.length, 3)
   assert.equal(next.content?.[1]?.content?.[1]?.content?.[0]?.text, "C")
   assert.equal(next.content?.[1]?.content?.[2]?.content?.[0]?.text, "D")
+})
+
+test("resizeAdjacentColumnsWidths updates only adjacent columns and keeps total width", () => {
+  const next = resizeAdjacentColumnsWidths({
+    widths: [1, 1, 1],
+    count: 3,
+    handleIndex: 0,
+    containerWidthPx: 900,
+    deltaPx: 120,
+    minColumnWidthPx: 140,
+    gapPx: 12,
+  })
+
+  assert.equal(next.length, 3)
+  assert.equal(next[2], 1)
+  assert.ok(next[0] > 1)
+  assert.ok(next[1] < 1)
+  const total = Number((next[0] + next[1] + next[2]).toFixed(4))
+  assert.equal(total, 3)
+})
+
+test("resizeAdjacentColumnsWidths enforces minimum column width clamp", () => {
+  const next = resizeAdjacentColumnsWidths({
+    widths: [1, 1],
+    count: 2,
+    handleIndex: 0,
+    containerWidthPx: 400,
+    deltaPx: -999,
+    minColumnWidthPx: 140,
+    gapPx: 12,
+  })
+
+  const total = next[0] + next[1]
+  const availablePx = 400 - 12
+  const expectedMin = Number(((140 / availablePx) * total).toFixed(4))
+  assert.equal(next[0], expectedMin)
+  assert.equal(next[1], Number((total - expectedMin).toFixed(4)))
+})
+
+test("resolveColumnResizeHandlePercents returns cumulative split positions", () => {
+  assert.deepEqual(resolveColumnResizeHandlePercents([1, 1], 2), [50])
+  assert.deepEqual(resolveColumnResizeHandlePercents([2, 1], 2), [66.6667])
+  assert.deepEqual(resolveColumnResizeHandlePercents([1, 1, 1], 3), [33.3333, 66.6667])
+})
+
+test("resolveColumnResizeHandleLayouts compensates fixed column gaps", () => {
+  const layouts = resolveColumnResizeHandleLayouts([2.1, 1.5, 1, 1, 1.1], 5, 12)
+  assert.equal(layouts.length, 4)
+  assert.deepEqual(
+    layouts.map((item) => item.percent),
+    [31.3433, 53.7313, 68.6567, 83.5821],
+  )
+  assert.deepEqual(
+    layouts.map((item) => item.offsetPx),
+    [-9.0448, -7.791, -2.9552, 1.8806],
+  )
 })

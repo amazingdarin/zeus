@@ -5,6 +5,9 @@ type ColumnsCount = 2 | 3 | 4 | 5 | 6 | 7 | 8
 const MIN_COLUMNS = 2
 const MAX_COLUMNS = 8
 const DEFAULT_COLUMN_WIDTH = 1
+const DEFAULT_COLUMN_GAP_PX = 12
+const DEFAULT_MIN_COLUMN_WIDTH_PX = 140
+const MIN_COLUMN_WIDTH_RATIO = 0.08
 
 function paragraphNode(): JSONContent {
   return { type: "paragraph" }
@@ -60,6 +63,119 @@ export function normalizeColumnsWidths(value: unknown, countInput: unknown): num
     normalized.push(DEFAULT_COLUMN_WIDTH)
   }
   return normalized
+}
+
+export function resolveColumnResizeHandlePercents(
+  widthsInput: unknown,
+  countInput: unknown
+): number[] {
+  const count = normalizeColumnsCount(countInput)
+  const widths = normalizeColumnsWidths(widthsInput, count)
+  const total = widths.reduce((sum, item) => sum + item, 0)
+  if (!(total > 0)) {
+    return []
+  }
+  const result: number[] = []
+  let accumulated = 0
+  for (let index = 0; index < widths.length - 1; index += 1) {
+    accumulated += widths[index]
+    result.push(Number(((accumulated / total) * 100).toFixed(4)))
+  }
+  return result
+}
+
+export function resolveColumnResizeHandleLayouts(
+  widthsInput: unknown,
+  countInput: unknown,
+  gapPxInput: unknown = DEFAULT_COLUMN_GAP_PX
+): Array<{ percent: number; offsetPx: number }> {
+  const count = normalizeColumnsCount(countInput)
+  const percents = resolveColumnResizeHandlePercents(widthsInput, count)
+  const gapPxRaw = Number(gapPxInput)
+  const gapPx =
+    Number.isFinite(gapPxRaw) && gapPxRaw >= 0
+      ? gapPxRaw
+      : DEFAULT_COLUMN_GAP_PX
+  const totalGaps = Math.max(0, count - 1)
+  return percents.map((percent, index) => {
+    const ratio = percent / 100
+    const offsetPx = Number(((index + 0.5 - ratio * totalGaps) * gapPx).toFixed(4))
+    return { percent, offsetPx }
+  })
+}
+
+export function resizeAdjacentColumnsWidths(options: {
+  widths: unknown
+  count: unknown
+  handleIndex: unknown
+  containerWidthPx: unknown
+  deltaPx: unknown
+  minColumnWidthPx?: unknown
+  gapPx?: unknown
+}): number[] {
+  const count = normalizeColumnsCount(options.count)
+  const widths = normalizeColumnsWidths(options.widths, count)
+  if (count < 2) {
+    return widths
+  }
+
+  const handleIndex = Number.parseInt(String(options.handleIndex ?? ""), 10)
+  if (!Number.isFinite(handleIndex) || handleIndex < 0 || handleIndex >= count - 1) {
+    return widths
+  }
+
+  const containerWidthPx = Number(options.containerWidthPx)
+  if (!Number.isFinite(containerWidthPx) || containerWidthPx <= 0) {
+    return widths
+  }
+
+  const deltaPx = Number(options.deltaPx)
+  if (!Number.isFinite(deltaPx) || deltaPx === 0) {
+    return widths
+  }
+
+  const gapPxRaw = Number(options.gapPx ?? DEFAULT_COLUMN_GAP_PX)
+  const gapPx =
+    Number.isFinite(gapPxRaw) && gapPxRaw >= 0
+      ? gapPxRaw
+      : DEFAULT_COLUMN_GAP_PX
+  const availableWidthPx = Math.max(1, containerWidthPx - (count - 1) * gapPx)
+
+  const totalWeight = widths.reduce((sum, value) => sum + value, 0)
+  if (!(totalWeight > 0)) {
+    return createDefaultColumnWidths(count)
+  }
+
+  const pairTotal = widths[handleIndex] + widths[handleIndex + 1]
+  if (!(pairTotal > 0)) {
+    return widths
+  }
+
+  const minColumnWidthPxRaw = Number(options.minColumnWidthPx ?? DEFAULT_MIN_COLUMN_WIDTH_PX)
+  const minColumnWidthPx =
+    Number.isFinite(minColumnWidthPxRaw) && minColumnWidthPxRaw > 0
+      ? minColumnWidthPxRaw
+      : DEFAULT_MIN_COLUMN_WIDTH_PX
+  const minByPx = (minColumnWidthPx / availableWidthPx) * totalWeight
+  const minByRatio = totalWeight * MIN_COLUMN_WIDTH_RATIO
+  let minWeight = Number(Math.max(minByPx, minByRatio).toFixed(4))
+  const maxAllowedMinWeight = Number((pairTotal / 2).toFixed(4))
+  if (minWeight > maxAllowedMinWeight) {
+    minWeight = maxAllowedMinWeight
+  }
+
+  const deltaWeight = (deltaPx / availableWidthPx) * totalWeight
+  const nextLeftRaw = Math.max(
+    minWeight,
+    Math.min(pairTotal - minWeight, widths[handleIndex] + deltaWeight)
+  )
+  const nextLeft = Number(nextLeftRaw.toFixed(4))
+  const nextRight = Number((pairTotal - nextLeft).toFixed(4))
+
+  const next = [...widths]
+  next[handleIndex] = nextLeft
+  next[handleIndex + 1] = nextRight
+  return next
 }
 
 export function buildColumnsNodeJson(countInput: unknown): JSONContent {
