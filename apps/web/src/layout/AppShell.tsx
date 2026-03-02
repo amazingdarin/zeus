@@ -5,7 +5,6 @@ import { message } from "antd";
 
 import Sidebar from "../components/Sidebar";
 import SettingsModal from "../components/SettingsModal";
-import ChatPanel from "../components/ChatPanel";
 import CommandPalette from "../components/CommandPalette";
 import { useAuth } from "../context/AuthContext";
 import { useProjectContext } from "../context/ProjectContext";
@@ -63,9 +62,6 @@ function AppShell({ children }: AppShellProps) {
     return /^\/documents\/[^/]+$/.test(location.pathname);
   }, [location.pathname]);
 
-  // Don't show ChatPanel on the dedicated chat page
-  const isChatPage = location.pathname === "/chat";
-
   const handleLogout = async () => {
     try {
       await logout();
@@ -102,9 +98,6 @@ function AppShell({ children }: AppShellProps) {
         />
         <main className={`content${isDocumentPageRoute ? " content--flush" : ""}`}>{children}</main>
       </div>
-
-      {/* Bottom Chat Panel - hidden on dedicated chat page */}
-      {!isChatPage && <ChatPanel onOpenSettings={() => setSettingsOpen(true)} />}
 
       <SettingsModal
         isOpen={settingsOpen}

@@ -3469,11 +3469,52 @@ body {
 
 .doc-viewer-page {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
+}
+
+.doc-page-workarea {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.doc-page-workarea-main {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.doc-page-main-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.doc-page-llm-sidebar {
+  width: 360px;
+  min-width: 300px;
+  max-width: 460px;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  transition: width 0.18s ease, min-width 0.18s ease, border-color 0.18s ease;
+}
+
+.doc-page-llm-sidebar.is-closed {
+  width: 0;
+  min-width: 0;
+  border-left-color: transparent;
 }
 
 .document-workspace {
@@ -3557,6 +3598,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .doc-page-right-topbar {
@@ -3577,6 +3619,10 @@ body {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+}
+
+.doc-page-right-topbar-actions-end {
+  margin-left: 4px;
 }
 
 .doc-page-right-topbar-btn {
@@ -3667,6 +3713,33 @@ body {
 .doc-page-tab-close:hover {
   background: var(--hover-bg);
   color: var(--ink);
+}
+
+@media (max-width: 1200px) {
+  .doc-page-llm-sidebar {
+    width: 320px;
+    min-width: 260px;
+  }
+}
+
+@media (max-width: 960px) {
+  .doc-page-workarea {
+    flex-direction: column;
+  }
+
+  .doc-page-llm-sidebar {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    height: 42%;
+  }
+
+  .doc-page-llm-sidebar.is-closed {
+    height: 0;
+    border-top-color: transparent;
+  }
 }
 
 .doc-page-title {
@@ -6333,6 +6406,13 @@ body {
    Chat Dock Bottom - Modern AI Chat Interface
    ───────────────────────────────────────────────────────────────────────── */
 
+.chat-dock-side {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .chat-dock-bottom {
   position: fixed;
   left: 50%;
@@ -6344,6 +6424,33 @@ body {
   flex-direction: column;
   gap: 0;
   z-index: 100;
+}
+
+.chat-dock-side .chat-dock-panel {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  margin-bottom: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  animation: none;
+}
+
+.chat-dock-side .chat-dock-resize-handle {
+  display: none;
+}
+
+.chat-dock-side .chat-dock-messages {
+  padding: 12px 14px;
+}
+
+.chat-dock-side .chat-dock-bar {
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  box-shadow: none;
 }
 
 /* Hide button in the input bar */

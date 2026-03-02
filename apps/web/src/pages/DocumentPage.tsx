@@ -9,6 +9,7 @@ import { StarterKit } from "@tiptap/starter-kit";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   DeleteOutlined,
+  MessageOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   RollbackOutlined,
@@ -21,6 +22,7 @@ import type {
   DocumentEditorSaveStatus,
   DocumentSyncStatus,
 } from "../components/DocumentHeader";
+import ChatPanel from "../components/ChatPanel";
 import DocumentTabBar from "../components/DocumentTabBar";
 import DocumentWorkspace from "../components/DocumentWorkspace";
 import RichTextViewer from "../components/RichTextViewer";
@@ -415,6 +417,7 @@ function DocumentPage() {
   const [editorSaveStatus, setEditorSaveStatus] = useState<DocumentEditorSaveStatus>("idle");
   const [editorSaveError, setEditorSaveError] = useState<string | null>(null);
   const [lockBusy, setLockBusy] = useState(false);
+  const [llmSidebarVisible, setLlmSidebarVisible] = useState(true);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -858,7 +861,7 @@ function DocumentPage() {
     (item: DocumentTreeItem, parentId: string): KnowledgeBaseDocument => {
       return {
         id: item.id,
-        title: item.title || "Untitled",
+        title: item.title || "无标题文档",
         type: "document",
         parentId,
         kind: item.kind,
@@ -1057,7 +1060,7 @@ function DocumentPage() {
 
     setRecentEdits((prev) => {
       const existing = prev.find((item) => item.docId === normalizedDocId);
-      const normalizedTitle = title.trim() || existing?.title || "Untitled";
+      const normalizedTitle = title.trim() || existing?.title || "无标题文档";
       const next: RecentEditedDocument[] = [
         {
           docId: normalizedDocId,
@@ -2751,7 +2754,7 @@ function DocumentPage() {
     }
 
     const content = activeDocument.content ?? { type: "doc", content: [] };
-    const safeTitle = sanitizeFileName(activeDocument.title || "document");
+    const safeTitle = sanitizeFileName(activeDocument.title || "文档");
 
     try {
       setExporting(true);
@@ -2761,7 +2764,7 @@ function DocumentPage() {
           throw new Error("项目未就绪，无法导出 Word");
         }
         const blob = await exportDocumentDocx(resolvedProjectKey, activeDocument.id);
-        const filename = `${safeTitle || "document"}.docx`;
+        const filename = `${safeTitle || "文档"}.docx`;
         downloadBlobFile(blob, filename);
         setExportModalOpen(false);
         return;
@@ -2769,11 +2772,11 @@ function DocumentPage() {
 
       if (exportFormat === "markdown") {
         const markdown = tiptapJsonToMarkdown(content);
-        const filename = `${safeTitle || "document"}.md`;
+        const filename = `${safeTitle || "文档"}.md`;
         downloadTextFile(markdown, filename, "text/markdown;charset=utf-8");
       } else {
         const payload = exportContentJson(content, null);
-        const filename = `${safeTitle || "document"}.zeus.json`;
+        const filename = `${safeTitle || "文档"}.zeus.json`;
         downloadTextFile(
           JSON.stringify(payload, null, 2),
           filename,
@@ -3667,7 +3670,7 @@ function DocumentPage() {
     if (!resolvedDocumentId) {
       return (
         <div className="doc-viewer-state">
-          Select a document from the left navigation to view its details.
+          请从左侧文档树选择一个文档查看详情。
         </div>
       );
     }
@@ -3680,14 +3683,14 @@ function DocumentPage() {
       return <div className="doc-viewer-state">加载文档中...</div>;
     }
     if (!activeDocument) {
-      return <div className="doc-viewer-state">No document available</div>;
+      return <div className="doc-viewer-state">暂无可显示的文档</div>;
     }
     return (
       <div className="doc-page-body">
         {hasProposal ? (
           <div className="doc-diff-panel">
             <div className="doc-diff-header">
-              <span>Proposed Changes</span>
+              <span>建议变更</span>
               <div className="doc-diff-actions">
                 <button
                   className="doc-diff-action"
@@ -3703,7 +3706,7 @@ function DocumentPage() {
                   onClick={handleDismissProposal}
                   disabled={applyLoading}
                 >
-                  Cancel
+                  取消
                 </button>
               </div>
             </div>
@@ -3715,18 +3718,18 @@ function DocumentPage() {
               <div className="doc-diff-body">
                 {diffData.metaDiff ? (
                   <div className="doc-diff-section">
-                    <div className="doc-diff-label">Meta</div>
+                    <div className="doc-diff-label">元数据</div>
                     <pre className="doc-diff-code">{diffData.metaDiff}</pre>
                   </div>
                 ) : null}
                 {diffData.contentDiff ? (
                   <div className="doc-diff-section">
-                    <div className="doc-diff-label">Content</div>
+                    <div className="doc-diff-label">内容</div>
                     <pre className="doc-diff-code">{diffData.contentDiff}</pre>
                   </div>
                 ) : null}
                 {!diffData.metaDiff && !diffData.contentDiff ? (
-                  <div className="doc-diff-state">No changes detected.</div>
+                  <div className="doc-diff-state">未检测到变更。</div>
                 ) : null}
               </div>
             ) : null}
@@ -3787,53 +3790,82 @@ function DocumentPage() {
       }
     >
       <>
-        <div className="doc-page-right-head">
-          <div className="doc-page-right-topbar">
-            <div className="doc-page-right-topbar-actions">
-              <DocumentTreeToggleButton />
+        <div className="doc-viewer-page">
+          <div className={`doc-page-workarea${llmSidebarVisible ? " has-llm-sidebar" : ""}`}>
+            <div className="doc-page-workarea-main">
+              <div className="doc-page-right-head">
+                <div className="doc-page-right-topbar">
+                  <div className="doc-page-right-topbar-actions">
+                    <DocumentTreeToggleButton />
+                  </div>
+                  <DocumentTabBar
+                    tabs={tabItems}
+                    activeDocId={activeTabDocId}
+                    onActivate={handleActivateTab}
+                    onClose={(docId) => {
+                      void handleCloseTab(docId);
+                    }}
+                  />
+                  <div className="doc-page-right-topbar-actions doc-page-right-topbar-actions-end">
+                    <Tooltip title={llmSidebarVisible ? "隐藏 AI 对话" : "显示 AI 对话"}>
+                      <button
+                        className="kb-sidebar-toolbar-btn doc-page-right-topbar-btn"
+                        type="button"
+                        onClick={() => setLlmSidebarVisible((prev) => !prev)}
+                        aria-label={llmSidebarVisible ? "隐藏 AI 对话" : "显示 AI 对话"}
+                      >
+                        <MessageOutlined />
+                      </button>
+                    </Tooltip>
+                  </div>
+                </div>
+                {showBreadcrumb || showHeaderActions ? (
+                  <DocumentHeader
+                    breadcrumbItems={trashPanelOpen ? [{ label: "垃圾箱" }] : breadcrumbItems}
+                    mode="view"
+                    showBreadcrumb={showBreadcrumb}
+                    showActions={showHeaderActions && !trashPanelOpen}
+                    allowChildActions={allowChildActions}
+                    allowDelete={Boolean(activeDocument) && !isEphemeralActive && !isActiveDocumentLocked}
+                    allowOptimize={Boolean(activeDocument) && !isEphemeralActive && !isActiveDocumentLocked}
+                    deleting={deleting}
+                    onSave={() => { }}
+                    onCancel={() => { }}
+                    onNew={handleOpenNew}
+                    onImport={() => handleOpenImportWithMode("file")}
+                    onDelete={handleDelete}
+                    onDuplicate={activeDocument && !isEphemeralActive ? handleDuplicate : undefined}
+                    onExport={activeDocument && !isEphemeralActive ? handleOpenExport : undefined}
+                    onOptimize={activeDocument && !isEphemeralActive ? handleOpenOptimize : undefined}
+                    syncStatus={syncStatus}
+                    syncError={syncError}
+                    syncDisabled={!resolvedProjectKey || syncStatus === "syncing"}
+                    locked={isActiveDocumentLocked}
+                    lockBusy={lockBusy}
+                    onLockToggle={activeDocument && !isEphemeralActive ? handleToggleDocumentLock : undefined}
+                    editorSaveStatus={editorSaveStatus}
+                    editorSaveError={editorSaveError}
+                    onRetryEditorSave={activeDocument ? handleRetryEditorSave : undefined}
+                    onSync={resolvedProjectKey ? handleSyncNow : undefined}
+                    onViewSyncLogs={resolvedProjectKey ? handleOpenSyncLogs : undefined}
+                  />
+                ) : null}
+              </div>
+              <div className="doc-page-main-body">{bodyContent()}</div>
             </div>
-            <DocumentTabBar
-              tabs={tabItems}
-              activeDocId={activeTabDocId}
-              onActivate={handleActivateTab}
-              onClose={(docId) => {
-                void handleCloseTab(docId);
-              }}
-            />
+            <aside
+              className={`doc-page-llm-sidebar${llmSidebarVisible ? " is-open" : " is-closed"}`}
+              aria-hidden={!llmSidebarVisible}
+            >
+              <ChatPanel
+                variant="sidebar"
+                hidden={!llmSidebarVisible}
+                showFloatingButtonWhenHidden={false}
+                onHiddenChange={(nextHidden) => setLlmSidebarVisible(!nextHidden)}
+              />
+            </aside>
           </div>
-          {showBreadcrumb || showHeaderActions ? (
-            <DocumentHeader
-              breadcrumbItems={trashPanelOpen ? [{ label: "垃圾箱" }] : breadcrumbItems}
-              mode="view"
-              showBreadcrumb={showBreadcrumb}
-              showActions={showHeaderActions && !trashPanelOpen}
-              allowChildActions={allowChildActions}
-              allowDelete={Boolean(activeDocument) && !isEphemeralActive && !isActiveDocumentLocked}
-              allowOptimize={Boolean(activeDocument) && !isEphemeralActive && !isActiveDocumentLocked}
-              deleting={deleting}
-              onSave={() => { }}
-              onCancel={() => { }}
-              onNew={handleOpenNew}
-              onImport={() => handleOpenImportWithMode("file")}
-              onDelete={handleDelete}
-              onDuplicate={activeDocument && !isEphemeralActive ? handleDuplicate : undefined}
-              onExport={activeDocument && !isEphemeralActive ? handleOpenExport : undefined}
-              onOptimize={activeDocument && !isEphemeralActive ? handleOpenOptimize : undefined}
-              syncStatus={syncStatus}
-              syncError={syncError}
-              syncDisabled={!resolvedProjectKey || syncStatus === "syncing"}
-              locked={isActiveDocumentLocked}
-              lockBusy={lockBusy}
-              onLockToggle={activeDocument && !isEphemeralActive ? handleToggleDocumentLock : undefined}
-              editorSaveStatus={editorSaveStatus}
-              editorSaveError={editorSaveError}
-              onRetryEditorSave={activeDocument ? handleRetryEditorSave : undefined}
-              onSync={resolvedProjectKey ? handleSyncNow : undefined}
-              onViewSyncLogs={resolvedProjectKey ? handleOpenSyncLogs : undefined}
-            />
-          ) : null}
         </div>
-        <div className="doc-viewer-page">{bodyContent()}</div>
         {importModalOpen ? (
           <div className="modal-overlay" role="presentation">
             <button
@@ -3913,7 +3945,7 @@ function DocumentPage() {
                           </button>
                         </div>
                       </div>
-                      <fieldset className="kb-import-smart-options" aria-label="Smart import types">
+                      <fieldset className="kb-import-smart-options" aria-label="智能导入类型">
                         {SMART_IMPORT_OPTIONS.map((option) => {
                           const disabled = !option.enabled || !smartImportEnabled;
                           const active = isSmartImportTypeSelected(option.id);
@@ -3937,7 +3969,7 @@ function DocumentPage() {
                         })}
                       </fieldset>
                     </fieldset>
-                    <fieldset className="kb-import-smart" aria-label="Filter presets">
+                    <fieldset className="kb-import-smart" aria-label="文件筛选条件">
                       <div className="kb-import-smart-header">
                         <div className="kb-import-smart-title">文件类型筛选</div>
                       </div>
@@ -4349,7 +4381,7 @@ function DocumentPage() {
                       checked={exportFormat === "markdown"}
                       onChange={() => setExportFormat("markdown")}
                     />
-                    <span>Markdown (.md)</span>
+                    <span>Markdown 文档（.md）</span>
                   </label>
                   <label className="kb-export-option">
                     <input
@@ -4370,7 +4402,7 @@ function DocumentPage() {
                       onChange={() => setExportFormat("word")}
                     />
                     <span className="kb-export-option-content">
-                      <span>Word (.docx)</span>
+                      <span>Word 文档（.docx）</span>
                       <small className="kb-export-option-hint">有损导出（部分格式会降级）</small>
                     </span>
                   </label>
@@ -4419,17 +4451,17 @@ function DocumentPage() {
               onKeyDown={(event) => event.stopPropagation()}
             >
               <div className="modal-header">
-                <h2>Rebuild knowledge</h2>
+                <h2>重建知识库</h2>
                 <button
                   className="modal-close"
                   type="button"
                   onClick={() => setRebuildModalOpen(false)}
                 >
-                  Close
+                  关闭
                 </button>
               </div>
               <div className="modal-body">
-                Generate a document summary as well?
+                是否同时生成文档摘要？
               </div>
               <div className="modal-actions">
                 <button
@@ -4438,7 +4470,7 @@ function DocumentPage() {
                   onClick={() => setRebuildModalOpen(false)}
                   disabled={rebuilding}
                 >
-                  Cancel
+                  取消
                 </button>
                 <button
                   className="btn ghost"
@@ -4446,7 +4478,7 @@ function DocumentPage() {
                   onClick={() => handleRebuildChoice(false)}
                   disabled={rebuilding}
                 >
-                  Rebuild only
+                  仅重建索引
                 </button>
                 <button
                   className="btn primary"
@@ -4454,7 +4486,7 @@ function DocumentPage() {
                   onClick={() => handleRebuildChoice(true)}
                   disabled={rebuilding}
                 >
-                  Rebuild + Summary
+                  重建并生成摘要
                 </button>
               </div>
             </div>
@@ -4909,7 +4941,7 @@ function mapFavoriteDocuments(items: FavoriteDocumentItem[]): FavoriteDocument[]
   return items
     .map((item) => ({
       docId: String(item.doc_id ?? "").trim(),
-      title: String(item.title ?? "").trim() || "Untitled",
+      title: String(item.title ?? "").trim() || "无标题文档",
       favoritedAt: String(item.favorited_at ?? "").trim(),
     }))
     .filter((item) => item.docId);
@@ -4923,7 +4955,7 @@ function mapRecentEditedDocuments(items: RecentEditedDocumentItem[]): RecentEdit
   return items
     .map((item) => ({
       docId: String(item.doc_id ?? "").trim(),
-      title: String(item.title ?? "").trim() || "Untitled",
+      title: String(item.title ?? "").trim() || "无标题文档",
       editedAt: String(item.edited_at ?? "").trim(),
     }))
     .filter((item) => item.docId);
@@ -4997,7 +5029,7 @@ async function createDocumentRecord(
   metaInput: DocumentCreateMeta,
   content: JSONContent,
 ): Promise<{ id: string; title: string }> {
-  const title = metaInput.title.trim() || "Untitled Document";
+  const title = metaInput.title.trim() || "无标题文档";
   const parentId = resolveParentId(metaInput.parentId);
   const slug = sanitizeFileName(title);
   const extra = metaInput.extra ?? {};

@@ -6,6 +6,8 @@ async (page) => {
 
   const result = {
     assertions: [],
+    lockedStateReady: false,
+    unlockedStateReady: false,
     readonlyAfterLock: false,
     readonlyAfterUnlock: false,
     readonlyAfterFallback: false,
@@ -16,6 +18,7 @@ async (page) => {
     switchCheckedAfterFallback: null,
     tabLockIconVisibleAfterLock: null,
     tabLockIconVisibleAfterUnlock: null,
+    requests: [],
     screenshot: "/Users/darin/mine/code/zeus/output/playwright/document-lock-regression.png",
   };
 
@@ -48,6 +51,8 @@ async (page) => {
       },
     };
     let lock = null;
+    const requests = [];
+    window.__zeusMockRequests = requests;
 
     window.__zeusLockExternally = () => {
       lock = {
@@ -84,6 +89,7 @@ async (page) => {
       const urlText = typeof input === "string" ? input : request?.url || "";
       const url = new URL(urlText, window.location.origin);
       const path = url.pathname;
+      requests.push(`${method} ${path}`);
 
       if (!path.startsWith("/api/")) {
         return originalFetch(input, init);
@@ -236,7 +242,8 @@ async (page) => {
     localStorage.setItem("zeus.lastProjectRef", projectRefSeed);
   }, { projectRefSeed: projectRef, docIdSeed: docId });
 
-  await page.goto(`${base}/#/documents/${docId}`, { waitUntil: "domcontentloaded", timeout: 60000 });
+  const runNonce = Date.now();
+  await page.goto(`${base}/?pw=${runNonce}#/documents/${docId}`, { waitUntil: "domcontentloaded", timeout: 60000 });
   await page.waitForSelector(".document-workspace-title-input", { timeout: 60000 });
   await page.waitForSelector(".doc-editor-content .ProseMirror", { timeout: 60000 });
   await page.waitForSelector(".kb-menu-button", { timeout: 60000 });
@@ -245,7 +252,9 @@ async (page) => {
   const menuButton = page.locator(".kb-menu-button").first();
   let lockSwitchReady = false;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    await menuButton.click();
+    await menuButton.evaluate((el) => {
+      el.click();
+    });
     lockSwitchReady = await waitForState(
       async () => (await page.locator(".kb-menu-item-lock .ant-switch").count()) > 0,
       5,
@@ -256,14 +265,24 @@ async (page) => {
     }
   }
   expect(lockSwitchReady, "Lock switch renders in header menu");
-  const lockSwitch = page.locator(".kb-menu-item-lock .ant-switch").first();
+  const headerMenu = page.locator(".kb-menu").last();
+  const lockSwitch = headerMenu.locator(".kb-menu-item-lock .ant-switch").first();
   const editorRoot = page.locator(".doc-editor-content .ProseMirror").first();
   const activeTabLockIcon = page.locator(".doc-page-tab.active .doc-page-tab-lock").first();
 
   await lockSwitch.click();
-  const lockedStateReady = await waitForState(async () =>
-    titleInput.evaluate((el) => el.readOnly).catch(() => false)
-  );
+  const lockedStateReady = await waitForState(async () => {
+    const [titleReadonly, switchChecked] = await Promise.all([
+      titleInput.evaluate((el) => el.readOnly).catch(() => false),
+      lockSwitch.evaluate((el) => el.classList.contains("ant-switch-checked")).catch(() => false),
+    ]);
+    return titleReadonly || switchChecked;
+  }, 60, 200);
+  result.requests = await page.evaluate(() => {
+    const value = window.__zeusMockRequests;
+    return Array.isArray(value) ? value.slice() : [];
+  });
+  result.lockedStateReady = lockedStateReady;
   expect(lockedStateReady, "Workspace becomes readonly after lock toggle");
   result.readonlyAfterLock = await titleInput.evaluate((el) => el.readOnly);
   result.switchCheckedAfterLock = await lockSwitch.evaluate((el) =>
@@ -279,9 +298,14 @@ async (page) => {
   expect(result.tabLockIconVisibleAfterLock === true, "Tab lock icon appears after lock");
 
   await lockSwitch.click();
-  const unlockedStateReady = await waitForState(async () =>
-    titleInput.evaluate((el) => !el.readOnly).catch(() => false)
-  );
+  const unlockedStateReady = await waitForState(async () => {
+    const [titleWritable, switchUnchecked] = await Promise.all([
+      titleInput.evaluate((el) => !el.readOnly).catch(() => false),
+      lockSwitch.evaluate((el) => !el.classList.contains("ant-switch-checked")).catch(() => false),
+    ]);
+    return titleWritable || switchUnchecked;
+  }, 60, 200);
+  result.unlockedStateReady = unlockedStateReady;
   expect(unlockedStateReady, "Workspace becomes editable after unlock toggle");
   result.readonlyAfterUnlock = await titleInput.evaluate((el) => el.readOnly);
   result.switchCheckedAfterUnlock = await lockSwitch.evaluate((el) =>

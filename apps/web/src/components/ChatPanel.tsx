@@ -43,14 +43,32 @@ import ThinkingTimeline from "./ThinkingTimeline";
 
 type ChatPanelProps = {
   onOpenSettings?: () => void;
+  variant?: "bottom" | "sidebar";
+  hidden?: boolean;
+  onHiddenChange?: (hidden: boolean) => void;
+  showFloatingButtonWhenHidden?: boolean;
 };
 
-function ChatPanel({ onOpenSettings }: ChatPanelProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [isHidden, setIsHidden] = useState(true);
+function ChatPanel({
+  onOpenSettings,
+  variant = "bottom",
+  hidden,
+  onHiddenChange,
+  showFloatingButtonWhenHidden = true,
+}: ChatPanelProps) {
+  const isSidebar = variant === "sidebar";
+  const [isExpanded, setIsExpanded] = useState(isSidebar);
+  const [internalHidden, setInternalHidden] = useState(isSidebar ? false : true);
   const [panelHeight, setPanelHeight] = useState(320);
   const [isResizing, setIsResizing] = useState(false);
   const resizeStartRef = useRef<{ y: number; height: number } | null>(null);
+  const isHidden = typeof hidden === "boolean" ? hidden : internalHidden;
+  const setHidden = (nextHidden: boolean) => {
+    if (typeof hidden !== "boolean") {
+      setInternalHidden(nextHidden);
+    }
+    onHiddenChange?.(nextHidden);
+  };
 
   const {
     messages,
@@ -104,7 +122,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     attachments,
     handlePaste,
     removeAttachment,
-  } = useChatLogic({ autoScrollEnabled: isExpanded });
+  } = useChatLogic({ autoScrollEnabled: isSidebar || isExpanded });
 
   const taskTodoStorageKey = projectKey && sessionId
     ? `zeus-task-todo-expanded-${projectKey}-${sessionId}`
@@ -112,15 +130,24 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
 
   const mutableInputRef = inputRef as { current: HTMLTextAreaElement | null };
 
+  useEffect(() => {
+    if (isSidebar) {
+      setIsExpanded(true);
+    }
+  }, [isSidebar]);
+
   // Focus input when panel opens
   useEffect(() => {
-    if (isExpanded && inputRef.current) {
+    if (!isHidden && (isSidebar || isExpanded) && inputRef.current) {
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [isExpanded, inputRef]);
+  }, [inputRef, isExpanded, isHidden, isSidebar]);
 
   // Handle resize
   useEffect(() => {
+    if (isSidebar) {
+      return;
+    }
     if (!isResizing) return;
     const handleMove = (event: MouseEvent) => {
       const start = resizeStartRef.current;
@@ -139,11 +166,11 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mouseup", handleUp);
     };
-  }, [isResizing]);
+  }, [isResizing, isSidebar]);
 
   // Auto expand panel when sending message
   const handleSendWithExpand = async () => {
-    if (!isExpanded) {
+    if (!isSidebar && !isExpanded) {
       setIsExpanded(true);
     }
     await handleSend();
@@ -396,23 +423,25 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
           onSelect={handleSelectIntent}
         />
 
-        <button
-          type="button"
-          className="chat-floating-btn"
-          onClick={() => setIsHidden(false)}
-          title="打开 AI 助手"
-        >
-          <MessageOutlined />
-          {messages.length > 0 && (
-            <span className="chat-floating-badge">{messages.length}</span>
-          )}
-        </button>
+        {showFloatingButtonWhenHidden ? (
+          <button
+            type="button"
+            className="chat-floating-btn"
+            onClick={() => setHidden(false)}
+            title="打开 AI 助手"
+          >
+            <MessageOutlined />
+            {messages.length > 0 && (
+              <span className="chat-floating-badge">{messages.length}</span>
+            )}
+          </button>
+        ) : null}
       </>
     );
   }
 
   return (
-    <section className="chat-dock-bottom">
+    <section className={isSidebar ? "chat-dock-side" : "chat-dock-bottom"}>
       {/* Draft Preview Modal */}
       {pendingDraft && (
         <DraftPreviewModal
@@ -440,19 +469,20 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
 
       {/* Expanded Panel (animated open/close) */}
       <div
-        className={`chat-dock-panel${isExpanded ? " is-expanded" : " is-collapsed"}${isResizing ? " is-resizing" : ""}`}
-        style={{ height: `${isExpanded ? panelHeight : 0}px` }}
-        aria-hidden={!isExpanded}
+        className={`chat-dock-panel${isSidebar ? " chat-dock-panel-side is-expanded" : isExpanded ? " is-expanded" : " is-collapsed"}${isResizing ? " is-resizing" : ""}`}
+        style={isSidebar ? undefined : { height: `${isExpanded ? panelHeight : 0}px` }}
+        aria-hidden={isSidebar ? false : !isExpanded}
       >
-          {/* Resize Handle */}
-          <div
-            className="chat-dock-resize-handle"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              resizeStartRef.current = { y: e.clientY, height: panelHeight };
-              setIsResizing(true);
-            }}
-          />
+          {!isSidebar ? (
+            <div
+              className="chat-dock-resize-handle"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                resizeStartRef.current = { y: e.clientY, height: panelHeight };
+                setIsResizing(true);
+              }}
+            />
+          ) : null}
 
           {/* Header */}
           <header className="chat-dock-header">
@@ -715,7 +745,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
             </ul>
             <div className="slash-command-hint">
               <span>↑↓ 选择</span>
-              <span>Tab/Enter 确认</span>
+              <span>Tab/回车 确认</span>
               <span>Esc 取消</span>
             </div>
           </div>
@@ -768,22 +798,26 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
                 <SendOutlined />
               </button>
             )}
-            <button
-              type="button"
-              className="chat-dock-toggle-btn"
-              onClick={() => setIsExpanded(!isExpanded)}
-              title={isExpanded ? "收起" : "展开"}
-            >
-              {isExpanded ? <DownOutlined /> : <UpOutlined />}
-            </button>
-            <button
-              type="button"
-              className="chat-dock-hide-btn"
-              onClick={() => setIsHidden(true)}
-              title="隐藏对话框"
-            >
-              <RightOutlined />
-            </button>
+            {!isSidebar ? (
+              <>
+                <button
+                  type="button"
+                  className="chat-dock-toggle-btn"
+                  onClick={() => setIsExpanded(!isExpanded)}
+                  title={isExpanded ? "收起" : "展开"}
+                >
+                  {isExpanded ? <DownOutlined /> : <UpOutlined />}
+                </button>
+                <button
+                  type="button"
+                  className="chat-dock-hide-btn"
+                  onClick={() => setHidden(true)}
+                  title="隐藏对话框"
+                >
+                  <RightOutlined />
+                </button>
+              </>
+            ) : null}
           </div>
         </div>
       </div>
