@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Editor, JSONContent } from "@tiptap/react";
 
 import RichTextEditor from "./RichTextEditor";
-import { updateDocumentContent } from "../api/documents";
+import {
+  isDocumentLockedError,
+  updateDocumentContent,
+} from "../api/documents";
 import {
   createSaveScheduler,
   type SaveScheduler,
@@ -14,9 +17,13 @@ import {
   type EditorSaveEvent,
 } from "../features/document-editor/save-state";
 import {
+  isMeaningfulDraftChange,
   mapSaveStatusText,
+  shouldPersistWorkspacePayload,
+  shouldApplyIncomingWorkspaceState,
   shouldFlushOn,
 } from "../features/document-editor/workspace-model";
+import { reduceLockFallbackState } from "../features/document-editor/lock-fallback";
 import { useScrollToBlock } from "@zeus/doc-editor";
 import {
   toSelectionRange,
@@ -36,6 +43,8 @@ type SavePayload = {
   content: JSONContent;
 };
 
+type PersistMode = "persisted" | "ephemeral";
+
 type DocumentWorkspaceProps = {
   projectKey: string;
   documentId: string;
@@ -43,11 +52,16 @@ type DocumentWorkspaceProps = {
   content: JSONContent | null;
   blockId?: string | null;
   showTitle?: boolean;
+  locked?: boolean;
+  persistMode?: PersistMode;
   onSaved?: (payload: SavePayload) => void;
+  onFirstMeaningfulChange?: (payload: SavePayload) => Promise<void> | void;
+  onLockFallback?: () => void;
   onSaveStateChange?: (state: EditorSaveState) => void;
   onRetryBind?: (handler: (() => void) | null) => void;
   onFocusBind?: (handler: (() => void) | null) => void;
   onBridgeBind?: (bridge: WorkspaceBridge | null) => void;
+  onTitleChange?: (nextTitle: string) => void;
 };
 
 function reduceWith(state: EditorSaveState, event: EditorSaveEvent): EditorSaveState {
@@ -62,6 +76,9 @@ function findEditorScrollContainer(root: HTMLElement | null): HTMLElement | null
 }
 
 function mapSnapshotStatusToSaveState(status: WorkspaceSnapshot["saveStatus"]): EditorSaveState {
+  if (status === "draft") {
+    return { status: "draft", error: "" };
+  }
   if (status === "dirty") {
     return { status: "dirty", error: "" };
   }
@@ -81,18 +98,28 @@ export default function DocumentWorkspace({
   content,
   blockId = null,
   showTitle = true,
+  locked = false,
+  persistMode = "persisted",
   onSaved,
+  onFirstMeaningfulChange,
+  onLockFallback,
   onSaveStateChange,
   onRetryBind,
   onFocusBind,
   onBridgeBind,
+  onTitleChange,
 }: DocumentWorkspaceProps) {
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [editorReady, setEditorReady] = useState(false);
   const [titleValue, setTitleValue] = useState(title);
   const [editorContent, setEditorContent] = useState<JSONContent>(content ?? EMPTY_DOC);
-  const [saveState, setSaveState] = useState<EditorSaveState>(initialSaveState());
+  const [readonlyFallback, setReadonlyFallback] = useState(false);
+  const [saveState, setSaveState] = useState<EditorSaveState>(() =>
+    persistMode === "ephemeral"
+      ? { status: "draft", error: "" }
+      : initialSaveState(),
+  );
 
   const schedulerRef = useRef<SaveScheduler<SavePayload> | null>(null);
   const latestContentRef = useRef<JSONContent>(content ?? EMPTY_DOC);
@@ -100,8 +127,75 @@ export default function DocumentWorkspace({
   const latestSerializedRef = useRef<string>(JSON.stringify(content ?? EMPTY_DOC));
   const lastSavedSerializedRef = useRef<string>(JSON.stringify(content ?? EMPTY_DOC));
   const lastSavedTitleRef = useRef<string>(title);
+  const onSaveStateChangeRef = useRef(onSaveStateChange);
+  const onRetryBindRef = useRef(onRetryBind);
+  const onFocusBindRef = useRef(onFocusBind);
+  const onBridgeBindRef = useRef(onBridgeBind);
+  const captureSnapshotRef = useRef<() => WorkspaceSnapshot>(() => ({
+    scrollTop: 0,
+    selection: null,
+    draftTitle: "",
+    draftContent: EMPTY_DOC,
+    saveStatus: "idle",
+  }));
+  const restoreSnapshotRef = useRef<(snapshot: WorkspaceSnapshot) => void>(() => undefined);
+  const flushForBridgeRef = useRef<() => Promise<void>>(async () => undefined);
+  const bridgeRef = useRef<WorkspaceBridge | null>(null);
+  const workspaceIdentityRef = useRef(`${projectKey}:${documentId}`);
+  const hasMaterializedRef = useRef(persistMode === "persisted");
+  const materializingRef = useRef(false);
+  const lockedRef = useRef(locked);
+  const readonly = locked || readonlyFallback;
 
   useScrollToBlock(blockId, editorReady);
+
+  useEffect(() => {
+    onSaveStateChangeRef.current = onSaveStateChange;
+  }, [onSaveStateChange]);
+
+  useEffect(() => {
+    onRetryBindRef.current = onRetryBind;
+  }, [onRetryBind]);
+
+  useEffect(() => {
+    onFocusBindRef.current = onFocusBind;
+  }, [onFocusBind]);
+
+  useEffect(() => {
+    onBridgeBindRef.current = onBridgeBind;
+  }, [onBridgeBind]);
+
+  useEffect(() => {
+    if (persistMode === "persisted") {
+      hasMaterializedRef.current = true;
+      setSaveState((prev) => (prev.status === "draft" ? initialSaveState() : prev));
+      return;
+    }
+    hasMaterializedRef.current = false;
+    setSaveState((prev) => {
+      if (prev.status === "saving" || prev.status === "error") {
+        return prev;
+      }
+      if (prev.status === "draft") {
+        return prev;
+      }
+      return { status: "draft", error: "" };
+    });
+  }, [persistMode]);
+
+  useEffect(() => {
+    if (!locked && lockedRef.current) {
+      setReadonlyFallback(false);
+    }
+    lockedRef.current = locked;
+  }, [locked]);
+
+  useEffect(() => {
+    if (!readonly) {
+      return;
+    }
+    schedulerRef.current?.cancel();
+  }, [readonly]);
 
   const dispatchSaveEvent = useCallback((event: EditorSaveEvent) => {
     setSaveState((prev) => reduceWith(prev, event));
@@ -110,6 +204,15 @@ export default function DocumentWorkspace({
   const flushPending = useCallback(
     async (reason: FlushReason, options?: { throwOnError?: boolean }) => {
       if (!shouldFlushOn(reason)) {
+        return;
+      }
+      if (readonly) {
+        return;
+      }
+      if (!shouldPersistWorkspacePayload({
+        persistMode,
+        hasMaterialized: hasMaterializedRef.current,
+      })) {
         return;
       }
       const scheduler = schedulerRef.current;
@@ -125,7 +228,7 @@ export default function DocumentWorkspace({
         // save-state handled via scheduler error callback
       }
     },
-    [],
+    [persistMode, readonly],
   );
 
   const flushForBridge = useCallback(async () => {
@@ -140,9 +243,10 @@ export default function DocumentWorkspace({
       selection,
       draftTitle: latestTitleRef.current,
       draftContent: latestContentRef.current,
+      locked: readonly,
       saveStatus: saveState.status,
     };
-  }, [editor, saveState.status]);
+  }, [editor, readonly, saveState.status]);
 
   const restoreSnapshot = useCallback(
     (snapshot: WorkspaceSnapshot) => {
@@ -155,6 +259,11 @@ export default function DocumentWorkspace({
       latestTitleRef.current = nextTitle;
       latestContentRef.current = nextContent;
       latestSerializedRef.current = serialized;
+      if (snapshot.locked) {
+        setReadonlyFallback(true);
+      } else if (!locked) {
+        setReadonlyFallback(false);
+      }
       setSaveState(mapSnapshotStatusToSaveState(snapshot.saveStatus));
 
       window.requestAnimationFrame(() => {
@@ -183,38 +292,93 @@ export default function DocumentWorkspace({
         editor.commands.setTextSelection({ from, to });
       }
     },
-    [editor],
+    [editor, locked],
   );
 
   useEffect(() => {
-    onBridgeBind?.({
-      captureSnapshot,
-      restoreSnapshot,
-      flush: flushForBridge,
-    });
+    captureSnapshotRef.current = captureSnapshot;
+  }, [captureSnapshot]);
+
+  useEffect(() => {
+    restoreSnapshotRef.current = restoreSnapshot;
+  }, [restoreSnapshot]);
+
+  useEffect(() => {
+    flushForBridgeRef.current = flushForBridge;
+  }, [flushForBridge]);
+
+  useEffect(() => {
+    if (!bridgeRef.current) {
+      bridgeRef.current = {
+        captureSnapshot: () => captureSnapshotRef.current(),
+        restoreSnapshot: (snapshot) => restoreSnapshotRef.current(snapshot),
+        flush: () => flushForBridgeRef.current(),
+      };
+    }
+    onBridgeBindRef.current?.(bridgeRef.current);
     return () => {
-      onBridgeBind?.(null);
+      onBridgeBindRef.current?.(null);
     };
-  }, [captureSnapshot, flushForBridge, onBridgeBind, restoreSnapshot]);
+  }, []);
 
   const saveNow = useCallback(
     async (payload: SavePayload) => {
+      if (readonly) {
+        return;
+      }
+      if (!shouldPersistWorkspacePayload({
+        persistMode,
+        hasMaterialized: hasMaterializedRef.current,
+      })) {
+        return;
+      }
       dispatchSaveEvent({ type: "save-start" });
       const normalizedTitle = payload.title.trim() || "无标题文档";
-      await updateDocumentContent(projectKey, documentId, {
-        title: normalizedTitle,
-        content: payload.content,
-      });
-      const serialized = JSON.stringify(payload.content);
-      lastSavedSerializedRef.current = serialized;
-      lastSavedTitleRef.current = normalizedTitle;
-      dispatchSaveEvent({ type: "save-success" });
-      onSaved?.({
-        title: normalizedTitle,
-        content: payload.content,
-      });
+      try {
+        await updateDocumentContent(projectKey, documentId, {
+          title: normalizedTitle,
+          content: payload.content,
+        });
+        const serialized = JSON.stringify(payload.content);
+        lastSavedSerializedRef.current = serialized;
+        lastSavedTitleRef.current = normalizedTitle;
+        dispatchSaveEvent({ type: "save-success" });
+        onSaved?.({
+          title: normalizedTitle,
+          content: payload.content,
+        });
+      } catch (error) {
+        const status = typeof (error as { status?: unknown })?.status === "number"
+          ? (error as { status: number }).status
+          : undefined;
+        const code = typeof (error as { code?: unknown })?.code === "string"
+          ? (error as { code: string }).code
+          : undefined;
+        const lockFallback = reduceLockFallbackState(
+          { readonly: readonlyFallback },
+          {
+            status,
+            code,
+          },
+        );
+        if (lockFallback.readonly && !readonlyFallback && isDocumentLockedError(error)) {
+          setReadonlyFallback(true);
+          schedulerRef.current?.cancel();
+          onLockFallback?.();
+        }
+        throw error;
+      }
     },
-    [dispatchSaveEvent, documentId, onSaved, projectKey],
+    [
+      dispatchSaveEvent,
+      documentId,
+      onLockFallback,
+      onSaved,
+      persistMode,
+      projectKey,
+      readonly,
+      readonlyFallback,
+    ],
   );
 
   useEffect(() => {
@@ -238,22 +402,92 @@ export default function DocumentWorkspace({
 
   useEffect(() => {
     const nextContent = content ?? EMPTY_DOC;
+    const nextTitle = title;
     const serialized = JSON.stringify(nextContent);
-    setTitleValue(title);
-    setEditorContent(nextContent);
+    const nextIdentity = `${projectKey}:${documentId}`;
+    const identityChanged = workspaceIdentityRef.current !== nextIdentity;
+    workspaceIdentityRef.current = nextIdentity;
+
+    const shouldSyncFromIncoming = shouldApplyIncomingWorkspaceState({
+      saveStatus: saveState.status,
+      incomingTitle: nextTitle,
+      localTitle: latestTitleRef.current,
+      incomingSerialized: serialized,
+      localSerialized: latestSerializedRef.current,
+      force: identityChanged,
+    });
+    if (!shouldSyncFromIncoming) {
+      return;
+    }
+
+    if (nextTitle !== latestTitleRef.current) {
+      setTitleValue(nextTitle);
+    }
+    if (serialized !== latestSerializedRef.current) {
+      setEditorContent(nextContent);
+    }
     latestContentRef.current = nextContent;
-    latestTitleRef.current = title;
+    latestTitleRef.current = nextTitle;
     latestSerializedRef.current = serialized;
     lastSavedSerializedRef.current = serialized;
-    lastSavedTitleRef.current = title;
-    setSaveState(initialSaveState());
-  }, [content, documentId, projectKey, title]);
+    lastSavedTitleRef.current = nextTitle;
+    hasMaterializedRef.current = persistMode === "persisted";
+    if (identityChanged) {
+      setSaveState(
+        persistMode === "ephemeral"
+          ? { status: "draft", error: "" }
+          : initialSaveState(),
+      );
+      setReadonlyFallback(false);
+    }
+  }, [content, documentId, persistMode, projectKey, saveState.status, title]);
+
+  const triggerFirstMeaningfulChange = useCallback(
+    async (payload: SavePayload) => {
+      if (persistMode !== "ephemeral" || !onFirstMeaningfulChange) {
+        return;
+      }
+      if (!isMeaningfulDraftChange({
+        title: payload.title,
+        content: payload.content,
+        defaultTitle: "无标题文档",
+      })) {
+        return;
+      }
+      if (materializingRef.current || hasMaterializedRef.current) {
+        return;
+      }
+      materializingRef.current = true;
+      dispatchSaveEvent({ type: "save-start" });
+      try {
+        await onFirstMeaningfulChange(payload);
+        hasMaterializedRef.current = true;
+        dispatchSaveEvent({ type: "save-success" });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "首次保存失败";
+        dispatchSaveEvent({ type: "save-error", error: message });
+      } finally {
+        materializingRef.current = false;
+      }
+    },
+    [dispatchSaveEvent, onFirstMeaningfulChange, persistMode],
+  );
 
   useEffect(() => {
-    onSaveStateChange?.(saveState);
-  }, [onSaveStateChange, saveState]);
+    onSaveStateChangeRef.current?.(saveState);
+  }, [saveState]);
 
   const retrySave = useCallback(() => {
+    if (readonly) {
+      return;
+    }
+    if (persistMode === "ephemeral") {
+      void triggerFirstMeaningfulChange({
+        title: latestTitleRef.current,
+        content: latestContentRef.current,
+      });
+      return;
+    }
     const scheduler = schedulerRef.current;
     if (!scheduler) {
       return;
@@ -271,14 +505,14 @@ export default function DocumentWorkspace({
     dispatchSaveEvent({ type: "changed" });
     scheduler.schedule(nextPayload);
     void scheduler.flush().catch(() => undefined);
-  }, [dispatchSaveEvent]);
+  }, [dispatchSaveEvent, persistMode, readonly, triggerFirstMeaningfulChange]);
 
   useEffect(() => {
-    onRetryBind?.(retrySave);
+    onRetryBindRef.current?.(retrySave);
     return () => {
-      onRetryBind?.(null);
+      onRetryBindRef.current?.(null);
     };
-  }, [onRetryBind, retrySave]);
+  }, [retrySave]);
 
   const focusEditor = useCallback(() => {
     if (!editor || editor.isDestroyed) {
@@ -288,11 +522,17 @@ export default function DocumentWorkspace({
   }, [editor]);
 
   useEffect(() => {
-    onFocusBind?.(focusEditor);
+    onFocusBindRef.current?.(focusEditor);
     return () => {
-      onFocusBind?.(null);
+      onFocusBindRef.current?.(null);
     };
-  }, [focusEditor, onFocusBind]);
+  }, [focusEditor]);
+
+  const handleEditorReady = useCallback((instance: Editor | null) => {
+    setEditor((prev) => (prev === instance ? prev : instance));
+    const nextReady = Boolean(instance);
+    setEditorReady((prev) => (prev === nextReady ? prev : nextReady));
+  }, []);
 
   useEffect(() => {
     const onWindowBlur = () => {
@@ -313,10 +553,29 @@ export default function DocumentWorkspace({
 
   const handleEditorChange = useCallback(
     (nextContent: JSONContent) => {
+      if (readonly) {
+        return;
+      }
       setEditorContent(nextContent);
       latestContentRef.current = nextContent;
       const serialized = JSON.stringify(nextContent);
       latestSerializedRef.current = serialized;
+      if (persistMode === "ephemeral") {
+        const payload: SavePayload = {
+          title: latestTitleRef.current,
+          content: nextContent,
+        };
+        if (!isMeaningfulDraftChange({
+          title: payload.title,
+          content: payload.content,
+          defaultTitle: "无标题文档",
+        })) {
+          setSaveState((prev) => (prev.status === "draft" ? prev : { status: "draft", error: "" }));
+          return;
+        }
+        void triggerFirstMeaningfulChange(payload);
+        return;
+      }
       const normalizedTitle = latestTitleRef.current.trim() || "无标题文档";
       const savedTitle = lastSavedTitleRef.current.trim() || "无标题文档";
       if (serialized === lastSavedSerializedRef.current && normalizedTitle === savedTitle) {
@@ -328,13 +587,33 @@ export default function DocumentWorkspace({
         content: nextContent,
       });
     },
-    [dispatchSaveEvent],
+    [dispatchSaveEvent, persistMode, readonly, triggerFirstMeaningfulChange],
   );
 
   const handleTitleChange = useCallback(
     (nextTitle: string) => {
+      if (readonly) {
+        return;
+      }
       setTitleValue(nextTitle);
       latestTitleRef.current = nextTitle;
+      onTitleChange?.(nextTitle);
+      if (persistMode === "ephemeral") {
+        const payload: SavePayload = {
+          title: nextTitle,
+          content: latestContentRef.current,
+        };
+        if (!isMeaningfulDraftChange({
+          title: payload.title,
+          content: payload.content,
+          defaultTitle: "无标题文档",
+        })) {
+          setSaveState((prev) => (prev.status === "draft" ? prev : { status: "draft", error: "" }));
+          return;
+        }
+        void triggerFirstMeaningfulChange(payload);
+        return;
+      }
       const normalizedTitle = nextTitle.trim() || "无标题文档";
       const savedTitle = lastSavedTitleRef.current.trim() || "无标题文档";
       const contentChanged = latestSerializedRef.current !== lastSavedSerializedRef.current;
@@ -347,30 +626,31 @@ export default function DocumentWorkspace({
         content: latestContentRef.current,
       });
     },
-    [dispatchSaveEvent],
+    [dispatchSaveEvent, onTitleChange, persistMode, readonly, triggerFirstMeaningfulChange],
   );
 
   const saveHint = useMemo(() => mapSaveStatusText(saveState.status), [saveState.status]);
 
   return (
-    <div className="document-workspace" ref={workspaceRef}>
+    <div className={`document-workspace${readonly ? " document-workspace-readonly" : ""}`} ref={workspaceRef}>
       {showTitle ? (
-        <input
-          className="document-workspace-title-input"
-          value={titleValue}
-          placeholder="无标题文档"
-          onChange={(event) => handleTitleChange(event.target.value)}
-        />
+        <div className="document-workspace-title-row">
+          <input
+            className="document-workspace-title-input"
+            value={titleValue}
+            placeholder="无标题文档"
+            readOnly={readonly}
+            onChange={(event) => handleTitleChange(event.target.value)}
+          />
+        </div>
       ) : null}
       <RichTextEditor
         content={editorContent}
         projectKey={projectKey}
         docId={documentId}
+        mode={readonly ? "view" : "edit"}
         onChange={handleEditorChange}
-        onEditorReady={(instance) => {
-          setEditor(instance);
-          setEditorReady(Boolean(instance));
-        }}
+        onEditorReady={handleEditorReady}
       />
       {saveState.status === "error" && saveState.error ? (
         <div className="document-workspace-save-tip error" title={saveState.error}>

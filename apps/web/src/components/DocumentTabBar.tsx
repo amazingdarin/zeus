@@ -1,7 +1,10 @@
+import { LockOutlined } from "@ant-design/icons";
+
 type DocumentTabBarItem = {
   docId: string;
   title: string;
   dirty?: boolean;
+  locked?: boolean;
 };
 
 type DocumentTabBarProps = {
@@ -37,6 +40,11 @@ export default function DocumentTabBar({
             title={toTabLabel(tab.title)}
           >
             <span className="doc-page-tab-label">{toTabLabel(tab.title)}</span>
+            {tab.locked ? (
+              <span className="doc-page-tab-lock" aria-label="文档已锁定" title="文档已锁定">
+                <LockOutlined />
+              </span>
+            ) : null}
             {tab.dirty ? <span className="doc-page-tab-dirty" aria-hidden>•</span> : null}
             <span
               className="doc-page-tab-close"

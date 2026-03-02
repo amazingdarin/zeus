@@ -46,7 +46,9 @@ import { ChartNode } from "../../nodes/chart-node/chart-node-extension"
 import { MindmapNode } from "../../nodes/mindmap-node/mindmap-node-extension"
 import { ColumnNode, ColumnsNode } from "../../nodes/columns-node/columns-node-extension"
 import {
+  createDefaultColumnWidths,
   normalizeColumnsCount,
+  normalizeColumnsWidths,
 } from "../../nodes/columns-node/columns-transform"
 import { createTableExtensions } from "../../nodes/table-node/table-node-extension"
 import "../../nodes/blockquote-node/blockquote-node.scss"
@@ -158,6 +160,7 @@ import {
   matchSlashShortcutToken,
   resolveDocumentBlockShortcuts,
 } from "../../extensions/block-shortcuts"
+import { syncEditorEditableState } from "../../extensions/editable-sync"
 import { shouldApplyIncomingContentSync } from "../../extensions/content-sync"
 import {
   convertTopLevelTextBlock,
@@ -1002,15 +1005,30 @@ export function DocEditor({
     [extensionSignature, pluginBlockIdSignature]
   )
 
+  useEffect(() => {
+    syncEditorEditableState(editor, isEditable)
+  }, [editor, isEditable])
+
+  const currentTopLevelBlock =
+    editor && currentBlockId
+      ? findTopLevelBlockById(editor, currentBlockId)
+      : null
+
+  const currentColumnsBlock =
+    currentTopLevelBlock && currentTopLevelBlock.node.type.name === "columns"
+      ? currentTopLevelBlock
+      : null
+
+  const currentColumnsCount =
+    currentColumnsBlock != null
+      ? normalizeColumnsCount(currentColumnsBlock.node.attrs?.count)
+      : null
+
   const currentBlockConvertType: ConvertibleTextBlockType | null = (() => {
-    if (!editor || !currentBlockId) {
+    if (!currentTopLevelBlock) {
       return null
     }
-    const currentBlock = findTopLevelBlockById(editor, currentBlockId)
-    if (!currentBlock) {
-      return null
-    }
-    return resolveCurrentBlockConvertType(currentBlock.node.toJSON() as JSONContent)
+    return resolveCurrentBlockConvertType(currentTopLevelBlock.node.toJSON() as JSONContent)
   })()
 
   const blockConvertTargetItems = useMemo<
@@ -1896,6 +1914,30 @@ export function DocEditor({
     ]
   )
 
+  const handleSetCurrentColumnsCount = useCallback(
+    (nextRaw: string) => {
+      if (!editor || !currentColumnsBlock || currentColumnsCount == null) {
+        return
+      }
+      const nextCount = normalizeColumnsCount(nextRaw)
+      const currentWidths = normalizeColumnsWidths(
+        currentColumnsBlock.node.attrs?.widths,
+        currentColumnsCount
+      )
+      const nextWidths =
+        nextCount === currentColumnsCount
+          ? normalizeColumnsWidths(currentWidths, nextCount)
+          : createDefaultColumnWidths(nextCount)
+      editor.commands.setColumnsCount({
+        pos: currentColumnsBlock.pos,
+        count: nextCount,
+        widths: nextWidths,
+      })
+      updateBlockHandlePosition()
+    },
+    [currentColumnsBlock, currentColumnsCount, editor, updateBlockHandlePosition]
+  )
+
   const resolveDropTarget = useCallback(
     (clientY: number): { blockId: string; placement: DropPlacement; indicatorTop: number } | null => {
       if (!editor) {
@@ -2491,6 +2533,41 @@ export function DocEditor({
                           ))}
                         </div>
                       ) : null}
+                    </>
+                  ) : null}
+                  {currentColumnsCount != null ? (
+                    <>
+                      <div
+                        className="doc-editor-block-action-menu-specific"
+                        role="group"
+                        aria-label="块专属设置"
+                      >
+                        <div className="doc-editor-block-action-menu-specific-title">
+                          块专属设置
+                        </div>
+                        <label
+                          className="doc-editor-block-action-menu-specific-row"
+                          htmlFor="doc-editor-block-columns-count"
+                        >
+                          <span>列数（2-8）</span>
+                          <input
+                            id="doc-editor-block-columns-count"
+                            className="doc-editor-block-action-menu-specific-input"
+                            type="number"
+                            min={2}
+                            max={8}
+                            step={1}
+                            value={currentColumnsCount}
+                            onChange={(event) => {
+                              handleSetCurrentColumnsCount(event.target.value)
+                            }}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                            }}
+                          />
+                        </label>
+                      </div>
+                      <div className="doc-editor-block-action-menu-divider" />
                     </>
                   ) : null}
                   <button

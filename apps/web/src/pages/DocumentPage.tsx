@@ -7,7 +7,13 @@ import type { JSONContent } from "@tiptap/react";
 import { Image } from "@tiptap/extension-image";
 import { StarterKit } from "@tiptap/starter-kit";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
+import {
+  DeleteOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  RollbackOutlined,
+  WarningOutlined,
+} from "@ant-design/icons";
 import { Checkbox, Input, Tooltip, message } from "antd";
 
 import DocumentHeader from "../components/DocumentHeader";
@@ -17,14 +23,17 @@ import type {
 } from "../components/DocumentHeader";
 import DocumentTabBar from "../components/DocumentTabBar";
 import DocumentWorkspace from "../components/DocumentWorkspace";
+import RichTextViewer from "../components/RichTextViewer";
 import KnowledgeBaseLayout, { useToggleTree } from "../components/KnowledgeBaseLayout";
 import KnowledgeBaseSideNav, {
   type KnowledgeBaseDocument,
   type KnowledgeBaseMoveRequest,
+  type TrashSideNavNode,
 } from "../components/KnowledgeBaseSideNav";
 import DocumentOptimizeModal from "../components/DocumentOptimizeModal";
 import {
   fetchDocument,
+  isDocumentLockedError,
   isDocumentNotFoundError,
   fetchDocumentHierarchy,
   fetchDocumentTree,
@@ -37,19 +46,29 @@ import {
   applyProposal,
   moveDocument,
   createDocument,
+  updateDocumentContent,
   duplicateDocument,
   deleteDocument,
+  lockDocument,
+  unlockDocument,
+  fetchDocumentTrash,
+  fetchDocumentTrashSnapshot,
   exportDocumentDocx,
   fetchUrlHtml,
   importFileAsDocument,
+  purgeDocumentTrash,
+  restoreDocumentTrash,
   createImportGitTask,
   createImportFolderTask,
+  type DocumentLockInfo,
+  type DocumentTrashItem,
   type DocumentDetail,
   type DocumentTreeItem,
   type FavoriteDocumentItem,
   type RecentEditedDocumentItem,
 } from "../api/documents";
 import { fetchMessageCenter, type MessageItem } from "../api/message-center";
+import { getGeneralSettings } from "../api/general-settings";
 import { rebuildDocumentRag, rebuildProjectRag, getRebuildStatus } from "../api/projects";
 import { uploadAsset } from "../api/assets";
 import { apiFetch, encodeProjectRef } from "../config/api";
@@ -110,12 +129,14 @@ import {
   updateTitleInTree,
 } from "../features/document-page/title-sync";
 import { insertDuplicateIntoTree } from "../features/document-page/duplicate-state";
+import { mapDocumentLockViewState } from "../features/document-page/lock-view-state";
 
 type DocumentData = {
   id: string;
   title: string;
   docType: string;
   parentId: string;
+  lock: DocumentLockInfo | null;
   bodyFormat: "tiptap" | "markdown" | "unknown";
   content: JSONContent | null;
   hierarchy: Array<{ id: string; name: string }>;
@@ -126,6 +147,7 @@ type DocumentMetaInfo = {
   title: string;
   docType: string;
   parentId: string;
+  lock: DocumentLockInfo | null;
 };
 
 type FavoriteDocument = {
@@ -138,6 +160,15 @@ type RecentEditedDocument = {
   docId: string;
   title: string;
   editedAt: string;
+};
+
+type TrashDocumentPreview = {
+  key: string;
+  trashId: string;
+  docId: string;
+  deletedAt: string;
+  deletedBy: string;
+  document: DocumentData;
 };
 
 const documentCache = new Map<string, DocumentData>();
@@ -187,6 +218,11 @@ type DocumentCreateMeta = {
 };
 
 type ExportFormat = "markdown" | "zeus" | "word";
+
+const EMPTY_TIPTAP_DOC: JSONContent = {
+  type: "doc",
+  content: [],
+};
 
 const UPLOAD_FILTER_PRESETS: UploadFilterPreset[] = [
   { id: "all", label: "全部", extensions: [] },
@@ -378,6 +414,7 @@ function DocumentPage() {
   const [syncLogsError, setSyncLogsError] = useState<string | null>(null);
   const [editorSaveStatus, setEditorSaveStatus] = useState<DocumentEditorSaveStatus>("idle");
   const [editorSaveError, setEditorSaveError] = useState<string | null>(null);
+  const [lockBusy, setLockBusy] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -407,6 +444,14 @@ function DocumentPage() {
   const [loadingIds, setLoadingIds] = useState<Record<string, boolean>>({});
   const [rootLoading, setRootLoading] = useState(false);
   const [outlineMode, setOutlineMode] = useState(false);
+  const [trashPanelOpen, setTrashPanelOpen] = useState(false);
+  const [trashLoading, setTrashLoading] = useState(false);
+  const [trashEntries, setTrashEntries] = useState<DocumentTrashItem[]>([]);
+  const [trashTreeNodes, setTrashTreeNodes] = useState<TrashSideNavNode[]>([]);
+  const [trashPreviewByKey, setTrashPreviewByKey] = useState<Record<string, TrashDocumentPreview>>({});
+  const [activeTrashNodeKey, setActiveTrashNodeKey] = useState<string | null>(null);
+  const [trashAutoCleanupEnabled, setTrashAutoCleanupEnabled] = useState(false);
+  const [trashAutoCleanupDays, setTrashAutoCleanupDays] = useState(30);
 
   const [rebuildingIndex, setRebuildingIndex] = useState(false);
   const [rebuildProgress, setRebuildProgress] = useState<{
@@ -428,7 +473,50 @@ function DocumentPage() {
     snapshotStoreRef.current = snapshotStore;
   }, [snapshotStore]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void getGeneralSettings()
+      .then((settings) => {
+        if (cancelled) {
+          return;
+        }
+        setTrashAutoCleanupEnabled(Boolean(settings.trashAutoCleanupEnabled));
+        setTrashAutoCleanupDays(
+          normalizeTrashAutoCleanupDaysForBanner(settings.trashAutoCleanupDays),
+        );
+      })
+      .catch(() => {
+        // keep banner defaults when settings are unavailable
+      });
+
+    const handleSettingsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent).detail as
+        | { trashAutoCleanupEnabled?: boolean; trashAutoCleanupDays?: number }
+        | undefined;
+      if (!detail) {
+        return;
+      }
+      if (typeof detail.trashAutoCleanupEnabled === "boolean") {
+        setTrashAutoCleanupEnabled(detail.trashAutoCleanupEnabled);
+      }
+      if (typeof detail.trashAutoCleanupDays === "number" && Number.isFinite(detail.trashAutoCleanupDays)) {
+        setTrashAutoCleanupDays(
+          normalizeTrashAutoCleanupDaysForBanner(detail.trashAutoCleanupDays),
+        );
+      }
+    };
+
+    window.addEventListener("zeus:general-settings-updated", handleSettingsUpdated);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("zeus:general-settings-updated", handleSettingsUpdated);
+    };
+  }, []);
+
   const applyTabSessionState = useCallback((nextState: TabSessionState) => {
+    if (nextState === tabSessionRef.current) {
+      return;
+    }
     tabSessionRef.current = nextState;
     setTabSessionState(nextState);
   }, []);
@@ -564,14 +652,23 @@ function DocumentPage() {
       }
       const now = Date.now();
       let currentState = tabSessionRef.current;
-      const title = resolveTabTitle(normalizedDocId, titleHint);
+      const title = resolveTabTitle(normalizedDocId, titleHint).trim() || "无标题文档";
 
       if (hasTab(currentState, normalizedDocId)) {
-        currentState = activateTab(
-          updateTabTitle(currentState, { docId: normalizedDocId, title }),
-          { docId: normalizedDocId, now },
-        );
-        applyTabSessionState(currentState);
+        const existingTab = currentState.tabs.find((tab) => tab.docId === normalizedDocId) ?? null;
+        const titleChanged = existingTab?.title !== title;
+        const needActivate = currentState.activeDocId !== normalizedDocId;
+        if (!titleChanged && !needActivate) {
+          return true;
+        }
+        let nextState = currentState;
+        if (titleChanged) {
+          nextState = updateTabTitle(nextState, { docId: normalizedDocId, title });
+        }
+        if (needActivate) {
+          nextState = activateTab(nextState, { docId: normalizedDocId, now });
+        }
+        applyTabSessionState(nextState);
         return true;
       }
 
@@ -614,12 +711,17 @@ function DocumentPage() {
         return;
       }
       const currentState = tabSessionRef.current;
-      if (!hasTab(currentState, normalizedDocId)) {
+      const tab = currentState.tabs.find((item) => item.docId === normalizedDocId);
+      if (!tab) {
+        return;
+      }
+      const normalizedTitle = title.trim() || "无标题文档";
+      if (tab.title === normalizedTitle) {
         return;
       }
       const nextState = updateTabTitle(currentState, {
         docId: normalizedDocId,
-        title: title.trim() || "无标题文档",
+        title: normalizedTitle,
       });
       applyTabSessionState(nextState);
     },
@@ -875,6 +977,78 @@ function DocumentPage() {
     }
   }, []);
 
+  const loadTrash = useCallback(async (projectKey: string) => {
+    setTrashLoading(true);
+    try {
+      const entries = await fetchDocumentTrash(projectKey);
+      if (projectKeyRef.current !== projectKey) {
+        return;
+      }
+      setTrashEntries(entries);
+
+      if (entries.length === 0) {
+        setTrashTreeNodes([]);
+        setTrashPreviewByKey({});
+        setActiveTrashNodeKey(null);
+        return;
+      }
+
+      const snapshots = await Promise.all(
+        entries.map(async (entry) => {
+          try {
+            const snapshot = await fetchDocumentTrashSnapshot(projectKey, entry.trashId);
+            return {
+              entry,
+              docs: snapshot.docs,
+              rootDocId: snapshot.rootDocId || entry.rootDocId,
+            };
+          } catch {
+            return {
+              entry,
+              docs: [] as DocumentDetail[],
+              rootDocId: entry.rootDocId,
+            };
+          }
+        }),
+      );
+      if (projectKeyRef.current !== projectKey) {
+        return;
+      }
+
+      const nextTreeNodes: TrashSideNavNode[] = [];
+      const nextPreviewByKey: Record<string, TrashDocumentPreview> = {};
+      snapshots.forEach(({ entry, docs, rootDocId }) => {
+        const built = buildTrashTreeFromSnapshot(entry, docs, rootDocId, {
+          markdownExtensions,
+        });
+        nextTreeNodes.push(...built.nodes);
+        Object.assign(nextPreviewByKey, built.previewByKey);
+      });
+      setTrashTreeNodes(nextTreeNodes);
+      setTrashPreviewByKey(nextPreviewByKey);
+      setActiveTrashNodeKey((prev) => {
+        if (prev && nextPreviewByKey[prev]) {
+          return prev;
+        }
+        return nextTreeNodes[0]?.key ?? null;
+      });
+    } catch (err) {
+      if (projectKeyRef.current !== projectKey) {
+        return;
+      }
+      console.error("Load trash failed:", err);
+      setTrashEntries([]);
+      setTrashTreeNodes([]);
+      setTrashPreviewByKey({});
+      setActiveTrashNodeKey(null);
+      message.error(err instanceof Error ? err.message : "加载垃圾箱失败");
+    } finally {
+      if (projectKeyRef.current === projectKey) {
+        setTrashLoading(false);
+      }
+    }
+  }, [markdownExtensions]);
+
   const touchRecentEditInState = useCallback((docId: string, title: string) => {
     const normalizedDocId = docId.trim();
     if (!normalizedDocId) {
@@ -1021,6 +1195,12 @@ function DocumentPage() {
       setFavoritePendingIds({});
       setRecentEdits([]);
       setRecentEditsLoading(false);
+      setTrashPanelOpen(false);
+      setTrashEntries([]);
+      setTrashLoading(false);
+      setTrashTreeNodes([]);
+      setTrashPreviewByKey({});
+      setActiveTrashNodeKey(null);
       childrenByParentRef.current = {};
       setExpandedIds({});
       setLoadingIds({});
@@ -1076,7 +1256,8 @@ function DocumentPage() {
     }
     void loadFavorites(projectKey);
     void loadRecentEdits(projectKey);
-  }, [loadFavorites, loadRecentEdits, resolvedProjectKey]);
+    void loadTrash(projectKey);
+  }, [loadFavorites, loadRecentEdits, loadTrash, resolvedProjectKey]);
 
   const runProjectSync = useCallback(
     async (projectKey: string, options?: { silent?: boolean }) => {
@@ -1489,23 +1670,136 @@ function DocumentPage() {
     [loadFullTree, resolvedProjectKey],
   );
 
+  const handleOpenTrash = useCallback(() => {
+    if (!resolvedProjectKey) {
+      return;
+    }
+    setTrashPanelOpen(true);
+    setActiveTrashNodeKey((prev) => prev || trashTreeNodes[0]?.key || null);
+    if (trashEntries.length === 0) {
+      void loadTrash(resolvedProjectKey);
+    }
+  }, [loadTrash, resolvedProjectKey, trashEntries.length, trashTreeNodes]);
+
+  const handleSelectTrashNode = useCallback((node: TrashSideNavNode) => {
+    setTrashPanelOpen(true);
+    setActiveTrashNodeKey(node.key);
+  }, []);
+
+  const handleRestoreTrash = useCallback(async (trashId: string) => {
+    if (!resolvedProjectKey) {
+      return;
+    }
+    try {
+      const restored = await restoreDocumentTrash(resolvedProjectKey, trashId);
+      message.success(restored.fallback_to_root ? "已恢复到根目录" : "已恢复文档");
+      await Promise.all([
+        loadTrash(resolvedProjectKey),
+        loadFullTree(resolvedProjectKey),
+      ]);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "恢复失败");
+    }
+  }, [loadFullTree, loadTrash, resolvedProjectKey]);
+
+  const handlePurgeTrash = useCallback(async (trashId: string) => {
+    if (!resolvedProjectKey) {
+      return;
+    }
+    try {
+      await purgeDocumentTrash(resolvedProjectKey, trashId);
+      message.success("已彻底删除");
+      await loadTrash(resolvedProjectKey);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "彻底删除失败");
+    }
+  }, [loadTrash, resolvedProjectKey]);
+
+  const applyDocumentLockState = useCallback(
+    (docId: string, lock: DocumentLockInfo | null) => {
+      const normalizedDocId = docId.trim();
+      if (!normalizedDocId) {
+        return;
+      }
+      const nextLocked = Boolean(lock?.locked);
+      setDocument((prev) =>
+        prev && prev.id === normalizedDocId
+          ? {
+              ...prev,
+              lock: lock ?? null,
+            }
+          : prev,
+      );
+      setDocumentsById((prevDocs) => {
+        const current = prevDocs[normalizedDocId];
+        if (!current) {
+          return prevDocs;
+        }
+        if (Boolean(current.lock?.locked) === nextLocked) {
+          return prevDocs;
+        }
+        return {
+          ...prevDocs,
+          [normalizedDocId]: {
+            ...current,
+            lock: lock ?? null,
+          },
+        };
+      });
+
+      const snapshot = snapshotStoreRef.current[normalizedDocId];
+      if (snapshot && snapshot.locked !== nextLocked) {
+        const nextSnapshots = upsertSnapshot(snapshotStoreRef.current, normalizedDocId, {
+          ...snapshot,
+          locked: nextLocked,
+        });
+        applySnapshotStore(nextSnapshots);
+      }
+
+      if (resolvedProjectKey) {
+        const requestKey = `${resolvedProjectKey}:${normalizedDocId}`;
+        const cached = documentCache.get(requestKey);
+        if (cached) {
+          documentCache.set(requestKey, {
+            ...cached,
+            lock: lock ?? null,
+          });
+        }
+      }
+    },
+    [applySnapshotStore, resolvedProjectKey],
+  );
+
   const handleMove = useCallback(
     async (request: KnowledgeBaseMoveRequest) => {
       if (!resolvedProjectKey) {
         return;
       }
-      const movePayload = {
-        target_parent_id: request.newParentId,
-        before_doc_id: request.beforeId,
-        after_doc_id: request.afterId,
-      };
-      await moveDocument(resolvedProjectKey, request.docId, movePayload);
-      await refreshParent(request.sourceParentId);
-      if (request.targetParentId !== request.sourceParentId) {
-        await refreshParent(request.targetParentId);
+      try {
+        const movePayload = {
+          target_parent_id: request.newParentId,
+          before_doc_id: request.beforeId,
+          after_doc_id: request.afterId,
+        };
+        await moveDocument(resolvedProjectKey, request.docId, movePayload);
+        await refreshParent(request.sourceParentId);
+        if (request.targetParentId !== request.sourceParentId) {
+          await refreshParent(request.targetParentId);
+        }
+      } catch (err) {
+        if (isDocumentLockedError(err)) {
+          applyDocumentLockState(request.docId, {
+            locked: true,
+            lockedBy: "",
+            lockedAt: new Date().toISOString(),
+          });
+          message.warning("文档已锁定，无法移动");
+          return;
+        }
+        throw err;
       }
     },
-    [refreshParent, resolvedProjectKey],
+    [applyDocumentLockState, refreshParent, resolvedProjectKey],
   );
 
   const openDocumentById = useCallback(
@@ -1574,6 +1868,7 @@ function DocumentPage() {
       if (!doc.id) {
         return;
       }
+      setTrashPanelOpen(false);
       void openDocumentById(doc.id, doc.title);
     },
     [openDocumentById],
@@ -1582,6 +1877,11 @@ function DocumentPage() {
   const activeDocument =
     (resolvedDocumentId ? documentsById[resolvedDocumentId] : null) ?? document;
   const isEphemeralActive = activeDocument?.id === EPHEMERAL_DRAFT_ID;
+  const activeLock = !isEphemeralActive ? activeDocument?.lock ?? null : null;
+  const activeLockViewState = mapDocumentLockViewState(activeLock);
+  const isActiveDocumentLocked = activeLockViewState.readonly;
+  const activeTrashPreview =
+    activeTrashNodeKey ? trashPreviewByKey[activeTrashNodeKey] ?? null : null;
 
   const handleFavoriteMutation = useCallback(
     async (docId: string, action: "favorite" | "unfavorite") => {
@@ -2108,6 +2408,79 @@ function DocumentPage() {
     workspaceRetryMapRef.current.get(currentDocId)?.();
   }, [resolvedDocumentId]);
 
+  const handleWorkspaceLockFallback = useCallback(
+    (docId: string) => {
+      const normalizedDocId = docId.trim();
+      if (!normalizedDocId) {
+        return;
+      }
+      applyDocumentLockState(normalizedDocId, {
+        locked: true,
+        lockedBy: "",
+        lockedAt: new Date().toISOString(),
+      });
+      if (resolvedProjectKey) {
+        void fetchDocument(resolvedProjectKey, normalizedDocId)
+          .then((data) => {
+            const mapped = mapDocumentDetail(data, normalizedDocId, {
+              markdownExtensions,
+            });
+            applyDocumentLockState(normalizedDocId, mapped.lock);
+          })
+          .catch(() => {
+            // keep optimistic locked state when refresh fails
+          });
+      }
+      if (resolvedDocumentId === normalizedDocId) {
+        message.warning("文档已被锁定，已切换为只读");
+      }
+    },
+    [
+      applyDocumentLockState,
+      markdownExtensions,
+      resolvedDocumentId,
+      resolvedProjectKey,
+    ],
+  );
+
+  const handleToggleDocumentLock = useCallback(async () => {
+    if (!resolvedProjectKey || !activeDocument || isEphemeralActive || lockBusy) {
+      return;
+    }
+    setLockBusy(true);
+    try {
+      if (isActiveDocumentLocked) {
+        await unlockDocument(resolvedProjectKey, activeDocument.id);
+        applyDocumentLockState(activeDocument.id, null);
+        message.success("文档已解锁");
+      } else {
+        const lock = await lockDocument(resolvedProjectKey, activeDocument.id);
+        applyDocumentLockState(activeDocument.id, lock);
+        message.success("文档已锁定");
+      }
+    } catch (err) {
+      if (isDocumentLockedError(err)) {
+        applyDocumentLockState(activeDocument.id, {
+          locked: true,
+          lockedBy: "",
+          lockedAt: new Date().toISOString(),
+        });
+        message.warning("文档已被锁定");
+      } else {
+        message.error(err instanceof Error ? err.message : "更新锁状态失败");
+      }
+    } finally {
+      setLockBusy(false);
+    }
+  }, [
+    activeDocument,
+    applyDocumentLockState,
+    isActiveDocumentLocked,
+    isEphemeralActive,
+    lockBusy,
+    resolvedProjectKey,
+  ]);
+
   const handleMaterializeEphemeralDraft = useCallback(
     async (payload: { title: string; content: JSONContent }) => {
       if (!resolvedProjectKey) {
@@ -2429,25 +2802,11 @@ function DocumentPage() {
         return;
       }
       try {
-        // Update the document with the optimized content
-        const response = await apiFetch(
-          `/api/projects/${encodeProjectRef(resolvedProjectKey)}/documents/${encodeURIComponent(activeDocument.id)}`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              meta: { title: activeDocument.title },
-              body: { type: "tiptap", content: optimizedContent },
-            }),
-          },
-        );
-        if (!response.ok) {
-          throw new Error("保存优化文档失败");
-        }
-        // Refresh the document
-        const payload = await response.json();
-        const data = payload?.data ?? payload;
-        const updatedContent = data?.body?.content ?? optimizedContent;
+        const saved = await updateDocumentContent(resolvedProjectKey, activeDocument.id, {
+          title: activeDocument.title,
+          content: optimizedContent,
+        });
+        const updatedContent = extractDocJsonContent(saved?.body?.content) ?? optimizedContent;
         setDocument((prev) =>
           prev
             ? { ...prev, content: updatedContent }
@@ -2475,11 +2834,21 @@ function DocumentPage() {
           // Index rebuild failure is not critical
         }
       } catch (err) {
+        if (isDocumentLockedError(err)) {
+          applyDocumentLockState(activeDocument.id, {
+            locked: true,
+            lockedBy: "",
+            lockedAt: new Date().toISOString(),
+          });
+          message.warning("文档已被锁定，已切换为只读");
+          return;
+        }
         console.error("Failed to apply optimization:", err);
-        alert("保存优化后的文档失败");
+        message.error(err instanceof Error ? err.message : "保存优化后的文档失败");
       }
     },
     [
+      applyDocumentLockState,
       resolvedProjectKey,
       activeDocument,
       scheduleRecentEditsRefresh,
@@ -2528,6 +2897,16 @@ function DocumentPage() {
       clearProposalParam();
       setDiffData(null);
     } catch (err) {
+      if (isDocumentLockedError(err)) {
+        applyDocumentLockState(resolvedDocumentId, {
+          locked: true,
+          lockedBy: "",
+          lockedAt: new Date().toISOString(),
+        });
+        setDiffError("文档已锁定，无法应用提案");
+        message.warning("文档已被锁定，已切换为只读");
+        return;
+      }
       setDiffError((err as Error).message || "应用提案失败");
     } finally {
       setApplyLoading(false);
@@ -2574,11 +2953,15 @@ function DocumentPage() {
     if (deleting) {
       return;
     }
+    if (isActiveDocumentLocked) {
+      message.warning("文档已锁定，无法删除");
+      return;
+    }
     // Show confirmation dialog
     const hasChildren = activeDocument.docType === "dir";
     const confirmMessage = hasChildren
-      ? `Are you sure you want to delete "${activeDocument.title}" and all its sub-documents? This action cannot be undone.`
-      : `Are you sure you want to delete "${activeDocument.title}"? This action cannot be undone.`;
+      ? `确认将「${activeDocument.title}」及其子文档移入垃圾箱？`
+      : `确认将「${activeDocument.title}」移入垃圾箱？`;
     if (!window.confirm(confirmMessage)) {
       return;
     }
@@ -2676,17 +3059,28 @@ function DocumentPage() {
         setExpandedIds((prev) => ({ ...prev, [parentId]: true }));
       }
     } catch (err) {
+      if (isDocumentLockedError(err)) {
+        applyDocumentLockState(activeDocument.id, {
+          locked: true,
+          lockedBy: "",
+          lockedAt: new Date().toISOString(),
+        });
+        message.warning("文档已被锁定，无法删除");
+        return;
+      }
       console.error("Delete failed:", err);
-      alert(err instanceof Error ? err.message : "删除文档失败");
+      message.error(err instanceof Error ? err.message : "删除文档失败");
     } finally {
       setDeleting(false);
     }
   }, [
     resolvedProjectKey,
     activeDocument,
+    applyDocumentLockState,
     applySnapshotStore,
     applyTabSessionState,
     deleting,
+    isActiveDocumentLocked,
     navigate,
     resolvedDocumentId,
     loadFavorites,
@@ -3131,13 +3525,16 @@ function DocumentPage() {
       tabSessionState.tabs.map((tab) => {
         const doc = documentsById[tab.docId];
         const saveState = workspaceSaveStateByDoc[tab.docId];
+        const snapshotLocked = Boolean(snapshotStore[tab.docId]?.locked);
+        const isEphemeralTab = tab.docId === EPHEMERAL_DRAFT_ID || doc?.id === EPHEMERAL_DRAFT_ID;
         return {
           docId: tab.docId,
           title: doc?.title ?? tab.title,
           dirty: saveState?.status === "dirty" || saveState?.status === "error",
+          locked: !isEphemeralTab && (Boolean(doc?.lock?.locked) || snapshotLocked),
         };
       }),
-    [documentsById, tabSessionState.tabs, workspaceSaveStateByDoc],
+    [documentsById, snapshotStore, tabSessionState.tabs, workspaceSaveStateByDoc],
   );
 
   const renderWorkspaceStack = () => {
@@ -3152,6 +3549,8 @@ function DocumentPage() {
             (activeDocument && activeDocument.id === tab.docId ? activeDocument : null);
           const isActive = tab.docId === activeTabDocId;
           const isEphemeralTab = tabDocument?.id === EPHEMERAL_DRAFT_ID;
+          const snapshotLocked = Boolean(snapshotStore[tab.docId]?.locked);
+          const tabLocked = !isEphemeralTab && (Boolean(tabDocument?.lock?.locked) || snapshotLocked);
           return (
             <div
               key={`${resolvedProjectKey}:${tab.docId}`}
@@ -3166,10 +3565,12 @@ function DocumentPage() {
                   content={tabDocument.content}
                   blockId={isActive ? blockIdParam : null}
                   showTitle={showDocumentTitle}
+                  locked={tabLocked}
                   persistMode={isEphemeralTab ? "ephemeral" : "persisted"}
                   onFirstMeaningfulChange={
                     isEphemeralTab ? handleMaterializeEphemeralDraft : undefined
                   }
+                  onLockFallback={() => handleWorkspaceLockFallback(tabDocument.id)}
                   onSaved={(payload) => handleWorkspaceSaved(tabDocument.id, payload)}
                   onSaveStateChange={(state) =>
                     handleWorkspaceSaveStateChange(tabDocument.id, {
@@ -3195,6 +3596,74 @@ function DocumentPage() {
   };
 
   const bodyContent = () => {
+    if (trashPanelOpen) {
+      if (trashLoading && !activeTrashPreview) {
+        return <div className="doc-viewer-state">加载垃圾箱中...</div>;
+      }
+      if (!activeTrashPreview) {
+        return <div className="doc-viewer-state">垃圾箱暂无文档</div>;
+      }
+      return (
+        <div className="doc-page-body">
+          <div className="document-trash-banner" role="status" aria-live="polite">
+            <div className="document-trash-banner-message">
+              <WarningOutlined className="document-trash-banner-message-icon" />
+              <span
+                className="document-trash-banner-message-text"
+                title={`删除时间：${formatTrashDeletedAt(activeTrashPreview.deletedAt)}`}
+              >
+                {buildTrashBannerMessage(
+                  activeTrashPreview.deletedBy,
+                  activeTrashPreview.deletedAt,
+                  trashAutoCleanupEnabled,
+                  trashAutoCleanupDays,
+                )}
+              </span>
+            </div>
+            <div className="document-trash-banner-actions">
+              <button
+                className="document-trash-banner-btn"
+                type="button"
+                onClick={() => {
+                  void handleRestoreTrash(activeTrashPreview.trashId);
+                }}
+                disabled={trashLoading}
+              >
+                <RollbackOutlined />
+                <span>恢复文档</span>
+              </button>
+              <button
+                className="document-trash-banner-btn document-trash-banner-btn-danger"
+                type="button"
+                onClick={() => {
+                  if (!window.confirm("确定彻底删除当前文档吗？")) {
+                    return;
+                  }
+                  void handlePurgeTrash(activeTrashPreview.trashId);
+                }}
+                disabled={trashLoading}
+              >
+                <DeleteOutlined />
+                <span>从垃圾箱中删除</span>
+              </button>
+            </div>
+          </div>
+          <div className="document-workspace document-workspace-readonly">
+            {showDocumentTitle ? (
+              <input
+                className="document-workspace-title-input"
+                value={activeTrashPreview.document.title}
+                readOnly
+              />
+            ) : null}
+            <RichTextViewer
+              content={activeTrashPreview.document.content ?? EMPTY_TIPTAP_DOC}
+              projectKey={resolvedProjectKey}
+            />
+          </div>
+        </div>
+      );
+    }
     if (!resolvedDocumentId) {
       return (
         <div className="doc-viewer-state">
@@ -3280,8 +3749,15 @@ function DocumentPage() {
           favoritePendingIds={favoritePendingIds}
           recentEdits={recentEdits}
           recentEditsLoading={recentEditsLoading}
+          trashNodes={trashTreeNodes}
+          trashLoading={trashLoading}
+          activeTrashKey={activeTrashNodeKey}
           expandedIds={expandedIds}
-          activeId={resolvedDocumentId === EPHEMERAL_DRAFT_ID ? null : (resolvedDocumentId || null)}
+          activeId={
+            trashPanelOpen
+              ? null
+              : (resolvedDocumentId === EPHEMERAL_DRAFT_ID ? null : (resolvedDocumentId || null))
+          }
           loadingIds={loadingIds}
           rootLoading={rootLoading}
           rebuildingIndex={rebuildingIndex}
@@ -3294,8 +3770,14 @@ function DocumentPage() {
           onExpandAll={handleExpandAllTree}
           onCollapseToRoot={handleCollapseTreeToRoot}
           onUnfavorite={handleUnfavoriteDocument}
-          onEmptyAreaClick={() => navigate("/documents")}
+          onOpenTrash={handleOpenTrash}
+          onSelectTrash={handleSelectTrashNode}
+          onEmptyAreaClick={() => {
+            setTrashPanelOpen(false);
+            navigate("/documents");
+          }}
           onAddDocument={() => {
+            setTrashPanelOpen(false);
             void handleOpenNew();
           }}
           outlineMode={outlineMode}
@@ -3321,13 +3803,13 @@ function DocumentPage() {
           </div>
           {showBreadcrumb || showHeaderActions ? (
             <DocumentHeader
-              breadcrumbItems={breadcrumbItems}
+              breadcrumbItems={trashPanelOpen ? [{ label: "垃圾箱" }] : breadcrumbItems}
               mode="view"
               showBreadcrumb={showBreadcrumb}
-              showActions={showHeaderActions}
+              showActions={showHeaderActions && !trashPanelOpen}
               allowChildActions={allowChildActions}
-              allowDelete={Boolean(activeDocument) && !isEphemeralActive}
-              allowOptimize={Boolean(activeDocument) && !isEphemeralActive}
+              allowDelete={Boolean(activeDocument) && !isEphemeralActive && !isActiveDocumentLocked}
+              allowOptimize={Boolean(activeDocument) && !isEphemeralActive && !isActiveDocumentLocked}
               deleting={deleting}
               onSave={() => { }}
               onCancel={() => { }}
@@ -3340,6 +3822,9 @@ function DocumentPage() {
               syncStatus={syncStatus}
               syncError={syncError}
               syncDisabled={!resolvedProjectKey || syncStatus === "syncing"}
+              locked={isActiveDocumentLocked}
+              lockBusy={lockBusy}
+              onLockToggle={activeDocument && !isEphemeralActive ? handleToggleDocumentLock : undefined}
               editorSaveStatus={editorSaveStatus}
               editorSaveError={editorSaveError}
               onRetryEditorSave={activeDocument ? handleRetryEditorSave : undefined}
@@ -4011,6 +4496,7 @@ function createEphemeralDraftDocument(): DocumentData {
     title: EPHEMERAL_DRAFT_TITLE,
     docType: "document",
     parentId: "root",
+    lock: null,
     bodyFormat: "tiptap",
     content: {
       type: "doc",
@@ -4028,6 +4514,206 @@ const trimBreadcrumbItems = (items: Array<{ label: string; to?: string }>) => {
   const tail = items.slice(-2);
   return [...head, { label: "..." }, ...tail];
 };
+
+function formatTrashDeletedAt(value: string): string {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString();
+}
+
+const TRASH_AUTO_CLEANUP_DAYS_FALLBACK = 30;
+
+function formatTrashDeletedRelative(value: string): string {
+  if (!value) {
+    return "刚刚";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return formatTrashDeletedAt(value);
+  }
+  const diffMs = Date.now() - date.getTime();
+  if (diffMs <= 60_000) {
+    return "刚刚";
+  }
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 60) {
+    return `${minutes} 分钟前`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours} 小时前`;
+  }
+  const days = Math.floor(hours / 24);
+  if (days < 30) {
+    return `${days} 天前`;
+  }
+  return formatTrashDeletedAt(value);
+}
+
+function normalizeTrashAutoCleanupDaysForBanner(value: number): number {
+  if (!Number.isFinite(value)) {
+    return TRASH_AUTO_CLEANUP_DAYS_FALLBACK;
+  }
+  return Math.min(3650, Math.max(1, Math.floor(value)));
+}
+
+function buildTrashAutoCleanupCopy(enabled: boolean, days: number): string {
+  if (!enabled) {
+    return "当前未开启自动清理。";
+  }
+  const normalizedDays = normalizeTrashAutoCleanupDaysForBanner(days);
+  return `此文档将在 ${normalizedDays} 天后自动删除。`;
+}
+
+function buildTrashBannerMessage(
+  deletedBy: string,
+  deletedAt: string,
+  autoCleanupEnabled: boolean,
+  autoCleanupDays: number,
+): string {
+  const actor = normalizeTrashActor(deletedBy);
+  const deletedRelative = formatTrashDeletedRelative(deletedAt);
+  const cleanupCopy = buildTrashAutoCleanupCopy(autoCleanupEnabled, autoCleanupDays);
+  return `${actor} 于 ${deletedRelative} 将此文档移至垃圾箱。${cleanupCopy}`;
+}
+
+function normalizeTrashActor(deletedBy: string): string {
+  const trimmed = deletedBy.trim();
+  if (!trimmed) {
+    return "某位成员";
+  }
+  const isUuid =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(trimmed);
+  return isUuid ? "某位成员" : trimmed;
+}
+
+function getTrashDocId(doc: DocumentDetail): string {
+  return String(doc.meta?.id ?? doc.id ?? "").trim();
+}
+
+function getTrashDocParentId(doc: DocumentDetail): string {
+  return String(doc.meta?.parent_id ?? doc.parent_id ?? "root").trim() || "root";
+}
+
+function buildTrashTreeFromSnapshot(
+  entry: DocumentTrashItem,
+  docs: DocumentDetail[],
+  rootDocId: string,
+  options?: { markdownExtensions?: Extensions },
+): {
+  nodes: TrashSideNavNode[];
+  previewByKey: Record<string, TrashDocumentPreview>;
+} {
+  const previewByKey: Record<string, TrashDocumentPreview> = {};
+
+  if (docs.length === 0) {
+    const fallbackNode: TrashSideNavNode = {
+      key: `${entry.trashId}:${entry.rootDocId || "root"}`,
+      trashId: entry.trashId,
+      docId: entry.rootDocId || "",
+      title: entry.title || "无标题文档",
+      deletedAt: entry.deletedAt,
+      children: [],
+    };
+    return {
+      nodes: [fallbackNode],
+      previewByKey,
+    };
+  }
+
+  const docById = new Map<string, DocumentDetail>();
+  docs.forEach((doc) => {
+    const id = getTrashDocId(doc);
+    if (id) {
+      docById.set(id, doc);
+    }
+  });
+
+  if (docById.size === 0) {
+    const fallbackNode: TrashSideNavNode = {
+      key: `${entry.trashId}:${entry.rootDocId || "root"}`,
+      trashId: entry.trashId,
+      docId: entry.rootDocId || "",
+      title: entry.title || "无标题文档",
+      deletedAt: entry.deletedAt,
+      children: [],
+    };
+    return {
+      nodes: [fallbackNode],
+      previewByKey,
+    };
+  }
+
+  const childrenByParent = new Map<string, string[]>();
+  docById.forEach((doc, docId) => {
+    const rawParentId = getTrashDocParentId(doc);
+    const parentId = rawParentId !== "root" && docById.has(rawParentId)
+      ? rawParentId
+      : "__root__";
+    const next = childrenByParent.get(parentId) ?? [];
+    next.push(docId);
+    childrenByParent.set(parentId, next);
+  });
+
+  const buildNode = (docId: string): TrashSideNavNode => {
+    const doc = docById.get(docId);
+    const mapped = mapDocumentDetail(doc ?? null, docId, options);
+    const key = `${entry.trashId}:${docId}`;
+    previewByKey[key] = {
+      key,
+      trashId: entry.trashId,
+      docId,
+      deletedAt: entry.deletedAt,
+      deletedBy: entry.deletedBy,
+      document: mapped,
+    };
+    const childIds = childrenByParent.get(docId) ?? [];
+    return {
+      key,
+      trashId: entry.trashId,
+      docId,
+      title: mapped.title || "无标题文档",
+      deletedAt: entry.deletedAt,
+      children: childIds.map((childId) => buildNode(childId)),
+    };
+  };
+
+  const preferredRootId =
+    (rootDocId && docById.has(rootDocId) ? rootDocId : "") ||
+    (entry.rootDocId && docById.has(entry.rootDocId) ? entry.rootDocId : "") ||
+    Array.from(docById.keys())[0];
+
+  const rootIds = [preferredRootId, ...(childrenByParent.get("__root__") ?? [])].filter(
+    (id, index, arr) => Boolean(id) && arr.indexOf(id) === index,
+  );
+
+  return {
+    nodes: rootIds.map((id) => buildNode(id)),
+    previewByKey,
+  };
+}
+
+function readDocumentLock(raw: unknown): DocumentLockInfo | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  if (record.locked !== true) {
+    return null;
+  }
+  const lockedBy = typeof record.lockedBy === "string" ? record.lockedBy : "";
+  const lockedAt = typeof record.lockedAt === "string" ? record.lockedAt : "";
+  return {
+    locked: true,
+    lockedBy,
+    lockedAt,
+  };
+}
 
 function mapDocumentMeta(data: DocumentDetail | undefined | null, fallbackId: string): DocumentMetaInfo {
   const meta = data?.meta ?? {};
@@ -4050,11 +4736,13 @@ function mapDocumentMeta(data: DocumentDetail | undefined | null, fallbackId: st
   const parentId = String(
     meta.parent_id ?? (meta as { parent?: string }).parent ?? data?.parent_id ?? "",
   ).trim();
+  const lock = readDocumentLock(extra.lock);
   return {
     id,
     title,
     docType,
     parentId,
+    lock,
   };
 }
 

@@ -2,7 +2,7 @@
   "name": "zeus",
   "private": true,
   "scripts": {
-    "test:unified-editor": "node --import tsx --test apps/web/tests/save-scheduler.test.ts apps/web/tests/save-state.test.ts apps/web/tests/document-workspace-model.test.ts apps/web/tests/document-workspace-autosave.test.ts apps/web/tests/new-document-compat.test.ts packages/doc-editor/tests/block-add-handle.test.ts packages/doc-editor/tests/block-placeholder.test.ts"
+    "test:unified-editor": "node --import tsx --test apps/web/tests/save-scheduler.test.ts apps/web/tests/save-state.test.ts apps/web/tests/document-workspace-model.test.ts apps/web/tests/document-workspace-autosave.test.ts apps/web/tests/document-title-sync.test.ts apps/web/tests/document-duplicate-state.test.ts apps/web/tests/new-document-compat.test.ts apps/web/tests/general-settings-shortcuts.test.ts packages/doc-editor/tests/block-add-handle.test.ts packages/doc-editor/tests/block-placeholder.test.ts packages/doc-editor/tests/block-shortcut.test.ts packages/doc-editor/tests/block-style-palette.test.ts packages/doc-editor/tests/block-style-extension.test.ts packages/doc-editor/tests/block-conversion.test.ts packages/doc-editor/tests/block-duplicate.test.ts packages/doc-editor/tests/builtin-block-content.test.ts packages/doc-editor/tests/content-sync.test.ts packages/doc-editor/tests/editable-sync.test.ts packages/doc-editor/tests/columns-transform.test.ts packages/doc-editor/tests/unsupported-plugin-block.test.ts packages/doc-editor/tests/text-enter-behavior.test.ts"
   },
   "workspaces": [
     "packages/*",
