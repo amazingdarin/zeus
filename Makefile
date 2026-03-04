@@ -4,11 +4,14 @@ HELM_NAMESPACE ?= zeus
 NAMESPACE ?= $(HELM_NAMESPACE)
 CONFIG_PATH ?= /tmp/zeus-$(NAMESPACE)/config.yaml
 
-.PHONY: run-server run-app-backend run-app-web run-app-desktop init-app-mobile-android init-app-mobile-ios run-app-mobile-android run-app-mobile-ios build-app-mobile-android build-app-mobile-ios install uninstall dev-install build-postgres-image build-backend-image build-frontend-image build-paddleocr-image download-runtime-binaries package-desktop package-mobile-android package-mobile-ios package-mobile package-all start-deps start-deps-dev stop-deps stop-deps-dev clean-deps start-all stop-all clean-all test-integration setup-python-venv install-paddleocr run-paddleocr-docker stop-paddleocr-docker
+.PHONY: run-server run-code-runner run-app-backend run-app-web run-app-desktop init-app-mobile-android init-app-mobile-ios run-app-mobile-android run-app-mobile-ios build-app-mobile-android build-app-mobile-ios install uninstall dev-install build-postgres-image build-backend-image build-frontend-image build-paddleocr-image download-runtime-binaries package-desktop package-mobile-android package-mobile-ios package-mobile package-all start-deps start-deps-dev stop-deps stop-deps-dev clean-deps start-all stop-all clean-all test-integration setup-python-venv install-paddleocr run-paddleocr-docker stop-paddleocr-docker
 
 # Development run commands
 run-server:
 	cd server && go run ./cmd/zeus
+
+run-code-runner:
+	cd server && go run ./cmd/code-runner
 
 run-app-backend:
 	@# Load env vars from apps/app-backend/.env and override with apps/app-backend/.env.local (gitignored).
@@ -24,6 +27,11 @@ run-app-web:
 	cd apps/web && npm run dev
 
 run-app-desktop:
+	@# Clean stale Tauri cache if the desktop crate was moved from the old frontend/src-tauri path.
+	@if [ -d apps/desktop/target/debug/build ] && rg -q "frontend/src-tauri" apps/desktop/target/debug/build; then \
+		echo "Detected stale Tauri cache in apps/desktop/target, cleaning..."; \
+		rm -rf apps/desktop/target; \
+	fi
 	cd apps/desktop && cargo tauri dev
 
 init-app-mobile-android:

@@ -1,0 +1,19 @@
+{{- if .Values.codeRunner.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "zeus.fullname" . }}-code-runner
+  labels:
+    {{- include "zeus.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.codeRunner.service.type }}
+  ports:
+    - port: {{ .Values.codeRunner.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: {{ include "zeus.name" . }}-code-runner
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+

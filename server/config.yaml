@@ -1,5 +1,12 @@
 server:
-  addr: ":8080"
+  addr: "0.0.0.0:8080"
+
+code_runner:
+  addr: ":8091"
+  internal_token: "zeus-dev-code-runner-token"
+  namespace: "default"
+  default_timeout_seconds: 10
+  max_output_bytes: 262144
 
 postgres:
   host: localhost

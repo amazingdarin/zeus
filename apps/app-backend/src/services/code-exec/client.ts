@@ -89,7 +89,11 @@ function withDefaultDeps(deps?: Partial<CodeExecClientDeps>): CodeExecClientDeps
   const baseUrl = String(deps?.baseUrl ?? process.env.CODE_RUNNER_BASE_URL ?? "http://127.0.0.1:8091")
     .trim()
     .replace(/\/+$/, "");
-  const internalToken = String(deps?.internalToken ?? process.env.CODE_RUNNER_INTERNAL_TOKEN ?? "").trim();
+  const internalToken = String(
+    deps?.internalToken
+    ?? process.env.CODE_RUNNER_INTERNAL_TOKEN
+    ?? "zeus-dev-code-runner-token",
+  ).trim();
   const fetchImpl = deps?.fetchImpl ?? fetch;
   return {
     baseUrl,
@@ -174,4 +178,3 @@ export function createCodeExecClient(deps?: Partial<CodeExecClientDeps>): CodeEx
     },
   };
 }
-

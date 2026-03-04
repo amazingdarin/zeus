@@ -76,6 +76,13 @@ backend:
     server:
       addr: ":8080"
 
+    code_runner:
+      addr: ":8091"
+      internal_token: "zeus-dev-code-runner-token"
+      namespace: "default"
+      default_timeout_seconds: 10
+      max_output_bytes: 262144
+
     postgres:
       host: postgres
       port: 5432
@@ -122,6 +129,18 @@ backend:
       copilot:
         client_id: "Ov23liPsn9jEM8DUvp3I"
         scopes: []
+
+codeRunner:
+  enabled: false
+  replicas: 1
+  image:
+    repository: zeus
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8091
+  resources: {}
 
 frontend:
   enabled: true

@@ -10,6 +10,7 @@ import (
 
 type Config struct {
 	Server        ServerConfig        `mapstructure:"server"`
+	CodeRunner    CodeRunnerConfig    `mapstructure:"code_runner"`
 	Postgres      PostgresConfig      `mapstructure:"postgres"`
 	ObjectStorage ObjectStorageConfig `mapstructure:"object_storage"`
 	Asset         AssetConfig         `mapstructure:"asset"`
@@ -25,6 +26,14 @@ var AppConfig *Config
 
 type ServerConfig struct {
 	Addr string `mapstructure:"addr"`
+}
+
+type CodeRunnerConfig struct {
+	Addr                 string `mapstructure:"addr"`
+	InternalToken        string `mapstructure:"internal_token"`
+	Namespace            string `mapstructure:"namespace"`
+	DefaultTimeoutSecond int    `mapstructure:"default_timeout_seconds"`
+	MaxOutputBytes       int    `mapstructure:"max_output_bytes"`
 }
 
 type PostgresConfig struct {
@@ -152,6 +161,18 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Asset.MetaRoot == "" {
 		cfg.Asset.MetaRoot = "/var/lib/zeus/assets"
+	}
+	if cfg.CodeRunner.Addr == "" {
+		cfg.CodeRunner.Addr = ":8091"
+	}
+	if cfg.CodeRunner.Namespace == "" {
+		cfg.CodeRunner.Namespace = "default"
+	}
+	if cfg.CodeRunner.DefaultTimeoutSecond <= 0 {
+		cfg.CodeRunner.DefaultTimeoutSecond = 10
+	}
+	if cfg.CodeRunner.MaxOutputBytes <= 0 {
+		cfg.CodeRunner.MaxOutputBytes = 256 * 1024
 	}
 	if cfg.Git.BareRepoRoot == "" {
 		cfg.Git.BareRepoRoot = "/var/lib/zeus/git"
