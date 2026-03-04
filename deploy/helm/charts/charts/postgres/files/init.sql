@@ -174,6 +174,28 @@ CREATE TABLE task (
   updated_at      TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE TABLE message_center_tasks (
+  id               TEXT PRIMARY KEY,
+  user_id          TEXT NOT NULL,
+  owner_type       TEXT NOT NULL DEFAULT 'personal',
+  owner_id         TEXT NOT NULL DEFAULT '',
+  project_key      TEXT NOT NULL,
+  type             TEXT NOT NULL,
+  title            TEXT NOT NULL,
+  status           TEXT NOT NULL,
+  progress_current INT NOT NULL DEFAULT 0,
+  progress_total   INT NOT NULL DEFAULT 0,
+  progress_percent INT NOT NULL DEFAULT 0,
+  detail_json      JSONB NOT NULL DEFAULT '{}'::jsonb,
+  error_message    TEXT,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at      TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_center_tasks_scope_status_updated
+  ON message_center_tasks (user_id, owner_type, owner_id, project_key, status, updated_at DESC);
+
 CREATE TABLE knowledge_fulltext_index
 (
     owner_type   TEXT NOT NULL DEFAULT 'personal',
@@ -222,12 +244,6 @@ ON knowledge_embedding_index (owner_type, owner_id, project_key);
 CREATE INDEX IF NOT EXISTS idx_kei_embedding
 ON knowledge_embedding_index USING ivfflat (embedding vector_cosine_ops);
 
--- ============================================================
--- Multi-granularity knowledge index (knowledge_index)
--- ============================================================
--- NOTE: Vector dimension is set to 1536 to match the existing default embedding
--- model fallback in the app (`text-embedding-3-small`).
-
 CREATE TABLE IF NOT EXISTS knowledge_index (
     id          TEXT PRIMARY KEY,
     user_id     TEXT NOT NULL,
@@ -235,19 +251,14 @@ CREATE TABLE IF NOT EXISTS knowledge_index (
     owner_id    TEXT NOT NULL DEFAULT '',
     project_key TEXT NOT NULL,
     doc_id      TEXT NOT NULL,
-
     granularity TEXT NOT NULL CHECK (granularity IN ('document', 'section', 'block', 'code')),
-
     content     TEXT NOT NULL,
     embedding   vector(1536),
-
     metadata    JSONB NOT NULL DEFAULT '{}'::jsonb,
-
     tsv_en      tsvector GENERATED ALWAYS AS (
                     to_tsvector('english', coalesce(metadata->>'title', '') || ' ' || content)
                 ) STORED,
     tsv_zh      tsvector,
-
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -290,10 +301,6 @@ CREATE TRIGGER trg_knowledge_index_tsv_zh
     FOR EACH ROW
     EXECUTE FUNCTION update_knowledge_index_tsv_zh();
 
--- ============================================================
--- RAPTOR tree (raptor_tree)
--- ============================================================
-
 CREATE TABLE IF NOT EXISTS raptor_tree (
     id          TEXT PRIMARY KEY,
     user_id     TEXT NOT NULL,
@@ -301,14 +308,11 @@ CREATE TABLE IF NOT EXISTS raptor_tree (
     owner_id    TEXT NOT NULL DEFAULT '',
     project_key TEXT NOT NULL,
     doc_id      TEXT NOT NULL,
-
     level       INTEGER NOT NULL,
     parent_id   TEXT,
     children    TEXT[] DEFAULT '{}'::text[],
-
     content     TEXT NOT NULL,
     embedding   vector(1536),
-
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -326,10 +330,6 @@ ON raptor_tree (parent_id);
 
 CREATE INDEX IF NOT EXISTS idx_raptor_embedding
 ON raptor_tree USING ivfflat (embedding vector_cosine_ops);
-
--- ============================================================
--- Document summary cache (document_summary_cache)
--- ============================================================
 
 CREATE TABLE IF NOT EXISTS document_summary_cache (
     doc_id      TEXT NOT NULL,
@@ -373,23 +373,24 @@ ON ppt_templates (owner_type, owner_id, project_key, name);
 CREATE INDEX IF NOT EXISTS idx_ppt_owner_project
 ON ppt_templates (owner_type, owner_id, project_key);
 
+-- LLM Provider Configuration
 CREATE TABLE llm_provider_config
 (
     id              TEXT PRIMARY KEY,
-    config_type     TEXT NOT NULL DEFAULT 'llm',
-    provider_id     TEXT NOT NULL,
+    config_type     TEXT NOT NULL DEFAULT 'llm', -- llm, embedding
+    provider_id     TEXT NOT NULL,              -- openai, anthropic, google, ollama, openai-compatible
     display_name    TEXT NOT NULL,
     base_url        TEXT,
     default_model   TEXT,
-    api_key_cipher  TEXT,
-    api_key_iv      TEXT,
+    api_key_cipher  TEXT,                       -- AES-256-GCM encrypted
+    api_key_iv      TEXT,                       -- initialization vector
     enabled         BOOLEAN DEFAULT true,
-    status          TEXT DEFAULT 'unknown',
+    status          TEXT DEFAULT 'unknown',     -- active, error, unknown
     last_error      TEXT,
     last_tested_at  TIMESTAMPTZ,
     created_at      TIMESTAMPTZ DEFAULT now(),
     updated_at      TIMESTAMPTZ DEFAULT now(),
-    UNIQUE (config_type)
+    UNIQUE (config_type)                        -- only one config per type
 );
 
 CREATE INDEX IF NOT EXISTS idx_llm_provider_config_provider
@@ -398,6 +399,7 @@ ON llm_provider_config (provider_id);
 CREATE INDEX IF NOT EXISTS idx_llm_provider_config_type
 ON llm_provider_config (config_type);
 
+-- Skill Configuration
 CREATE TABLE skill_config
 (
     id          TEXT PRIMARY KEY,
@@ -415,6 +417,7 @@ ON skill_config (category);
 CREATE INDEX IF NOT EXISTS idx_skill_config_enabled
 ON skill_config (enabled);
 
+-- Default skill configurations
 INSERT INTO skill_config (id, skill_name, category, enabled, priority) VALUES
     (gen_random_uuid(), 'doc-read', 'doc', true, 10),
     (gen_random_uuid(), 'doc-create', 'doc', true, 20),
@@ -430,6 +433,7 @@ INSERT INTO skill_config (id, skill_name, category, enabled, priority) VALUES
     (gen_random_uuid(), 'doc-convert', 'doc', true, 120)
 ON CONFLICT (skill_name) DO NOTHING;
 
+-- Project-scoped skill configuration for System Agent
 CREATE TABLE IF NOT EXISTS project_skill_config
 (
     id            TEXT PRIMARY KEY,
@@ -437,7 +441,7 @@ CREATE TABLE IF NOT EXISTS project_skill_config
     owner_id      TEXT NOT NULL DEFAULT '',
     project_key   TEXT NOT NULL,
     skill_id      TEXT NOT NULL,
-    source        TEXT NOT NULL,
+    source        TEXT NOT NULL, -- native | anthropic | mcp
     enabled       BOOLEAN NOT NULL DEFAULT true,
     priority      INTEGER NOT NULL DEFAULT 0,
     risk_override TEXT,
@@ -455,20 +459,38 @@ ON project_skill_config (source);
 CREATE INDEX IF NOT EXISTS idx_project_skill_config_enabled
 ON project_skill_config (enabled);
 
+-- Web Search Configuration
 CREATE TABLE web_search_config
 (
     id              TEXT PRIMARY KEY DEFAULT gen_random_uuid(),
-    provider        TEXT NOT NULL,
-    api_key_cipher  TEXT,
-    api_key_iv      TEXT,
+    provider        TEXT NOT NULL,              -- tavily, serpapi, duckduckgo
+    api_key_cipher  TEXT,                       -- AES-256-GCM encrypted
+    api_key_iv      TEXT,                       -- initialization vector
     enabled         BOOLEAN DEFAULT false,
     created_at      TIMESTAMPTZ DEFAULT now(),
     updated_at      TIMESTAMPTZ DEFAULT now()
 );
 
+-- Only allow one web search config (singleton pattern)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_web_search_config_singleton
 ON web_search_config ((true));
 
+-- Per-user general settings
+CREATE TABLE IF NOT EXISTS user_general_settings
+(
+    user_id                     TEXT PRIMARY KEY,
+    use_remote_knowledge_base   BOOLEAN NOT NULL DEFAULT false,
+    document_auto_sync          BOOLEAN NOT NULL DEFAULT false,
+    trash_auto_cleanup_enabled   BOOLEAN NOT NULL DEFAULT false,
+    trash_auto_cleanup_days      INTEGER NOT NULL DEFAULT 30 CHECK (trash_auto_cleanup_days >= 1 AND trash_auto_cleanup_days <= 3650),
+    created_at                  TIMESTAMPTZ DEFAULT now(),
+    updated_at                  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_general_settings_user_id
+ON user_general_settings (user_id);
+
+-- Chat Settings (singleton)
 CREATE TABLE chat_settings
 (
     id            TEXT PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -480,8 +502,10 @@ CREATE TABLE chat_settings
 CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_settings_singleton
 ON chat_settings ((true));
 
+-- Seed default row
 INSERT INTO chat_settings (full_access) VALUES (false) ON CONFLICT DO NOTHING;
 
+-- Chat Sessions
 CREATE TABLE chat_sessions
 (
     id            TEXT PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -497,6 +521,7 @@ CREATE TABLE chat_sessions
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_owner_user_project
 ON chat_sessions (owner_type, owner_id, user_id, project_key, updated_at DESC);
 
+-- Chat Messages
 CREATE TABLE chat_messages
 (
     id            TEXT PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -622,3 +647,36 @@ CREATE TABLE IF NOT EXISTS plugin_user_registry_snapshot
 
 CREATE INDEX IF NOT EXISTS idx_plugin_registry_snapshot_user_updated
 ON plugin_user_registry_snapshot (user_id, updated_at DESC);
+
+-- Document code execution runs (server-side audit storage)
+CREATE TABLE IF NOT EXISTS document_code_runs
+(
+    id                TEXT PRIMARY KEY,
+    run_id            TEXT NOT NULL UNIQUE,
+    request_id        TEXT NOT NULL,
+    owner_type        TEXT NOT NULL,
+    owner_id          TEXT NOT NULL,
+    project_key       TEXT NOT NULL,
+    doc_id            TEXT NOT NULL,
+    block_id          TEXT NOT NULL,
+    user_id           TEXT NOT NULL,
+    language          TEXT NOT NULL,
+    image_ref         TEXT NOT NULL DEFAULT '',
+    status            TEXT NOT NULL,
+    stdout            TEXT NOT NULL DEFAULT '',
+    stderr            TEXT NOT NULL DEFAULT '',
+    truncated         BOOLEAN NOT NULL DEFAULT false,
+    timed_out         BOOLEAN NOT NULL DEFAULT false,
+    exit_code         INTEGER NOT NULL DEFAULT 0,
+    duration_ms       BIGINT NOT NULL DEFAULT 0,
+    cpu_limit_milli   INTEGER NOT NULL DEFAULT 0,
+    memory_limit_mb   INTEGER NOT NULL DEFAULT 0,
+    timeout_ms        INTEGER NOT NULL DEFAULT 0,
+    code_sha256       TEXT NOT NULL DEFAULT '',
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at        TIMESTAMPTZ,
+    finished_at       TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_code_runs_scope_doc_block_created
+ON document_code_runs (owner_type, owner_id, project_key, doc_id, block_id, created_at DESC);

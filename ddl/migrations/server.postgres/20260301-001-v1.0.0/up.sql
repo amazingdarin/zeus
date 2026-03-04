@@ -475,6 +475,21 @@ CREATE TABLE web_search_config
 CREATE UNIQUE INDEX IF NOT EXISTS idx_web_search_config_singleton
 ON web_search_config ((true));
 
+-- Per-user general settings
+CREATE TABLE IF NOT EXISTS user_general_settings
+(
+    user_id                     TEXT PRIMARY KEY,
+    use_remote_knowledge_base   BOOLEAN NOT NULL DEFAULT false,
+    document_auto_sync          BOOLEAN NOT NULL DEFAULT false,
+    trash_auto_cleanup_enabled   BOOLEAN NOT NULL DEFAULT false,
+    trash_auto_cleanup_days      INTEGER NOT NULL DEFAULT 30 CHECK (trash_auto_cleanup_days >= 1 AND trash_auto_cleanup_days <= 3650),
+    created_at                  TIMESTAMPTZ DEFAULT now(),
+    updated_at                  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_general_settings_user_id
+ON user_general_settings (user_id);
+
 -- Chat Settings (singleton)
 CREATE TABLE chat_settings
 (
@@ -632,3 +647,36 @@ CREATE TABLE IF NOT EXISTS plugin_user_registry_snapshot
 
 CREATE INDEX IF NOT EXISTS idx_plugin_registry_snapshot_user_updated
 ON plugin_user_registry_snapshot (user_id, updated_at DESC);
+
+-- Document code execution runs (server-side audit storage)
+CREATE TABLE IF NOT EXISTS document_code_runs
+(
+    id                TEXT PRIMARY KEY,
+    run_id            TEXT NOT NULL UNIQUE,
+    request_id        TEXT NOT NULL,
+    owner_type        TEXT NOT NULL,
+    owner_id          TEXT NOT NULL,
+    project_key       TEXT NOT NULL,
+    doc_id            TEXT NOT NULL,
+    block_id          TEXT NOT NULL,
+    user_id           TEXT NOT NULL,
+    language          TEXT NOT NULL,
+    image_ref         TEXT NOT NULL DEFAULT '',
+    status            TEXT NOT NULL,
+    stdout            TEXT NOT NULL DEFAULT '',
+    stderr            TEXT NOT NULL DEFAULT '',
+    truncated         BOOLEAN NOT NULL DEFAULT false,
+    timed_out         BOOLEAN NOT NULL DEFAULT false,
+    exit_code         INTEGER NOT NULL DEFAULT 0,
+    duration_ms       BIGINT NOT NULL DEFAULT 0,
+    cpu_limit_milli   INTEGER NOT NULL DEFAULT 0,
+    memory_limit_mb   INTEGER NOT NULL DEFAULT 0,
+    timeout_ms        INTEGER NOT NULL DEFAULT 0,
+    code_sha256       TEXT NOT NULL DEFAULT '',
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at        TIMESTAMPTZ,
+    finished_at       TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_code_runs_scope_doc_block_created
+ON document_code_runs (owner_type, owner_id, project_key, doc_id, block_id, created_at DESC);
