@@ -1,6 +1,47 @@
 import { apiFetch, encodeProjectRef } from "../config/api";
 import type { JSONContent } from "@tiptap/react";
 
+export class DocumentApiError extends Error {
+    status: number;
+    code: string;
+    data?: unknown;
+
+    constructor(message: string, status: number, code = "DOCUMENT_API_ERROR", data?: unknown) {
+        super(message);
+        this.name = "DocumentApiError";
+        this.status = status;
+        this.code = code;
+        this.data = data;
+    }
+}
+
+export function isDocumentNotFoundError(error: unknown): boolean {
+    return error instanceof DocumentApiError && error.status === 404;
+}
+
+export type DocumentLockInfo = {
+    locked: true;
+    lockedBy: string;
+    lockedAt: string;
+};
+
+export function isDocumentLockedError(error: unknown): boolean {
+    return error instanceof DocumentApiError
+        && (error.status === 423 || error.code === "DOCUMENT_LOCKED");
+}
+
+function toDocumentApiError(
+    response: Response,
+    payload: Record<string, unknown> | null,
+    fallbackCode: string,
+    fallbackMessage: string,
+): DocumentApiError {
+    const message = String(payload?.message ?? fallbackMessage);
+    const code = String(payload?.code ?? fallbackCode);
+    const data = payload?.data;
+    return new DocumentApiError(message, response.status, code, data);
+}
+
 export type DocumentListItem = {
     id?: string;
     slug?: string;
@@ -44,6 +85,8 @@ export type DocumentDetail = {
         extra?: {
             status?: string;
             tags?: string[];
+            lock?: DocumentLockInfo;
+            [key: string]: unknown;
         };
         doc_type?: string;
         parent?: string; // legacy support
@@ -161,6 +204,19 @@ export const fetchDocumentTree = async (projectKey: string): Promise<DocumentTre
     return Array.isArray(payload?.data) ? payload.data : [];
 };
 
+export const syncProjectDocuments = async (projectKey: string): Promise<void> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/sync`,
+        {
+            method: "POST",
+        },
+    );
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.message || "Failed to sync project documents");
+    }
+};
+
 export const fetchFavoriteDocuments = async (
     projectKey: string,
 ): Promise<FavoriteDocumentItem[]> => {
@@ -230,10 +286,112 @@ export const fetchDocument = async (projectKey: string, documentId: string): Pro
         )}`,
     );
     if (!response.ok) {
-        throw new Error("failed to load document");
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        throw toDocumentApiError(response, payload, "DOCUMENT_FETCH_FAILED", "failed to load document");
     }
     const payload = await response.json();
     return payload?.data ?? null;
+};
+
+export type UpdateDocumentContentInput = {
+    title: string;
+    content: JSONContent;
+};
+
+export const updateDocumentContent = async (
+    projectKey: string,
+    documentId: string,
+    input: UpdateDocumentContentInput,
+): Promise<DocumentDetail> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(documentId)}`,
+        {
+            method: "PUT",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                meta: {
+                    title: input.title,
+                },
+                body: {
+                    type: "tiptap",
+                    content: input.content,
+                },
+            }),
+        },
+    );
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        throw toDocumentApiError(response, payload, "DOCUMENT_UPDATE_FAILED", "save document failed");
+    }
+    const payload = await response.json().catch(() => null);
+    return payload?.data ?? payload ?? null;
+};
+
+export const lockDocument = async (
+    projectKey: string,
+    documentId: string,
+): Promise<DocumentLockInfo> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(documentId)}/lock`,
+        {
+            method: "PUT",
+        },
+    );
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        throw toDocumentApiError(response, payload, "DOCUMENT_LOCK_FAILED", "Failed to lock document");
+    }
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    const lock = payload?.data && typeof payload.data === "object"
+        ? (payload.data as { lock?: unknown }).lock
+        : null;
+    if (!lock || typeof lock !== "object") {
+        throw new DocumentApiError("Failed to lock document", response.status, "DOCUMENT_LOCK_FAILED");
+    }
+    const record = lock as Record<string, unknown>;
+    return {
+        locked: true,
+        lockedBy: String(record.lockedBy ?? ""),
+        lockedAt: String(record.lockedAt ?? ""),
+    };
+};
+
+export const unlockDocument = async (
+    projectKey: string,
+    documentId: string,
+): Promise<null> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(documentId)}/lock`,
+        {
+            method: "DELETE",
+        },
+    );
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        throw toDocumentApiError(response, payload, "DOCUMENT_UNLOCK_FAILED", "Failed to unlock document");
+    }
+    return null;
+};
+
+export const exportDocumentDocx = async (
+    projectKey: string,
+    documentId: string,
+): Promise<Blob> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(
+            documentId,
+        )}/export-docx`,
+        {
+            method: "POST",
+        },
+    );
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.message || "Failed to export Word document");
+    }
+    return response.blob();
 };
 
 export const filterDocuments = async (
@@ -314,6 +472,24 @@ export const createDocument = async (
     return payload?.data ?? payload;
 };
 
+export const duplicateDocument = async (
+    projectKey: string,
+    docId: string,
+): Promise<DocumentDetail> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(docId)}/duplicate`,
+        {
+            method: "POST",
+        },
+    );
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.message || "Failed to duplicate document");
+    }
+    const payload = await response.json().catch(() => null);
+    return payload?.data ?? payload ?? null;
+};
+
 export const moveDocument = async (
     projectKey: string,
     docId: string,
@@ -328,13 +504,15 @@ export const moveDocument = async (
         },
     );
     if (!response.ok) {
-        throw new Error("Failed to move document");
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        throw toDocumentApiError(response, payload, "DOCUMENT_MOVE_FAILED", "Failed to move document");
     }
 };
 
 export type DeleteDocumentResult = {
     deleted_ids: string[];
     count: number;
+    trash_id?: string;
 };
 
 export const deleteDocument = async (
@@ -353,11 +531,134 @@ export const deleteDocument = async (
         },
     );
     if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        throw new Error(payload?.message || "Failed to delete document");
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        throw toDocumentApiError(response, payload, "DOCUMENT_DELETE_FAILED", "Failed to delete document");
     }
     const payload = await response.json();
     return payload?.data ?? { deleted_ids: [], count: 0 };
+};
+
+export type DocumentTrashItem = {
+    trashId: string;
+    rootDocId: string;
+    title: string;
+    entityType: "document" | "directory";
+    originalPath: string;
+    originalParentId: string;
+    deletedAt: string;
+    deletedBy: string;
+    deletedIds: string[];
+};
+
+export type RestoreDocumentTrashResult = {
+    root: DocumentDetail;
+    fallback_to_root: boolean;
+    restored_ids: string[];
+};
+
+export type DocumentTrashSnapshot = {
+    rootDocId: string;
+    docs: DocumentDetail[];
+};
+
+export const fetchDocumentTrash = async (
+    projectKey: string,
+): Promise<DocumentTrashItem[]> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeProjectRef(projectKey)}/trash`,
+    );
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.message || "Failed to load trash");
+    }
+    const payload = await response.json();
+    const list = Array.isArray(payload?.data) ? payload.data : [];
+    return list.map((item: Record<string, unknown>) => ({
+        trashId: String(item?.trashId ?? ""),
+        rootDocId: String(item?.rootDocId ?? ""),
+        title: String(item?.title ?? ""),
+        entityType: item?.entityType === "directory" ? "directory" : "document",
+        originalPath: String(item?.originalPath ?? ""),
+        originalParentId: String(item?.originalParentId ?? "root"),
+        deletedAt: String(item?.deletedAt ?? ""),
+        deletedBy: String(item?.deletedBy ?? ""),
+        deletedIds: Array.isArray(item?.deletedIds)
+            ? (item.deletedIds as unknown[]).map((id) => String(id)).filter(Boolean)
+            : [],
+    }));
+};
+
+export const restoreDocumentTrash = async (
+    projectKey: string,
+    trashId: string,
+): Promise<RestoreDocumentTrashResult> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeProjectRef(projectKey)}/trash/${encodeURIComponent(trashId)}/restore`,
+        {
+            method: "POST",
+        },
+    );
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.message || "Failed to restore trash item");
+    }
+    const payload = await response.json();
+    return payload?.data ?? {};
+};
+
+export const fetchDocumentTrashSnapshot = async (
+    projectKey: string,
+    trashId: string,
+): Promise<DocumentTrashSnapshot> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeProjectRef(projectKey)}/trash/${encodeURIComponent(trashId)}/snapshot`,
+    );
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.message || "Failed to load trash snapshot");
+    }
+    const payload = await response.json().catch(() => null);
+    const data = payload?.data ?? {};
+    const docs = Array.isArray(data.docs) ? data.docs as DocumentDetail[] : [];
+    return {
+        rootDocId: String(data.root_doc_id ?? data.rootDocId ?? "").trim(),
+        docs,
+    };
+};
+
+export const purgeDocumentTrash = async (
+    projectKey: string,
+    trashId: string,
+): Promise<{ purged: boolean }> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeProjectRef(projectKey)}/trash/${encodeURIComponent(trashId)}`,
+        {
+            method: "DELETE",
+        },
+    );
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.message || "Failed to purge trash item");
+    }
+    const payload = await response.json();
+    return payload?.data ?? { purged: false };
+};
+
+export const purgeAllDocumentTrash = async (
+    projectKey: string,
+): Promise<{ count: number }> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeProjectRef(projectKey)}/trash`,
+        {
+            method: "DELETE",
+        },
+    );
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.message || "Failed to clear trash");
+    }
+    const payload = await response.json();
+    return payload?.data ?? { count: 0 };
 };
 
 export const uploadDocument = async (
@@ -624,7 +925,8 @@ export const applyProposal = async (
         { method: "POST" },
     );
     if (!response.ok) {
-        throw new Error("failed to apply proposal");
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        throw toDocumentApiError(response, payload, "PROPOSAL_APPLY_FAILED", "failed to apply proposal");
     }
     const payload = await response.json();
     return payload?.data ?? payload;
@@ -744,7 +1046,148 @@ export const updateBlockAttrs = async (
         },
     );
     if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        throw new Error(payload?.message || "Failed to update block attributes");
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        throw toDocumentApiError(response, payload, "BLOCK_UPDATE_FAILED", "Failed to update block attributes");
     }
+};
+
+export type CodeExecLanguage = "python" | "javascript" | "bash";
+
+export type DocumentCodeRunResult = {
+    stdout: string;
+    stderr: string;
+    exitCode: number;
+    durationMs: number;
+    truncated: boolean;
+    timedOut: boolean;
+};
+
+export type DocumentCodeRun = {
+    runId: string;
+    status: "queued" | "running" | "completed" | "failed" | "timeout";
+    result: DocumentCodeRunResult;
+};
+
+export type RunDocumentCodeInput = {
+    blockId: string;
+    language: CodeExecLanguage;
+    code: string;
+    timeoutMs?: number;
+};
+
+export type ListDocumentCodeRunsInput = {
+    blockId?: string;
+    cursor?: string;
+    limit?: number;
+};
+
+export type ListDocumentCodeRunsResult = {
+    items: DocumentCodeRun[];
+    nextCursor?: string;
+};
+
+export function buildCodeExecRunPath(projectKey: string, documentId: string): string {
+    return `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(documentId)}/code-exec/run`;
+}
+
+function buildCodeExecRunsPath(
+    projectKey: string,
+    documentId: string,
+    input?: ListDocumentCodeRunsInput,
+): string {
+    const params = new URLSearchParams();
+    if (input?.blockId) {
+        params.set("blockId", input.blockId);
+    }
+    if (input?.cursor) {
+        params.set("cursor", input.cursor);
+    }
+    if (typeof input?.limit === "number" && Number.isFinite(input.limit)) {
+        params.set("limit", String(Math.max(1, Math.floor(input.limit))));
+    }
+    const query = params.toString();
+    const base = `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(documentId)}/code-exec/runs`;
+    return query ? `${base}?${query}` : base;
+}
+
+export function mapDocumentCodeRun(raw: unknown): DocumentCodeRun {
+    const node = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    const result = (node.result && typeof node.result === "object"
+        ? node.result
+        : {}) as Record<string, unknown>;
+    return {
+        runId: String(node.runId ?? ""),
+        status: String(node.status ?? "failed") as DocumentCodeRun["status"],
+        result: {
+            stdout: String(result.stdout ?? ""),
+            stderr: String(result.stderr ?? ""),
+            exitCode: Number(result.exitCode ?? 1),
+            durationMs: Number(result.durationMs ?? 0),
+            truncated: Boolean(result.truncated),
+            timedOut: Boolean(result.timedOut),
+        },
+    };
+}
+
+export const runDocumentCodeBlock = async (
+    projectKey: string,
+    documentId: string,
+    input: RunDocumentCodeInput,
+): Promise<DocumentCodeRun> => {
+    const response = await apiFetch(buildCodeExecRunPath(projectKey, documentId), {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            blockId: input.blockId,
+            language: input.language,
+            code: input.code,
+            timeoutMs: input.timeoutMs,
+        }),
+    });
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        throw toDocumentApiError(response, payload, "CODE_EXEC_RUN_FAILED", "Failed to run code block");
+    }
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    return mapDocumentCodeRun(payload?.data);
+};
+
+export const listDocumentCodeRuns = async (
+    projectKey: string,
+    documentId: string,
+    input?: ListDocumentCodeRunsInput,
+): Promise<ListDocumentCodeRunsResult> => {
+    const response = await apiFetch(buildCodeExecRunsPath(projectKey, documentId, input));
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        throw toDocumentApiError(response, payload, "CODE_EXEC_LIST_FAILED", "Failed to list code runs");
+    }
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    const data = (payload?.data && typeof payload.data === "object"
+        ? payload.data
+        : {}) as Record<string, unknown>;
+    const items = Array.isArray(data.items) ? data.items.map((item) => mapDocumentCodeRun(item)) : [];
+    const nextCursor = String(data.nextCursor ?? "");
+    return {
+        items,
+        nextCursor: nextCursor || undefined,
+    };
+};
+
+export const getDocumentCodeRun = async (
+    projectKey: string,
+    documentId: string,
+    runId: string,
+): Promise<DocumentCodeRun> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(documentId)}/code-exec/runs/${encodeURIComponent(runId)}`,
+    );
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        throw toDocumentApiError(response, payload, "CODE_EXEC_GET_FAILED", "Failed to get code run");
+    }
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    return mapDocumentCodeRun(payload?.data);
 };

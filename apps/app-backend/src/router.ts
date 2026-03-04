@@ -29,7 +29,7 @@ import { knowledgeSearch } from "./knowledge/search.js";
 import { rebuildTaskManager } from "./knowledge/rebuild-task.js";
 import { notifyDocumentMoved } from "./knowledge/tree-sync.js";
 import { assetStore } from "./storage/asset-store.js";
-import { getUserId } from "./middleware/auth.js";
+import { authMiddleware, getUserId, optionalAuthMiddleware } from "./middleware/auth.js";
 import { projectScopeMiddleware } from "./middleware/project-scope.js";
 import { resolveProjectScope } from "./project-scope.js";
 import {
@@ -63,8 +63,24 @@ import {
   optimizeFormatSync,
   type OptimizeMode,
 } from "./services/optimize.js";
+import {
+  exportDocumentToDocxBuffer,
+  ExportDocxError,
+} from "./services/export-docx.js";
+import { duplicateDocument } from "./services/document-duplicate.js";
+import {
+  applyDocumentLock,
+  assertDocumentUnlocked,
+  clearDocumentLock,
+  DocumentLockedError,
+  getDocumentLockInfo,
+} from "./services/document-lock.js";
+import { createCodeExecService } from "./services/code-exec/service.js";
+import { CodeExecGuardError } from "./services/code-exec/guard.js";
+import { CodeExecClientError } from "./services/code-exec/client.js";
 import { documentFavoriteStore } from "./services/document-favorite-store.js";
 import { documentRecentEditStore } from "./services/document-recent-edit-store.js";
+import { documentTrashStore } from "./services/document-trash/store.js";
 import { messageCenterBus, messageCenterStore } from "./services/message-center-store.js";
 import {
   documentContainsAnyBlockType,
@@ -78,6 +94,7 @@ import { pluginManagerV2 } from "./plugins-v2/index.js";
 const upload = multer({ storage: multer.memoryStorage() });
 const uploadWithPath = multer({ storage: multer.memoryStorage(), preservePath: true });
 const pluginManager = pluginManagerV2;
+const codeExecService = createCodeExecService();
 const VALID_CONFIG_TYPES = new Set<ConfigType>(["llm", "embedding", "vision", "transcription"]);
 const VALID_CONFIG_TYPE_MESSAGE =
   "configType must be 'llm', 'embedding', 'vision', or 'transcription'";
@@ -254,6 +271,18 @@ function error(res: Response, code: string, message: string, status = 400): void
   res.status(status).json({ code, message });
 }
 
+function extractBearerToken(authorizationHeader: unknown): string {
+  const raw = String(authorizationHeader ?? "").trim();
+  if (!raw) {
+    return "";
+  }
+  const parts = raw.split(" ");
+  if (parts.length !== 2 || parts[0].toLowerCase() !== "bearer") {
+    return "";
+  }
+  return String(parts[1] ?? "").trim();
+}
+
 type DocumentHookEvent =
   | "document.create"
   | "document.update"
@@ -317,6 +346,31 @@ function dispatchDocumentAfterHooks(
     payload,
     requestId,
   });
+
+  const accessToken = extractBearerToken(req.headers.authorization);
+  const isAuthenticated = Boolean(req.user?.id && accessToken);
+  const scope = req.projectScope
+    ? {
+      ownerType: req.projectScope.ownerType,
+      ownerId: req.projectScope.ownerId,
+      projectKey: req.projectScope.projectKey,
+    }
+    : undefined;
+
+  void import("./services/document-version/dispatch.js")
+    .then(({ documentVersionDispatcher }) =>
+      documentVersionDispatcher({
+        userId,
+        projectKey,
+        event,
+        payload,
+        isAuthenticated,
+        accessToken,
+        scope,
+      }))
+    .catch((err) => {
+      console.warn("[doc-version] failed to dispatch version event:", err);
+    });
 }
 
 /**
@@ -343,6 +397,51 @@ function updateBlockAttrsInContent(
   }
 
   return false;
+}
+
+async function loadUnlockedDocument(
+  userId: string,
+  projectKey: string,
+  docId: string,
+): Promise<Document> {
+  const doc = await documentStore.get(userId, projectKey, docId);
+  assertDocumentUnlocked(doc.meta);
+  return doc;
+}
+
+function respondDocumentLocked(res: Response, err: DocumentLockedError): void {
+  res.status(err.status).json({
+    code: err.code,
+    message: err.message,
+    data: {
+      lock: err.lock,
+    },
+  });
+}
+
+function respondCodeExecError(res: Response, err: unknown): void {
+  if (err instanceof DocumentNotFoundError) {
+    error(res, "NOT_FOUND", err.message, 404);
+    return;
+  }
+  if (err instanceof BlockNotFoundError) {
+    error(res, "BLOCK_NOT_FOUND", err.message, 404);
+    return;
+  }
+  if (err instanceof DocumentLockedError) {
+    respondDocumentLocked(res, err);
+    return;
+  }
+  if (err instanceof CodeExecGuardError) {
+    error(res, err.code, err.message, err.status);
+    return;
+  }
+  if (err instanceof CodeExecClientError) {
+    error(res, err.code, err.message, err.status);
+    return;
+  }
+  const message = err instanceof Error ? err.message : "Code execution failed";
+  error(res, "CODE_EXEC_FAILED", message, 500);
 }
 
 export const buildRouter = () => {
@@ -418,6 +517,7 @@ export const buildRouter = () => {
     }
   });
 
+  router.use(optionalAuthMiddleware);
   router.use("/projects/:ownerType/:ownerKey/:projectKey", projectScopeMiddleware);
 
   // ============================================
@@ -436,7 +536,8 @@ export const buildRouter = () => {
         const userId = getUserId(req);
         const limit = Number(req.query.limit ?? 50);
         const cursor = typeof req.query.cursor === "string" ? req.query.cursor : undefined;
-        const result = await messageCenterStore.listTasks(userId, projectKey, { limit, cursor });
+        const type = typeof req.query.type === "string" ? req.query.type : undefined;
+        const result = await messageCenterStore.listTasks(userId, projectKey, { limit, cursor, type });
         success(res, result);
       } catch (err) {
         const message = err instanceof Error ? err.message : "List message center failed";
@@ -512,6 +613,44 @@ export const buildRouter = () => {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Get tree failed";
       error(res, "TREE_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Trigger document git sync-on-open
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/sync
+   */
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/documents/sync", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const accessToken = extractBearerToken(req.headers.authorization);
+      const isAuthenticated = Boolean(req.user?.id && accessToken);
+      const scope = req.projectScope
+        ? {
+          ownerType: req.projectScope.ownerType,
+          ownerId: req.projectScope.ownerId,
+          projectKey: req.projectScope.projectKey,
+        }
+        : undefined;
+
+      const { documentVersionService } = await import("./services/document-version/service.js");
+      const result = await documentVersionService.syncOnOpen({
+        userId,
+        projectKey,
+        isAuthenticated,
+        accessToken,
+        scope,
+      });
+
+      success(res, {
+        status: result.status,
+        syncMode: result.syncMode,
+        synced: result.synced === true,
+      }, 202);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Sync failed";
+      error(res, "DOCUMENT_SYNC_FAILED", message, 500);
     }
   });
 
@@ -707,6 +846,61 @@ export const buildRouter = () => {
   });
 
   /**
+   * Lock a document
+   * PUT /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/lock
+   */
+  router.put(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/lock",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+        const doc = await documentStore.get(userId, projectKey, docId);
+        const existingLock = getDocumentLockInfo(doc.meta);
+        if (existingLock?.locked) {
+          success(res, { lock: existingLock });
+          return;
+        }
+        const lock = applyDocumentLock(doc.meta, userId, new Date().toISOString());
+        const saved = await documentStore.save(userId, projectKey, doc);
+        success(res, { lock: getDocumentLockInfo(saved.meta) ?? lock });
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          error(res, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Lock failed";
+        error(res, "LOCK_DOCUMENT_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Unlock a document
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/lock
+   */
+  router.delete(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/lock",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+        const doc = await documentStore.get(userId, projectKey, docId);
+        clearDocumentLock(doc.meta);
+        const saved = await documentStore.save(userId, projectKey, doc);
+        success(res, { lock: getDocumentLockInfo(saved.meta) });
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          error(res, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Unlock failed";
+        error(res, "UNLOCK_DOCUMENT_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
    * Get document hierarchy (ancestor chain)
    * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/hierarchy
    */
@@ -735,6 +929,79 @@ export const buildRouter = () => {
   );
 
   /**
+   * Duplicate a document under the same parent
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/duplicate
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/duplicate",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+
+        const duplicated = await duplicateDocument({
+          userId,
+          projectKey,
+          docId,
+        });
+
+        knowledgeSearch.indexDocument(userId, projectKey, duplicated).catch((err) => {
+          console.error("Index error:", err);
+        });
+
+        success(res, { meta: duplicated.meta, body: duplicated.body }, 201);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          error(res, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Duplicate failed";
+        error(res, "DUPLICATE_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Export current document to Word (.docx)
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/export-docx
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/export-docx",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+
+        const result = await exportDocumentToDocxBuffer({
+          userId,
+          projectKey,
+          docId,
+        });
+
+        res.status(200);
+        res.setHeader("Content-Type", result.contentType);
+        res.setHeader("Content-Length", String(result.buffer.length));
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${result.asciiFilename}"; filename*=UTF-8''${encodeURIComponent(result.filename)}`,
+        );
+        res.send(result.buffer);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          error(res, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        if (err instanceof ExportDocxError) {
+          error(res, err.code, err.message, err.status);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Failed to export docx";
+        error(res, "EXPORT_DOCX_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
    * Get a specific block from a document
    * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/blocks/:blockId
    */
@@ -757,6 +1024,119 @@ export const buildRouter = () => {
         }
         const message = err instanceof Error ? err.message : "Get block failed";
         error(res, "GET_BLOCK_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Execute a code block in a document
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/code-exec/run
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/code-exec/run",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+        const scope = req.projectScope;
+        if (!scope) {
+          error(res, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
+          return;
+        }
+
+        const blockId = String(req.body?.blockId ?? "").trim();
+        const language = String(req.body?.language ?? "").trim();
+        const code = String(req.body?.code ?? "");
+        const timeoutRaw = Number(req.body?.timeoutMs ?? 10_000);
+        const timeoutMs = Number.isFinite(timeoutRaw) ? Math.max(1000, Math.floor(timeoutRaw)) : 10_000;
+
+        if (!blockId) {
+          error(res, "BLOCK_ID_REQUIRED", "blockId is required", 400);
+          return;
+        }
+        if (!language) {
+          error(res, "LANGUAGE_REQUIRED", "language is required", 400);
+          return;
+        }
+
+        const run = await codeExecService.run({
+          userId,
+          ownerType: scope.ownerType,
+          ownerId: scope.ownerId,
+          projectKey,
+          docId,
+          blockId,
+          language,
+          code,
+          timeoutMs,
+        });
+        success(res, run);
+      } catch (err) {
+        respondCodeExecError(res, err);
+      }
+    },
+  );
+
+  /**
+   * List code execution runs
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/code-exec/runs
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/code-exec/runs",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const scope = req.projectScope;
+        if (!scope) {
+          error(res, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
+          return;
+        }
+        const blockId = String(req.query.blockId ?? "").trim() || undefined;
+        const cursor = String(req.query.cursor ?? "").trim() || undefined;
+        const limitRaw = Number(req.query.limit ?? 20);
+        const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, Math.floor(limitRaw))) : 20;
+
+        const data = await codeExecService.listRuns({
+          ownerType: scope.ownerType,
+          ownerId: scope.ownerId,
+          projectKey,
+          docId,
+          blockId,
+          cursor,
+          limit,
+        });
+        success(res, data);
+      } catch (err) {
+        respondCodeExecError(res, err);
+      }
+    },
+  );
+
+  /**
+   * Get one code execution run
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/code-exec/runs/:runId
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/code-exec/runs/:runId",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId, runId } = req.params;
+        const scope = req.projectScope;
+        if (!scope) {
+          error(res, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
+          return;
+        }
+
+        const data = await codeExecService.getRun({
+          ownerType: scope.ownerType,
+          ownerId: scope.ownerId,
+          projectKey,
+          docId,
+          runId,
+        });
+        success(res, data);
+      } catch (err) {
+        respondCodeExecError(res, err);
       }
     },
   );
@@ -845,7 +1225,7 @@ export const buildRouter = () => {
         : body) as CreateDocumentRequest;
 
       // Get existing document
-      const existing = await documentStore.get(userId, projectKey, docId);
+      const existing = await loadUnlockedDocument(userId, projectKey, docId);
 
       // Merge updates
       const updatedBody = nextBody.body || existing.body;
@@ -879,6 +1259,10 @@ export const buildRouter = () => {
         error(res, "NOT_FOUND", err.message, 404);
         return;
       }
+      if (err instanceof DocumentLockedError) {
+        respondDocumentLocked(res, err);
+        return;
+      }
       const message = err instanceof Error ? err.message : "Update failed";
       error(res, "UPDATE_FAILED", message, 500);
     }
@@ -905,8 +1289,17 @@ export const buildRouter = () => {
         ? before.payload.docId.trim()
         : docId;
       const nextRecursive = before.payload.recursive === true || recursive;
-      
-      const deletedIds = await documentStore.delete(userId, projectKey, nextDocId, nextRecursive);
+
+      await loadUnlockedDocument(userId, projectKey, nextDocId);
+
+      const moved = await documentTrashStore.moveToTrash({
+        userId,
+        projectKey,
+        docId: nextDocId,
+        recursive: nextRecursive,
+        deletedBy: userId,
+      });
+      const deletedIds = moved.deletedIds;
 
       await documentFavoriteStore.removeMany(userId, projectKey, deletedIds);
 
@@ -924,16 +1317,140 @@ export const buildRouter = () => {
       dispatchDocumentAfterHooks(req, "document.delete", {
         request: before.payload,
         deletedIds,
+        trashId: moved.entry.trashId,
       }, before.requestId);
 
-      success(res, { deleted_ids: deletedIds, count: deletedIds.length });
+      success(res, { deleted_ids: deletedIds, count: deletedIds.length, trash_id: moved.entry.trashId });
     } catch (err) {
       if (err instanceof DocumentNotFoundError) {
         error(res, "NOT_FOUND", err.message, 404);
         return;
       }
+      if (err instanceof DocumentLockedError) {
+        respondDocumentLocked(res, err);
+        return;
+      }
       const message = err instanceof Error ? err.message : "Delete failed";
       error(res, "DELETE_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * List trash entries
+   * GET /projects/:ownerType/:ownerKey/:projectKey/trash
+   */
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/trash", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const entries = await documentTrashStore.list({ userId, projectKey });
+      success(res, entries);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "List trash failed";
+      error(res, "TRASH_LIST_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Get one trash snapshot (for read-only preview/tree)
+   * GET /projects/:ownerType/:ownerKey/:projectKey/trash/:trashId/snapshot
+   */
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/trash/:trashId/snapshot", async (req: Request, res: Response) => {
+    try {
+      const { projectKey, trashId } = req.params;
+      const userId = getUserId(req);
+      const snapshot = await documentTrashStore.getSnapshot({
+        userId,
+        projectKey,
+        trashId,
+      });
+      success(res, {
+        root_doc_id: snapshot.rootDocId,
+        docs: snapshot.docs,
+      });
+    } catch (err) {
+      if (err instanceof DocumentNotFoundError) {
+        error(res, "NOT_FOUND", err.message, 404);
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Get trash snapshot failed";
+      error(res, "TRASH_SNAPSHOT_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Restore one trash entry
+   * POST /projects/:ownerType/:ownerKey/:projectKey/trash/:trashId/restore
+   */
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/trash/:trashId/restore", async (req: Request, res: Response) => {
+    try {
+      const { projectKey, trashId } = req.params;
+      const userId = getUserId(req);
+      const restored = await documentTrashStore.restore({
+        userId,
+        projectKey,
+        trashId,
+      });
+
+      for (const restoredId of restored.restoredIds) {
+        documentStore.get(userId, projectKey, restoredId).then((doc) => {
+          return knowledgeSearch.indexDocument(userId, projectKey, doc);
+        }).catch((indexErr) => {
+          console.error("Restore index error:", indexErr);
+        });
+      }
+
+      success(res, {
+        root: restored.root,
+        fallback_to_root: restored.fallbackToRoot,
+        restored_ids: restored.restoredIds,
+      });
+    } catch (err) {
+      if (err instanceof DocumentNotFoundError) {
+        error(res, "NOT_FOUND", err.message, 404);
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Restore trash failed";
+      error(res, "TRASH_RESTORE_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Purge one trash entry
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/trash/:trashId
+   */
+  router.delete("/projects/:ownerType/:ownerKey/:projectKey/trash/:trashId", async (req: Request, res: Response) => {
+    try {
+      const { projectKey, trashId } = req.params;
+      const userId = getUserId(req);
+      const result = await documentTrashStore.purgeOne({
+        userId,
+        projectKey,
+        trashId,
+      });
+      success(res, result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Purge trash failed";
+      error(res, "TRASH_PURGE_ONE_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Purge all trash entries
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/trash
+   */
+  router.delete("/projects/:ownerType/:ownerKey/:projectKey/trash", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const result = await documentTrashStore.purgeAll({
+        userId,
+        projectKey,
+      });
+      success(res, result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Purge all trash failed";
+      error(res, "TRASH_PURGE_ALL_FAILED", message, 500);
     }
   });
 
@@ -955,7 +1472,7 @@ export const buildRouter = () => {
         }
 
         // Get existing document
-        const doc = await documentStore.get(userId, projectKey, docId);
+        const doc = await loadUnlockedDocument(userId, projectKey, docId);
 
         // Update block attrs in content
         // Document structure: body.content = { meta: {...}, content: { type: "doc", content: [...] } }
@@ -1003,6 +1520,10 @@ export const buildRouter = () => {
           error(res, "NOT_FOUND", err.message, 404);
           return;
         }
+        if (err instanceof DocumentLockedError) {
+          respondDocumentLocked(res, err);
+          return;
+        }
         const message = err instanceof Error ? err.message : "Update block failed";
         error(res, "UPDATE_BLOCK_FAILED", message, 500);
       }
@@ -1041,7 +1562,7 @@ export const buildRouter = () => {
           if (!value || value === "root") return null;
           return value;
         };
-        const before = await documentStore.get(userId, projectKey, nextDocId);
+        const before = await loadUnlockedDocument(userId, projectKey, nextDocId);
         const oldParentId = normalizeParentId(before.meta.parent_id);
         const newParentId = normalizeParentId(nextBody.target_parent_id);
 
@@ -1072,6 +1593,10 @@ export const buildRouter = () => {
       } catch (err) {
         if (err instanceof DocumentNotFoundError) {
           error(res, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        if (err instanceof DocumentLockedError) {
+          respondDocumentLocked(res, err);
           return;
         }
         const message = err instanceof Error ? err.message : "Move failed";
@@ -3150,12 +3675,25 @@ export const buildRouter = () => {
   router.post("/projects/:ownerType/:ownerKey/:projectKey/drafts/:draftId/apply", async (req: Request, res: Response) => {
     try {
       const { projectKey, draftId } = req.params;
+      const userId = getUserId(req);
       const { modifiedContent, parentId, saveAsNew, newTitle } = req.body as {
         modifiedContent?: unknown;
         parentId?: string | null;
         saveAsNew?: boolean;
         newTitle?: string;
       };
+      const draft = draftService.get(draftId);
+      if (!draft) {
+        error(res, "NOT_FOUND", "Draft not found or expired", 404);
+        return;
+      }
+      if (draft.projectKey !== projectKey) {
+        error(res, "FORBIDDEN", "Draft does not belong to this project", 403);
+        return;
+      }
+      if (!saveAsNew && draft.docId) {
+        await loadUnlockedDocument(userId, projectKey, draft.docId);
+      }
 
       // Validate modified content if provided
       let validatedContent: JSONContent | undefined = undefined;
@@ -3176,6 +3714,10 @@ export const buildRouter = () => {
         applied: true,
       });
     } catch (err) {
+      if (err instanceof DocumentLockedError) {
+        respondDocumentLocked(res, err);
+        return;
+      }
       const msg = err instanceof Error ? err.message : "Failed to apply draft";
       error(res, "APPLY_DRAFT_FAILED", msg, 500);
     }
@@ -4023,6 +4565,109 @@ export const buildRouter = () => {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to list skill sources";
       error(res, "LIST_SKILL_SOURCES_FAILED", msg, 500);
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // General Settings API
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get general settings
+   * GET /settings/general
+   */
+  router.get("/settings/general", optionalAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { generalSettingsStore } = await import("./services/general-settings-store.js");
+      const { resolveSyncMode } = await import("./services/general-settings-auth.js");
+
+      const userId = String(req.user?.id ?? "").trim();
+      const accessToken = extractBearerToken(req.headers.authorization);
+      const isAuthenticated = Boolean(req.user?.id && accessToken);
+      const settings = await generalSettingsStore.get(userId);
+      const syncMode = resolveSyncMode({
+        isAuthenticated,
+        documentAutoSync: settings.documentAutoSync,
+      });
+      success(res, {
+        ...settings,
+        syncMode,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to get general settings";
+      error(res, "GET_GENERAL_SETTINGS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Update general settings
+   * PUT /settings/general
+   */
+  router.put("/settings/general", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { generalSettingsStore } = await import("./services/general-settings-store.js");
+      const { resolveSyncMode } = await import("./services/general-settings-auth.js");
+      const { validateDocumentBlockShortcutsInput } = await import("./services/general-settings-shortcuts.js");
+      const {
+        use_remote_knowledge_base,
+        document_auto_sync,
+        trash_auto_cleanup_enabled,
+        trash_auto_cleanup_days,
+        document_block_shortcuts,
+      } = req.body as {
+        use_remote_knowledge_base?: boolean;
+        document_auto_sync?: boolean;
+        trash_auto_cleanup_enabled?: boolean;
+        trash_auto_cleanup_days?: number;
+        document_block_shortcuts?: unknown;
+      };
+
+      const userId = String(req.user?.id ?? "").trim();
+      if (!userId) {
+        error(res, "UNAUTHORIZED", "user not authenticated", 401);
+        return;
+      }
+
+      let documentBlockShortcuts: import("./services/general-settings-shortcuts.js").DocumentBlockShortcuts | undefined;
+      if (document_block_shortcuts !== undefined) {
+        const validation = validateDocumentBlockShortcutsInput(document_block_shortcuts);
+        if (!validation.ok) {
+          error(res, "INVALID_BLOCK_SHORTCUTS", validation.message, 400);
+          return;
+        }
+        documentBlockShortcuts = validation.value;
+      }
+
+      const settings = await generalSettingsStore.update(userId, {
+        useRemoteKnowledgeBase: typeof use_remote_knowledge_base === "boolean"
+          ? use_remote_knowledge_base
+          : undefined,
+        documentAutoSync: typeof document_auto_sync === "boolean"
+          ? document_auto_sync
+          : undefined,
+        trashAutoCleanupEnabled: typeof trash_auto_cleanup_enabled === "boolean"
+          ? trash_auto_cleanup_enabled
+          : undefined,
+        trashAutoCleanupDays: typeof trash_auto_cleanup_days === "number"
+          ? trash_auto_cleanup_days
+          : undefined,
+        documentBlockShortcuts,
+      });
+
+      const accessToken = extractBearerToken(req.headers.authorization);
+      const isAuthenticated = Boolean(req.user?.id && accessToken);
+      const syncMode = resolveSyncMode({
+        isAuthenticated,
+        documentAutoSync: settings.documentAutoSync,
+      });
+
+      success(res, {
+        ...settings,
+        syncMode,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update general settings";
+      error(res, "UPDATE_GENERAL_SETTINGS_FAILED", msg, 500);
     }
   });
 

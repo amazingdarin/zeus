@@ -1,7 +1,14 @@
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").trim();
-const appBackendUrl = (import.meta.env.VITE_APP_BACKEND_URL ?? "http://localhost:4870").trim();
-const serverUrl = (import.meta.env.VITE_SERVER_URL ?? "http://localhost:8080").trim();
-const useProxy = Boolean(import.meta.env.DEV);
+const env = (((import.meta as unknown as { env?: Record<string, unknown> }).env ?? {}) as Record<string, unknown>);
+const apiBaseUrl = String(env.VITE_API_BASE_URL ?? "").trim();
+const appBackendUrl = String(env.VITE_APP_BACKEND_URL ?? "http://localhost:4870").trim();
+const serverUrl = String(env.VITE_SERVER_URL ?? "http://localhost:8080").trim();
+const remoteKnowledgeBaseUrl = (
+  env.VITE_REMOTE_KNOWLEDGE_BASE_URL
+  ?? env.VITE_REMOTE_APP_BACKEND_URL
+  ?? ""
+).toString().trim();
+const useProxy = Boolean(env.DEV);
+const remoteKnowledgeBaseStorageKey = "zeus.settings.use_remote_knowledge_base";
 
 const PROJECT_REF_SEPARATOR = "::";
 
@@ -54,6 +61,42 @@ export const encodeProjectRef = (projectRef: string): string => {
 
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, "");
 const trimLeadingSlash = (value: string) => value.replace(/^\/+/, "");
+let remoteKnowledgeBaseEnabledCache: boolean | null = null;
+
+function readRemoteKnowledgeBaseEnabledFromStorage(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  try {
+    return window.localStorage.getItem(remoteKnowledgeBaseStorageKey) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function isRemoteKnowledgeBaseEnabled(): boolean {
+  if (remoteKnowledgeBaseEnabledCache != null) {
+    return remoteKnowledgeBaseEnabledCache;
+  }
+  remoteKnowledgeBaseEnabledCache = readRemoteKnowledgeBaseEnabledFromStorage();
+  return remoteKnowledgeBaseEnabledCache;
+}
+
+export function setRemoteKnowledgeBaseEnabled(enabled: boolean): void {
+  remoteKnowledgeBaseEnabledCache = enabled;
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(remoteKnowledgeBaseStorageKey, enabled ? "1" : "0");
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+export function getRemoteKnowledgeBaseBackendUrl(): string {
+  return remoteKnowledgeBaseUrl;
+}
 
 const isScopedProjectPath = (path: string): boolean => {
   return /^\/api\/projects\/[^/]+\/[^/]+\/[^/]+(?:\/|$)/.test(path);
@@ -75,6 +118,12 @@ const isAppBackendPath = (path: string): boolean => {
   return false;
 };
 
+const isKnowledgeBasePath = (path: string): boolean => {
+  if (isScopedProjectPath(path)) return true;
+  if (path.startsWith("/api/system-docs")) return true;
+  return false;
+};
+
 export const buildApiUrl = (path: string) => {
   const normalizedPath = `/${trimLeadingSlash(path)}`;
 
@@ -85,7 +134,15 @@ export const buildApiUrl = (path: string) => {
     if (useProxy) {
       return appPath;
     }
-    return `${trimTrailingSlash(appBackendUrl)}${appPath}`;
+    const shouldUseRemoteKnowledgeBase = Boolean(
+      remoteKnowledgeBaseUrl
+      && isRemoteKnowledgeBaseEnabled()
+      && isKnowledgeBasePath(appPath),
+    );
+    const targetBaseUrl = shouldUseRemoteKnowledgeBase
+      ? remoteKnowledgeBaseUrl
+      : appBackendUrl;
+    return `${trimTrailingSlash(targetBaseUrl)}${appPath}`;
   }
 
   if (useProxy || !apiBaseUrl) {
@@ -126,7 +183,7 @@ const getCallerFrames = () => {
 };
 
 export const apiFetch = (path: string, init: RequestInit = {}) => {
-  if (import.meta.env.DEV && path !== "/api/system") {
+  if (useProxy && path !== "/api/system") {
     const { caller3, caller4 } = getCallerFrames();
     const method = (init.method ?? "GET").toUpperCase();
     console.groupCollapsed(`[api] ${method} ${path}`);
@@ -171,6 +228,7 @@ const markSessionBootstrap = () => {
 };
 
 let sessionPromise: Promise<void> | null = null;
+let generalSettingsBootstrapPromise: Promise<void> | null = null;
 
 export const ensureSystemSession = async () => {
   if (hasSessionCookie() || hasSessionBootstrap()) {
@@ -188,4 +246,29 @@ export const ensureSystemSession = async () => {
       });
   }
   await sessionPromise;
+};
+
+export const bootstrapGeneralSettings = async () => {
+  if (generalSettingsBootstrapPromise) {
+    return generalSettingsBootstrapPromise;
+  }
+
+  generalSettingsBootstrapPromise = (async () => {
+    try {
+      const response = await fetchWithCredentials("/api/settings/general", { method: "GET" });
+      if (!response.ok) {
+        return;
+      }
+      const payload = await response.json().catch(() => null);
+      const data = payload?.data ?? payload ?? {};
+      const enabled = Boolean(data.useRemoteKnowledgeBase ?? false);
+      setRemoteKnowledgeBaseEnabled(enabled);
+    } catch {
+      // Ignore bootstrap failures and keep existing local value.
+    } finally {
+      generalSettingsBootstrapPromise = null;
+    }
+  })();
+
+  await generalSettingsBootstrapPromise;
 };
