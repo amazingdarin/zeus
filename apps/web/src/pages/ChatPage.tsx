@@ -24,6 +24,7 @@ import {
 
 import {
   useChatLogic,
+  createId,
   renderMarkdown,
   formatTime,
   type ChatArtifact,
@@ -43,7 +44,6 @@ import ThinkingTimeline from "../components/ThinkingTimeline";
 import { useProjectContext } from "../context/ProjectContext";
 import {
   listSessions,
-  createSession,
   deleteSession as apiDeleteSession,
   renameSession as apiRenameSession,
   type ChatSessionInfo,
@@ -76,15 +76,15 @@ function ChatPage() {
         return bTime - aTime;
       });
       setSessions(sorted);
-      // Auto-select the most recent session, or create one
+      // Auto-select the most recent session; if none exists, keep a local-only session ID.
       if (sorted.length > 0) {
         if (!activeSessionId || !sorted.find((s) => s.id === activeSessionId)) {
           setActiveSessionId(sorted[0].id);
         }
       } else {
-        const session = await createSession(chatProjectKey);
-        setSessions([session]);
-        setActiveSessionId(session.id);
+        if (!activeSessionId) {
+          setActiveSessionId(`session-${createId()}`);
+        }
       }
     } catch {
       setSessions([]);
@@ -101,13 +101,7 @@ function ChatPage() {
 
   const handleNewSessionFromDrawer = useCallback(async () => {
     if (!chatProjectKey) return;
-    try {
-      const session = await createSession(chatProjectKey);
-      setSessions((prev) => [session, ...prev]);
-      setActiveSessionId(session.id);
-    } catch {
-      message.error("创建对话失败");
-    }
+    setActiveSessionId(`session-${createId()}`);
   }, [chatProjectKey]);
 
   const handleDeleteSession = useCallback(async (id: string) => {
@@ -780,7 +774,7 @@ function ChatPage() {
             </ul>
             <div className="slash-command-hint">
               <span>↑↓ 选择</span>
-              <span>Tab/Enter 确认</span>
+              <span>Tab/回车 确认</span>
               <span>Esc 取消</span>
             </div>
           </div>

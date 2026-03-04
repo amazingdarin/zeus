@@ -23,7 +23,6 @@ import {
   selectIntent,
   provideRequiredInput,
   providePreflightInput,
-  type DocumentScope,
   type PendingToolCall,
   type PendingIntentInfo,
   type PendingPreflightInfo,
@@ -53,6 +52,8 @@ import {
 } from "../api/skills";
 import { useChatAttachments, isValidUrl } from "./useChatAttachments";
 import type { ChatAttachment } from "../types/chat-attachment";
+import { shouldHandleSseDisconnectError } from "../features/chat/sse-error";
+import { buildDocumentScopeForChat } from "../features/chat/document-scope";
 
 // Types
 export type MentionState = {
@@ -255,6 +256,7 @@ type UseChatLogicOptions = {
   autoScrollEnabled?: boolean;
   deepSearchEnabled?: boolean;
   onDeepSearchChange?: (enabled: boolean) => void;
+  defaultDocumentId?: string;
   /** Externally managed session ID (takes priority over internal state) */
   sessionId?: string;
   /** Callback when a new session is created internally */
@@ -325,6 +327,7 @@ export type UseChatLogicReturn = {
   handleProvideRequiredInput: (payload: ProvideRequiredInputPayload) => Promise<void>;
   toggleSourcesExpanded: (messageId: string) => void;
   handlePaste: (e: React.ClipboardEvent) => void;
+  handleAddAttachmentFile: (file: File) => void;
   removeAttachment: (id: string) => void;
 
   // Render helpers
@@ -337,6 +340,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     autoScrollEnabled = true,
     deepSearchEnabled: externalDeepSearch,
     onDeepSearchChange,
+    defaultDocumentId,
     sessionId: externalSessionId,
     onSessionChange,
   } = options;
@@ -949,13 +953,10 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         return;
       }
 
-      // Convert mentions to document scope
-      const documentScope: DocumentScope[] | undefined = docMentions.length > 0
-        ? docMentions.map((m) => ({
-            docId: m.docId,
-            includeChildren: m.includeChildren,
-          }))
-        : undefined;
+      const documentScope = buildDocumentScopeForChat({
+        mentions: currentMentions,
+        defaultDocumentId,
+      });
 
       const attachmentAssets = currentAttachments.flatMap((a) => {
         if (a.status !== "ready" || !a.assetId) return [];
@@ -1174,6 +1175,12 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       };
 
       source.onerror = () => {
+        if (!shouldHandleSseDisconnectError({
+          isActiveSource: eventSourceRef.current === source,
+          readyState: source.readyState,
+        })) {
+          return;
+        }
         setError("连接中断");
         appendMessage("system", "错误: 连接中断");
         setIsGenerating(false);
@@ -1256,16 +1263,9 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     resetThinkingSteps();
     resetTaskTodoItems();
 
-    try {
-      const { createSession } = await import("../api/chat-sessions");
-      const session = await createSession(projectKey);
-      setMessages([]);
-      setSessionId(session.id);
-    } catch {
-      // Fallback to local-only new session
-      setMessages([]);
-      setSessionId(`session-${createId()}`);
-    }
+    // Do not create empty sessions in backend; persist only after first message is sent.
+    setMessages([]);
+    setSessionId(`session-${createId()}`);
   }, [projectKey, resetAssistantBuffer, resetThinkingSteps, resetTaskTodoItems, setSessionId]);
 
   /**
@@ -1467,6 +1467,13 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     },
     [projectKey, addAttachmentFile, addAttachmentUrl]
   );
+
+  const handleAddAttachmentFile = useCallback((file: File) => {
+    if (!projectKey || !file) {
+      return;
+    }
+    addAttachmentFile(projectKey, file);
+  }, [addAttachmentFile, projectKey]);
 
   const filteredSlashCommands = useMemo(() => {
     if (!slashActive) return [];
@@ -1712,6 +1719,7 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     handleProvideRequiredInput,
     toggleSourcesExpanded,
     handlePaste,
+    handleAddAttachmentFile,
     removeAttachment,
 
     // Render helpers

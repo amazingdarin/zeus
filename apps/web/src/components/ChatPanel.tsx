@@ -25,13 +25,13 @@ import {
   MessageOutlined,
   SlidersOutlined,
   PlusCircleOutlined,
-  DoubleRightOutlined,
   GlobalOutlined,
   PaperClipOutlined,
 } from "@ant-design/icons";
 
 import {
   useChatLogic,
+  createId,
   renderMarkdown,
   formatTime,
   type ChatArtifact,
@@ -46,6 +46,8 @@ import ToolConfirmDialog from "./ToolConfirmDialog";
 import ChatAttachmentTags from "./ChatAttachmentTags";
 import TaskTodoList from "./TaskTodoList";
 import ThinkingTimeline from "./ThinkingTimeline";
+import { useProjectContext } from "../context/ProjectContext";
+import { listSessions, type ChatSessionInfo } from "../api/chat-sessions";
 
 type ChatPanelProps = {
   onOpenSettings?: () => void;
@@ -65,12 +67,21 @@ function ChatPanel({
   showFloatingButtonWhenHidden = true,
 }: ChatPanelProps) {
   const isSidebar = variant === "sidebar";
+  const { currentProject } = useProjectContext();
+  const scopedProjectRef = currentProject?.projectRef ?? "";
   const [isExpanded, setIsExpanded] = useState(isSidebar);
   const [internalHidden, setInternalHidden] = useState(isSidebar ? false : true);
   const [queuedQuickPrompt, setQueuedQuickPrompt] = useState<string | null>(null);
+  const [sidebarSessionId, setSidebarSessionId] = useState<string | undefined>(undefined);
+  const [sidebarSessions, setSidebarSessions] = useState<ChatSessionInfo[]>([]);
+  const [sidebarSessionLoading, setSidebarSessionLoading] = useState(isSidebar);
+  const [sidebarSessionMenuOpen, setSidebarSessionMenuOpen] = useState(false);
   const [panelHeight, setPanelHeight] = useState(320);
   const [isResizing, setIsResizing] = useState(false);
   const resizeStartRef = useRef<{ y: number; height: number } | null>(null);
+  const sidebarSessionTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const sidebarSessionMenuRef = useRef<HTMLDivElement | null>(null);
+  const prevSidebarGeneratingRef = useRef(false);
   const isHidden = typeof hidden === "boolean" ? hidden : internalHidden;
   const setHidden = (nextHidden: boolean) => {
     if (typeof hidden !== "boolean") {
@@ -78,6 +89,78 @@ function ChatPanel({
     }
     onHiddenChange?.(nextHidden);
   };
+  const sidebarSessionStorageKey = isSidebar && scopedProjectRef
+    ? `zeus-sidebar-chat-session-${scopedProjectRef}`
+    : "";
+
+  const persistSidebarSessionId = useCallback((nextSessionId?: string) => {
+    if (!sidebarSessionStorageKey || typeof window === "undefined") {
+      return;
+    }
+    try {
+      if (nextSessionId) {
+        window.localStorage.setItem(sidebarSessionStorageKey, nextSessionId);
+      } else {
+        window.localStorage.removeItem(sidebarSessionStorageKey);
+      }
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [sidebarSessionStorageKey]);
+
+  const handleSidebarSessionChange = useCallback((nextSessionId: string) => {
+    setSidebarSessionId(nextSessionId);
+    persistSidebarSessionId(nextSessionId);
+  }, [persistSidebarSessionId]);
+
+  const loadSidebarSessions = useCallback(
+    async (options?: { preferredSessionId?: string }) => {
+      if (!isSidebar) {
+        return;
+      }
+      if (!scopedProjectRef) {
+        setSidebarSessions([]);
+        setSidebarSessionId(undefined);
+        setSidebarSessionLoading(false);
+        return;
+      }
+
+      setSidebarSessionLoading(true);
+      try {
+        const storedSessionId = sidebarSessionStorageKey
+          ? window.localStorage.getItem(sidebarSessionStorageKey)?.trim()
+          : "";
+        const preferredSessionId = options?.preferredSessionId?.trim() || storedSessionId || "";
+        const sessions = await listSessions(scopedProjectRef, 50, 0);
+
+        setSidebarSessions(sessions);
+        if (sessions.length === 0) {
+          const fallbackSessionId = preferredSessionId || `session-${createId()}`;
+          setSidebarSessionId(fallbackSessionId);
+          persistSidebarSessionId(fallbackSessionId);
+          return;
+        }
+
+        const matchedSession = preferredSessionId
+          ? sessions.find((item) => item.id === preferredSessionId)
+          : undefined;
+        const targetSessionId = matchedSession?.id || sessions[0].id;
+        setSidebarSessionId(targetSessionId);
+        persistSidebarSessionId(targetSessionId);
+      } catch {
+        setSidebarSessions([]);
+        setSidebarSessionId(undefined);
+      } finally {
+        setSidebarSessionLoading(false);
+      }
+    },
+    [
+      isSidebar,
+      persistSidebarSessionId,
+      scopedProjectRef,
+      sidebarSessionStorageKey,
+    ],
+  );
 
   const {
     messages,
@@ -109,6 +192,7 @@ function ChatPanel({
     handleSend,
     handleStop,
     handleClearHistory,
+    handleNewSession,
     sessionId,
     handleInputChange,
     handleKeyDown,
@@ -139,12 +223,21 @@ function ChatPanel({
   } = useChatLogic({
     autoScrollEnabled: isSidebar || isExpanded,
     defaultDocumentId: isSidebar ? defaultDocumentId : undefined,
+    sessionId: isSidebar ? sidebarSessionId : undefined,
+    onSessionChange: isSidebar ? handleSidebarSessionChange : undefined,
   });
 
   const taskTodoStorageKey = projectKey && sessionId
     ? `zeus-task-todo-expanded-${projectKey}-${sessionId}`
     : undefined;
   const hasSidebarReferences = mentions.length > 0 || attachments.length > 0 || Boolean(selectedCommand);
+  const sidebarInteractionsDisabled = isSidebar && sidebarSessionLoading;
+  const activeSidebarSession = isSidebar
+    ? sidebarSessions.find((item) => item.id === sessionId) ?? null
+    : null;
+  const sidebarSessionTitle = sidebarSessionLoading
+    ? "加载会话中..."
+    : (activeSidebarSession?.title?.trim() || "新建 AI 对话");
   const sidebarQuickActions = [
     {
       icon: <PlusCircleOutlined />,
@@ -173,8 +266,64 @@ function ChatPanel({
   const mutableInputRef = inputRef as { current: HTMLTextAreaElement | null };
   const sidebarFileInputRef = useRef<HTMLInputElement | null>(null);
 
+  useEffect(() => {
+    if (!isSidebar) {
+      return;
+    }
+    setSidebarSessionMenuOpen(false);
+    void loadSidebarSessions();
+  }, [isSidebar, loadSidebarSessions]);
+
+  const handleSidebarCreateSession = useCallback(async () => {
+    if (sidebarInteractionsDisabled) {
+      return;
+    }
+    await handleNewSession();
+    setSidebarSessionMenuOpen(false);
+    void loadSidebarSessions();
+  }, [handleNewSession, loadSidebarSessions, sidebarInteractionsDisabled]);
+
+  const handleSidebarSelectSession = useCallback((nextSessionId: string) => {
+    if (!nextSessionId) {
+      return;
+    }
+    handleSidebarSessionChange(nextSessionId);
+    setSidebarSessionMenuOpen(false);
+  }, [handleSidebarSessionChange]);
+
+  useEffect(() => {
+    if (!sidebarSessionMenuOpen) {
+      return;
+    }
+    const handleMouseDown = (event: MouseEvent) => {
+      const targetNode = event.target as Node;
+      if (sidebarSessionTriggerRef.current?.contains(targetNode)) {
+        return;
+      }
+      if (sidebarSessionMenuRef.current?.contains(targetNode)) {
+        return;
+      }
+      setSidebarSessionMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+    };
+  }, [sidebarSessionMenuOpen]);
+
+  useEffect(() => {
+    if (!isSidebar) {
+      return;
+    }
+    const wasGenerating = prevSidebarGeneratingRef.current;
+    prevSidebarGeneratingRef.current = isGenerating;
+    if (wasGenerating && !isGenerating) {
+      void loadSidebarSessions({ preferredSessionId: sessionId });
+    }
+  }, [isSidebar, isGenerating, loadSidebarSessions, sessionId]);
+
   const handleSidebarQuickActionClick = useCallback((prompt: string) => {
-    if (!projectKey || isGenerating) {
+    if (!projectKey || isGenerating || sidebarInteractionsDisabled) {
       return;
     }
     const normalized = prompt.trim();
@@ -183,7 +332,7 @@ function ChatPanel({
     }
     setInput(normalized);
     setQueuedQuickPrompt(normalized);
-  }, [isGenerating, projectKey, setInput]);
+  }, [isGenerating, projectKey, setInput, sidebarInteractionsDisabled]);
 
   useEffect(() => {
     if (!queuedQuickPrompt || isGenerating) {
@@ -197,11 +346,11 @@ function ChatPanel({
   }, [handleSend, input, isGenerating, queuedQuickPrompt]);
 
   const handleSidebarFilePickClick = useCallback(() => {
-    if (!projectKey || isGenerating) {
+    if (!projectKey || isGenerating || sidebarInteractionsDisabled) {
       return;
     }
     sidebarFileInputRef.current?.click();
-  }, [isGenerating, projectKey]);
+  }, [isGenerating, projectKey, sidebarInteractionsDisabled]);
 
   const handleSidebarFileChange = useCallback((event: ReactChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -576,17 +725,49 @@ function ChatPanel({
             {isSidebar ? (
               <>
                 <div className="chat-dock-side-title-wrap">
-                  <button type="button" className="chat-dock-side-title-btn">
-                    <span className="chat-dock-side-title-text">新建 AI 对话</span>
-                    <DownOutlined />
+                  <button
+                    ref={sidebarSessionTriggerRef}
+                    type="button"
+                    className={`chat-dock-side-title-btn${sidebarSessionMenuOpen ? " is-open" : ""}`}
+                    onClick={() => {
+                      if (sidebarSessionLoading || sidebarSessions.length === 0) {
+                        return;
+                      }
+                      setSidebarSessionMenuOpen((prev) => !prev);
+                    }}
+                    disabled={sidebarSessionLoading || sidebarSessions.length === 0}
+                    aria-haspopup="listbox"
+                    aria-expanded={sidebarSessionMenuOpen}
+                  >
+                    <span className="chat-dock-side-title-text" title={sidebarSessionTitle}>
+                      {sidebarSessionTitle}
+                    </span>
+                    <DownOutlined className="chat-dock-side-title-btn-icon" />
                   </button>
+                  {sidebarSessionMenuOpen ? (
+                    <div ref={sidebarSessionMenuRef} className="chat-dock-side-session-menu" role="listbox" aria-label="选择对话">
+                      {sidebarSessions.map((chatSession) => (
+                        <button
+                          key={chatSession.id}
+                          type="button"
+                          role="option"
+                          className={`chat-dock-side-session-item${chatSession.id === sessionId ? " is-active" : ""}`}
+                          aria-selected={chatSession.id === sessionId}
+                          onClick={() => handleSidebarSelectSession(chatSession.id)}
+                        >
+                          <span className="chat-dock-side-session-item-title">{chatSession.title || "新对话"}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="chat-dock-header-actions chat-dock-header-actions-side">
                   <button
                     type="button"
                     className="chat-dock-header-btn"
-                    onClick={handleClearHistory}
+                    onClick={handleSidebarCreateSession}
                     title="新建对话"
+                    disabled={sidebarInteractionsDisabled}
                   >
                     <PlusCircleOutlined />
                   </button>
@@ -600,14 +781,6 @@ function ChatPanel({
                       <SlidersOutlined />
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className="chat-dock-header-btn"
-                    onClick={() => setHidden(true)}
-                    title="隐藏对话栏"
-                  >
-                    <DoubleRightOutlined />
-                  </button>
                 </div>
               </>
             ) : (
@@ -681,7 +854,7 @@ function ChatPanel({
                         role="listitem"
                         type="button"
                         onClick={() => handleSidebarQuickActionClick(action.prompt)}
-                        disabled={!projectKey || isGenerating}
+                        disabled={!projectKey || isGenerating || sidebarInteractionsDisabled}
                       >
                         <span className="chat-dock-side-quick-icon">{action.icon}</span>
                         <span className="chat-dock-side-quick-label">{action.label}</span>
@@ -937,7 +1110,9 @@ function ChatPanel({
                 }}
                 className={`chat-dock-textarea chat-dock-side-textarea-layer ${selectedCommand ? "with-command" : ""}`}
                 placeholder={
-                  selectedCommand
+                  sidebarInteractionsDisabled
+                    ? "正在加载对话历史..."
+                    : selectedCommand
                     ? "输入参数..."
                     : projectKey
                       ? "输入消息，@ 指定文档范围，/ 选择技能..."
@@ -947,7 +1122,7 @@ function ChatPanel({
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
-                disabled={!projectKey || isGenerating}
+                disabled={!projectKey || isGenerating || sidebarInteractionsDisabled}
                 autoSize={{ minRows: 2, maxRows: 8 }}
               />
             </div>
@@ -958,7 +1133,7 @@ function ChatPanel({
                 className="chat-dock-side-tool-btn"
                 onClick={handleSidebarFilePickClick}
                 title="添加文件"
-                disabled={!projectKey || isGenerating}
+                disabled={!projectKey || isGenerating || sidebarInteractionsDisabled}
               >
                 <PaperClipOutlined />
               </button>
@@ -967,7 +1142,7 @@ function ChatPanel({
                 className={`chat-dock-side-tool-btn chat-dock-side-web-search-btn ${deepSearchEnabled ? "active" : ""}`}
                 onClick={() => setDeepSearchEnabled(!deepSearchEnabled)}
                 title={deepSearchEnabled ? "关闭网络搜索" : "开启网络搜索"}
-                disabled={!projectKey || isGenerating}
+                disabled={!projectKey || isGenerating || sidebarInteractionsDisabled}
               >
                 <GlobalOutlined />
               </button>
@@ -997,7 +1172,7 @@ function ChatPanel({
                   type="button"
                   className="chat-dock-send-btn"
                   onClick={handleSendWithExpand}
-                  disabled={!canSend || attachmentsLoading}
+                  disabled={!canSend || attachmentsLoading || sidebarInteractionsDisabled}
                   title="发送消息"
                 >
                   <SendOutlined />
