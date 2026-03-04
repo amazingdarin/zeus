@@ -4,7 +4,8 @@
  * Uses the shared useChatLogic hook for chat functionality.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ChangeEvent as ReactChangeEvent } from "react";
 import { Input } from "antd";
 import {
   DeleteOutlined,
@@ -22,6 +23,11 @@ import {
   AppstoreOutlined,
   RightOutlined,
   MessageOutlined,
+  SlidersOutlined,
+  PlusCircleOutlined,
+  DoubleRightOutlined,
+  GlobalOutlined,
+  PaperClipOutlined,
 } from "@ant-design/icons";
 
 import {
@@ -44,6 +50,7 @@ import ThinkingTimeline from "./ThinkingTimeline";
 type ChatPanelProps = {
   onOpenSettings?: () => void;
   variant?: "bottom" | "sidebar";
+  defaultDocumentId?: string;
   hidden?: boolean;
   onHiddenChange?: (hidden: boolean) => void;
   showFloatingButtonWhenHidden?: boolean;
@@ -52,6 +59,7 @@ type ChatPanelProps = {
 function ChatPanel({
   onOpenSettings,
   variant = "bottom",
+  defaultDocumentId,
   hidden,
   onHiddenChange,
   showFloatingButtonWhenHidden = true,
@@ -59,6 +67,7 @@ function ChatPanel({
   const isSidebar = variant === "sidebar";
   const [isExpanded, setIsExpanded] = useState(isSidebar);
   const [internalHidden, setInternalHidden] = useState(isSidebar ? false : true);
+  const [queuedQuickPrompt, setQueuedQuickPrompt] = useState<string | null>(null);
   const [panelHeight, setPanelHeight] = useState(320);
   const [isResizing, setIsResizing] = useState(false);
   const resizeStartRef = useRef<{ y: number; height: number } | null>(null);
@@ -78,6 +87,7 @@ function ChatPanel({
     assistantBuffer,
     thinkingSteps,
     taskTodoItems,
+    deepSearchEnabled,
     llmConfig,
     mentions,
     mentionState,
@@ -91,8 +101,10 @@ function ChatPanel({
     projectKey,
     messagesRef,
     inputRef,
+    setInput,
     setError,
     setSlashSelectedIndex,
+    setDeepSearchEnabled,
     handleMessagesScroll,
     handleSend,
     handleStop,
@@ -120,15 +132,90 @@ function ChatPanel({
     toggleSourcesExpanded,
     // Attachments
     attachments,
+    attachmentsLoading,
     handlePaste,
+    handleAddAttachmentFile,
     removeAttachment,
-  } = useChatLogic({ autoScrollEnabled: isSidebar || isExpanded });
+  } = useChatLogic({
+    autoScrollEnabled: isSidebar || isExpanded,
+    defaultDocumentId: isSidebar ? defaultDocumentId : undefined,
+  });
 
   const taskTodoStorageKey = projectKey && sessionId
     ? `zeus-task-todo-expanded-${projectKey}-${sessionId}`
     : undefined;
+  const hasSidebarReferences = mentions.length > 0 || attachments.length > 0 || Boolean(selectedCommand);
+  const sidebarQuickActions = [
+    {
+      icon: <PlusCircleOutlined />,
+      label: "创建自定义代理",
+      badge: "新",
+      prompt: "创建自定义代理",
+    },
+    {
+      icon: <AppstoreOutlined />,
+      label: "根据页面创建图表",
+      badge: "新",
+      prompt: "根据页面创建图表",
+    },
+    {
+      icon: <FileTextOutlined />,
+      label: "总结此页面",
+      prompt: "总结此页面",
+    },
+    {
+      icon: <MessageOutlined />,
+      label: "总结页面评论",
+      prompt: "总结页面评论",
+    },
+  ];
 
   const mutableInputRef = inputRef as { current: HTMLTextAreaElement | null };
+  const sidebarFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleSidebarQuickActionClick = useCallback((prompt: string) => {
+    if (!projectKey || isGenerating) {
+      return;
+    }
+    const normalized = prompt.trim();
+    if (!normalized) {
+      return;
+    }
+    setInput(normalized);
+    setQueuedQuickPrompt(normalized);
+  }, [isGenerating, projectKey, setInput]);
+
+  useEffect(() => {
+    if (!queuedQuickPrompt || isGenerating) {
+      return;
+    }
+    if (input.trim() !== queuedQuickPrompt) {
+      return;
+    }
+    void handleSend();
+    setQueuedQuickPrompt(null);
+  }, [handleSend, input, isGenerating, queuedQuickPrompt]);
+
+  const handleSidebarFilePickClick = useCallback(() => {
+    if (!projectKey || isGenerating) {
+      return;
+    }
+    sidebarFileInputRef.current?.click();
+  }, [isGenerating, projectKey]);
+
+  const handleSidebarFileChange = useCallback((event: ReactChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) {
+      return;
+    }
+    for (let i = 0; i < files.length; i += 1) {
+      const file = files.item(i);
+      if (file) {
+        handleAddAttachmentFile(file);
+      }
+    }
+    event.target.value = "";
+  }, [handleAddAttachmentFile]);
 
   useEffect(() => {
     if (isSidebar) {
@@ -485,44 +572,85 @@ function ChatPanel({
           ) : null}
 
           {/* Header */}
-          <header className="chat-dock-header">
-            <div className="chat-dock-header-left">
-              <div className="chat-dock-avatar">
-                <RobotOutlined />
-              </div>
-              <div className="chat-dock-title-group">
-                <span className="chat-dock-title">AI 助手</span>
-                {llmConfig ? (
-                  <span className="chat-dock-model">
-                    {llmConfig.displayName} · {llmConfig.defaultModel}
-                  </span>
-                ) : (
-                  <span className="chat-dock-model chat-dock-model-warning">
-                    未配置模型
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="chat-dock-header-actions">
-              {onOpenSettings && (
-                <button
-                  type="button"
-                  className="chat-dock-header-btn"
-                  onClick={onOpenSettings}
-                  title="设置"
-                >
-                  <SettingOutlined />
-                </button>
-              )}
-              <button
-                type="button"
-                className="chat-dock-header-btn"
-                onClick={handleClearHistory}
-                title="清空对话"
-              >
-                <DeleteOutlined />
-              </button>
-            </div>
+          <header className={`chat-dock-header${isSidebar ? " chat-dock-header-side" : ""}`}>
+            {isSidebar ? (
+              <>
+                <div className="chat-dock-side-title-wrap">
+                  <button type="button" className="chat-dock-side-title-btn">
+                    <span className="chat-dock-side-title-text">新建 AI 对话</span>
+                    <DownOutlined />
+                  </button>
+                </div>
+                <div className="chat-dock-header-actions chat-dock-header-actions-side">
+                  <button
+                    type="button"
+                    className="chat-dock-header-btn"
+                    onClick={handleClearHistory}
+                    title="新建对话"
+                  >
+                    <PlusCircleOutlined />
+                  </button>
+                  {onOpenSettings && (
+                    <button
+                      type="button"
+                      className="chat-dock-header-btn"
+                      onClick={onOpenSettings}
+                      title="对话设置"
+                    >
+                      <SlidersOutlined />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="chat-dock-header-btn"
+                    onClick={() => setHidden(true)}
+                    title="隐藏对话栏"
+                  >
+                    <DoubleRightOutlined />
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="chat-dock-header-left">
+                  <div className="chat-dock-avatar">
+                    <RobotOutlined />
+                  </div>
+                  <div className="chat-dock-title-group">
+                    <span className="chat-dock-title">AI 助手</span>
+                    {llmConfig ? (
+                      <span className="chat-dock-model">
+                        {llmConfig.displayName} · {llmConfig.defaultModel}
+                      </span>
+                    ) : (
+                      <span className="chat-dock-model chat-dock-model-warning">
+                        未配置模型
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="chat-dock-header-actions">
+                  {onOpenSettings && (
+                    <button
+                      type="button"
+                      className="chat-dock-header-btn"
+                      onClick={onOpenSettings}
+                      title="设置"
+                    >
+                      <SettingOutlined />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="chat-dock-header-btn"
+                    onClick={handleClearHistory}
+                    title="清空对话"
+                  >
+                    <DeleteOutlined />
+                  </button>
+                </div>
+              </>
+            )}
             {isGenerating && (
               <span className="chat-dock-status">
                 <LoadingOutlined spin /> 生成中...
@@ -533,15 +661,48 @@ function ChatPanel({
           {/* Messages */}
           <div className="chat-dock-messages" ref={messagesRef} onScroll={handleMessagesScroll}>
             {messages.length === 0 && !assistantBuffer && thinkingSteps.length === 0 ? (
-              <div className="chat-dock-empty">
-                <div className="chat-dock-empty-icon">
-                  <RobotOutlined />
+              isSidebar ? (
+                <div className="chat-dock-empty chat-dock-empty-side">
+                  <div className="chat-dock-empty-icon">
+                    <span
+                      className="chat-dock-empty-icon-emoji"
+                      role="img"
+                      aria-label="AI 机器人"
+                    >
+                      🤖
+                    </span>
+                  </div>
+                  <div className="chat-dock-empty-text">开始奇妙创作之旅</div>
+                  <div className="chat-dock-side-quick-list" role="list">
+                    {sidebarQuickActions.map((action) => (
+                      <button
+                        key={action.label}
+                        className="chat-dock-side-quick-item"
+                        role="listitem"
+                        type="button"
+                        onClick={() => handleSidebarQuickActionClick(action.prompt)}
+                        disabled={!projectKey || isGenerating}
+                      >
+                        <span className="chat-dock-side-quick-icon">{action.icon}</span>
+                        <span className="chat-dock-side-quick-label">{action.label}</span>
+                        {action.badge ? (
+                          <span className="chat-dock-side-quick-badge">{action.badge}</span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="chat-dock-empty-text">有什么可以帮助你的？</div>
-                <div className="chat-dock-empty-hint">
-                  {projectKey ? `当前项目: ${projectKey}` : "请先选择一个项目"}
+              ) : (
+                <div className="chat-dock-empty">
+                  <div className="chat-dock-empty-icon">
+                    <RobotOutlined />
+                  </div>
+                  <div className="chat-dock-empty-text">有什么可以帮助你的？</div>
+                  <div className="chat-dock-empty-hint">
+                    {projectKey ? `当前项目: ${projectKey}` : "请先选择一个项目"}
+                  </div>
                 </div>
-              </div>
+              )
             ) : (
               <>
                 {messages.map((msg) => (
@@ -685,36 +846,14 @@ function ChatPanel({
 
       {/* Input Bar (Always visible) */}
       <div className="chat-dock-bar">
-        {/* Mention Tags (above input) */}
-        {mentions.length > 0 && (
-          <div className="chat-mention-tags">
-            {mentions.map((m) => (
-              <span key={m.docId} className="chat-mention-tag">
-                <span className="chat-mention-tag-icon">
-                  {m.kind === "plugin_template"
-                    ? <AppstoreOutlined />
-                    : m.includeChildren ? <FolderOutlined /> : <FileTextOutlined />}
-                </span>
-                <span className="chat-mention-tag-text" title={m.titlePath}>
-                  {m.kind === "plugin_template" ? `@ppt:${m.title}` : m.title}
-                  {m.kind !== "plugin_template" && m.includeChildren && "/"}
-                </span>
-                <button
-                  type="button"
-                  className="chat-mention-tag-remove"
-                  onClick={() => handleRemoveMention(m.docId)}
-                >
-                  <CloseCircleOutlined />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Attachment Tags (above input) */}
-        <ChatAttachmentTags
-          attachments={attachments}
-          onRemove={removeAttachment}
+        <input
+          ref={sidebarFileInputRef}
+          type="file"
+          multiple
+          className="chat-dock-side-file-input"
+          onChange={handleSidebarFileChange}
+          tabIndex={-1}
+          aria-hidden="true"
         />
 
         {/* Mention Dropdown - positioned relative to chat-dock-bar */}
@@ -750,56 +889,203 @@ function ChatPanel({
             </div>
           </div>
         )}
+        {isSidebar ? (
+          <div className="chat-dock-side-stack">
+            {hasSidebarReferences ? (
+              <div className="chat-dock-side-reference-layer">
+                {mentions.length > 0 && (
+                  <div className="chat-mention-tags">
+                    {mentions.map((m) => (
+                      <span key={m.docId} className="chat-mention-tag">
+                        <span className="chat-mention-tag-icon">
+                          {m.kind === "plugin_template"
+                            ? <AppstoreOutlined />
+                            : m.includeChildren ? <FolderOutlined /> : <FileTextOutlined />}
+                        </span>
+                        <span className="chat-mention-tag-text" title={m.titlePath}>
+                          {m.kind === "plugin_template" ? `@ppt:${m.title}` : m.title}
+                          {m.kind !== "plugin_template" && m.includeChildren && "/"}
+                        </span>
+                        <button
+                          type="button"
+                          className="chat-mention-tag-remove"
+                          onClick={() => handleRemoveMention(m.docId)}
+                        >
+                          <CloseCircleOutlined />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <ChatAttachmentTags
+                  attachments={attachments}
+                  onRemove={removeAttachment}
+                />
+                {selectedCommand ? (
+                  <span className="chat-dock-side-command-chip">
+                    <span className="chat-command-tag-icon">{selectedCommand.icon}</span>
+                    <span className="chat-command-tag-text">{selectedCommand.command}</span>
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
 
-        <div className="chat-dock-input-wrapper">
-          {/* Command Tag (inline, left of input) */}
-          {selectedCommand && (
-            <span className="chat-command-tag-inline">
-              <span className="chat-command-tag-icon">{selectedCommand.icon}</span>
-              <span className="chat-command-tag-text">{selectedCommand.command}</span>
-            </span>
-          )}
-          <Input.TextArea
-            ref={(instance) => {
-              mutableInputRef.current = instance?.resizableTextArea?.textArea ?? null;
-            }}
-            className={`chat-dock-textarea ${selectedCommand ? "with-command" : ""}`}
-            placeholder={
-              selectedCommand
-                ? "输入参数..."
-                : projectKey
-                  ? "输入消息，@ 指定文档范围，@ppt 选择 PPT 模版..."
-                  : "请先选择项目"
-            }
-            value={input}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            disabled={!projectKey || isGenerating}
-            autoSize={{ minRows: 1, maxRows: 8 }}
-          />
-          <div className="chat-dock-bar-actions">
-            {isGenerating ? (
+            <div className="chat-dock-side-input-layer">
+              <Input.TextArea
+                ref={(instance) => {
+                  mutableInputRef.current = instance?.resizableTextArea?.textArea ?? null;
+                }}
+                className={`chat-dock-textarea chat-dock-side-textarea-layer ${selectedCommand ? "with-command" : ""}`}
+                placeholder={
+                  selectedCommand
+                    ? "输入参数..."
+                    : projectKey
+                      ? "输入消息，@ 指定文档范围，/ 选择技能..."
+                      : "请先选择项目"
+                }
+                value={input}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+                disabled={!projectKey || isGenerating}
+                autoSize={{ minRows: 2, maxRows: 8 }}
+              />
+            </div>
+
+            <div className="chat-dock-side-function-layer">
               <button
                 type="button"
-                className="chat-dock-send-btn chat-dock-stop-btn"
-                onClick={handleStop}
-                title="停止生成"
+                className="chat-dock-side-tool-btn"
+                onClick={handleSidebarFilePickClick}
+                title="添加文件"
+                disabled={!projectKey || isGenerating}
               >
-                <StopOutlined />
+                <PaperClipOutlined />
               </button>
-            ) : (
               <button
                 type="button"
-                className="chat-dock-send-btn"
-                onClick={handleSendWithExpand}
-                disabled={!canSend}
+                className={`chat-dock-side-tool-btn chat-dock-side-web-search-btn ${deepSearchEnabled ? "active" : ""}`}
+                onClick={() => setDeepSearchEnabled(!deepSearchEnabled)}
+                title={deepSearchEnabled ? "关闭网络搜索" : "开启网络搜索"}
+                disabled={!projectKey || isGenerating}
               >
-                <SendOutlined />
+                <GlobalOutlined />
               </button>
+              <button
+                type="button"
+                className="chat-dock-side-model-btn"
+                onClick={onOpenSettings}
+                title="选择模型"
+                disabled={!onOpenSettings}
+              >
+                <span className="chat-dock-side-model-text">
+                  {llmConfig?.defaultModel || "自动"}
+                </span>
+                <DownOutlined />
+              </button>
+              {isGenerating ? (
+                <button
+                  type="button"
+                  className="chat-dock-send-btn chat-dock-stop-btn"
+                  onClick={handleStop}
+                  title="停止生成"
+                >
+                  <StopOutlined />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="chat-dock-send-btn"
+                  onClick={handleSendWithExpand}
+                  disabled={!canSend || attachmentsLoading}
+                  title="发送消息"
+                >
+                  <SendOutlined />
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Mention Tags (above input) */}
+            {mentions.length > 0 && (
+              <div className="chat-mention-tags">
+                {mentions.map((m) => (
+                  <span key={m.docId} className="chat-mention-tag">
+                    <span className="chat-mention-tag-icon">
+                      {m.kind === "plugin_template"
+                        ? <AppstoreOutlined />
+                        : m.includeChildren ? <FolderOutlined /> : <FileTextOutlined />}
+                    </span>
+                    <span className="chat-mention-tag-text" title={m.titlePath}>
+                      {m.kind === "plugin_template" ? `@ppt:${m.title}` : m.title}
+                      {m.kind !== "plugin_template" && m.includeChildren && "/"}
+                    </span>
+                    <button
+                      type="button"
+                      className="chat-mention-tag-remove"
+                      onClick={() => handleRemoveMention(m.docId)}
+                    >
+                      <CloseCircleOutlined />
+                    </button>
+                  </span>
+                ))}
+              </div>
             )}
-            {!isSidebar ? (
-              <>
+
+            {/* Attachment Tags (above input) */}
+            <ChatAttachmentTags
+              attachments={attachments}
+              onRemove={removeAttachment}
+            />
+
+            <div className="chat-dock-input-wrapper">
+              {/* Command Tag (inline, left of input) */}
+              {selectedCommand && (
+                <span className="chat-command-tag-inline">
+                  <span className="chat-command-tag-icon">{selectedCommand.icon}</span>
+                  <span className="chat-command-tag-text">{selectedCommand.command}</span>
+                </span>
+              )}
+              <Input.TextArea
+                ref={(instance) => {
+                  mutableInputRef.current = instance?.resizableTextArea?.textArea ?? null;
+                }}
+                className={`chat-dock-textarea ${selectedCommand ? "with-command" : ""}`}
+                placeholder={
+                  selectedCommand
+                    ? "输入参数..."
+                    : projectKey
+                      ? "输入消息，@ 指定文档范围，@ppt 选择 PPT 模版..."
+                      : "请先选择项目"
+                }
+                value={input}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+                disabled={!projectKey || isGenerating}
+                autoSize={{ minRows: 1, maxRows: 8 }}
+              />
+              <div className="chat-dock-bar-actions">
+                {isGenerating ? (
+                  <button
+                    type="button"
+                    className="chat-dock-send-btn chat-dock-stop-btn"
+                    onClick={handleStop}
+                    title="停止生成"
+                  >
+                    <StopOutlined />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="chat-dock-send-btn"
+                    onClick={handleSendWithExpand}
+                    disabled={!canSend}
+                  >
+                    <SendOutlined />
+                  </button>
+                )}
                 <button
                   type="button"
                   className="chat-dock-toggle-btn"
@@ -816,10 +1102,10 @@ function ChatPanel({
                 >
                   <RightOutlined />
                 </button>
-              </>
-            ) : null}
-          </div>
-        </div>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </section>
   );
