@@ -154,7 +154,8 @@ import {
 	updateTitleInTree,
 } from "../features/document-page/title-sync";
 import { insertDuplicateIntoTree } from "../features/document-page/duplicate-state";
-import { mapDocumentLockViewState } from "../features/document-page/lock-view-state";
+import { createDocumentFlowViewState } from "../features/document-page/document-flow-orchestrator";
+import { buildBlockCommentKey } from "../features/document-page/document-flow-selectors";
 import {
 	createCodeExecState,
 	reduceCodeExecState,
@@ -413,10 +414,6 @@ function normalizeCodeExecLanguage(language: string): CodeExecLanguage | null {
 		return normalized as CodeExecLanguage;
 	}
 	return null;
-}
-
-function buildBlockCommentKey(docId: string, blockId: string): string {
-	return `${String(docId ?? "").trim()}::${String(blockId ?? "").trim()}`;
 }
 
 function getUntitledDocumentTitle(): string {
@@ -2171,53 +2168,33 @@ function DocumentPage() {
 		[openDocumentById],
 	);
 
-	const activeDocument =
-		(resolvedDocumentId ? documentsById[resolvedDocumentId] : null) ?? document;
-	const isEphemeralActive = activeDocument?.id === EPHEMERAL_DRAFT_ID;
-	const activeLock = !isEphemeralActive ? (activeDocument?.lock ?? null) : null;
-	const activeLockViewState = mapDocumentLockViewState(activeLock);
-	const isActiveDocumentLocked = activeLockViewState.readonly;
-	const activeTrashPreview = activeTrashNodeKey
-		? (trashPreviewByKey[activeTrashNodeKey] ?? null)
-		: null;
-	const activeCommentPanel = useMemo(() => {
-		const docId = String(activeDocument?.id ?? "").trim();
-		if (!docId) {
-			return { visible: false, blockId: null, threadId: null };
-		}
-		return (
-			blockCommentState.panelByDocId[docId] ?? {
-				visible: false,
-				blockId: null,
-				threadId: null,
-			}
-		);
-	}, [activeDocument?.id, blockCommentState.panelByDocId]);
-	const activeCommentBlockId =
-		String(activeCommentPanel.blockId ?? "").trim() || null;
-	const activeCommentKey = useMemo(() => {
-		if (!activeDocument?.id || !activeCommentBlockId) {
-			return "";
-		}
-		return buildBlockCommentKey(activeDocument.id, activeCommentBlockId);
-	}, [activeCommentBlockId, activeDocument?.id]);
-	const activeCommentThreads = activeCommentKey
-		? (blockCommentThreadsByKey[activeCommentKey] ?? [])
-		: [];
-	const activeCommentAnchor = String(activeDocument?.id ?? "").trim()
-		? (blockCommentAnchorByDocId[String(activeDocument?.id ?? "").trim()] ??
-			null)
-		: null;
-	const activeCommentLoading = activeCommentKey
-		? Boolean(blockCommentLoadingByKey[activeCommentKey])
-		: false;
-	const activeCommentVisible = Boolean(
-		activeCommentPanel.visible &&
-			activeDocument?.id &&
-			activeCommentBlockId &&
-			!trashPanelOpen &&
-			!isEphemeralActive,
-	);
+	const {
+		activeDocument,
+		isEphemeralActive,
+		activeLock,
+		activeLockViewState,
+		isActiveDocumentLocked,
+		activeTrashPreview,
+		activeCommentPanel,
+		activeCommentBlockId,
+		activeCommentKey,
+		activeCommentThreads,
+		activeCommentAnchor,
+		activeCommentLoading,
+		activeCommentVisible,
+		sideNavActiveId,
+	} = createDocumentFlowViewState({
+		resolvedDocumentId,
+		documentsById,
+		document,
+		activeTrashNodeKey,
+		trashPreviewByKey,
+		blockCommentState,
+		blockCommentThreadsByKey,
+		blockCommentLoadingByKey,
+		blockCommentAnchorByDocId,
+		trashPanelOpen,
+	});
 
 	const loadBlockComments = useCallback(
 		async (docId: string, blockId: string) => {
@@ -4665,13 +4642,7 @@ function DocumentPage() {
 					trashLoading={trashLoading}
 					activeTrashKey={activeTrashNodeKey}
 					expandedIds={expandedIds}
-					activeId={
-						trashPanelOpen
-							? null
-							: resolvedDocumentId === EPHEMERAL_DRAFT_ID
-								? null
-								: resolvedDocumentId || null
-					}
+					activeId={sideNavActiveId}
 					loadingIds={loadingIds}
 					rootLoading={rootLoading}
 					rebuildingIndex={rebuildingIndex}
