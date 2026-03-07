@@ -390,6 +390,7 @@ BANANA_SLIDES_API_KEY=
 - 只要修改了前端相关代码（至少包含 `apps/web/`、`packages/doc-editor/`、`apps/desktop/` 中承载前端交互的改动），提交前必须执行 `playwright-cli` 无头模式进行自动化测试。
 - `playwright-cli` 测试统一使用固定测试账号，凭据文件路径：`output/playwright/test-account.json`。
 - 新增或修改前端功能时，测试脚本必须从 `output/playwright/test-account.json` 读取账号信息进行登录，禁止临时手填个人账号。
+- 开始文档主链路相关开发前，先运行 `npm run doctor:doc-flow` 检查 `server`、`app-backend`、`web`、PostgreSQL 对齐状态和测试账号是否可用。
 
 ## ANTI-PATTERNS
 
