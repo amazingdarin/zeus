@@ -5,14 +5,14 @@ import { test } from "node:test";
 
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
 const files = [
-  "tests/harness/document-flow/playwright/smoke-login-documents.js",
-  "tests/harness/document-flow/playwright/title-sync.js",
-  "tests/harness/document-flow/playwright/tabs-restore.js",
-  "tests/harness/document-flow/playwright/comments.js",
-  "tests/harness/document-flow/playwright/lock.js",
-  "tests/harness/document-flow/playwright/i18n.js",
-  "tests/harness/document-flow/playwright/ppt-context.js",
-  "tests/harness/document-flow/playwright/_helpers/account.js",
+  "tests/harness/document-flow/playwright/smoke-login-documents.mjs",
+  "tests/harness/document-flow/playwright/title-sync.mjs",
+  "tests/harness/document-flow/playwright/tabs-restore.mjs",
+  "tests/harness/document-flow/playwright/comments.mjs",
+  "tests/harness/document-flow/playwright/lock.mjs",
+  "tests/harness/document-flow/playwright/i18n.mjs",
+  "tests/harness/document-flow/playwright/ppt-context.mjs",
+  "tests/harness/document-flow/playwright/_helpers/account.mjs",
 ];
 
 test("document-flow playwright harness files exist", () => {

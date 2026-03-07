@@ -116,7 +116,14 @@ async function ensureProject(token, key, name) {
     body: JSON.stringify({ key, name, owner_type: ownerType, owner_key: ownerKey }),
   });
   if (!created.response.ok) {
-    throw new Error(`create project failed: ${created.response.status}`);
+    const message = String(created.payload?.message || "");
+    const alreadyExists = created.response.status === 500 && (
+      message.includes('duplicate key value violates unique constraint')
+      || message.includes('repo already exists')
+    );
+    if (!alreadyExists) {
+      throw new Error(`create project failed: ${created.response.status}`);
+    }
   }
 }
 

@@ -1,4 +1,4 @@
-import { buildPreamble, loadHarnessContext } from "./_helpers/account.js";
+import { buildPreamble, loadHarnessContext } from "./_helpers/account.mjs";
 
 export default async function buildRunCodeScript() {
   const context = await loadHarnessContext();
