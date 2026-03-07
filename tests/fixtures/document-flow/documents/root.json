@@ -1,0 +1,25 @@
+{
+  "meta": {
+    "id": "doc-flow-root",
+    "title": "Harness Root",
+    "parent_id": "root"
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "heading",
+          "attrs": { "id": "doc-flow-root-heading", "level": 1 },
+          "content": [{ "type": "text", "text": "Harness Root" }]
+        },
+        {
+          "type": "paragraph",
+          "attrs": { "id": "doc-flow-root-paragraph" },
+          "content": [{ "type": "text", "text": "Seeded root document for document flow regression." }]
+        }
+      ]
+    }
+  }
+}
