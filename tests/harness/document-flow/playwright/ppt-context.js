@@ -5,7 +5,7 @@ export default async function buildRunCodeScript() {
   return `async (page) => {
 ${buildPreamble(context)}
   await primeProjectSelection(projectRef);
-  await loginThroughUi();
+  await programmaticLogin();
   await selectProject(projectRef);
   const consoleEntries = [];
   page.on('console', (message) => {

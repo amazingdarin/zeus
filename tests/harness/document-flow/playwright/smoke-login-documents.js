@@ -5,7 +5,7 @@ export default async function buildRunCodeScript() {
   return `async (page) => {
 ${buildPreamble(context)}
   await primeProjectSelection(projectRef);
-  await loginThroughUi();
+  await programmaticLogin();
   await selectProject(projectRef);
   await page.goto(\`${'${baseUrl}'}/#/documents\`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(1500);

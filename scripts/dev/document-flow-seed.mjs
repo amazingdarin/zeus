@@ -37,6 +37,64 @@ function buildProjectApiBase(projectKey) {
   return `http://127.0.0.1:4870/api/projects/${ownerType}/${ownerKey}/${encodeURIComponent(projectKey)}`;
 }
 
+const DEFAULT_PPT_TEMPLATE_CATALOG = {
+  version: 1,
+  presets: [
+    { id: "clean-blue", name: "Clean Blue", description: "Corporate deck with calm blue accents.", tags: ["business", "minimal"] },
+    { id: "growth-orange", name: "Growth Orange", description: "High-energy sales presentation template.", tags: ["sales", "marketing"] },
+    { id: "research-dark", name: "Research Dark", description: "Academic presentation with dense content layout.", tags: ["research", "report"] }
+  ],
+  custom: []
+};
+
+async function ensurePluginInstalled(token, pluginId) {
+  const list = await apiFetch("http://127.0.0.1:4870/api/plugins/v2/me", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!list.response.ok) {
+    throw new Error(`list installed plugins failed: ${list.response.status}`);
+  }
+  const items = Array.isArray(list.payload?.data) ? list.payload.data : [];
+  const existing = items.find((item) => String(item?.pluginId || "").trim() === pluginId);
+  if (existing?.installation?.status === "installed" && existing?.installation?.enabled !== false) {
+    return;
+  }
+  const installed = await apiFetch("http://127.0.0.1:4870/api/plugins/v2/me/install", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ pluginId }),
+  });
+  if (!installed.response.ok && installed.response.status !== 409) {
+    throw new Error(`install plugin failed: ${installed.response.status}`);
+  }
+}
+
+async function bootstrapPptCatalog(token, projectKey) {
+  const writeResult = await apiFetch(
+    `${buildProjectApiBase(projectKey)}/plugins/v2/ppt-plugin/local-data/file`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        path: "templates/catalog.json",
+        content: JSON.stringify(DEFAULT_PPT_TEMPLATE_CATALOG, null, 2),
+        scope: "project",
+        encoding: "utf8",
+        overwrite: true,
+      }),
+    },
+  );
+  if (!writeResult.response.ok) {
+    throw new Error(`bootstrap ppt catalog failed: ${writeResult.response.status}`);
+  }
+}
+
 async function ensureProject(token, key, name) {
   const { response, payload } = await apiFetch("http://127.0.0.1:8080/api/projects", {
     headers: { Authorization: `Bearer ${token}` },
@@ -88,6 +146,13 @@ async function clearProject(token, projectKey) {
   });
 }
 
+async function unlockDocument(token, projectKey, docId) {
+  await apiFetch(`${buildProjectApiBase(projectKey)}/documents/${encodeURIComponent(docId)}/lock`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 async function getDocument(token, projectKey, docId) {
   const { response, payload } = await apiFetch(`${buildProjectApiBase(projectKey)}/documents/${encodeURIComponent(docId)}`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -103,6 +168,9 @@ async function getDocument(token, projectKey, docId) {
 
 async function upsertDocument(token, projectKey, fixture) {
   const docId = String(fixture?.meta?.id || "").trim();
+  if (docId) {
+    await unlockDocument(token, projectKey, docId);
+  }
   const existing = await getDocument(token, projectKey, docId);
   const url = existing
     ? `${buildProjectApiBase(projectKey)}/documents/${encodeURIComponent(docId)}`
@@ -119,13 +187,6 @@ async function upsertDocument(token, projectKey, fixture) {
   if (!response.ok) {
     throw new Error(`${method} document failed for ${docId}: ${response.status}`);
   }
-}
-
-async function unlockDocument(token, projectKey, docId) {
-  await apiFetch(`${buildProjectApiBase(projectKey)}/documents/${encodeURIComponent(docId)}/lock`, {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${token}` },
-  });
 }
 
 async function lockDocument(token, projectKey, docId) {
@@ -182,6 +243,7 @@ const token = loginPayload.access_token;
 
 await ensureProject(token, projectFixture.projectKey, projectFixture.projectName);
 await ensureProject(token, projectFixture.emptyProjectKey, projectFixture.emptyProjectName);
+await ensurePluginInstalled(token, "ppt-plugin");
 await clearProject(token, projectFixture.emptyProjectKey);
 
 await upsertDocument(token, projectFixture.projectKey, rootDoc);
@@ -190,6 +252,7 @@ await upsertDocument(token, projectFixture.projectKey, commentedDoc);
 await unlockDocument(token, projectFixture.projectKey, rootDoc.meta.id);
 await unlockDocument(token, projectFixture.projectKey, commentedDoc.meta.id);
 await ensureCommentThread(token, projectFixture.projectKey, commentFixture);
+await bootstrapPptCatalog(token, projectFixture.projectKey);
 await lockDocument(token, projectFixture.projectKey, lockedDoc.meta.id);
 
 process.stdout.write(JSON.stringify({
