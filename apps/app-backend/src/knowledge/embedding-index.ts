@@ -1,4 +1,5 @@
 import { query } from "../db/postgres.js";
+import { resolveProjectScope } from "../project-scope.js";
 import type { Document, SearchResult } from "../storage/types.js";
 import { buildChunks } from "./chunker.js";
 import { llmGateway, configStore, type LLMProviderId, type ProviderConfigInternal } from "../llm/index.js";
@@ -90,6 +91,7 @@ export const embeddingIndex = {
       throw new Error("Invalid parameters for embedding upsert");
     }
 
+    const scope = resolveProjectScope("", projectKey);
     const chunks = buildChunks(doc);
     if (chunks.length === 0) return;
 
@@ -106,9 +108,9 @@ export const embeddingIndex = {
 
     // Delete existing chunks for this document
     await query(
-      `DELETE FROM knowledge_embedding_index 
-       WHERE project_key = $1 AND index_name = $2 AND doc_id = $3`,
-      [projectKey, indexName, doc.meta.id],
+      `DELETE FROM knowledge_embedding_index
+       WHERE owner_type = $1 AND owner_id = $2 AND project_key = $3 AND index_name = $4 AND doc_id = $5`,
+      [scope.ownerType, scope.ownerId, scope.projectKey, indexName, doc.meta.id],
     );
 
     // Insert new chunks
@@ -124,11 +126,13 @@ export const embeddingIndex = {
       };
 
       await query(
-        `INSERT INTO knowledge_embedding_index 
-          (project_key, index_name, doc_id, block_id, chunk_index, content, model, embedding, metadata_json, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector, $9, NOW())`,
+        `INSERT INTO knowledge_embedding_index
+          (owner_type, owner_id, project_key, index_name, doc_id, block_id, chunk_index, content, model, embedding, metadata_json, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, $11, NOW())`,
         [
-          projectKey,
+          scope.ownerType,
+          scope.ownerId,
+          scope.projectKey,
           indexName,
           chunk.doc_id,
           chunk.block_id,
@@ -146,10 +150,12 @@ export const embeddingIndex = {
    * Remove a document from the embedding index
    */
   async remove(projectKey: string, indexName: string, docId: string): Promise<void> {
+    const scope = resolveProjectScope("", projectKey);
+
     await query(
-      `DELETE FROM knowledge_embedding_index 
-       WHERE project_key = $1 AND index_name = $2 AND doc_id = $3`,
-      [projectKey, indexName, docId],
+      `DELETE FROM knowledge_embedding_index
+       WHERE owner_type = $1 AND owner_id = $2 AND project_key = $3 AND index_name = $4 AND doc_id = $5`,
+      [scope.ownerType, scope.ownerId, scope.projectKey, indexName, docId],
     );
   },
 
@@ -157,10 +163,12 @@ export const embeddingIndex = {
    * Remove all documents for an index
    */
   async removeByIndex(projectKey: string, indexName: string): Promise<void> {
+    const scope = resolveProjectScope("", projectKey);
+
     await query(
-      `DELETE FROM knowledge_embedding_index 
-       WHERE project_key = $1 AND index_name = $2`,
-      [projectKey, indexName],
+      `DELETE FROM knowledge_embedding_index
+       WHERE owner_type = $1 AND owner_id = $2 AND project_key = $3 AND index_name = $4`,
+      [scope.ownerType, scope.ownerId, scope.projectKey, indexName],
     );
   },
 
@@ -175,7 +183,7 @@ export const embeddingIndex = {
       limit?: number;
       offset?: number;
       vector?: number[];
-      docIds?: string[];  // Optional: filter by specific document IDs
+      docIds?: string[]; // Optional: filter by specific document IDs
     } = {},
   ): Promise<SearchResult[]> {
     const { limit = 20, offset = 0, docIds } = options;
@@ -192,36 +200,45 @@ export const embeddingIndex = {
       vector = vectors[0];
     }
 
+    const scope = resolveProjectScope("", projectKey);
+
     // Build query with optional doc_id filter
     let sql: string;
     let params: unknown[];
 
     if (docIds && docIds.length > 0) {
-      sql = `SELECT 
+      sql = `SELECT
          doc_id,
          block_id,
          chunk_index,
-         1 - (embedding <=> $3::vector) as score,
+         1 - (embedding <=> $5::vector) as score,
          content,
          metadata_json
        FROM knowledge_embedding_index
-       WHERE project_key = $1 AND index_name = $2 AND doc_id = ANY($6)
-       ORDER BY embedding <=> $3::vector
-       LIMIT $4 OFFSET $5`;
-      params = [projectKey, indexName, formatVector(vector), limit, offset, docIds];
+       WHERE owner_type = $1
+         AND owner_id = $2
+         AND project_key = $3
+         AND index_name = $4
+         AND doc_id = ANY($8)
+       ORDER BY embedding <=> $5::vector
+       LIMIT $6 OFFSET $7`;
+      params = [scope.ownerType, scope.ownerId, scope.projectKey, indexName, formatVector(vector), limit, offset, docIds];
     } else {
-      sql = `SELECT 
+      sql = `SELECT
          doc_id,
          block_id,
          chunk_index,
-         1 - (embedding <=> $3::vector) as score,
+         1 - (embedding <=> $5::vector) as score,
          content,
          metadata_json
        FROM knowledge_embedding_index
-       WHERE project_key = $1 AND index_name = $2
-       ORDER BY embedding <=> $3::vector
-       LIMIT $4 OFFSET $5`;
-      params = [projectKey, indexName, formatVector(vector), limit, offset];
+       WHERE owner_type = $1
+         AND owner_id = $2
+         AND project_key = $3
+         AND index_name = $4
+       ORDER BY embedding <=> $5::vector
+       LIMIT $6 OFFSET $7`;
+      params = [scope.ownerType, scope.ownerId, scope.projectKey, indexName, formatVector(vector), limit, offset];
     }
 
     const result = await query<{

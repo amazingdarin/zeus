@@ -1,6 +1,17 @@
 /**
  * Document metadata
  */
+export type DocumentLockInfo = {
+  locked: true;
+  lockedBy: string;
+  lockedAt: string;
+};
+
+export type DocumentExtra = {
+  lock?: DocumentLockInfo;
+  [key: string]: unknown;
+};
+
 export interface DocumentMeta {
   id: string;
   schema_version: string;
@@ -10,7 +21,7 @@ export interface DocumentMeta {
   parent_id: string;
   created_at: string;
   updated_at: string;
-  extra?: Record<string, unknown>;
+  extra?: DocumentExtra;
 }
 
 /**

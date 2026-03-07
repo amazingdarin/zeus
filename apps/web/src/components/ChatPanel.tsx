@@ -4,10 +4,13 @@
  * Uses the shared useChatLogic hook for chat functionality.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ChangeEvent as ReactChangeEvent } from "react";
+import { Input } from "antd";
 import {
   DeleteOutlined,
   SendOutlined,
+  StopOutlined,
   RobotOutlined,
   UserOutlined,
   LoadingOutlined,
@@ -17,12 +20,18 @@ import {
   CloseCircleOutlined,
   FolderOutlined,
   FileTextOutlined,
+  AppstoreOutlined,
   RightOutlined,
   MessageOutlined,
+  SlidersOutlined,
+  PlusCircleOutlined,
+  GlobalOutlined,
+  PaperClipOutlined,
 } from "@ant-design/icons";
 
 import {
   useChatLogic,
+  createId,
   renderMarkdown,
   formatTime,
   type ChatArtifact,
@@ -30,17 +39,128 @@ import {
 } from "../hooks/useChatLogic";
 import MentionDropdown from "./MentionDropdown";
 import DraftPreviewModal from "./DraftPreviewModal";
+import IntentSelectDialog from "./IntentSelectDialog";
+import PreflightInputDialog from "./PreflightInputDialog";
+import RequiredInputDialog from "./RequiredInputDialog";
+import ToolConfirmDialog from "./ToolConfirmDialog";
+import ChatAttachmentTags from "./ChatAttachmentTags";
+import TaskTodoList from "./TaskTodoList";
+import ThinkingTimeline from "./ThinkingTimeline";
+import { useProjectContext } from "../context/ProjectContext";
+import { listSessions, type ChatSessionInfo } from "../api/chat-sessions";
 
 type ChatPanelProps = {
   onOpenSettings?: () => void;
+  variant?: "bottom" | "sidebar";
+  defaultDocumentId?: string;
+  hidden?: boolean;
+  onHiddenChange?: (hidden: boolean) => void;
+  showFloatingButtonWhenHidden?: boolean;
 };
 
-function ChatPanel({ onOpenSettings }: ChatPanelProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [isHidden, setIsHidden] = useState(true);
+function ChatPanel({
+  onOpenSettings,
+  variant = "bottom",
+  defaultDocumentId,
+  hidden,
+  onHiddenChange,
+  showFloatingButtonWhenHidden = true,
+}: ChatPanelProps) {
+  const isSidebar = variant === "sidebar";
+  const { currentProject } = useProjectContext();
+  const scopedProjectRef = currentProject?.projectRef ?? "";
+  const [isExpanded, setIsExpanded] = useState(isSidebar);
+  const [internalHidden, setInternalHidden] = useState(isSidebar ? false : true);
+  const [queuedQuickPrompt, setQueuedQuickPrompt] = useState<string | null>(null);
+  const [sidebarSessionId, setSidebarSessionId] = useState<string | undefined>(undefined);
+  const [sidebarSessions, setSidebarSessions] = useState<ChatSessionInfo[]>([]);
+  const [sidebarSessionLoading, setSidebarSessionLoading] = useState(isSidebar);
+  const [sidebarSessionMenuOpen, setSidebarSessionMenuOpen] = useState(false);
   const [panelHeight, setPanelHeight] = useState(320);
   const [isResizing, setIsResizing] = useState(false);
   const resizeStartRef = useRef<{ y: number; height: number } | null>(null);
+  const sidebarSessionTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const sidebarSessionMenuRef = useRef<HTMLDivElement | null>(null);
+  const prevSidebarGeneratingRef = useRef(false);
+  const isHidden = typeof hidden === "boolean" ? hidden : internalHidden;
+  const setHidden = (nextHidden: boolean) => {
+    if (typeof hidden !== "boolean") {
+      setInternalHidden(nextHidden);
+    }
+    onHiddenChange?.(nextHidden);
+  };
+  const sidebarSessionStorageKey = isSidebar && scopedProjectRef
+    ? `zeus-sidebar-chat-session-${scopedProjectRef}`
+    : "";
+
+  const persistSidebarSessionId = useCallback((nextSessionId?: string) => {
+    if (!sidebarSessionStorageKey || typeof window === "undefined") {
+      return;
+    }
+    try {
+      if (nextSessionId) {
+        window.localStorage.setItem(sidebarSessionStorageKey, nextSessionId);
+      } else {
+        window.localStorage.removeItem(sidebarSessionStorageKey);
+      }
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [sidebarSessionStorageKey]);
+
+  const handleSidebarSessionChange = useCallback((nextSessionId: string) => {
+    setSidebarSessionId(nextSessionId);
+    persistSidebarSessionId(nextSessionId);
+  }, [persistSidebarSessionId]);
+
+  const loadSidebarSessions = useCallback(
+    async (options?: { preferredSessionId?: string }) => {
+      if (!isSidebar) {
+        return;
+      }
+      if (!scopedProjectRef) {
+        setSidebarSessions([]);
+        setSidebarSessionId(undefined);
+        setSidebarSessionLoading(false);
+        return;
+      }
+
+      setSidebarSessionLoading(true);
+      try {
+        const storedSessionId = sidebarSessionStorageKey
+          ? window.localStorage.getItem(sidebarSessionStorageKey)?.trim()
+          : "";
+        const preferredSessionId = options?.preferredSessionId?.trim() || storedSessionId || "";
+        const sessions = await listSessions(scopedProjectRef, 50, 0);
+
+        setSidebarSessions(sessions);
+        if (sessions.length === 0) {
+          const fallbackSessionId = preferredSessionId || `session-${createId()}`;
+          setSidebarSessionId(fallbackSessionId);
+          persistSidebarSessionId(fallbackSessionId);
+          return;
+        }
+
+        const matchedSession = preferredSessionId
+          ? sessions.find((item) => item.id === preferredSessionId)
+          : undefined;
+        const targetSessionId = matchedSession?.id || sessions[0].id;
+        setSidebarSessionId(targetSessionId);
+        persistSidebarSessionId(targetSessionId);
+      } catch {
+        setSidebarSessions([]);
+        setSidebarSessionId(undefined);
+      } finally {
+        setSidebarSessionLoading(false);
+      }
+    },
+    [
+      isSidebar,
+      persistSidebarSessionId,
+      scopedProjectRef,
+      sidebarSessionStorageKey,
+    ],
+  );
 
   const {
     messages,
@@ -48,6 +168,9 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     isGenerating,
     error,
     assistantBuffer,
+    thinkingSteps,
+    taskTodoItems,
+    deepSearchEnabled,
     llmConfig,
     mentions,
     mentionState,
@@ -61,10 +184,16 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     projectKey,
     messagesRef,
     inputRef,
+    setInput,
     setError,
     setSlashSelectedIndex,
+    setDeepSearchEnabled,
+    handleMessagesScroll,
     handleSend,
+    handleStop,
     handleClearHistory,
+    handleNewSession,
+    sessionId,
     handleInputChange,
     handleKeyDown,
     handleMentionSelect,
@@ -75,18 +204,186 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     handleDraftClose,
     handleDocumentNavigate,
     handleProposalAction,
+    handleConfirmTool,
+    handleRejectTool,
+    handleSelectIntent,
+    handleProvidePreflightInput,
+    handleProvideRequiredInput,
+    pendingTool,
+    pendingIntentInfo,
+    pendingPreflightInfo,
+    pendingRequiredInput,
     toggleSourcesExpanded,
-  } = useChatLogic({ autoScrollEnabled: isExpanded });
+    // Attachments
+    attachments,
+    attachmentsLoading,
+    handlePaste,
+    handleAddAttachmentFile,
+    removeAttachment,
+  } = useChatLogic({
+    autoScrollEnabled: isSidebar || isExpanded,
+    defaultDocumentId: isSidebar ? defaultDocumentId : undefined,
+    sessionId: isSidebar ? sidebarSessionId : undefined,
+    onSessionChange: isSidebar ? handleSidebarSessionChange : undefined,
+  });
+
+  const taskTodoStorageKey = projectKey && sessionId
+    ? `zeus-task-todo-expanded-${projectKey}-${sessionId}`
+    : undefined;
+  const hasSidebarReferences = mentions.length > 0 || attachments.length > 0 || Boolean(selectedCommand);
+  const sidebarInteractionsDisabled = isSidebar && sidebarSessionLoading;
+  const activeSidebarSession = isSidebar
+    ? sidebarSessions.find((item) => item.id === sessionId) ?? null
+    : null;
+  const sidebarSessionTitle = sidebarSessionLoading
+    ? "加载会话中..."
+    : (activeSidebarSession?.title?.trim() || "新建 AI 对话");
+  const sidebarQuickActions = [
+    {
+      icon: <PlusCircleOutlined />,
+      label: "创建自定义代理",
+      badge: "新",
+      prompt: "创建自定义代理",
+    },
+    {
+      icon: <AppstoreOutlined />,
+      label: "根据页面创建图表",
+      badge: "新",
+      prompt: "根据页面创建图表",
+    },
+    {
+      icon: <FileTextOutlined />,
+      label: "总结此页面",
+      prompt: "总结此页面",
+    },
+    {
+      icon: <MessageOutlined />,
+      label: "总结页面评论",
+      prompt: "总结页面评论",
+    },
+  ];
+
+  const mutableInputRef = inputRef as { current: HTMLTextAreaElement | null };
+  const sidebarFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!isSidebar) {
+      return;
+    }
+    setSidebarSessionMenuOpen(false);
+    void loadSidebarSessions();
+  }, [isSidebar, loadSidebarSessions]);
+
+  const handleSidebarCreateSession = useCallback(async () => {
+    if (sidebarInteractionsDisabled) {
+      return;
+    }
+    await handleNewSession();
+    setSidebarSessionMenuOpen(false);
+    void loadSidebarSessions();
+  }, [handleNewSession, loadSidebarSessions, sidebarInteractionsDisabled]);
+
+  const handleSidebarSelectSession = useCallback((nextSessionId: string) => {
+    if (!nextSessionId) {
+      return;
+    }
+    handleSidebarSessionChange(nextSessionId);
+    setSidebarSessionMenuOpen(false);
+  }, [handleSidebarSessionChange]);
+
+  useEffect(() => {
+    if (!sidebarSessionMenuOpen) {
+      return;
+    }
+    const handleMouseDown = (event: MouseEvent) => {
+      const targetNode = event.target as Node;
+      if (sidebarSessionTriggerRef.current?.contains(targetNode)) {
+        return;
+      }
+      if (sidebarSessionMenuRef.current?.contains(targetNode)) {
+        return;
+      }
+      setSidebarSessionMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+    };
+  }, [sidebarSessionMenuOpen]);
+
+  useEffect(() => {
+    if (!isSidebar) {
+      return;
+    }
+    const wasGenerating = prevSidebarGeneratingRef.current;
+    prevSidebarGeneratingRef.current = isGenerating;
+    if (wasGenerating && !isGenerating) {
+      void loadSidebarSessions({ preferredSessionId: sessionId });
+    }
+  }, [isSidebar, isGenerating, loadSidebarSessions, sessionId]);
+
+  const handleSidebarQuickActionClick = useCallback((prompt: string) => {
+    if (!projectKey || isGenerating || sidebarInteractionsDisabled) {
+      return;
+    }
+    const normalized = prompt.trim();
+    if (!normalized) {
+      return;
+    }
+    setInput(normalized);
+    setQueuedQuickPrompt(normalized);
+  }, [isGenerating, projectKey, setInput, sidebarInteractionsDisabled]);
+
+  useEffect(() => {
+    if (!queuedQuickPrompt || isGenerating) {
+      return;
+    }
+    if (input.trim() !== queuedQuickPrompt) {
+      return;
+    }
+    void handleSend();
+    setQueuedQuickPrompt(null);
+  }, [handleSend, input, isGenerating, queuedQuickPrompt]);
+
+  const handleSidebarFilePickClick = useCallback(() => {
+    if (!projectKey || isGenerating || sidebarInteractionsDisabled) {
+      return;
+    }
+    sidebarFileInputRef.current?.click();
+  }, [isGenerating, projectKey, sidebarInteractionsDisabled]);
+
+  const handleSidebarFileChange = useCallback((event: ReactChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) {
+      return;
+    }
+    for (let i = 0; i < files.length; i += 1) {
+      const file = files.item(i);
+      if (file) {
+        handleAddAttachmentFile(file);
+      }
+    }
+    event.target.value = "";
+  }, [handleAddAttachmentFile]);
+
+  useEffect(() => {
+    if (isSidebar) {
+      setIsExpanded(true);
+    }
+  }, [isSidebar]);
 
   // Focus input when panel opens
   useEffect(() => {
-    if (isExpanded && inputRef.current) {
+    if (!isHidden && (isSidebar || isExpanded) && inputRef.current) {
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [isExpanded, inputRef]);
+  }, [inputRef, isExpanded, isHidden, isSidebar]);
 
   // Handle resize
   useEffect(() => {
+    if (isSidebar) {
+      return;
+    }
     if (!isResizing) return;
     const handleMove = (event: MouseEvent) => {
       const start = resizeStartRef.current;
@@ -105,11 +402,11 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mouseup", handleUp);
     };
-  }, [isResizing]);
+  }, [isResizing, isSidebar]);
 
   // Auto expand panel when sending message
   const handleSendWithExpand = async () => {
-    if (!isExpanded) {
+    if (!isSidebar && !isExpanded) {
       setIsExpanded(true);
     }
     await handleSend();
@@ -241,6 +538,22 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
     if (!sources || sources.length === 0) return null;
 
     const isSourceExpanded = expandedSources.has(messageId);
+    const kbSources = sources.filter((s) => s.type !== "web");
+    const webSources = sources.filter((s) => s.type === "web");
+
+    // Group KB sources by document
+    const kbDocGroups = new Map<string, { title: string; blocks: typeof kbSources }>();
+    for (const source of kbSources) {
+      const key = source.docId || "unknown";
+      if (!kbDocGroups.has(key)) {
+        kbDocGroups.set(key, { title: source.title, blocks: [] });
+      }
+      kbDocGroups.get(key)!.blocks.push(source);
+    }
+
+    const totalLabel = [];
+    if (kbDocGroups.size > 0) totalLabel.push(`${kbDocGroups.size} 个文档`);
+    if (webSources.length > 0) totalLabel.push(`${webSources.length} 个网页`);
 
     return (
       <div className="chat-sources">
@@ -249,9 +562,9 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
           className="chat-sources-toggle"
           onClick={() => toggleSourcesExpanded(messageId)}
         >
-          <span className="chat-sources-icon">📚</span>
+          <span className="chat-sources-icon">{webSources.length > 0 ? "🔍" : "📚"}</span>
           <span className="chat-sources-label">
-            引用了 {sources.length} 个文档
+            引用了 {totalLabel.join("、")}
           </span>
           <span className={`chat-sources-arrow ${isSourceExpanded ? "expanded" : ""}`}>
             {isSourceExpanded ? <DownOutlined /> : <UpOutlined />}
@@ -259,22 +572,57 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
         </button>
         {isSourceExpanded && (
           <div className="chat-sources-list">
-            {sources.map((source, index) => (
-              <div
-                key={`${source.docId}-${source.blockId || ""}-${index}`}
-                className="chat-source-item"
-                onClick={() => handleDocumentNavigate(source.docId, { blockId: source.blockId })}
+            {/* KB Sources - grouped by document */}
+            {Array.from(kbDocGroups).map(([docId, group]) => (
+              <div key={`kb-doc-${docId}`} className="chat-source-doc-group">
+                <div
+                  className="chat-source-doc-header"
+                  onClick={() => docId !== "unknown" && handleDocumentNavigate(docId, {})}
+                >
+                  <span className="chat-source-type-icon">📄</span>
+                  <span className="chat-source-doc-title">{group.title}</span>
+                  <span className="chat-source-block-count">
+                    {group.blocks.length} 处引用
+                  </span>
+                </div>
+                <div className="chat-source-blocks">
+                  {group.blocks.map((block, index) => (
+                    <div
+                      key={`kb-block-${docId}-${block.blockId || index}`}
+                      className="chat-source-block-item"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        docId !== "unknown" && handleDocumentNavigate(docId, { blockId: block.blockId });
+                      }}
+                    >
+                      {block.blockId && (
+                        <span className="chat-source-block-hint">
+                          #{block.blockId.slice(0, 8)}
+                        </span>
+                      )}
+                      <span className="chat-source-block-snippet">{block.snippet}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {/* Web Sources */}
+            {webSources.map((source, index) => (
+              <a
+                key={`web-${source.url}-${index}`}
+                className="chat-source-item chat-source-web"
+                href={source.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
               >
                 <div className="chat-source-title">
+                  <span className="chat-source-type-icon">🌐</span>
                   {source.title}
-                  {source.blockId && (
-                    <span className="chat-source-block-hint">
-                      #{source.blockId.slice(0, 8)}
-                    </span>
-                  )}
                 </div>
                 <div className="chat-source-snippet">{source.snippet}</div>
-              </div>
+                <div className="chat-source-url">{source.url}</div>
+              </a>
             ))}
           </div>
         )}
@@ -295,23 +643,41 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
             onApplied={handleDraftApplied}
           />
         )}
-        <button
-          type="button"
-          className="chat-floating-btn"
-          onClick={() => setIsHidden(false)}
-          title="打开 AI 助手"
-        >
-          <MessageOutlined />
-          {messages.length > 0 && (
-            <span className="chat-floating-badge">{messages.length}</span>
-          )}
-        </button>
+
+        {/* Tool Confirmation Dialog */}
+        <ToolConfirmDialog
+          visible={!!pendingTool}
+          pendingTool={pendingTool}
+          onConfirm={handleConfirmTool}
+          onReject={handleRejectTool}
+        />
+
+        {/* Intent Selection Dialog */}
+        <IntentSelectDialog
+          visible={!!pendingIntentInfo}
+          pendingIntent={pendingIntentInfo}
+          onSelect={handleSelectIntent}
+        />
+
+        {showFloatingButtonWhenHidden ? (
+          <button
+            type="button"
+            className="chat-floating-btn"
+            onClick={() => setHidden(false)}
+            title="打开 AI 助手"
+          >
+            <MessageOutlined />
+            {messages.length > 0 && (
+              <span className="chat-floating-badge">{messages.length}</span>
+            )}
+          </button>
+        ) : null}
       </>
     );
   }
 
   return (
-    <section className="chat-dock-bottom">
+    <section className={isSidebar ? "chat-dock-side" : "chat-dock-bottom"}>
       {/* Draft Preview Modal */}
       {pendingDraft && (
         <DraftPreviewModal
@@ -322,61 +688,142 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
         />
       )}
 
-      {/* Expanded Panel */}
-      {isExpanded && (
-        <div
-          className="chat-dock-panel"
-          style={{ height: `${panelHeight}px` }}
-        >
-          {/* Resize Handle */}
-          <div
-            className="chat-dock-resize-handle"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              resizeStartRef.current = { y: e.clientY, height: panelHeight };
-              setIsResizing(true);
-            }}
-          />
+      {/* Tool Confirmation Dialog */}
+      <ToolConfirmDialog
+        visible={!!pendingTool}
+        pendingTool={pendingTool}
+        onConfirm={handleConfirmTool}
+        onReject={handleRejectTool}
+      />
+
+      {/* Intent Selection Dialog */}
+      <IntentSelectDialog
+        visible={!!pendingIntentInfo}
+        pendingIntent={pendingIntentInfo}
+        onSelect={handleSelectIntent}
+      />
+
+      {/* Expanded Panel (animated open/close) */}
+      <div
+        className={`chat-dock-panel${isSidebar ? " chat-dock-panel-side is-expanded" : isExpanded ? " is-expanded" : " is-collapsed"}${isResizing ? " is-resizing" : ""}`}
+        style={isSidebar ? undefined : { height: `${isExpanded ? panelHeight : 0}px` }}
+        aria-hidden={isSidebar ? false : !isExpanded}
+      >
+          {!isSidebar ? (
+            <div
+              className="chat-dock-resize-handle"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                resizeStartRef.current = { y: e.clientY, height: panelHeight };
+                setIsResizing(true);
+              }}
+            />
+          ) : null}
 
           {/* Header */}
-          <header className="chat-dock-header">
-            <div className="chat-dock-header-left">
-              <div className="chat-dock-avatar">
-                <RobotOutlined />
-              </div>
-              <div className="chat-dock-title-group">
-                <span className="chat-dock-title">AI 助手</span>
-                {llmConfig ? (
-                  <span className="chat-dock-model">
-                    {llmConfig.displayName} · {llmConfig.defaultModel}
-                  </span>
-                ) : (
-                  <span className="chat-dock-model chat-dock-model-warning">
-                    未配置模型
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="chat-dock-header-actions">
-              {onOpenSettings && (
-                <button
-                  type="button"
-                  className="chat-dock-header-btn"
-                  onClick={onOpenSettings}
-                  title="设置"
-                >
-                  <SettingOutlined />
-                </button>
-              )}
-              <button
-                type="button"
-                className="chat-dock-header-btn"
-                onClick={handleClearHistory}
-                title="清空对话"
-              >
-                <DeleteOutlined />
-              </button>
-            </div>
+          <header className={`chat-dock-header${isSidebar ? " chat-dock-header-side" : ""}`}>
+            {isSidebar ? (
+              <>
+                <div className="chat-dock-side-title-wrap">
+                  <button
+                    ref={sidebarSessionTriggerRef}
+                    type="button"
+                    className={`chat-dock-side-title-btn${sidebarSessionMenuOpen ? " is-open" : ""}`}
+                    onClick={() => {
+                      if (sidebarSessionLoading || sidebarSessions.length === 0) {
+                        return;
+                      }
+                      setSidebarSessionMenuOpen((prev) => !prev);
+                    }}
+                    disabled={sidebarSessionLoading || sidebarSessions.length === 0}
+                    aria-haspopup="listbox"
+                    aria-expanded={sidebarSessionMenuOpen}
+                  >
+                    <span className="chat-dock-side-title-text" title={sidebarSessionTitle}>
+                      {sidebarSessionTitle}
+                    </span>
+                    <DownOutlined className="chat-dock-side-title-btn-icon" />
+                  </button>
+                  {sidebarSessionMenuOpen ? (
+                    <div ref={sidebarSessionMenuRef} className="chat-dock-side-session-menu" role="listbox" aria-label="选择对话">
+                      {sidebarSessions.map((chatSession) => (
+                        <button
+                          key={chatSession.id}
+                          type="button"
+                          role="option"
+                          className={`chat-dock-side-session-item${chatSession.id === sessionId ? " is-active" : ""}`}
+                          aria-selected={chatSession.id === sessionId}
+                          onClick={() => handleSidebarSelectSession(chatSession.id)}
+                        >
+                          <span className="chat-dock-side-session-item-title">{chatSession.title || "新对话"}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="chat-dock-header-actions chat-dock-header-actions-side">
+                  <button
+                    type="button"
+                    className="chat-dock-header-btn"
+                    onClick={handleSidebarCreateSession}
+                    title="新建对话"
+                    disabled={sidebarInteractionsDisabled}
+                  >
+                    <PlusCircleOutlined />
+                  </button>
+                  {onOpenSettings && (
+                    <button
+                      type="button"
+                      className="chat-dock-header-btn"
+                      onClick={onOpenSettings}
+                      title="对话设置"
+                    >
+                      <SlidersOutlined />
+                    </button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="chat-dock-header-left">
+                  <div className="chat-dock-avatar">
+                    <RobotOutlined />
+                  </div>
+                  <div className="chat-dock-title-group">
+                    <span className="chat-dock-title">AI 助手</span>
+                    {llmConfig ? (
+                      <span className="chat-dock-model">
+                        {llmConfig.displayName} · {llmConfig.defaultModel}
+                      </span>
+                    ) : (
+                      <span className="chat-dock-model chat-dock-model-warning">
+                        未配置模型
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="chat-dock-header-actions">
+                  {onOpenSettings && (
+                    <button
+                      type="button"
+                      className="chat-dock-header-btn"
+                      onClick={onOpenSettings}
+                      title="设置"
+                    >
+                      <SettingOutlined />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="chat-dock-header-btn"
+                    onClick={handleClearHistory}
+                    title="清空对话"
+                  >
+                    <DeleteOutlined />
+                  </button>
+                </div>
+              </>
+            )}
             {isGenerating && (
               <span className="chat-dock-status">
                 <LoadingOutlined spin /> 生成中...
@@ -385,17 +832,50 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
           </header>
 
           {/* Messages */}
-          <div className="chat-dock-messages" ref={messagesRef}>
-            {messages.length === 0 && !assistantBuffer ? (
-              <div className="chat-dock-empty">
-                <div className="chat-dock-empty-icon">
-                  <RobotOutlined />
+          <div className="chat-dock-messages" ref={messagesRef} onScroll={handleMessagesScroll}>
+            {messages.length === 0 && !assistantBuffer && thinkingSteps.length === 0 ? (
+              isSidebar ? (
+                <div className="chat-dock-empty chat-dock-empty-side">
+                  <div className="chat-dock-empty-icon">
+                    <span
+                      className="chat-dock-empty-icon-emoji"
+                      role="img"
+                      aria-label="AI 机器人"
+                    >
+                      🤖
+                    </span>
+                  </div>
+                  <div className="chat-dock-empty-text">开始奇妙创作之旅</div>
+                  <div className="chat-dock-side-quick-list" role="list">
+                    {sidebarQuickActions.map((action) => (
+                      <button
+                        key={action.label}
+                        className="chat-dock-side-quick-item"
+                        role="listitem"
+                        type="button"
+                        onClick={() => handleSidebarQuickActionClick(action.prompt)}
+                        disabled={!projectKey || isGenerating || sidebarInteractionsDisabled}
+                      >
+                        <span className="chat-dock-side-quick-icon">{action.icon}</span>
+                        <span className="chat-dock-side-quick-label">{action.label}</span>
+                        {action.badge ? (
+                          <span className="chat-dock-side-quick-badge">{action.badge}</span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="chat-dock-empty-text">有什么可以帮助你的？</div>
-                <div className="chat-dock-empty-hint">
-                  {projectKey ? `当前项目: ${projectKey}` : "请先选择一个项目"}
+              ) : (
+                <div className="chat-dock-empty">
+                  <div className="chat-dock-empty-icon">
+                    <RobotOutlined />
+                  </div>
+                  <div className="chat-dock-empty-text">有什么可以帮助你的？</div>
+                  <div className="chat-dock-empty-hint">
+                    {projectKey ? `当前项目: ${projectKey}` : "请先选择一个项目"}
+                  </div>
                 </div>
-              </div>
+              )
             ) : (
               <>
                 {messages.map((msg) => (
@@ -437,7 +917,7 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
                 ))}
 
                 {/* Streaming message */}
-                {assistantBuffer && (
+                {(assistantBuffer || thinkingSteps.length > 0 || taskTodoItems.length > 0) && (
                   <div className="chat-msg chat-msg-assistant">
                     <div className="chat-msg-avatar">
                       <RobotOutlined />
@@ -446,18 +926,66 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
                       <div className="chat-msg-header">
                         <span className="chat-msg-role">AI</span>
                         <span className="chat-msg-time">
-                          <LoadingOutlined spin /> 思考中...
+                          {isGenerating ? <><LoadingOutlined spin /> 思考中...</> : "已完成"}
                         </span>
                       </div>
-                      <div className="chat-msg-text">
-                        {renderMarkdown(assistantBuffer)}
+                      <div className="chat-msg-text chat-stream-content">
+                        {taskTodoItems.length > 0 && (
+                          <TaskTodoList
+                            items={taskTodoItems}
+                            loading={isGenerating}
+                            storageKey={taskTodoStorageKey}
+                          />
+                        )}
+                        {thinkingSteps.length > 0 && (
+                          <ThinkingTimeline steps={thinkingSteps} loading={isGenerating} />
+                        )}
+                        {assistantBuffer ? (
+                          <div className="chat-stream-answer">
+                            {renderMarkdown(assistantBuffer)}
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   </div>
                 )}
 
+                {pendingRequiredInput && (
+                  <div className="chat-msg chat-msg-assistant chat-msg-inline-input">
+                    <div className="chat-msg-avatar">
+                      <RobotOutlined />
+                    </div>
+                    <div className="chat-msg-content">
+                      <RequiredInputDialog
+                        visible={true}
+                        inline
+                        projectKey={projectKey}
+                        pendingInput={pendingRequiredInput}
+                        onSubmit={handleProvideRequiredInput}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {pendingPreflightInfo && (
+                  <div className="chat-msg chat-msg-assistant chat-msg-inline-input">
+                    <div className="chat-msg-avatar">
+                      <RobotOutlined />
+                    </div>
+                    <div className="chat-msg-content">
+                      <PreflightInputDialog
+                        visible={true}
+                        inline
+                        projectKey={projectKey}
+                        pendingPreflight={pendingPreflightInfo}
+                        onSubmit={handleProvidePreflightInput}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* Generating indicator */}
-                {isGenerating && !assistantBuffer && (
+                {isGenerating && !assistantBuffer && thinkingSteps.length === 0 && taskTodoItems.length === 0 && (
                   <div className="chat-msg chat-msg-assistant">
                     <div className="chat-msg-avatar">
                       <RobotOutlined />
@@ -487,34 +1015,19 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
               </button>
             </div>
           )}
-        </div>
-      )}
+      </div>
 
       {/* Input Bar (Always visible) */}
       <div className="chat-dock-bar">
-        {/* Mention Tags (above input) */}
-        {mentions.length > 0 && (
-          <div className="chat-mention-tags">
-            {mentions.map((m) => (
-              <span key={m.docId} className="chat-mention-tag">
-                <span className="chat-mention-tag-icon">
-                  {m.includeChildren ? <FolderOutlined /> : <FileTextOutlined />}
-                </span>
-                <span className="chat-mention-tag-text" title={m.titlePath}>
-                  {m.title}
-                  {m.includeChildren && "/"}
-                </span>
-                <button
-                  type="button"
-                  className="chat-mention-tag-remove"
-                  onClick={() => handleRemoveMention(m.docId)}
-                >
-                  <CloseCircleOutlined />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
+        <input
+          ref={sidebarFileInputRef}
+          type="file"
+          multiple
+          className="chat-dock-side-file-input"
+          onChange={handleSidebarFileChange}
+          tabIndex={-1}
+          aria-hidden="true"
+        />
 
         {/* Mention Dropdown - positioned relative to chat-dock-bar */}
         <MentionDropdown
@@ -544,63 +1057,230 @@ function ChatPanel({ onOpenSettings }: ChatPanelProps) {
             </ul>
             <div className="slash-command-hint">
               <span>↑↓ 选择</span>
-              <span>Tab/Enter 确认</span>
+              <span>Tab/回车 确认</span>
               <span>Esc 取消</span>
             </div>
           </div>
         )}
+        {isSidebar ? (
+          <div className="chat-dock-side-stack">
+            {hasSidebarReferences ? (
+              <div className="chat-dock-side-reference-layer">
+                {mentions.length > 0 && (
+                  <div className="chat-mention-tags">
+                    {mentions.map((m) => (
+                      <span key={m.docId} className="chat-mention-tag">
+                        <span className="chat-mention-tag-icon">
+                          {m.kind === "plugin_template"
+                            ? <AppstoreOutlined />
+                            : m.includeChildren ? <FolderOutlined /> : <FileTextOutlined />}
+                        </span>
+                        <span className="chat-mention-tag-text" title={m.titlePath}>
+                          {m.kind === "plugin_template" ? `@ppt:${m.title}` : m.title}
+                          {m.kind !== "plugin_template" && m.includeChildren && "/"}
+                        </span>
+                        <button
+                          type="button"
+                          className="chat-mention-tag-remove"
+                          onClick={() => handleRemoveMention(m.docId)}
+                        >
+                          <CloseCircleOutlined />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <ChatAttachmentTags
+                  attachments={attachments}
+                  onRemove={removeAttachment}
+                />
+                {selectedCommand ? (
+                  <span className="chat-dock-side-command-chip">
+                    <span className="chat-command-tag-icon">{selectedCommand.icon}</span>
+                    <span className="chat-command-tag-text">{selectedCommand.command}</span>
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
 
-        <div className="chat-dock-input-wrapper">
-          {/* Command Tag (inline, left of input) */}
-          {selectedCommand && (
-            <span className="chat-command-tag-inline">
-              <span className="chat-command-tag-icon">{selectedCommand.icon}</span>
-              <span className="chat-command-tag-text">{selectedCommand.command}</span>
-            </span>
-          )}
-          <textarea
-            ref={inputRef}
-            className={`chat-dock-textarea ${selectedCommand ? "with-command" : ""}`}
-            placeholder={
-              selectedCommand
-                ? "输入参数..."
-                : projectKey
-                  ? "输入消息，@ 指定文档范围..."
-                  : "请先选择项目"
-            }
-            value={input}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            disabled={!projectKey || isGenerating}
-            rows={1}
-          />
-          <div className="chat-dock-bar-actions">
-            <button
-              type="button"
-              className="chat-dock-send-btn"
-              onClick={handleSendWithExpand}
-              disabled={!canSend}
-            >
-              {isGenerating ? <LoadingOutlined spin /> : <SendOutlined />}
-            </button>
-            <button
-              type="button"
-              className="chat-dock-toggle-btn"
-              onClick={() => setIsExpanded(!isExpanded)}
-              title={isExpanded ? "收起" : "展开"}
-            >
-              {isExpanded ? <DownOutlined /> : <UpOutlined />}
-            </button>
-            <button
-              type="button"
-              className="chat-dock-hide-btn"
-              onClick={() => setIsHidden(true)}
-              title="隐藏对话框"
-            >
-              <RightOutlined />
-            </button>
+            <div className="chat-dock-side-input-layer">
+              <Input.TextArea
+                ref={(instance) => {
+                  mutableInputRef.current = instance?.resizableTextArea?.textArea ?? null;
+                }}
+                className={`chat-dock-textarea chat-dock-side-textarea-layer ${selectedCommand ? "with-command" : ""}`}
+                placeholder={
+                  sidebarInteractionsDisabled
+                    ? "正在加载对话历史..."
+                    : selectedCommand
+                    ? "输入参数..."
+                    : projectKey
+                      ? "输入消息，@ 指定文档范围，/ 选择技能..."
+                      : "请先选择项目"
+                }
+                value={input}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+                disabled={!projectKey || isGenerating || sidebarInteractionsDisabled}
+                autoSize={{ minRows: 2, maxRows: 8 }}
+              />
+            </div>
+
+            <div className="chat-dock-side-function-layer">
+              <button
+                type="button"
+                className="chat-dock-side-tool-btn"
+                onClick={handleSidebarFilePickClick}
+                title="添加文件"
+                disabled={!projectKey || isGenerating || sidebarInteractionsDisabled}
+              >
+                <PaperClipOutlined />
+              </button>
+              <button
+                type="button"
+                className={`chat-dock-side-tool-btn chat-dock-side-web-search-btn ${deepSearchEnabled ? "active" : ""}`}
+                onClick={() => setDeepSearchEnabled(!deepSearchEnabled)}
+                title={deepSearchEnabled ? "关闭网络搜索" : "开启网络搜索"}
+                disabled={!projectKey || isGenerating || sidebarInteractionsDisabled}
+              >
+                <GlobalOutlined />
+              </button>
+              <button
+                type="button"
+                className="chat-dock-side-model-btn"
+                onClick={onOpenSettings}
+                title="选择模型"
+                disabled={!onOpenSettings}
+              >
+                <span className="chat-dock-side-model-text">
+                  {llmConfig?.defaultModel || "自动"}
+                </span>
+                <DownOutlined />
+              </button>
+              {isGenerating ? (
+                <button
+                  type="button"
+                  className="chat-dock-send-btn chat-dock-stop-btn"
+                  onClick={handleStop}
+                  title="停止生成"
+                >
+                  <StopOutlined />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="chat-dock-send-btn"
+                  onClick={handleSendWithExpand}
+                  disabled={!canSend || attachmentsLoading || sidebarInteractionsDisabled}
+                  title="发送消息"
+                >
+                  <SendOutlined />
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        ) : (
+          <>
+            {/* Mention Tags (above input) */}
+            {mentions.length > 0 && (
+              <div className="chat-mention-tags">
+                {mentions.map((m) => (
+                  <span key={m.docId} className="chat-mention-tag">
+                    <span className="chat-mention-tag-icon">
+                      {m.kind === "plugin_template"
+                        ? <AppstoreOutlined />
+                        : m.includeChildren ? <FolderOutlined /> : <FileTextOutlined />}
+                    </span>
+                    <span className="chat-mention-tag-text" title={m.titlePath}>
+                      {m.kind === "plugin_template" ? `@ppt:${m.title}` : m.title}
+                      {m.kind !== "plugin_template" && m.includeChildren && "/"}
+                    </span>
+                    <button
+                      type="button"
+                      className="chat-mention-tag-remove"
+                      onClick={() => handleRemoveMention(m.docId)}
+                    >
+                      <CloseCircleOutlined />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Attachment Tags (above input) */}
+            <ChatAttachmentTags
+              attachments={attachments}
+              onRemove={removeAttachment}
+            />
+
+            <div className="chat-dock-input-wrapper">
+              {/* Command Tag (inline, left of input) */}
+              {selectedCommand && (
+                <span className="chat-command-tag-inline">
+                  <span className="chat-command-tag-icon">{selectedCommand.icon}</span>
+                  <span className="chat-command-tag-text">{selectedCommand.command}</span>
+                </span>
+              )}
+              <Input.TextArea
+                ref={(instance) => {
+                  mutableInputRef.current = instance?.resizableTextArea?.textArea ?? null;
+                }}
+                className={`chat-dock-textarea ${selectedCommand ? "with-command" : ""}`}
+                placeholder={
+                  selectedCommand
+                    ? "输入参数..."
+                    : projectKey
+                      ? "输入消息，@ 指定文档范围，@ppt 选择 PPT 模版..."
+                      : "请先选择项目"
+                }
+                value={input}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+                disabled={!projectKey || isGenerating}
+                autoSize={{ minRows: 1, maxRows: 8 }}
+              />
+              <div className="chat-dock-bar-actions">
+                {isGenerating ? (
+                  <button
+                    type="button"
+                    className="chat-dock-send-btn chat-dock-stop-btn"
+                    onClick={handleStop}
+                    title="停止生成"
+                  >
+                    <StopOutlined />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="chat-dock-send-btn"
+                    onClick={handleSendWithExpand}
+                    disabled={!canSend}
+                  >
+                    <SendOutlined />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="chat-dock-toggle-btn"
+                  onClick={() => setIsExpanded(!isExpanded)}
+                  title={isExpanded ? "收起" : "展开"}
+                >
+                  {isExpanded ? <DownOutlined /> : <UpOutlined />}
+                </button>
+                <button
+                  type="button"
+                  className="chat-dock-hide-btn"
+                  onClick={() => setHidden(true)}
+                  title="隐藏对话框"
+                >
+                  <RightOutlined />
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </section>
   );

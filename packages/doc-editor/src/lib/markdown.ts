@@ -14,6 +14,11 @@ import {
 import { CodeBlockNode } from "../nodes/code-block-node/code-block-node-extension"
 import { FileBlockNode } from "../nodes/file-block-node/file-block-node-extension"
 import { HorizontalRule } from "../nodes/horizontal-rule-node/horizontal-rule-node-extension"
+import { createTableExtensions } from "../nodes/table-node/table-node-extension"
+import { MathNode } from "../nodes/math-node/math-node-extension"
+import { MusicNode } from "../nodes/music-node/music-node-extension"
+import { ChartNode } from "../nodes/chart-node/chart-node-extension"
+import { ColumnNode, ColumnsNode } from "../nodes/columns-node/columns-node-extension"
 
 export type MarkdownConversionOptions = {
   extensions?: Extensions
@@ -33,6 +38,12 @@ const DEFAULT_EXTENSIONS: Extensions = [
   CodeBlockNode,
   Image,
   FileBlockNode,
+  MathNode,
+  MusicNode,
+  ChartNode,
+  ColumnNode,
+  ColumnsNode,
+  ...createTableExtensions(),
 ]
 
 const ATTR_PAIR_REGEX = /([a-zA-Z0-9_-]+)\s*=\s*("[^"]*"|'[^']*'|[^,\s}]+)/g
@@ -62,10 +73,146 @@ const createMarkdownSchema = (extensions?: Extensions) => {
 }
 
 const createMarkdownParser = (schema: ReturnType<typeof createMarkdownSchema>) => {
-  const markdown = new MarkdownIt("commonmark", {
+  // Use "default" preset instead of "commonmark" to enable GFM tables
+  const markdown = new MarkdownIt("default", {
     html: false,
     linkify: true,
     breaks: true,
+  })
+  // Enable GFM tables
+  markdown.enable("table")
+
+  // Add inline math rule: $...$
+  markdown.inline.ruler.after("escape", "math_inline", (state, silent) => {
+    if (state.src[state.pos] !== "$") {
+      return false
+    }
+    // Check for $$
+    if (state.src[state.pos + 1] === "$") {
+      return false
+    }
+
+    const start = state.pos + 1
+    let end = start
+    while (end < state.posMax && state.src[end] !== "$") {
+      if (state.src[end] === "\\") {
+        end += 2
+      } else {
+        end++
+      }
+    }
+
+    if (end >= state.posMax || state.src[end] !== "$") {
+      return false
+    }
+
+    const latex = state.src.slice(start, end)
+    if (!latex.trim()) {
+      return false
+    }
+
+    if (!silent) {
+      const token = state.push("math_inline", "span", 0)
+      token.content = latex
+      token.markup = "$"
+    }
+
+    state.pos = end + 1
+    return true
+  })
+
+  // Add block math rule: $$...$$
+  markdown.block.ruler.before("fence", "math_block", (state, startLine, endLine, silent) => {
+    const pos = state.bMarks[startLine] + state.tShift[startLine]
+    const max = state.eMarks[startLine]
+
+    if (pos + 2 > max) {
+      return false
+    }
+    if (state.src.slice(pos, pos + 2) !== "$$") {
+      return false
+    }
+
+    // Find closing $$
+    let nextLine = startLine
+    let content = ""
+
+    // Check if it's a single-line block: $$...$$ on same line
+    const restOfLine = state.src.slice(pos + 2, max).trim()
+    if (restOfLine.endsWith("$$") && restOfLine.length > 2) {
+      content = restOfLine.slice(0, -2)
+      nextLine = startLine + 1
+    } else {
+      // Multi-line block
+      nextLine = startLine + 1
+      while (nextLine < endLine) {
+        const lineStart = state.bMarks[nextLine] + state.tShift[nextLine]
+        const lineEnd = state.eMarks[nextLine]
+        const line = state.src.slice(lineStart, lineEnd)
+
+        if (line.trim() === "$$") {
+          break
+        }
+        content += (content ? "\n" : "") + line
+        nextLine++
+      }
+
+      if (nextLine >= endLine) {
+        return false
+      }
+      nextLine++
+    }
+
+    if (silent) {
+      return true
+    }
+
+    const token = state.push("math_block", "div", 0)
+    token.content = content.trim()
+    token.markup = "$$"
+    token.map = [startLine, nextLine]
+
+    state.line = nextLine
+    return true
+  })
+
+  // Add inline music rule: ~abc:...~
+  markdown.inline.ruler.after("escape", "music_inline", (state, silent) => {
+    if (state.src[state.pos] !== "~") {
+      return false
+    }
+    // Check for ~abc:
+    if (state.src.slice(state.pos, state.pos + 5) !== "~abc:") {
+      return false
+    }
+
+    const start = state.pos + 5
+    let end = start
+    while (end < state.posMax && state.src[end] !== "~") {
+      if (state.src[end] === "\\") {
+        end += 2
+      } else {
+        end++
+      }
+    }
+
+    if (end >= state.posMax || state.src[end] !== "~") {
+      return false
+    }
+
+    const abc = state.src.slice(start, end)
+    if (!abc.trim()) {
+      return false
+    }
+
+    if (!silent) {
+      const token = state.push("music_inline", "span", 0)
+      token.content = abc
+      token.markup = "~abc:"
+    }
+
+    state.pos = end + 1
+    return true
   })
 
   markdown.core.ruler.push("file_block_fence", (state) => {
@@ -76,6 +223,18 @@ const createMarkdownParser = (schema: ReturnType<typeof createMarkdownSchema>) =
       const { language } = parseFenceInfo(token.info || "")
       if (language === "file") {
         token.type = "file_block"
+        token.tag = "div"
+        continue
+      }
+      // Handle ABC music notation blocks
+      if (language === "abc") {
+        token.type = "music_block"
+        token.tag = "div"
+        continue
+      }
+      // Handle ECharts chart blocks
+      if (language === "echarts") {
+        token.type = "chart_block"
         token.tag = "div"
         continue
       }
@@ -138,9 +297,97 @@ const createMarkdownParser = (schema: ReturnType<typeof createMarkdownSchema>) =
       }),
     },
     code_inline: { mark: "code" },
+    // Math tokens
+    math_inline: {
+      node: "math",
+      getAttrs: (token: any) => ({
+        latex: token.content,
+        display: false,
+      }),
+    },
+    math_block: {
+      node: "math",
+      getAttrs: (token: any) => ({
+        latex: token.content,
+        display: true,
+      }),
+    },
+    // Music tokens
+    music_inline: {
+      node: "music",
+      getAttrs: (token: any) => ({
+        abc: token.content,
+        display: false,
+      }),
+    },
+    music_block: {
+      node: "music",
+      noCloseToken: true,
+      getAttrs: (token: any) => ({
+        abc: token.content,
+        display: true,
+      }),
+    },
+    // Chart tokens
+    chart_block: {
+      node: "chart",
+      noCloseToken: true,
+      getAttrs: (token: any) => ({
+        options: token.content,
+        mode: "advanced",
+        chartType: "bar",
+        simpleData: "",
+        width: 100,
+        height: 300,
+      }),
+    },
+    // Table tokens
+    table: { block: "table" },
+    thead: { ignore: true }, // thead/tbody are structural, content goes in rows
+    tbody: { ignore: true },
+    tr: { block: "tableRow" },
+    th: {
+      block: "tableHeader",
+      getAttrs: (token: any) => ({
+        colspan: Number(token.attrGet("colspan")) || 1,
+        rowspan: Number(token.attrGet("rowspan")) || 1,
+        colwidth: null,
+      }),
+    },
+    td: {
+      block: "tableCell",
+      getAttrs: (token: any) => ({
+        colspan: Number(token.attrGet("colspan")) || 1,
+        rowspan: Number(token.attrGet("rowspan")) || 1,
+        colwidth: null,
+      }),
+    },
   }
 
   return new MarkdownParser(schema, markdown, tokens)
+}
+
+/**
+ * Serialize cell content to plain text for markdown table
+ */
+const serializeCellContent = (cell: any): string => {
+  let text = ""
+  cell.forEach((child: any) => {
+    if (child.isText) {
+      text += child.text || ""
+    } else if (child.type.name === "paragraph") {
+      child.forEach((inline: any) => {
+        if (inline.isText) {
+          text += inline.text || ""
+        }
+      })
+    } else {
+      // For other block types, recursively get text content
+      text += child.textContent || ""
+    }
+  })
+  // Escape pipe characters in cell content
+  return text.replace(/\|/g, "\\|").trim()
 }
 
 const createMarkdownSerializer = (_schema: ReturnType<typeof createMarkdownSchema>) => {
@@ -155,7 +402,10 @@ const createMarkdownSerializer = (_schema: ReturnType<typeof createMarkdownSchem
       bulletList: baseNodes.bullet_list,
       orderedList: baseNodes.ordered_list,
       listItem: baseNodes.list_item,
-      horizontalRule: baseNodes.horizontal_rule,
+      horizontalRule: (state: any, node: any) => {
+        state.write("---")
+        state.closeBlock(node)
+      },
       hardBreak: baseNodes.hard_break,
       image: baseNodes.image,
       text: baseNodes.text ?? ((state: any, node: any) => state.text(node.text)),
@@ -175,6 +425,125 @@ const createMarkdownSerializer = (_schema: ReturnType<typeof createMarkdownSchem
         state.write(`\`\`\`${info}\n`)
         state.write("```")
         state.closeBlock(node)
+      },
+      // Table serializers
+      table: (state: any, node: any) => {
+        // Collect all rows and cells to compute column widths
+        const rows: string[][] = []
+        const isHeaderRow: boolean[] = []
+
+        node.forEach((row: any) => {
+          const cells: string[] = []
+          let hasHeader = false
+          row.forEach((cell: any) => {
+            // Serialize cell content to string
+            const cellContent = serializeCellContent(cell)
+            cells.push(cellContent)
+            if (cell.type.name === "tableHeader") {
+              hasHeader = true
+            }
+          })
+          rows.push(cells)
+          isHeaderRow.push(hasHeader)
+        })
+
+        if (rows.length === 0) {
+          state.closeBlock(node)
+          return
+        }
+
+        // Calculate column widths
+        const colCount = Math.max(...rows.map((r) => r.length))
+        const colWidths = new Array(colCount).fill(3)
+        for (const row of rows) {
+          for (let i = 0; i < row.length; i++) {
+            colWidths[i] = Math.max(colWidths[i], row[i].length)
+          }
+        }
+
+        // Write table
+        for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+          const row = rows[rowIdx]
+          const cells = row.map((cell, i) => cell.padEnd(colWidths[i]))
+          state.write(`| ${cells.join(" | ")} |\n`)
+
+          // Write separator after header row
+          if (isHeaderRow[rowIdx] && (rowIdx === 0 || !isHeaderRow[rowIdx - 1])) {
+            const separator = colWidths.map((w) => "-".repeat(w))
+            state.write(`| ${separator.join(" | ")} |\n`)
+          }
+        }
+
+        state.closeBlock(node)
+      },
+      tableRow: () => {
+        // Handled by table serializer
+      },
+      tableHeader: () => {
+        // Handled by table serializer
+      },
+      tableCell: () => {
+        // Handled by table serializer
+      },
+      // Math serializer
+      math: (state: any, node: any) => {
+        const latex = node.attrs.latex || ""
+        const display = node.attrs.display || false
+        if (display) {
+          // Block math
+          state.write("$$\n")
+          state.write(latex)
+          state.ensureNewLine()
+          state.write("$$")
+          state.closeBlock(node)
+        } else {
+          // Inline math
+          state.write(`$${latex}$`)
+        }
+      },
+      // Music serializer
+      music: (state: any, node: any) => {
+        const abc = node.attrs.abc || ""
+        const display = node.attrs.display || false
+        if (display) {
+          // Block music
+          state.write("```abc\n")
+          state.write(abc)
+          state.ensureNewLine()
+          state.write("```")
+          state.closeBlock(node)
+        } else {
+          // Inline music
+          state.write(`~abc:${abc}~`)
+        }
+      },
+      // Chart serializer
+      chart: (state: any, node: any) => {
+        const options = node.attrs.options || ""
+        // If options is set, use it directly
+        // Otherwise, serialize from simpleData (though typically options should be computed)
+        const content = options || "{}"
+        state.write("```echarts\n")
+        state.write(content)
+        state.ensureNewLine()
+        state.write("```")
+        state.closeBlock(node)
+      },
+      columns: (state: any, node: any) => {
+        node.forEach((column: any, _offset: number, index: number) => {
+          column.forEach((child: any) => {
+            state.render(child, node, index)
+          })
+          if (index < node.childCount - 1) {
+            state.ensureNewLine()
+          }
+        })
+        state.closeBlock(node)
+      },
+      column: (state: any, node: any) => {
+        node.forEach((child: any) => {
+          state.render(child, node, 0)
+        })
       },
     },
     {

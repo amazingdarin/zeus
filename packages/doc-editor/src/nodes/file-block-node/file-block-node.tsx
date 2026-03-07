@@ -10,11 +10,13 @@ import { Button } from "../../primitives/button"
 import { TrashIcon } from "../../icons/trash-icon"
 import { ImagePlusIcon } from "../../icons/image-plus-icon"
 import { ChevronDownIcon } from "../../icons/chevron-down-icon"
+import { DownloadIcon } from "../../icons/download-icon"
 import type {
   FileBlockAttrs,
   FileBlockNodeOptions,
   FileBlockUploadResult,
 } from "./file-block-node-extension"
+import { encodeProjectRefPath } from "../../lib/project-scope"
 import "./file-block-node.scss"
 
 type FileBlockState = {
@@ -33,7 +35,7 @@ const textCache = new Map<string, TextCacheEntry>()
 const textPromiseCache = new Map<string, Promise<TextCacheEntry>>()
 
 type FileKind = {
-  fileType: "office" | "text" | "unknown"
+  fileType: "office" | "text" | "audio" | "video" | "unknown"
   officeType?: "docx" | "xlsx" | "pptx" | "pdf"
 }
 
@@ -43,7 +45,7 @@ const DEFAULT_FETCHER: (url: string, init?: RequestInit) => Promise<Response> = 
 ) => fetch(url, init)
 
 const DEFAULT_ACCEPT =
-  ".pdf,.docx,.pptx,.xlsx,.txt,.md,.csv,.json,.yaml,.yml,.log"
+  ".pdf,.docx,.pptx,.xlsx,.txt,.md,.csv,.json,.yaml,.yml,.log,.mp3,.wav,.ogg,.m4a,.aac,.flac,.mp4,.webm,.ogv,.mov,.m4v,.avi,.mkv"
 
 const OFFICE_MIME_MAP: Record<string, FileKind["officeType"]> = {
   "application/pdf": "pdf",
@@ -68,8 +70,12 @@ const TEXT_EXTENSIONS = new Set([
   "yml",
   "log",
 ])
+const AUDIO_EXTENSIONS = new Set(["mp3", "wav", "ogg", "m4a", "aac", "flac"])
+const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "ogv", "mov", "m4v", "avi", "mkv"])
 
 const TEXT_MIME_PREFIXES = ["text/"]
+const AUDIO_MIME_PREFIXES = ["audio/"]
+const VIDEO_MIME_PREFIXES = ["video/"]
 const TEXT_MIME_VALUES = new Set([
   "application/json",
   "application/x-yaml",
@@ -93,8 +99,14 @@ const resolveFileKind = (
   if (fileType === "text") {
     return { fileType: "text" }
   }
+  if (fileType === "audio") {
+    return { fileType: "audio" }
+  }
+  if (fileType === "video") {
+    return { fileType: "video" }
+  }
 
-  const normalizedMime = mime.toLowerCase()
+  const normalizedMime = mime.trim().toLowerCase()
   if (normalizedMime in OFFICE_MIME_MAP) {
     return { fileType: "office", officeType: OFFICE_MIME_MAP[normalizedMime] }
   }
@@ -104,6 +116,12 @@ const resolveFileKind = (
   if (TEXT_MIME_PREFIXES.some((prefix) => normalizedMime.startsWith(prefix))) {
     return { fileType: "text" }
   }
+  if (AUDIO_MIME_PREFIXES.some((prefix) => normalizedMime.startsWith(prefix))) {
+    return { fileType: "audio" }
+  }
+  if (VIDEO_MIME_PREFIXES.some((prefix) => normalizedMime.startsWith(prefix))) {
+    return { fileType: "video" }
+  }
 
   const ext = fileName.split(".").pop()?.toLowerCase() ?? ""
   if (ext in OFFICE_EXT_MAP) {
@@ -111,6 +129,12 @@ const resolveFileKind = (
   }
   if (TEXT_EXTENSIONS.has(ext)) {
     return { fileType: "text" }
+  }
+  if (AUDIO_EXTENSIONS.has(ext)) {
+    return { fileType: "audio" }
+  }
+  if (VIDEO_EXTENSIONS.has(ext)) {
+    return { fileType: "video" }
   }
 
   return { fileType: "unknown" }
@@ -146,7 +170,7 @@ const defaultResolveAssetUrl = (projectKey: string, assetId: string) => {
     return normalized
   }
   const id = normalizeAssetId(normalized)
-  return `/api/projects/${encodeURIComponent(projectKey)}/assets/${encodeURIComponent(
+  return `/api/projects/${encodeProjectRefPath(projectKey)}/assets/${encodeURIComponent(
     id
   )}/content`
 }
@@ -166,7 +190,7 @@ const defaultUploadFile = async (
   formData.append("size", String(file.size))
 
   const response = await fetcher(
-    `/api/projects/${encodeURIComponent(projectKey)}/assets/import`,
+    `/api/projects/${encodeProjectRefPath(projectKey)}/assets/import`,
     {
       method: "POST",
       body: formData,
@@ -216,6 +240,7 @@ export function FileBlockNodeView({ node, editor, extension, getPos }: NodeViewP
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState(!editor.isEditable)
+  const [preferAudioPreview, setPreferAudioPreview] = useState(false)
   const [textState, setTextState] = useState<FileBlockState>({
     loading: false,
     error: null,
@@ -227,6 +252,10 @@ export function FileBlockNodeView({ node, editor, extension, getPos }: NodeViewP
   useEffect(() => {
     setCollapsed(!editor.isEditable)
   }, [editor.isEditable])
+
+  useEffect(() => {
+    setPreferAudioPreview(false)
+  }, [assetId, fileName, mime])
 
   const updateNodeAttrs = useCallback(
     (nextAttrs: Partial<FileBlockAttrs>) => {
@@ -341,6 +370,17 @@ export function FileBlockNodeView({ node, editor, extension, getPos }: NodeViewP
     setTextState({ loading: false, error: null, text: "", truncated: false })
   }
 
+  const handleDownload = useCallback(() => {
+    if (!assetUrl) return
+    const link = document.createElement("a")
+    link.href = assetUrl
+    link.download = fileName || "download"
+    link.rel = "noopener noreferrer"
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }, [assetUrl, fileName])
+
   const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     event.target.value = ""
@@ -371,13 +411,19 @@ export function FileBlockNodeView({ node, editor, extension, getPos }: NodeViewP
   }
 
   const fileSizeLabel = formatFileSize(size)
-  const typeLabel = mime || "unknown"
+  const typeLabel = mime || resolvedKind.fileType || "unknown"
   const nameLabel = fileName || "Untitled file"
   const showUpload = !assetId
   const showUploadPrompt = showUpload && editor.isEditable
   const showOfficeViewer =
     assetId && resolvedKind.fileType === "office" && resolvedKind.officeType
   const showTextViewer = assetId && resolvedKind.fileType === "text"
+  const showAudioViewer =
+    assetId &&
+    (resolvedKind.fileType === "audio" ||
+      (resolvedKind.fileType === "video" && preferAudioPreview))
+  const showVideoViewer =
+    assetId && resolvedKind.fileType === "video" && !preferAudioPreview
   const showUnsupported = assetId && resolvedKind.fileType === "unknown"
 
   return (
@@ -425,6 +471,15 @@ export function FileBlockNodeView({ node, editor, extension, getPos }: NodeViewP
             <div className="file-block-actions">
               <button
                 type="button"
+                className="file-block-download"
+                onClick={handleDownload}
+                aria-label="Download file"
+                title="下载文件"
+              >
+                <DownloadIcon className="file-block-action-icon" />
+              </button>
+              <button
+                type="button"
                 className="file-block-toggle"
                 onClick={toggleCollapse}
                 aria-label={collapsed ? "Expand file preview" : "Collapse file preview"}
@@ -450,7 +505,9 @@ export function FileBlockNodeView({ node, editor, extension, getPos }: NodeViewP
                   <div className="file-block-dropzone-text">
                     Drop a file or <em>browse</em>
                   </div>
-                  <div className="file-block-dropzone-subtext">Supports office + text files</div>
+                  <div className="file-block-dropzone-subtext">
+                    Supports office, text, audio and video files
+                  </div>
                 </div>
               </button>
             ) : showOfficeViewer ? (
@@ -473,6 +530,30 @@ export function FileBlockNodeView({ node, editor, extension, getPos }: NodeViewP
                     {textState.truncated ? "\n..." : ""}
                   </pre>
                 )}
+              </div>
+            ) : showAudioViewer ? (
+              <div className="file-block-preview file-block-preview--media" contentEditable={false}>
+                <audio className="file-block-audio" controls preload="metadata" src={assetUrl}>
+                  Your browser does not support audio playback.
+                </audio>
+              </div>
+            ) : showVideoViewer ? (
+              <div className="file-block-preview file-block-preview--media" contentEditable={false}>
+                <video
+                  className="file-block-video"
+                  controls
+                  preload="metadata"
+                  playsInline
+                  src={assetUrl}
+                  onLoadedMetadata={(event) => {
+                    const target = event.currentTarget
+                    if (target.videoWidth <= 0 || target.videoHeight <= 0) {
+                      setPreferAudioPreview(true)
+                    }
+                  }}
+                >
+                  Your browser does not support video playback.
+                </video>
               </div>
             ) : showUnsupported ? (
               <div className="file-block-state">Preview not available.</div>

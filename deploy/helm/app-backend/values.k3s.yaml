@@ -1,0 +1,55 @@
+replicaCount: 1
+
+image:
+  repository: 43.139.120.149:30002/zeus/app-backend
+  tag: "v20260305"
+  pullPolicy: IfNotPresent
+  pullSecrets:
+    - harbor-regcred
+
+service:
+  type: ClusterIP
+  port: 4870
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: zeus.tail.dkbgc.com
+      paths:
+        - /api/app
+        # Keep unscoped /api/projects for Go server; only route scoped paths to app-backend.
+        - /api/projects/personal
+        - /api/projects/team
+        - /api/system-docs
+        - /api/plugins
+        - /api/skills
+        - /api/llm
+        - /api/settings
+        - /api/ocr
+        - /api/ppt-templates
+        - /api/ppt-service
+  tls: []
+
+persistence:
+  enabled: true
+  size: 20Gi
+  storageClassName: local-path
+  mountPath: /var/lib/zeus
+
+env:
+  APP_BACKEND_PORT: "4870"
+  APP_BACKEND_CORS: ""
+  APP_MODE: "multi-tenant"
+  AUTH_ENABLED: "true"
+  PROJECT_ISOLATION: "true"
+  AUTH_SERVER_URL: "http://zeus-backend.zeus.svc.cluster.local:8080"
+  ZEUS_DATA_ROOT: "/var/lib/zeus"
+  SYSTEM_DOCS_DIR: "/var/lib/zeus/system-docs"
+  LANGFUSE_ENABLED: "false"
+  BANANA_SLIDES_URL: "http://banana-slides:8080"
+
+secretEnv:
+  DATABASE_URL: "postgres://zeus:__REPLACE_POSTGRES_PASSWORD__@postgres.postgres.svc.cluster.local:5432/zeus"
+  JWT_SECRET: "__REPLACE_JWT_SECRET__"
+  ENCRYPTION_KEY: "__REPLACE_ENCRYPTION_KEY__"

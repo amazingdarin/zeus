@@ -1,545 +1,763 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, Form, Input, Modal, Select, Switch, message, Spin, Card } from "antd";
+import { useTranslation } from "react-i18next";
+import { Button, Form, Input, Modal, Select, Switch, Spin, Card } from "antd";
+import { useAppFeedback } from "../hooks/useAppFeedback";
 import {
-  PlusOutlined,
-  EditOutlined,
-  DeleteOutlined,
-  ThunderboltOutlined,
-  RobotOutlined,
-  CloudServerOutlined,
-  ApiOutlined,
-  DesktopOutlined,
-  SyncOutlined,
+	PlusOutlined,
+	EditOutlined,
+	DeleteOutlined,
+	ThunderboltOutlined,
+	RobotOutlined,
+	CloudServerOutlined,
+	ApiOutlined,
+	DesktopOutlined,
+	SyncOutlined,
 } from "@ant-design/icons";
 
 import {
-  getConfigByType,
-  setConfigByType,
-  deleteConfigByType,
-  testConfigByType,
-  getProviderTypes,
-  fetchOllamaModels,
-  type ProviderConfig,
-  type ProviderConfigInput,
-  type ProviderType,
-  type LLMProviderId,
-  type OllamaModel,
-  type ConfigType,
+	getConfigByType,
+	setConfigByType,
+	deleteConfigByType,
+	testConfigByType,
+	getProviderTypes,
+	fetchOllamaModels,
+	type ProviderConfig,
+	type ProviderConfigInput,
+	type ProviderType,
+	type LLMProviderId,
+	type OllamaModel,
+	type ConfigType,
 } from "../api/llm-config";
+
+const TRANSCRIPTION_PROVIDER: LLMProviderId = "openai-compatible";
+const DEFAULT_TRANSCRIPTION_BASE_URL = "http://localhost:30800/v1";
+const DEFAULT_TRANSCRIPTION_MODEL = "whisper-large-v3";
 
 /**
  * Format file size
  */
 function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+	if (bytes < 1024) return `${bytes} B`;
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+	if (bytes < 1024 * 1024 * 1024)
+		return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+	return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
 
 /**
  * Get icon for provider type
  */
 function getProviderIcon(providerId: LLMProviderId) {
-  switch (providerId) {
-    case "openai":
-      return <RobotOutlined />;
-    case "anthropic":
-      return <CloudServerOutlined />;
-    case "google":
-      return <ApiOutlined />;
-    case "ollama":
-      return <DesktopOutlined />;
-    case "paddleocr":
-      return <ThunderboltOutlined />;
-    default:
-      return <CloudServerOutlined />;
-  }
+	switch (providerId) {
+		case "openai":
+			return <RobotOutlined />;
+		case "anthropic":
+			return <CloudServerOutlined />;
+		case "google":
+			return <ApiOutlined />;
+		case "ollama":
+			return <DesktopOutlined />;
+		case "paddleocr":
+			return <ThunderboltOutlined />;
+		default:
+			return <CloudServerOutlined />;
+	}
 }
 
 /**
  * AI Provider configuration panel
  */
 function AIProviderPanel() {
-  const [llmConfig, setLlmConfig] = useState<ProviderConfig | null>(null);
-  const [embeddingConfig, setEmbeddingConfig] = useState<ProviderConfig | null>(null);
-  const [visionConfig, setVisionConfig] = useState<ProviderConfig | null>(null);
-  const [providerTypes, setProviderTypes] = useState<ProviderType[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [editingType, setEditingType] = useState<ConfigType | null>(null);
-  const [selectedProvider, setSelectedProvider] = useState<LLMProviderId | null>(null);
-  const [testingType, setTestingType] = useState<ConfigType | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
-  const [loadingOllamaModels, setLoadingOllamaModels] = useState(false);
-  const [form] = Form.useForm();
+	const { messageApi, modalApi } = useAppFeedback();
+	const [llmConfig, setLlmConfig] = useState<ProviderConfig | null>(null);
+	const [embeddingConfig, setEmbeddingConfig] = useState<ProviderConfig | null>(
+		null,
+	);
+	const [visionConfig, setVisionConfig] = useState<ProviderConfig | null>(null);
+	const [transcriptionConfig, setTranscriptionConfig] =
+		useState<ProviderConfig | null>(null);
+	const [providerTypes, setProviderTypes] = useState<ProviderType[]>([]);
+	const [loading, setLoading] = useState(true);
+	const [modalVisible, setModalVisible] = useState(false);
+	const [editingType, setEditingType] = useState<ConfigType | null>(null);
+	const [selectedProvider, setSelectedProvider] =
+		useState<LLMProviderId | null>(null);
+	const [testingType, setTestingType] = useState<ConfigType | null>(null);
+	const [submitting, setSubmitting] = useState(false);
+	const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
+	const [loadingOllamaModels, setLoadingOllamaModels] = useState(false);
+	const { t } = useTranslation("settings");
+	const [form] = Form.useForm();
+	const transcriptionDisplayName = t(
+		"settings.aiProviders.transcription.displayName",
+	);
+	const getStatusLabel = (status: string) => {
+		if (status === "active") return t("settings.aiProviders.status.active");
+		if (status === "error") return t("settings.aiProviders.status.error");
+		return t("settings.aiProviders.status.untested");
+	};
 
-  /**
-   * Load configurations and provider types
-   */
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [llm, embedding, vision, types] = await Promise.all([
-        getConfigByType("llm"),
-        getConfigByType("embedding"),
-        getConfigByType("vision"),
-        getProviderTypes(),
-      ]);
-      setLlmConfig(llm);
-      setEmbeddingConfig(embedding);
-      setVisionConfig(vision);
-      setProviderTypes(types);
-    } catch (err) {
-      message.error("加载配置失败");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+	/**
+	 * Load configurations and provider types
+	 */
+	const loadData = useCallback(async () => {
+		setLoading(true);
+		try {
+			const [llm, embedding, vision, transcription, types] = await Promise.all([
+				getConfigByType("llm"),
+				getConfigByType("embedding"),
+				getConfigByType("vision"),
+				getConfigByType("transcription"),
+				getProviderTypes(),
+			]);
+			setLlmConfig(llm);
+			setEmbeddingConfig(embedding);
+			setVisionConfig(vision);
+			setTranscriptionConfig(transcription);
+			setProviderTypes(types);
+		} catch (err) {
+			messageApi.error(t("settings.aiProviders.loadFailed"));
+		} finally {
+			setLoading(false);
+		}
+	}, []);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+	useEffect(() => {
+		loadData();
+	}, [loadData]);
 
-  /**
-   * Open modal to add/edit configuration
-   */
-  const handleOpenModal = (configType: ConfigType, existingConfig?: ProviderConfig | null) => {
-    setEditingType(configType);
-    form.resetFields();
-    
-    if (existingConfig) {
-      setSelectedProvider(existingConfig.providerId);
-      form.setFieldsValue({
-        displayName: existingConfig.displayName,
-        baseUrl: existingConfig.baseUrl,
-        defaultModel: existingConfig.defaultModel,
-        apiKey: "", // Don't fill in the API key
-        enabled: existingConfig.enabled,
-      });
-      // Load Ollama models when editing Ollama provider
-      if (existingConfig.providerId === "ollama" && existingConfig.baseUrl) {
-        loadOllamaModels(existingConfig.baseUrl);
-      }
-    } else {
-      setSelectedProvider(null);
-    }
-    setModalVisible(true);
-  };
+	/**
+	 * Open modal to add/edit configuration
+	 */
+	const handleOpenModal = (
+		configType: ConfigType,
+		existingConfig?: ProviderConfig | null,
+	) => {
+		setEditingType(configType);
+		form.resetFields();
+		if (configType === "transcription") {
+			setSelectedProvider(TRANSCRIPTION_PROVIDER);
+			form.setFieldsValue({
+				displayName: existingConfig?.displayName || transcriptionDisplayName,
+				baseUrl: existingConfig?.baseUrl || DEFAULT_TRANSCRIPTION_BASE_URL,
+				defaultModel:
+					existingConfig?.defaultModel || DEFAULT_TRANSCRIPTION_MODEL,
+				apiKey: "",
+				enabled: existingConfig?.enabled ?? true,
+			});
+			setModalVisible(true);
+			return;
+		}
 
-  /**
-   * Delete a configuration
-   */
-  const handleDelete = async (configType: ConfigType, displayName: string) => {
-    Modal.confirm({
-      title: "删除配置",
-      content: `确定要删除 "${displayName}" 吗？`,
-      okText: "删除",
-      okType: "danger",
-      cancelText: "取消",
-      onOk: async () => {
-        try {
-          await deleteConfigByType(configType);
-          message.success("配置已删除");
-          loadData();
-        } catch (err) {
-          message.error("删除配置失败");
-        }
-      },
-    });
-  };
+		if (existingConfig) {
+			setSelectedProvider(existingConfig.providerId);
+			form.setFieldsValue({
+				displayName: existingConfig.displayName,
+				baseUrl: existingConfig.baseUrl,
+				defaultModel: existingConfig.defaultModel,
+				apiKey: "", // Don't fill in the API key
+				enabled: existingConfig.enabled,
+			});
+			// Load Ollama models when editing Ollama provider
+			if (existingConfig.providerId === "ollama" && existingConfig.baseUrl) {
+				loadOllamaModels(existingConfig.baseUrl);
+			}
+		} else {
+			setSelectedProvider(null);
+		}
+		setModalVisible(true);
+	};
 
-  /**
-   * Test a configuration
-   */
-  const handleTest = async (configType: ConfigType) => {
-    setTestingType(configType);
-    try {
-      const result = await testConfigByType(configType);
-      if (result.success) {
-        message.success(`连接成功！`);
-      } else {
-        message.error(`连接失败`);
-      }
-      loadData(); // Refresh to update status
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "测试失败";
-      message.error(errorMsg);
-      loadData(); // Refresh to update status
-    } finally {
-      setTestingType(null);
-    }
-  };
+	/**
+	 * Delete a configuration
+	 */
+	const handleDelete = async (configType: ConfigType, displayName: string) => {
+		modalApi.confirm({
+			title: t("settings.aiProviders.deleteTitle"),
+			content: t("settings.aiProviders.deleteConfirm", { displayName }),
+			okText: t("settings.aiProviders.deleteOk"),
+			okType: "danger",
+			cancelText: t("settings.aiProviders.deleteCancel"),
+			onOk: async () => {
+				try {
+					await deleteConfigByType(configType);
+					messageApi.success(t("settings.aiProviders.deleteSuccess"));
+					loadData();
+				} catch (err) {
+					messageApi.error(t("settings.aiProviders.deleteFailed"));
+				}
+			},
+		});
+	};
 
-  /**
-   * Handle form submission
-   */
-  const handleSubmit = async (values: Record<string, unknown>) => {
-    if (!selectedProvider || !editingType) {
-      message.error("请选择一个提供商类型");
-      return;
-    }
+	/**
+	 * Test a configuration
+	 */
+	const handleTest = async (configType: ConfigType) => {
+		setTestingType(configType);
+		try {
+			const result = await testConfigByType(configType);
+			if (result.success) {
+				messageApi.success(t("settings.aiProviders.testSuccess"));
+			} else {
+				messageApi.error(t("settings.aiProviders.testFailed"));
+			}
+			loadData(); // Refresh to update status
+		} catch (err) {
+			const errorMsg =
+				err instanceof Error
+					? err.message
+					: t("settings.aiProviders.testFailedFallback");
+			messageApi.error(errorMsg);
+			loadData(); // Refresh to update status
+		} finally {
+			setTestingType(null);
+		}
+	};
 
-    const input: ProviderConfigInput = {
-      providerId: selectedProvider,
-      displayName: values.displayName as string,
-      baseUrl: (values.baseUrl as string) || undefined,
-      defaultModel: (values.defaultModel as string) || undefined,
-      apiKey: (values.apiKey as string) || undefined,
-      enabled: values.enabled as boolean ?? true,
-    };
+	/**
+	 * Handle form submission
+	 */
+	const handleSubmit = async (values: Record<string, unknown>) => {
+		if (!editingType) {
+			messageApi.error(t("settings.aiProviders.providerRequired"));
+			return;
+		}
+		const providerId =
+			editingType === "transcription"
+				? TRANSCRIPTION_PROVIDER
+				: selectedProvider;
+		if (!providerId) {
+			messageApi.error(t("settings.aiProviders.providerRequired"));
+			return;
+		}
+		const isTranscription = editingType === "transcription";
 
-    setSubmitting(true);
-    try {
-      await setConfigByType(editingType, input);
-      message.success("配置已保存");
-      setModalVisible(false);
-      loadData();
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "保存失败";
-      message.error(errorMsg);
-    } finally {
-      setSubmitting(false);
-    }
-  };
+		const input: ProviderConfigInput = {
+			providerId,
+			displayName: isTranscription
+				? transcriptionDisplayName
+				: (values.displayName as string),
+			baseUrl: (values.baseUrl as string) || undefined,
+			defaultModel: (values.defaultModel as string) || undefined,
+			apiKey: isTranscription
+				? undefined
+				: (values.apiKey as string) || undefined,
+			enabled: (values.enabled as boolean) ?? true,
+		};
 
-  /**
-   * Get provider type info by ID
-   */
-  const getTypeInfo = (providerId: LLMProviderId) => {
-    return providerTypes.find((t) => t.id === providerId);
-  };
+		setSubmitting(true);
+		try {
+			await setConfigByType(editingType, input);
+			messageApi.success(t("settings.aiProviders.saveSuccess"));
+			setModalVisible(false);
+			loadData();
+		} catch (err) {
+			const errorMsg =
+				err instanceof Error
+					? err.message
+					: t("settings.aiProviders.saveFailed");
+			messageApi.error(errorMsg);
+		} finally {
+			setSubmitting(false);
+		}
+	};
 
-  /**
-   * Load Ollama models from the API
-   */
-  const loadOllamaModels = useCallback(async (baseUrl: string) => {
-    setLoadingOllamaModels(true);
-    try {
-      const models = await fetchOllamaModels(baseUrl);
-      setOllamaModels(models);
-      if (models.length > 0) {
-        message.success(`已加载 ${models.length} 个模型`);
-      }
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "加载模型失败";
-      message.error(errorMsg);
-      setOllamaModels([]);
-    } finally {
-      setLoadingOllamaModels(false);
-    }
-  }, []);
+	/**
+	 * Get provider type info by ID
+	 */
+	const getTypeInfo = (providerId: LLMProviderId) => {
+		return providerTypes.find((t) => t.id === providerId);
+	};
 
-  /**
-   * Handle provider type selection
-   */
-  const handleSelectProvider = (providerId: LLMProviderId) => {
-    setSelectedProvider(providerId);
-    const typeInfo = providerTypes.find((t) => t.id === providerId);
-    // Pre-fill default values
-    if (typeInfo?.defaultBaseUrl) {
-      form.setFieldValue("baseUrl", typeInfo.defaultBaseUrl);
-      // Auto-load Ollama models
-      if (providerId === "ollama") {
-        loadOllamaModels(typeInfo.defaultBaseUrl);
-      }
-    }
-  };
+	/**
+	 * Load Ollama models from the API
+	 */
+	const loadOllamaModels = useCallback(async (baseUrl: string) => {
+		setLoadingOllamaModels(true);
+		try {
+			const models = await fetchOllamaModels(baseUrl);
+			setOllamaModels(models);
+			if (models.length > 0) {
+				messageApi.success(
+					t("settings.aiProviders.modelsLoaded", { count: models.length }),
+				);
+			}
+		} catch (err) {
+			const errorMsg =
+				err instanceof Error
+					? err.message
+					: t("settings.aiProviders.modelsLoadFailed");
+			messageApi.error(errorMsg);
+			setOllamaModels([]);
+		} finally {
+			setLoadingOllamaModels(false);
+		}
+	}, []);
 
-  /**
-   * Render a provider config card
-   */
-  const renderConfigCard = (configType: ConfigType, config: ProviderConfig | null, title: string, description: string) => {
-    const isConfigured = !!config;
-    const typeInfo = config ? getTypeInfo(config.providerId) : null;
+	/**
+	 * Handle provider type selection
+	 */
+	const handleSelectProvider = (providerId: LLMProviderId) => {
+		setSelectedProvider(providerId);
+		const typeInfo = providerTypes.find((t) => t.id === providerId);
+		// Pre-fill default values
+		if (typeInfo?.defaultBaseUrl) {
+			form.setFieldValue("baseUrl", typeInfo.defaultBaseUrl);
+			// Auto-load Ollama models
+			if (providerId === "ollama") {
+				loadOllamaModels(typeInfo.defaultBaseUrl);
+			}
+		}
+	};
 
-    return (
-      <Card 
-        className="provider-section-card"
-        title={
-          <div className="provider-section-header">
-            <span>{title}</span>
-            <span className="provider-section-desc">{description}</span>
-          </div>
-        }
-        extra={
-          isConfigured ? (
-            <div className="provider-card-actions">
-              <Button
-                icon={<ThunderboltOutlined />}
-                loading={testingType === configType}
-                onClick={() => handleTest(configType)}
-                title="测试连接"
-                size="small"
-              />
-              <Button 
-                icon={<EditOutlined />} 
-                onClick={() => handleOpenModal(configType, config)} 
-                title="编辑"
-                size="small"
-              />
-              <Button
-                icon={<DeleteOutlined />}
-                onClick={() => handleDelete(configType, config.displayName)}
-                title="删除"
-                size="small"
-              />
-            </div>
-          ) : (
-            <Button 
-              type="primary" 
-              icon={<PlusOutlined />} 
-              onClick={() => handleOpenModal(configType)}
-              size="small"
-            >
-              配置
-            </Button>
-          )
-        }
-      >
-        {isConfigured ? (
-          <div className="provider-config-info">
-            <div className="provider-config-row">
-              <span className="provider-config-icon">{getProviderIcon(config.providerId)}</span>
-              <span className="provider-config-name">{config.displayName}</span>
-              <span className="provider-config-type">{typeInfo?.name || config.providerId}</span>
-            </div>
-            <div className="provider-config-details">
-              <div className="provider-card-status">
-                <span className={`provider-card-status-dot ${config.status}`} />
-                <span>{config.status === "active" ? "正常" : config.status === "error" ? "错误" : "未测试"}</span>
-              </div>
-              {config.defaultModel && <span className="provider-config-model">模型：{config.defaultModel}</span>}
-              {config.apiKeyMasked && <span className="provider-config-key">密钥：{config.apiKeyMasked}</span>}
-              {!config.enabled && <span className="provider-disabled-tag">已禁用</span>}
-            </div>
-            {config.lastError && (
-              <div className="provider-error-msg">
-                错误：{config.lastError}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="provider-empty-hint">
-            尚未配置，点击右上角按钮添加
-          </div>
-        )}
-      </Card>
-    );
-  };
+	/**
+	 * Render a provider config card
+	 */
+	const renderConfigCard = (
+		configType: ConfigType,
+		config: ProviderConfig | null,
+		title: string,
+		description: string,
+	) => {
+		const isConfigured = !!config;
+		const typeInfo = config ? getTypeInfo(config.providerId) : null;
 
-  /**
-   * Render the selected provider type's configuration form
-   */
-  /**
-   * Get existing config by type
-   */
-  const getExistingConfig = (configType: ConfigType | null): ProviderConfig | null => {
-    if (configType === "llm") return llmConfig;
-    if (configType === "embedding") return embeddingConfig;
-    if (configType === "vision") return visionConfig;
-    return null;
-  };
+		return (
+			<Card
+				className="provider-section-card"
+				title={
+					<div className="provider-section-header">
+						<span>{title}</span>
+						<span className="provider-section-desc">{description}</span>
+					</div>
+				}
+				extra={
+					isConfigured ? (
+						<div className="provider-card-actions">
+							<Button
+								icon={<ThunderboltOutlined />}
+								loading={testingType === configType}
+								onClick={() => handleTest(configType)}
+								title={t("settings.aiProviders.action.test")}
+								size="small"
+							/>
+							<Button
+								icon={<EditOutlined />}
+								onClick={() => handleOpenModal(configType, config)}
+								title={t("settings.aiProviders.action.edit")}
+								size="small"
+							/>
+							<Button
+								icon={<DeleteOutlined />}
+								onClick={() => handleDelete(configType, config.displayName)}
+								title={t("settings.aiProviders.action.delete")}
+								size="small"
+							/>
+						</div>
+					) : (
+						<Button
+							type="primary"
+							icon={<PlusOutlined />}
+							onClick={() => handleOpenModal(configType)}
+							size="small"
+						>
+							{t("settings.aiProviders.action.configure")}
+						</Button>
+					)
+				}
+			>
+				{isConfigured ? (
+					<div className="provider-config-info">
+						<div className="provider-config-row">
+							<span className="provider-config-icon">
+								{getProviderIcon(config.providerId)}
+							</span>
+							<span className="provider-config-name">{config.displayName}</span>
+							<span className="provider-config-type">
+								{typeInfo?.name || config.providerId}
+							</span>
+						</div>
+						<div className="provider-config-details">
+							<div className="provider-card-status">
+								<span className={`provider-card-status-dot ${config.status}`} />
+								<span>{getStatusLabel(config.status)}</span>
+							</div>
+							{config.defaultModel && (
+								<span className="provider-config-model">
+									{t("settings.aiProviders.label.model")}：{config.defaultModel}
+								</span>
+							)}
+							{config.apiKeyMasked && (
+								<span className="provider-config-key">
+									{t("settings.aiProviders.label.key")}：{config.apiKeyMasked}
+								</span>
+							)}
+							{!config.enabled && (
+								<span className="provider-disabled-tag">
+									{t("settings.aiProviders.label.disabled")}
+								</span>
+							)}
+						</div>
+						{config.lastError && (
+							<div className="provider-error-msg">
+								{t("settings.aiProviders.label.error")}：{config.lastError}
+							</div>
+						)}
+					</div>
+				) : (
+					<div className="provider-empty-hint">
+						{t("settings.aiProviders.empty")}
+					</div>
+				)}
+			</Card>
+		);
+	};
 
-  /**
-   * Render the selected provider type's configuration form
-   */
-  const renderForm = () => {
-    if (!selectedProvider) return null;
+	/**
+	 * Render the selected provider type's configuration form
+	 */
+	/**
+	 * Get existing config by type
+	 */
+	const getExistingConfig = (
+		configType: ConfigType | null,
+	): ProviderConfig | null => {
+		if (configType === "llm") return llmConfig;
+		if (configType === "embedding") return embeddingConfig;
+		if (configType === "vision") return visionConfig;
+		if (configType === "transcription") return transcriptionConfig;
+		return null;
+	};
 
-    const typeInfo = getTypeInfo(selectedProvider);
-    const existingConfig = getExistingConfig(editingType);
-    const isEditing = !!existingConfig;
-    const requiresApiKey = typeInfo?.requiresApiKey ?? true;
+	/**
+	 * Render the selected provider type's configuration form
+	 */
+	const renderForm = () => {
+		if (!selectedProvider) return null;
 
-    return (
-      <Form form={form} layout="vertical" onFinish={handleSubmit}>
-        <Form.Item
-          name="displayName"
-          label="显示名称"
-          rules={[{ required: true, message: "请输入显示名称" }]}
-        >
-          <Input placeholder={`我的 ${typeInfo?.name || ""} 连接`} />
-        </Form.Item>
+		const typeInfo = getTypeInfo(selectedProvider);
+		const existingConfig = getExistingConfig(editingType);
+		const isEditing = !!existingConfig;
+		const requiresApiKey = typeInfo?.requiresApiKey ?? true;
+		const isTranscription = editingType === "transcription";
 
-        {requiresApiKey && (
-          <Form.Item
-            name="apiKey"
-            label="API 密钥"
-            extra={isEditing ? "留空则保持现有密钥不变" : undefined}
-            rules={[{ required: !isEditing, message: "API 密钥为必填项" }]}
-          >
-            <Input.Password placeholder="sk-..." />
-          </Form.Item>
-        )}
+		return (
+			<Form form={form} layout="vertical" onFinish={handleSubmit}>
+				{!isTranscription && (
+					<Form.Item
+						name="displayName"
+						label={t("settings.aiProviders.field.displayName")}
+						rules={[
+							{
+								required: true,
+								message: t("settings.aiProviders.field.displayNameRequired"),
+							},
+						]}
+					>
+						<Input
+							placeholder={t(
+								"settings.aiProviders.field.displayNamePlaceholder",
+								{ provider: typeInfo?.name || "" },
+							)}
+						/>
+					</Form.Item>
+				)}
 
-        {typeInfo?.supportsBaseUrl && (
-          <Form.Item
-            name="baseUrl"
-            label={selectedProvider === "paddleocr" ? "服务地址" : "API 地址"}
-            extra={
-              selectedProvider === "paddleocr" 
-                ? "PaddleOCR 服务的 HTTP 地址"
-                : typeInfo.requiresBaseUrl ? "该提供商必须填写此项" : "可选，用于自定义接口地址"
-            }
-            rules={typeInfo.requiresBaseUrl ? [{ required: true, message: selectedProvider === "paddleocr" ? "服务地址为必填项" : "API 地址为必填项" }] : undefined}
-          >
-            <Input 
-              placeholder={typeInfo.defaultBaseUrl || "https://api.example.com/v1"}
-              onBlur={(e) => {
-                // Auto-refresh Ollama models when baseUrl changes
-                if (selectedProvider === "ollama" && e.target.value) {
-                  loadOllamaModels(e.target.value);
-                }
-              }}
-            />
-          </Form.Item>
-        )}
+				{!isTranscription && requiresApiKey && (
+					<Form.Item
+						name="apiKey"
+						label={t("settings.aiProviders.field.apiKey")}
+						extra={
+							isEditing ? t("settings.aiProviders.field.apiKeyKeep") : undefined
+						}
+						rules={[
+							{
+								required: !isEditing,
+								message: t("settings.aiProviders.field.apiKeyRequired"),
+							},
+						]}
+					>
+						<Input.Password placeholder="sk-..." />
+					</Form.Item>
+				)}
 
-        {/* Don't show model field for PaddleOCR */}
-        {selectedProvider !== "paddleocr" && (
-        <Form.Item
-          name="defaultModel"
-          label={
-            <span>
-              默认模型
-              {selectedProvider === "ollama" && (
-                <Button
-                  type="link"
-                  size="small"
-                  icon={<SyncOutlined spin={loadingOllamaModels} />}
-                  onClick={() => {
-                    const baseUrl = form.getFieldValue("baseUrl") || typeInfo?.defaultBaseUrl;
-                    if (baseUrl) loadOllamaModels(baseUrl);
-                  }}
-                  style={{ marginLeft: 8, padding: 0 }}
-                >
-                  刷新
-                </Button>
-              )}
-            </span>
-          }
-          extra={selectedProvider === "ollama" ? "从 Ollama 服务获取已安装的模型" : "可选，用于测试连接和作为回退模型"}
-        >
-          {selectedProvider === "ollama" ? (
-            <Select
-              placeholder={loadingOllamaModels ? "正在加载模型..." : "选择一个模型"}
-              allowClear
-              showSearch
-              loading={loadingOllamaModels}
-              options={ollamaModels.map((m) => ({ 
-                label: `${m.id} (${formatSize(m.size)})`, 
-                value: m.id 
-              }))}
-              notFoundContent={loadingOllamaModels ? <Spin size="small" /> : "未找到模型，请确保 Ollama 正在运行"}
-            />
-          ) : typeInfo?.defaultModels && typeInfo.defaultModels.length > 0 ? (
-            <Select
-              placeholder="选择一个模型"
-              allowClear
-              showSearch
-              options={typeInfo.defaultModels.map((m) => ({ label: m, value: m }))}
-            />
-          ) : (
-            <Input placeholder="model-name" />
-          )}
-        </Form.Item>
-        )}
+				{typeInfo?.supportsBaseUrl && (
+					<Form.Item
+						name="baseUrl"
+						label={
+							isTranscription
+								? t("settings.aiProviders.field.baseUrl.transcription")
+								: selectedProvider === "paddleocr"
+									? t("settings.aiProviders.field.baseUrl.service")
+									: t("settings.aiProviders.field.baseUrl.api")
+						}
+						extra={
+							isTranscription
+								? t("settings.aiProviders.field.baseUrl.transcriptionHelp")
+								: selectedProvider === "paddleocr"
+									? t("settings.aiProviders.field.baseUrl.paddleocrHelp")
+									: typeInfo.requiresBaseUrl
+										? t("settings.aiProviders.field.baseUrl.requiredHelp")
+										: t("settings.aiProviders.field.baseUrl.optionalHelp")
+						}
+						rules={
+							isTranscription
+								? [
+										{
+											required: true,
+											message: t(
+												"settings.aiProviders.field.baseUrl.transcriptionRequired",
+											),
+										},
+									]
+								: typeInfo.requiresBaseUrl
+									? [
+											{
+												required: true,
+												message:
+													selectedProvider === "paddleocr"
+														? t(
+																"settings.aiProviders.field.baseUrl.serviceRequired",
+															)
+														: t(
+																"settings.aiProviders.field.baseUrl.apiRequired",
+															),
+											},
+										]
+									: undefined
+						}
+					>
+						<Input
+							placeholder={
+								isTranscription
+									? DEFAULT_TRANSCRIPTION_BASE_URL
+									: typeInfo.defaultBaseUrl || "https://api.example.com/v1"
+							}
+							onBlur={(e) => {
+								// Auto-refresh Ollama models when baseUrl changes
+								if (selectedProvider === "ollama" && e.target.value) {
+									loadOllamaModels(e.target.value);
+								}
+							}}
+						/>
+					</Form.Item>
+				)}
 
-        <Form.Item name="enabled" label="启用" valuePropName="checked" initialValue={true}>
-          <Switch />
-        </Form.Item>
+				{/* Don't show model field for PaddleOCR */}
+				{(isTranscription || selectedProvider !== "paddleocr") && (
+					<Form.Item
+						name="defaultModel"
+						label={
+							<span>
+								{isTranscription
+									? t("settings.aiProviders.field.whisperModel")
+									: t("settings.aiProviders.field.defaultModel")}
+								{!isTranscription && selectedProvider === "ollama" && (
+									<Button
+										type="link"
+										size="small"
+										icon={<SyncOutlined spin={loadingOllamaModels} />}
+										onClick={() => {
+											const baseUrl =
+												form.getFieldValue("baseUrl") ||
+												typeInfo?.defaultBaseUrl;
+											if (baseUrl) loadOllamaModels(baseUrl);
+										}}
+										style={{ marginLeft: 8, padding: 0 }}
+									>
+										{t("settings.aiProviders.field.modelRefresh")}
+									</Button>
+								)}
+							</span>
+						}
+						extra={
+							isTranscription
+								? t("settings.aiProviders.field.whisperModelHelp")
+								: selectedProvider === "ollama"
+									? t("settings.aiProviders.field.ollamaModelHelp")
+									: t("settings.aiProviders.field.modelHelp")
+						}
+						rules={
+							isTranscription
+								? [
+										{
+											required: true,
+											message: t(
+												"settings.aiProviders.field.whisperModelRequired",
+											),
+										},
+									]
+								: undefined
+						}
+					>
+						{!isTranscription && selectedProvider === "ollama" ? (
+							<Select
+								placeholder={
+									loadingOllamaModels
+										? t("settings.aiProviders.field.modelLoading")
+										: t("settings.aiProviders.field.modelSelect")
+								}
+								allowClear
+								showSearch
+								loading={loadingOllamaModels}
+								options={ollamaModels.map((m) => ({
+									label: `${m.id} (${formatSize(m.size)})`,
+									value: m.id,
+								}))}
+								notFoundContent={
+									loadingOllamaModels ? (
+										<Spin size="small" />
+									) : (
+										t("settings.aiProviders.field.modelNotFound")
+									)
+								}
+							/>
+						) : !isTranscription &&
+							typeInfo?.defaultModels &&
+							typeInfo.defaultModels.length > 0 ? (
+							<Select
+								placeholder={t("settings.aiProviders.field.modelSelect")}
+								allowClear
+								showSearch
+								options={typeInfo.defaultModels.map((m) => ({
+									label: m,
+									value: m,
+								}))}
+							/>
+						) : (
+							<Input
+								placeholder={
+									isTranscription
+										? DEFAULT_TRANSCRIPTION_MODEL
+										: t("settings.aiProviders.field.modelName")
+								}
+							/>
+						)}
+					</Form.Item>
+				)}
 
-        <div className="provider-form-actions">
-          <Button onClick={() => setModalVisible(false)}>取消</Button>
-          <Button type="primary" htmlType="submit" loading={submitting}>
-            保存
-          </Button>
-        </div>
-      </Form>
-    );
-  };
+				<Form.Item
+					name="enabled"
+					label={t("settings.aiProviders.field.enabled")}
+					valuePropName="checked"
+					initialValue={true}
+				>
+					<Switch />
+				</Form.Item>
 
-  if (loading) {
-    return (
-      <div className="settings-empty">
-        <Spin size="large" />
-      </div>
-    );
-  }
+				<div className="provider-form-actions">
+					<Button onClick={() => setModalVisible(false)}>
+						{t("settings.aiProviders.action.cancel")}
+					</Button>
+					<Button type="primary" htmlType="submit" loading={submitting}>
+						{t("settings.aiProviders.action.save")}
+					</Button>
+				</div>
+			</Form>
+		);
+	};
 
-  const existingConfig = getExistingConfig(editingType);
+	if (loading) {
+		return (
+			<div className="settings-empty">
+				<Spin size="large" />
+			</div>
+		);
+	}
 
-  return (
-    <>
-      <div className="settings-content-header">
-        <h2 className="settings-content-title">AI 提供商</h2>
-      </div>
+	const existingConfig = getExistingConfig(editingType);
 
-      <div className="provider-sections">
-        {renderConfigCard(
-          "llm",
-          llmConfig,
-          "大语言模型 (LLM)",
-          "用于对话、内容生成等功能"
-        )}
-        {renderConfigCard(
-          "embedding",
-          embeddingConfig,
-          "Embedding 模型",
-          "用于知识库向量检索"
-        )}
-        {renderConfigCard(
-          "vision",
-          visionConfig,
-          "OCR 文档识别",
-          "用于图片/PDF 文字识别，支持 LLM 视觉模型或 PaddleOCR 服务"
-        )}
-      </div>
+	return (
+		<>
+			<div className="settings-content-header">
+				<h2 className="settings-content-title">
+					{t("settings.aiProviders.title")}
+				</h2>
+			</div>
 
-      <Modal
-        title={existingConfig ? "编辑提供商" : "添加提供商"}
-        open={modalVisible}
-        onCancel={() => setModalVisible(false)}
-        footer={null}
-        width={500}
-        destroyOnClose
-      >
-        {!selectedProvider && !existingConfig ? (
-          <>
-            <p className="provider-type-hint">
-              选择一个提供商类型：
-            </p>
-            <div className="provider-type-grid">
-              {providerTypes
-                .filter((type) => {
-                  // PaddleOCR only shows for vision/OCR config
-                  if (type.id === "paddleocr") {
-                    return editingType === "vision";
-                  }
-                  // For vision config, show all providers (LLM vision models too)
-                  return true;
-                })
-                .map((type) => (
-                <div
-                  key={type.id}
-                  className={`provider-type-card${selectedProvider === type.id ? " selected" : ""}`}
-                  onClick={() => handleSelectProvider(type.id)}
-                >
-                  <div className="provider-type-card-icon">{getProviderIcon(type.id)}</div>
-                  <div className="provider-type-card-name">{type.name}</div>
-                  <div className="provider-type-card-desc">{type.description}</div>
-                </div>
-              ))}
-            </div>
-          </>
-        ) : (
-          renderForm()
-        )}
-      </Modal>
-    </>
-  );
+			<div className="provider-sections">
+				{renderConfigCard(
+					"llm",
+					llmConfig,
+					t("settings.aiProviders.section.llm.title"),
+					t("settings.aiProviders.section.llm.description"),
+				)}
+				{renderConfigCard(
+					"embedding",
+					embeddingConfig,
+					t("settings.aiProviders.section.embedding.title"),
+					t("settings.aiProviders.section.embedding.description"),
+				)}
+				{renderConfigCard(
+					"vision",
+					visionConfig,
+					t("settings.aiProviders.section.vision.title"),
+					t("settings.aiProviders.section.vision.description"),
+				)}
+				{renderConfigCard(
+					"transcription",
+					transcriptionConfig,
+					t("settings.aiProviders.section.transcription.title"),
+					t("settings.aiProviders.section.transcription.description"),
+				)}
+			</div>
+
+			<Modal
+				title={
+					existingConfig
+						? t("settings.aiProviders.modal.editTitle")
+						: t("settings.aiProviders.modal.addTitle")
+				}
+				open={modalVisible}
+				onCancel={() => setModalVisible(false)}
+				footer={null}
+				width={500}
+				destroyOnClose
+			>
+				{!selectedProvider && !existingConfig ? (
+					<>
+						<p className="provider-type-hint">
+							{t("settings.aiProviders.modal.providerHint")}
+						</p>
+						<div className="provider-type-grid">
+							{providerTypes
+								.filter((type) => {
+									if (editingType === "transcription") {
+										return (
+											type.id === "openai" || type.id === "openai-compatible"
+										);
+									}
+									// PaddleOCR only shows for vision/OCR config
+									if (type.id === "paddleocr") {
+										return editingType === "vision";
+									}
+									// For vision config, show all providers (LLM vision models too)
+									return true;
+								})
+								.map((type) => (
+									<div
+										key={type.id}
+										className={`provider-type-card${selectedProvider === type.id ? " selected" : ""}`}
+										onClick={() => handleSelectProvider(type.id)}
+									>
+										<div className="provider-type-card-icon">
+											{getProviderIcon(type.id)}
+										</div>
+										<div className="provider-type-card-name">{type.name}</div>
+										<div className="provider-type-card-desc">
+											{type.description}
+										</div>
+									</div>
+								))}
+						</div>
+					</>
+				) : (
+					renderForm()
+				)}
+			</Modal>
+		</>
+	);
 }
 
 export default AIProviderPanel;

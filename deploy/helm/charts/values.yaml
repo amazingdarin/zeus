@@ -1,7 +1,12 @@
 postgres:
+  enabled: true
   service:
     type: ClusterIP
     port: 5432
+  nodePortService:
+    enabled: false
+    port: 5432
+    nodePort: null
   postgres:
     database: zeus
     user: zeus
@@ -10,18 +15,27 @@ postgres:
     enabled: true
     size: 10Gi
 
-rustfs:
+faster-whisper:
+  enabled: false
+  image:
+    repository: ghcr.io/fedirz/faster-whisper-server
+    tag: latest-cpu
+    pullPolicy: IfNotPresent
+    pullSecrets: []
+  replicaCount: 1
   service:
     type: ClusterIP
-    port: 9000
-    consolePort: 9001
-    consoleEnabled: true
-  auth:
-    accessKey: zeus
-    secretKey: zeus
+    port: 8000
+    nodePort: null
   persistence:
     enabled: true
-    size: 10Gi
+    size: 20Gi
+    storageClassName: ""
+    mountPath: /root/.cache/huggingface
+  resources: {}
+  command: []
+  args: []
+  extraEnv: []
 
 global:
   hostNetwork: false
@@ -33,6 +47,7 @@ backend:
     repository: zeus
     tag: latest
     pullPolicy: IfNotPresent
+    pullSecrets: []
   service:
     type: ClusterIP
     port: 8080
@@ -46,9 +61,20 @@ backend:
           - /
     tls: []
   resources: {}
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
   config: |
     server:
       addr: ":8080"
+
+    code_runner:
+      addr: ":8091"
+      internal_token: "zeus-dev-code-runner-token"
+      namespace: "default"
+      default_timeout_seconds: 10
+      max_output_bytes: 262144
 
     postgres:
       host: postgres
@@ -61,15 +87,6 @@ backend:
       max_open_conns: 10
       max_idle_conns: 5
       conn_max_lifetime: 30m
-
-    object_storage:
-      endpoint: http://rustfs:9000
-      region: us-east-1
-      access_key: zeus
-      secret_key: zeus
-      bucket: zeus-docs
-      use_path_style: true
-      insecure: true
 
     asset:
       meta_root: /var/lib/zeus/assets
@@ -97,6 +114,18 @@ backend:
         client_id: "Ov23liPsn9jEM8DUvp3I"
         scopes: []
 
+codeRunner:
+  enabled: false
+  replicas: 1
+  image:
+    repository: zeus
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8091
+  resources: {}
+
 frontend:
   enabled: true
   replicas: 1
@@ -104,6 +133,7 @@ frontend:
     repository: zeus-web
     tag: latest
     pullPolicy: IfNotPresent
+    pullSecrets: []
   service:
     type: ClusterIP
     port: 80
@@ -117,3 +147,7 @@ frontend:
           - /
     tls: []
   resources: {}
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}

@@ -5,6 +5,7 @@
  */
 
 import type { JSONContent } from "@tiptap/core";
+import type { AnyZodObject } from "../zod.js";
 
 /**
  * Skill category for organizing skills
@@ -12,26 +13,58 @@ import type { JSONContent } from "@tiptap/core";
 export type SkillCategory = "doc" | "kb" | "code" | "img";
 
 /**
+ * Risk level for skill confirmation
+ */
+export type RiskLevel = "low" | "medium" | "high";
+
+/**
+ * Confirmation configuration for skills
+ */
+export type SkillConfirmation = {
+  required: boolean; // Whether confirmation is needed before execution
+  riskLevel?: RiskLevel; // Risk level for UI display
+  warningMessage?: string; // Custom warning message to show
+};
+
+/**
+ * Skill parameters (OpenAI Function Calling compatible JSON Schema subset)
+ *
+ * Note: this is the API/transport shape. Runtime skill contracts use Zod.
+ */
+export type SkillParameters = {
+  type: "object";
+  properties: Record<
+    string,
+    {
+      type: string;
+      description: string;
+      enum?: string[];
+      optional?: boolean;
+    }
+  >;
+  required: string[];
+};
+
+/**
  * Skill definition for registration
+ *
+ * Runtime contract: uses Zod as the source of truth.
  */
 export type SkillDefinition = {
   name: string; // e.g., "doc-create"
   category: SkillCategory;
   command: string; // e.g., "/doc-create"
   description: string;
-  parameters: {
-    type: "object";
-    properties: Record<
-      string,
-      {
-        type: string;
-        description: string;
-        enum?: string[];
-        optional?: boolean;
-      }
-    >;
-    required: string[];
-  };
+  required: boolean; // Whether this skill is required (cannot be disabled)
+  confirmation?: SkillConfirmation; // Confirmation settings for dangerous operations
+  inputSchema: AnyZodObject;
+};
+
+/**
+ * Skill definition DTO (API-friendly)
+ */
+export type SkillDefinitionDTO = Omit<SkillDefinition, "inputSchema"> & {
+  parameters: SkillParameters;
 };
 
 /**
@@ -46,6 +79,20 @@ export type SkillIntent = {
 };
 
 /**
+ * Pending tool call awaiting user confirmation
+ */
+export type PendingToolCall = {
+  id: string; // Unique ID for this pending call
+  skillName: string; // Name of the skill to execute
+  skillDescription: string; // Human-readable description
+  args: Record<string, unknown>; // Arguments for the skill
+  riskLevel: RiskLevel; // Risk level for UI display
+  warningMessage?: string; // Optional warning message
+  createdAt: number; // Timestamp when created
+  expiresAt: number; // Expiration timestamp (for cleanup)
+};
+
+/**
  * Skill execution result
  */
 export type SkillResult =
@@ -53,17 +100,36 @@ export type SkillResult =
   | { type: "draft"; draft: DocumentDraft }
   | { type: "error"; message: string };
 
+export type DraftValidationPolicy = "protocol_only" | "additive_strict";
+
+export type DraftValidationIssue = {
+  severity: "error" | "warning";
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+};
+
+export type DraftValidation = {
+  passed: boolean;
+  attempt: number;
+  policy: DraftValidationPolicy;
+  issues: DraftValidationIssue[];
+  feedback?: string;
+};
+
 /**
  * Document draft for pending changes
  */
 export type DocumentDraft = {
   id: string;
+  userId: string;
   projectKey: string;
   docId: string | null; // null = new document
   parentId: string | null; // Parent document ID for new docs
   title: string;
   originalContent: JSONContent | null; // null for new documents
   proposedContent: JSONContent;
+  validation?: DraftValidation;
   status: "pending" | "applied" | "rejected";
   createdAt: number;
   expiresAt: number;
@@ -73,6 +139,7 @@ export type DocumentDraft = {
  * Input for creating a draft
  */
 export type CreateDraftInput = {
+  userId: string;
   projectKey: string;
   docId?: string | null;
   parentId?: string | null;
@@ -82,11 +149,83 @@ export type CreateDraftInput = {
 };
 
 /**
+ * Organize plan types for document reorganization
+ */
+export type OrganizeMove = {
+  docId: string;
+  title: string;
+  targetParentId: string;
+};
+
+export type OrganizeProposal = {
+  categories: Array<{
+    name: string;
+    existingDocId?: string;
+    children: Array<{
+      name: string;
+      existingDocId?: string;
+      docIds: string[];
+    }>;
+    docIds: string[];
+  }>;
+};
+
+export type OrganizePlan = {
+  id: string;
+  userId: string;
+  projectKey: string;
+  rootDocId: string;
+  proposal: OrganizeProposal;
+  moves: OrganizeMove[];
+  newFolders: string[];
+  createdAt: number;
+};
+
+/**
  * Chat stream chunk types extended for skills
  */
 export type SkillStreamChunk =
   | { type: "delta"; content: string }
   | { type: "thinking"; content: string }
   | { type: "draft"; draft: DocumentDraft }
+  | { type: "organize_plan"; plan: OrganizePlan }
   | { type: "done"; message?: string }
   | { type: "error"; error: string };
+
+/**
+ * Skill configuration (database storage)
+ */
+export type SkillConfig = {
+  id: string;
+  skillName: string;
+  category: SkillCategory;
+  enabled: boolean;
+  priority: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * Complete skill info (definition + config)
+ */
+export type SkillInfo = SkillDefinitionDTO & {
+  config: SkillConfig;
+  isConfigurable: boolean; // Whether the skill can be enabled/disabled (!required)
+};
+
+/**
+ * Skill category metadata
+ */
+export type SkillCategoryMeta = {
+  id: SkillCategory;
+  name: string;
+  description: string;
+  icon: string;
+};
+
+/**
+ * Skill category info with skills
+ */
+export type SkillCategoryInfo = SkillCategoryMeta & {
+  skills: SkillInfo[];
+};

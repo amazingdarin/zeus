@@ -4,7 +4,7 @@
  * Encapsulates all chat logic for reuse between ChatPanel and ChatPage.
  */
 
-import type { KeyboardEvent, ChangeEvent, RefObject } from "react";
+import type { KeyboardEvent, ChangeEvent, RefObject, UIEvent } from "react";
 import {
   useCallback,
   useEffect,
@@ -14,14 +14,46 @@ import {
 } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { createChatRun, buildChatStreamUrl, clearChatSession, type DocumentScope } from "../api/chat";
+import {
+  createChatRun,
+  buildChatStreamUrl,
+  clearChatSession,
+  confirmTool,
+  rejectTool,
+  selectIntent,
+  provideRequiredInput,
+  providePreflightInput,
+  type PendingToolCall,
+  type PendingIntentInfo,
+  type PendingPreflightInfo,
+  type PendingRequiredInputInfo,
+  type ChatTaskStatus,
+  type ProvidePreflightInputPayload,
+  type ProvideRequiredInputPayload,
+  type IntentOption,
+} from "../api/chat";
 import { applyProposal, rejectProposal } from "../api/documents";
 import { executeCommand } from "../api/commands";
 import { useProjectContext } from "../context/ProjectContext";
 import { getConfigByType, type ProviderConfig } from "../api/llm-config";
 import type { MentionItem } from "../components/MentionDropdown";
 import type { DocumentDraft } from "../api/drafts";
-import { filterCommands, type SlashCommand } from "../constants/slash-commands";
+import Markdown from "../components/Markdown";
+import {
+  filterCommands,
+  setCommandCatalog,
+  setEnabledCommands,
+  type SlashCommand,
+} from "../constants/slash-commands";
+import {
+  getEnabledCommands,
+  getProjectEnabledCommands,
+  type ProjectEnabledCommand,
+} from "../api/skills";
+import { useChatAttachments, isValidUrl } from "./useChatAttachments";
+import type { ChatAttachment } from "../types/chat-attachment";
+import { shouldHandleSseDisconnectError } from "../features/chat/sse-error";
+import { buildDocumentScopeForChat } from "../features/chat/document-scope";
 
 // Types
 export type MentionState = {
@@ -44,8 +76,10 @@ export type ChatArtifact = {
 };
 
 export type SourceReference = {
-  docId: string;
-  blockId?: string;
+  type?: "kb" | "web";  // "kb" = knowledge base (default), "web" = web search
+  docId?: string;       // For KB sources
+  blockId?: string;     // For KB sources
+  url?: string;         // For web sources
   title: string;
   snippet: string;
   score: number;
@@ -57,6 +91,17 @@ export type ChatMessage = {
   content: string;
   artifacts?: ChatArtifact[];
   sources?: SourceReference[];
+  timestamp: number;
+};
+
+export type ThinkingStep = {
+  id: string;
+  kind: "thinking" | "search_start" | "search_result";
+  content: string;
+  phase?: string;
+  subQueries?: string[];
+  searchQuery?: string;
+  resultCount?: number;
   timestamp: number;
 };
 
@@ -75,6 +120,14 @@ export const formatTime = (timestamp: number) => {
     minute: "2-digit",
   });
 };
+
+function isPluginTemplateMention(item: MentionItem): boolean {
+  return item.kind === "plugin_template";
+}
+
+function isDocMention(item: MentionItem): boolean {
+  return !isPluginTemplateMention(item);
+}
 
 const parsePayload = (raw: string) => {
   if (!raw) return "";
@@ -102,106 +155,112 @@ const normalizeDonePayload = (
   return { message, artifacts, sources };
 };
 
-// Simple markdown rendering (bold, italic, code, links)
+const normalizeThinkingPayload = (payload: unknown) => {
+  const data = payload && typeof payload === "object"
+    ? (payload as Record<string, unknown>)
+    : {};
+  const content = typeof data.content === "string"
+    ? data.content
+    : typeof payload === "string"
+      ? payload
+      : "";
+  const phase = typeof data.phase === "string" ? data.phase : "";
+  const searchQuery = typeof data.searchQuery === "string" ? data.searchQuery : "";
+  const resultRaw = data.resultCount;
+  const resultValue = resultRaw === undefined || resultRaw === null
+    ? undefined
+    : Number(resultRaw);
+  const resultCount = Number.isFinite(resultValue) ? resultValue : undefined;
+  const subQueries = Array.isArray(data.subQueries)
+    ? data.subQueries
+      .map((item) => String(item ?? "").trim())
+      .filter(Boolean)
+    : undefined;
+
+  return {
+    content: content.trim(),
+    phase: phase.trim(),
+    searchQuery: searchQuery.trim(),
+    resultCount,
+    subQueries: subQueries && subQueries.length > 0 ? subQueries : undefined,
+  };
+};
+
+const normalizeTaskStatusPayload = (payload: unknown): ChatTaskStatus | null => {
+  if (!payload || typeof payload !== "object") return null;
+  const data = payload as Record<string, unknown>;
+  const taskId = typeof data.taskId === "string" ? data.taskId.trim() : "";
+  const title = typeof data.title === "string" ? data.title.trim() : "";
+  const skillId = typeof data.skillId === "string" ? data.skillId.trim() : "";
+  const statusRaw = typeof data.status === "string" ? data.status.trim() : "";
+  const status = statusRaw === "pending"
+    || statusRaw === "running"
+    || statusRaw === "completed"
+    || statusRaw === "failed"
+    || statusRaw === "skipped"
+    ? statusRaw
+    : "";
+  if (!taskId || !title || !skillId || !status) return null;
+
+  const indexValue = Number(data.index);
+  const totalValue = Number(data.total);
+  const index = Number.isFinite(indexValue) ? Math.max(1, Math.trunc(indexValue)) : 1;
+  const total = Number.isFinite(totalValue) ? Math.max(index, Math.trunc(totalValue)) : index;
+  const failurePolicy = data.failurePolicy === "best_effort" ? "best_effort" : "required";
+  const message = typeof data.message === "string" ? data.message.trim() : undefined;
+  const error = typeof data.error === "string" ? data.error.trim() : undefined;
+
+  return {
+    taskId,
+    title,
+    skillId,
+    index,
+    total,
+    failurePolicy,
+    status,
+    ...(message ? { message } : {}),
+    ...(error ? { error } : {}),
+  };
+};
+
+const taskStatusToThinkingContent = (status: ChatTaskStatus): string => {
+  const prefix = `子任务 ${status.index}/${status.total}`;
+  switch (status.status) {
+    case "pending":
+      return `${prefix} 待执行：${status.title}`;
+    case "running":
+      return `${prefix} 开始执行：${status.title}`;
+    case "completed":
+      return status.message
+        ? `${prefix} 已完成：${status.title}（${status.message}）`
+        : `${prefix} 已完成：${status.title}`;
+    case "skipped":
+      return status.error
+        ? `${prefix} 已跳过：${status.title}（${status.error}）`
+        : `${prefix} 已跳过：${status.title}`;
+    case "failed":
+    default:
+      return status.error
+        ? `${prefix} 失败：${status.title}（${status.error}）`
+        : `${prefix} 失败：${status.title}`;
+  }
+};
+
+// Markdown rendering for assistant messages
 export function renderMarkdown(content: string): React.ReactNode {
-  const lines = content.split("\n");
-  const elements: React.ReactNode[] = [];
-  let inCodeBlock = false;
-  let codeContent: string[] = [];
-  let codeLanguage = "";
-
-  lines.forEach((line, lineIndex) => {
-    // Code block start/end
-    if (line.startsWith("```")) {
-      if (inCodeBlock) {
-        elements.push(
-          <pre key={`code-${lineIndex}`} className="chat-code-block">
-            <code className={codeLanguage ? `language-${codeLanguage}` : ""}>
-              {codeContent.join("\n")}
-            </code>
-          </pre>,
-        );
-        codeContent = [];
-        codeLanguage = "";
-        inCodeBlock = false;
-      } else {
-        inCodeBlock = true;
-        codeLanguage = line.slice(3).trim();
-      }
-      return;
-    }
-
-    if (inCodeBlock) {
-      codeContent.push(line);
-      return;
-    }
-
-    // Parse inline elements
-    const parseInline = (text: string): React.ReactNode[] => {
-      const result: React.ReactNode[] = [];
-      let remaining = text;
-      let key = 0;
-
-      while (remaining) {
-        // Inline code
-        const codeMatch = remaining.match(/`([^`]+)`/);
-        if (codeMatch && codeMatch.index !== undefined) {
-          if (codeMatch.index > 0) {
-            result.push(remaining.slice(0, codeMatch.index));
-          }
-          result.push(
-            <code key={key++} className="chat-inline-code">
-              {codeMatch[1]}
-            </code>,
-          );
-          remaining = remaining.slice(codeMatch.index + codeMatch[0].length);
-          continue;
-        }
-
-        // Bold
-        const boldMatch = remaining.match(/\*\*([^*]+)\*\*/);
-        if (boldMatch && boldMatch.index !== undefined) {
-          if (boldMatch.index > 0) {
-            result.push(remaining.slice(0, boldMatch.index));
-          }
-          result.push(<strong key={key++}>{boldMatch[1]}</strong>);
-          remaining = remaining.slice(boldMatch.index + boldMatch[0].length);
-          continue;
-        }
-
-        // Italic
-        const italicMatch = remaining.match(/\*([^*]+)\*/);
-        if (italicMatch && italicMatch.index !== undefined) {
-          if (italicMatch.index > 0) {
-            result.push(remaining.slice(0, italicMatch.index));
-          }
-          result.push(<em key={key++}>{italicMatch[1]}</em>);
-          remaining = remaining.slice(italicMatch.index + italicMatch[0].length);
-          continue;
-        }
-
-        // No more matches
-        result.push(remaining);
-        break;
-      }
-
-      return result;
-    };
-
-    elements.push(
-      <span key={`line-${lineIndex}`}>
-        {parseInline(line)}
-        {lineIndex < lines.length - 1 && <br />}
-      </span>,
-    );
-  });
-
-  return <>{elements}</>;
+  return <Markdown content={content} variant="chat" />;
 }
 
 type UseChatLogicOptions = {
   onOpenSettings?: () => void;
   autoScrollEnabled?: boolean;
+  deepSearchEnabled?: boolean;
+  onDeepSearchChange?: (enabled: boolean) => void;
+  defaultDocumentId?: string;
+  /** Externally managed session ID (takes priority over internal state) */
+  sessionId?: string;
+  /** Callback when a new session is created internally */
+  onSessionChange?: (id: string) => void;
 };
 
 export type UseChatLogicReturn = {
@@ -209,12 +268,19 @@ export type UseChatLogicReturn = {
   messages: ChatMessage[];
   input: string;
   isGenerating: boolean;
+  deepSearchEnabled: boolean;
   error: string | null;
   assistantBuffer: string;
+  thinkingSteps: ThinkingStep[];
+  taskTodoItems: ChatTaskStatus[];
   llmConfig: ProviderConfig | null;
   mentions: MentionItem[];
   mentionState: MentionState;
   pendingDraft: DocumentDraft | null;
+  pendingTool: PendingToolCall | null;
+  pendingIntentInfo: PendingIntentInfo | null;
+  pendingPreflightInfo: PendingPreflightInfo | null;
+  pendingRequiredInput: PendingRequiredInputInfo | null;
   slashActive: boolean;
   slashQuery: string;
   slashSelectedIndex: number;
@@ -224,27 +290,45 @@ export type UseChatLogicReturn = {
   canSend: boolean;
   projectKey: string;
 
+  // Attachments
+  attachments: ChatAttachment[];
+  hasAttachments: boolean;
+  attachmentsLoading: boolean;
+
   // Refs
-  messagesRef: RefObject<HTMLDivElement>;
-  inputRef: RefObject<HTMLTextAreaElement>;
+  messagesRef: RefObject<HTMLDivElement | null>;
+  inputRef: RefObject<HTMLTextAreaElement | null>;
 
   // Actions
   setInput: (value: string) => void;
   setError: (error: string | null) => void;
   setSlashSelectedIndex: (index: number) => void;
+  setDeepSearchEnabled: (enabled: boolean) => void;
+  handleMessagesScroll: (event: UIEvent<HTMLDivElement>) => void;
   handleSend: () => Promise<void>;
+  handleStop: () => void;
   handleClearHistory: () => Promise<void>;
+  handleNewSession: () => Promise<void>;
+  sessionId: string;
   handleInputChange: (e: ChangeEvent<HTMLTextAreaElement>) => void;
   handleKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   handleMentionSelect: (item: MentionItem) => void;
   handleMentionClose: () => void;
-  handleRemoveMention: (docId: string) => void;
+  handleRemoveMention: (mentionId: string) => void;
   handleSlashSelect: (command: SlashCommand) => void;
   handleDraftApplied: (docId: string, isNew: boolean) => void;
   handleDraftClose: () => void;
   handleDocumentNavigate: (docId: string, options?: { proposalId?: string; blockId?: string }) => void;
   handleProposalAction: (action: string, docId: string, proposalId: string) => Promise<void>;
+  handleConfirmTool: () => Promise<void>;
+  handleRejectTool: () => Promise<void>;
+  handleSelectIntent: (option: IntentOption) => Promise<void>;
+  handleProvidePreflightInput: (payload: ProvidePreflightInputPayload) => Promise<void>;
+  handleProvideRequiredInput: (payload: ProvideRequiredInputPayload) => Promise<void>;
   toggleSourcesExpanded: (messageId: string) => void;
+  handlePaste: (e: React.ClipboardEvent) => void;
+  handleAddAttachmentFile: (file: File) => void;
+  removeAttachment: (id: string) => void;
 
   // Render helpers
   renderMarkdown: typeof renderMarkdown;
@@ -252,18 +336,84 @@ export type UseChatLogicReturn = {
 };
 
 export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicReturn {
-  const { autoScrollEnabled = true } = options;
+  const {
+    autoScrollEnabled = true,
+    deepSearchEnabled: externalDeepSearch,
+    onDeepSearchChange,
+    defaultDocumentId,
+    sessionId: externalSessionId,
+    onSessionChange,
+  } = options;
   const { currentProject } = useProjectContext();
-  const projectKey = currentProject?.key ?? "";
+  const projectKey = currentProject?.projectRef ?? "";
   const navigate = useNavigate();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [internalDeepSearch, setInternalDeepSearch] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Chat attachments
+  const {
+    attachments,
+    addFile: addAttachmentFile,
+    addUrl: addAttachmentUrl,
+    removeAttachment,
+    clearAttachments,
+    hasAttachments,
+    isLoading: attachmentsLoading,
+    getAttachmentsContext,
+  } = useChatAttachments();
+
+  // Use external deepSearch state if provided, otherwise internal
+  const deepSearchEnabled = externalDeepSearch ?? internalDeepSearch;
+  const setDeepSearchEnabled = useCallback((enabled: boolean) => {
+    if (onDeepSearchChange) {
+      onDeepSearchChange(enabled);
+    } else {
+      setInternalDeepSearch(enabled);
+    }
+  }, [onDeepSearchChange]);
   const [assistantBuffer, setAssistantBuffer] = useState("");
+  const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([]);
+  const [taskTodoItems, setTaskTodoItems] = useState<ChatTaskStatus[]>([]);
+  const [isUserBrowsingHistory, setIsUserBrowsingHistory] = useState(false);
   const [llmConfig, setLlmConfig] = useState<ProviderConfig | null>(null);
-  const [sessionId, setSessionId] = useState<string>(() => `session-${createId()}`);
+  const [internalSessionId, setInternalSessionId] = useState<string>(() => `session-${createId()}`);
+
+  // Use external sessionId if provided, otherwise internal
+  const sessionId = externalSessionId || internalSessionId;
+  const setSessionId = useCallback((id: string) => {
+    setInternalSessionId(id);
+    onSessionChange?.(id);
+  }, [onSessionChange]);
+
+  // Load history when sessionId changes (from external switching)
+  useEffect(() => {
+    if (!projectKey || !externalSessionId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getSessionMessages } = await import("../api/chat-sessions");
+        const msgs = await getSessionMessages(projectKey, externalSessionId);
+        if (cancelled) return;
+        setMessages(
+          msgs.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            sources: m.sources,
+            artifacts: m.artifacts,
+            timestamp: new Date(m.createdAt).getTime(),
+          })),
+        );
+      } catch {
+        if (!cancelled) setMessages([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectKey, externalSessionId]);
 
   // @ Mention state
   const [mentions, setMentions] = useState<MentionItem[]>([]);
@@ -276,6 +426,13 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   // Draft state for AI-generated document changes
   const [pendingDraft, setPendingDraft] = useState<DocumentDraft | null>(null);
 
+  // Pending tool confirmation state
+  const [pendingTool, setPendingTool] = useState<PendingToolCall | null>(null);
+  const [pendingIntentInfo, setPendingIntentInfo] = useState<PendingIntentInfo | null>(null);
+  const [pendingPreflightInfo, setPendingPreflightInfo] = useState<PendingPreflightInfo | null>(null);
+  const [pendingRequiredInput, setPendingRequiredInput] = useState<PendingRequiredInputInfo | null>(null);
+  const currentRunIdRef = useRef<string | null>(null);
+
   // Slash command state
   const [slashActive, setSlashActive] = useState(false);
   const [slashQuery, setSlashQuery] = useState("");
@@ -285,15 +442,23 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   const [selectedCommand, setSelectedCommand] = useState<SlashCommand | null>(null);
 
   // Command history (for arrow up/down navigation)
+  const MAX_HISTORY = 50;
+  const historyKey = projectKey && sessionId
+    ? `zeus-cmd-history-${projectKey}-${sessionId}`
+    : "";
   const [commandHistory, setCommandHistory] = useState<CommandHistoryEntry[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const currentInputRef = useRef<CommandHistoryEntry | null>(null);
+  const [loadedHistoryKey, setLoadedHistoryKey] = useState<string>("");
 
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const hasCustomEventsRef = useRef(false);
   const assistantBufferRef = useRef("");
+  const programmaticScrollRef = useRef(false);
+  const prevAutoScrollEnabledRef = useRef(autoScrollEnabled);
+  const lastScrollTopRef = useRef(0);
 
   // Track which messages have expanded sources
   const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
@@ -311,8 +476,13 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   }, []);
 
   const canSend = useMemo(() => {
-    return !isGenerating && input.trim().length > 0 && projectKey !== "";
-  }, [isGenerating, input, projectKey]);
+    const hasTypedInput = input.trim().length > 0;
+    const hasSelectedCommand = Boolean(selectedCommand);
+    const hasPluginTemplateMention = mentions.some(isPluginTemplateMention);
+    return !isGenerating
+      && projectKey !== ""
+      && (hasTypedInput || hasSelectedCommand || hasPluginTemplateMention);
+  }, [isGenerating, input, projectKey, selectedCommand, mentions]);
 
   // Load LLM config
   useEffect(() => {
@@ -327,44 +497,216 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     loadConfig();
   }, []);
 
-  // Load command history from localStorage
-  const MAX_HISTORY = 50;
+  // Load enabled skills and update command filtering
   useEffect(() => {
-    if (!projectKey) return;
-    const historyKey = `zeus-cmd-history-${projectKey}`;
-    try {
-      const saved = localStorage.getItem(historyKey);
-      if (saved) {
-        const parsed = JSON.parse(saved) as CommandHistoryEntry[];
-        setCommandHistory(parsed);
+    const loadEnabledSkills = async () => {
+      if (!projectKey) {
+        setCommandCatalog(undefined);
+        setEnabledCommands([]);
+        return;
       }
-    } catch {
-      // Ignore parse errors
-    }
+
+      try {
+        const projectData = await getProjectEnabledCommands(projectKey);
+        const commandCatalog = projectData.commands.map((cmd: ProjectEnabledCommand) => ({
+          command: cmd.command,
+          name: cmd.name || cmd.command.replace(/^\//, ""),
+          description: cmd.description || cmd.command,
+          category: cmd.category || "system",
+          requiresDocScope: cmd.requiresDocScope,
+        }));
+        setCommandCatalog(commandCatalog);
+        setEnabledCommands(commandCatalog.map((cmd) => cmd.command));
+      } catch {
+        try {
+          const legacyData = await getEnabledCommands();
+          setCommandCatalog(undefined);
+          setEnabledCommands(legacyData.commands);
+        } catch {
+          // Default to local command catalog if both endpoints fail
+          console.warn("Failed to load enabled commands, defaulting to local command catalog");
+          setCommandCatalog(undefined);
+        }
+      }
+    };
+    loadEnabledSkills();
   }, [projectKey]);
 
-  // Save command history to localStorage
+  // Load command history for the current session from localStorage
   useEffect(() => {
-    if (!projectKey || commandHistory.length === 0) return;
-    const historyKey = `zeus-cmd-history-${projectKey}`;
+    setHistoryIndex(-1);
+    currentInputRef.current = null;
+    setLoadedHistoryKey("");
+
+    if (!historyKey) {
+      setCommandHistory([]);
+      return;
+    }
+
+    try {
+      const saved = localStorage.getItem(historyKey);
+      if (!saved) {
+        setCommandHistory([]);
+        return;
+      }
+
+      const parsed = JSON.parse(saved) as unknown;
+      if (!Array.isArray(parsed)) {
+        setCommandHistory([]);
+        return;
+      }
+
+      const normalized: CommandHistoryEntry[] = [];
+      for (const item of parsed) {
+        if (!item || typeof item !== "object") continue;
+        const record = item as Record<string, unknown>;
+        if (typeof record.input !== "string") continue;
+
+        const mentionsRaw = Array.isArray(record.mentions) ? record.mentions : [];
+        const safeMentions: MentionItem[] = [];
+        for (const m of mentionsRaw) {
+          if (!m || typeof m !== "object") continue;
+          const mr = m as Record<string, unknown>;
+          const kind = mr.kind === "plugin_template" ? "plugin_template" : "doc";
+          const docId = typeof mr.docId === "string" ? mr.docId : "";
+          if (!docId) continue;
+          const title = typeof mr.title === "string" ? mr.title : "";
+          const titlePath = typeof mr.titlePath === "string" ? mr.titlePath : title;
+          if (kind === "plugin_template") {
+            safeMentions.push({
+              kind,
+              docId,
+              title,
+              titlePath,
+              includeChildren: false,
+              pluginId: typeof mr.pluginId === "string" ? mr.pluginId : "ppt-plugin",
+              command: typeof mr.command === "string" ? mr.command : "/ppt-agent",
+              templateId: typeof mr.templateId === "string" ? mr.templateId : undefined,
+            });
+          } else {
+            safeMentions.push({
+              kind: "doc",
+              docId,
+              title,
+              titlePath,
+              includeChildren: Boolean(mr.includeChildren),
+            });
+          }
+        }
+
+        let safeCommand: SlashCommand | null = null;
+        if (record.command && typeof record.command === "object") {
+          const cr = record.command as Record<string, unknown>;
+          const cmd = typeof cr.command === "string" ? cr.command : "";
+          if (cmd.startsWith("/")) {
+            safeCommand = {
+              command: cmd,
+              name: typeof cr.name === "string" ? cr.name : cmd.replace(/^\//, ""),
+              description: typeof cr.description === "string" ? cr.description : cmd,
+              category: typeof cr.category === "string" ? cr.category : "system",
+              icon: typeof cr.icon === "string" ? cr.icon : undefined,
+              requiresDocScope: Boolean(cr.requiresDocScope),
+            };
+          }
+        }
+
+        normalized.push({
+          input: record.input,
+          command: safeCommand,
+          mentions: safeMentions,
+          timestamp: typeof record.timestamp === "number" ? record.timestamp : Date.now(),
+        });
+      }
+
+      setCommandHistory(normalized.slice(-MAX_HISTORY));
+    } catch {
+      // Ignore parse errors
+      setCommandHistory([]);
+    } finally {
+      setLoadedHistoryKey(historyKey);
+    }
+  }, [historyKey]);
+
+  // Save command history for the current session to localStorage
+  useEffect(() => {
+    if (!historyKey) return;
+    if (loadedHistoryKey !== historyKey) return;
     try {
       const toSave = commandHistory.slice(-MAX_HISTORY);
-      localStorage.setItem(historyKey, JSON.stringify(toSave));
+      if (toSave.length === 0) {
+        localStorage.removeItem(historyKey);
+      } else {
+        localStorage.setItem(historyKey, JSON.stringify(toSave));
+      }
     } catch {
       // Ignore storage errors
     }
-  }, [projectKey, commandHistory]);
+  }, [historyKey, loadedHistoryKey, commandHistory]);
+
+  const isNearBottom = useCallback((container: HTMLDivElement) => {
+    const distance = container.scrollHeight - container.scrollTop - container.clientHeight;
+    return distance <= 40;
+  }, []);
+
+  const handleMessagesScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+    if (!autoScrollEnabled || programmaticScrollRef.current) {
+      return;
+    }
+    const container = event.currentTarget;
+    const currentTop = container.scrollTop;
+    const scrollingUp = currentTop < lastScrollTopRef.current - 1;
+    lastScrollTopRef.current = currentTop;
+    const nearBottom = isNearBottom(container);
+    setIsUserBrowsingHistory((prev) => {
+      if (nearBottom) {
+        return false;
+      }
+      if (scrollingUp) {
+        return true;
+      }
+      return prev ? prev : true;
+    });
+  }, [autoScrollEnabled, isNearBottom]);
+
+  useEffect(() => {
+    const prev = prevAutoScrollEnabledRef.current;
+    prevAutoScrollEnabledRef.current = autoScrollEnabled;
+    if (autoScrollEnabled && !prev) {
+      setIsUserBrowsingHistory(false);
+      lastScrollTopRef.current = 0;
+    }
+    if (!autoScrollEnabled) {
+      programmaticScrollRef.current = false;
+    }
+  }, [autoScrollEnabled]);
+
+  useEffect(() => {
+    setIsUserBrowsingHistory(false);
+    lastScrollTopRef.current = 0;
+  }, [projectKey, sessionId]);
 
   // Auto scroll to bottom
   useEffect(() => {
-    if (!autoScrollEnabled) return;
+    if (!autoScrollEnabled || isUserBrowsingHistory) return;
     const container = messagesRef.current;
     if (!container) return;
+    let releaseHandle = 0;
     const handle = requestAnimationFrame(() => {
+      programmaticScrollRef.current = true;
       container.scrollTop = container.scrollHeight;
+      lastScrollTopRef.current = container.scrollTop;
+      releaseHandle = requestAnimationFrame(() => {
+        programmaticScrollRef.current = false;
+      });
     });
-    return () => cancelAnimationFrame(handle);
-  }, [messages, assistantBuffer, autoScrollEnabled]);
+    return () => {
+      cancelAnimationFrame(handle);
+      if (releaseHandle) {
+        cancelAnimationFrame(releaseHandle);
+      }
+      programmaticScrollRef.current = false;
+    };
+  }, [messages, assistantBuffer, thinkingSteps, taskTodoItems, autoScrollEnabled, isUserBrowsingHistory]);
 
   const closeStream = useCallback(() => {
     if (eventSourceRef.current) {
@@ -396,6 +738,72 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   const resetAssistantBuffer = useCallback(() => {
     assistantBufferRef.current = "";
     setAssistantBuffer("");
+  }, []);
+
+  const resetThinkingSteps = useCallback(() => {
+    setThinkingSteps([]);
+  }, []);
+
+  const resetTaskTodoItems = useCallback(() => {
+    setTaskTodoItems([]);
+  }, []);
+
+  const upsertTaskTodoItem = useCallback((taskStatus: ChatTaskStatus) => {
+    setTaskTodoItems((prev) => {
+      const next = [...prev];
+      const index = next.findIndex((item) => item.taskId === taskStatus.taskId);
+      if (index >= 0) {
+        const existing = next[index];
+        next[index] = {
+          ...existing,
+          ...taskStatus,
+        };
+      } else {
+        next.push(taskStatus);
+      }
+      next.sort((a, b) => {
+        if (a.index !== b.index) return a.index - b.index;
+        return a.taskId.localeCompare(b.taskId);
+      });
+      return next;
+    });
+  }, []);
+
+  const appendThinkingStep = useCallback((step: Omit<ThinkingStep, "id" | "timestamp">) => {
+    const fallbackContent = step.kind === "search_start"
+      ? "开始检索"
+      : step.kind === "search_result"
+        ? "检索结果已返回"
+        : "正在思考";
+
+    const normalized: ThinkingStep = {
+      id: createId(),
+      kind: step.kind,
+      content: step.content?.trim() || fallbackContent,
+      phase: step.phase?.trim() || undefined,
+      searchQuery: step.searchQuery?.trim() || undefined,
+      resultCount: typeof step.resultCount === "number" && Number.isFinite(step.resultCount)
+        ? step.resultCount
+        : undefined,
+      subQueries: step.subQueries && step.subQueries.length > 0 ? step.subQueries : undefined,
+      timestamp: Date.now(),
+    };
+
+    setThinkingSteps((prev) => {
+      const last = prev[prev.length - 1];
+      if (
+        last
+        && last.kind === normalized.kind
+        && last.content === normalized.content
+        && (last.phase ?? "") === (normalized.phase ?? "")
+        && (last.searchQuery ?? "") === (normalized.searchQuery ?? "")
+        && (last.resultCount ?? -1) === (normalized.resultCount ?? -1)
+        && (last.subQueries ?? []).join("\n") === (normalized.subQueries ?? []).join("\n")
+      ) {
+        return prev;
+      }
+      return [...prev, normalized];
+    });
   }, []);
 
   const handleDelta = useCallback((delta: string) => {
@@ -467,19 +875,43 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
   const handleSend = useCallback(async () => {
     if (!canSend) return;
 
-    // Build full message with command prefix if selected
-    const commandPrefix = selectedCommand ? selectedCommand.command + " " : "";
-    const message = (commandPrefix + input).trim();
     const currentMentions = [...mentions];
+    const docMentions = currentMentions.filter(isDocMention);
+    const pluginTemplateMentions = currentMentions.filter(isPluginTemplateMention);
+    const selectedPptTemplateMention = pluginTemplateMentions[pluginTemplateMentions.length - 1];
+    const autoPptAgentCommand: SlashCommand | null = !selectedCommand && selectedPptTemplateMention
+      ? {
+          command: selectedPptTemplateMention.command || "/ppt-agent",
+          name: "PPT Agent",
+          description: "基于文档与知识库生成 PPT 类文档并导出",
+          category: "plugin",
+          icon: "📊",
+          requiresDocScope: false,
+        }
+      : null;
+    const effectiveCommand = selectedCommand || autoPptAgentCommand;
+    const commandPrefix = effectiveCommand ? `${effectiveCommand.command} ` : "";
+    const displayMessage = `${commandPrefix}${input.trim()}`.trim();
+    let messageBody = input.trim();
+    if (effectiveCommand?.command === "/ppt-agent" && selectedPptTemplateMention?.templateId) {
+      const templateArg = `template_id=${selectedPptTemplateMention.templateId}`;
+      messageBody = messageBody ? `${templateArg} ${messageBody}` : templateArg;
+    }
+    const message = `${commandPrefix}${messageBody}`.trim();
+    if (!message) return;
+
+    // Get attachments context before clearing
+    const attachmentsContext = getAttachmentsContext();
+    const currentAttachments = [...attachments];
 
     // Save to command history before clearing
     const historyEntry: CommandHistoryEntry = {
       input: input,
-      command: selectedCommand,
-      mentions: [...mentions],
+      command: effectiveCommand,
+      mentions: [...currentMentions],
       timestamp: Date.now(),
     };
-    setCommandHistory((prev) => [...prev, historyEntry]);
+    setCommandHistory((prev) => [...prev, historyEntry].slice(-MAX_HISTORY));
     setHistoryIndex(-1);
     currentInputRef.current = null;
 
@@ -488,14 +920,27 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     setSelectedCommand(null);
     setMentionState({ active: false, query: "", startPos: 0 });
     setError(null);
+    setPendingIntentInfo(null);
+    setPendingPreflightInfo(null);
+    setPendingRequiredInput(null);
+    clearAttachments();
 
-    // Build display message with mention info
-    const mentionInfo = currentMentions.length > 0
-      ? `[检索范围: ${currentMentions.map((m) => m.titlePath + (m.includeChildren ? "/" : "")).join(", ")}]\n`
+    // Build display message with mention info and attachments
+    const docScopeInfo = docMentions.length > 0
+      ? `[检索范围: ${docMentions.map((m) => m.titlePath + (m.includeChildren ? "/" : "")).join(", ")}]\n`
       : "";
-    appendMessage("user", mentionInfo + message);
+    const pluginResourceInfo = pluginTemplateMentions.length > 0
+      ? `[插件资源: ${pluginTemplateMentions.map((m) => `@ppt:${m.title}`).join(", ")}]\n`
+      : "";
+    const mentionInfo = `${docScopeInfo}${pluginResourceInfo}`;
+    const attachmentInfo = currentAttachments.length > 0
+      ? `[附件: ${currentAttachments.map((a) => a.name).join(", ")}]\n`
+      : "";
+    appendMessage("user", mentionInfo + attachmentInfo + (displayMessage || message));
     setIsGenerating(true);
     resetAssistantBuffer();
+    resetThinkingSteps();
+    resetTaskTodoItems();
     closeStream();
 
     try {
@@ -508,15 +953,35 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         return;
       }
 
-      // Convert mentions to document scope
-      const documentScope: DocumentScope[] | undefined = currentMentions.length > 0
-        ? currentMentions.map((m) => ({
-            docId: m.docId,
-            includeChildren: m.includeChildren,
-          }))
-        : undefined;
+      const documentScope = buildDocumentScopeForChat({
+        mentions: currentMentions,
+        defaultDocumentId,
+      });
 
-      const runId = await createChatRun(projectKey, message, sessionId, documentScope);
+      const attachmentAssets = currentAttachments.flatMap((a) => {
+        if (a.status !== "ready" || !a.assetId) return [];
+        if (a.type !== "file" && a.type !== "image") return [];
+        return [{
+          assetId: a.assetId,
+          name: a.name,
+          mimeType: a.mimeType,
+          size: a.size,
+          type: a.type,
+        }];
+      });
+
+      // Combine message with attachments context
+      const fullMessage = attachmentsContext
+        ? `${message}\n\n---\n附件内容:\n${attachmentsContext}`
+        : message;
+
+      const runId = await createChatRun(projectKey, fullMessage, {
+        sessionId,
+        documentScope,
+        ...(attachmentAssets.length > 0 ? { attachments: attachmentAssets } : {}),
+        deepSearch: deepSearchEnabled,
+      });
+      currentRunIdRef.current = runId;
       const url = buildChatStreamUrl(projectKey, runId);
       const source = new EventSource(url, { withCredentials: true });
       eventSourceRef.current = source;
@@ -531,12 +996,56 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       source.addEventListener("assistant.thinking", (event) => {
         hasCustomEventsRef.current = true;
         const payload = parsePayload((event as MessageEvent).data);
-        const content = typeof payload === "object" && payload !== null
-          ? String((payload as { content?: string }).content ?? "")
-          : String(payload ?? "");
-        if (content) {
-          setAssistantBuffer(`*${content}*\n`);
-        }
+        const thinking = normalizeThinkingPayload(payload);
+        appendThinkingStep({
+          kind: "thinking",
+          content: thinking.content,
+          phase: thinking.phase,
+          searchQuery: thinking.searchQuery,
+          resultCount: thinking.resultCount,
+          subQueries: thinking.subQueries,
+        });
+      });
+
+      source.addEventListener("assistant.search_start", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        const thinking = normalizeThinkingPayload(payload);
+        appendThinkingStep({
+          kind: "search_start",
+          content: thinking.content,
+          phase: thinking.phase,
+          searchQuery: thinking.searchQuery,
+          resultCount: thinking.resultCount,
+          subQueries: thinking.subQueries,
+        });
+      });
+
+      source.addEventListener("assistant.search_result", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        const thinking = normalizeThinkingPayload(payload);
+        appendThinkingStep({
+          kind: "search_result",
+          content: thinking.content,
+          phase: thinking.phase,
+          searchQuery: thinking.searchQuery,
+          resultCount: thinking.resultCount,
+          subQueries: thinking.subQueries,
+        });
+      });
+
+      source.addEventListener("assistant.task_status", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        const taskStatus = normalizeTaskStatusPayload(payload);
+        if (!taskStatus) return;
+        upsertTaskTodoItem(taskStatus);
+        if (taskStatus.status === "pending") return;
+        appendThinkingStep({
+          kind: "thinking",
+          content: taskStatusToThinkingContent(taskStatus),
+        });
       });
 
       source.addEventListener("assistant.draft", (event) => {
@@ -547,11 +1056,70 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         }
       });
 
+      source.addEventListener("assistant.intent_pending", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        if (payload && typeof payload === "object" && payload !== null) {
+          setPendingPreflightInfo(null);
+          setPendingIntentInfo(payload as PendingIntentInfo);
+        }
+      });
+
+      source.addEventListener("assistant.preflight_pending", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        if (payload && typeof payload === "object" && payload !== null) {
+          setPendingIntentInfo(null);
+          setPendingRequiredInput(null);
+          setPendingPreflightInfo(payload as PendingPreflightInfo);
+        }
+      });
+
+      source.addEventListener("assistant.input_pending", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        if (payload && typeof payload === "object" && payload !== null) {
+          setPendingPreflightInfo(null);
+          setPendingRequiredInput(payload as PendingRequiredInputInfo);
+        }
+      });
+
+      source.addEventListener("assistant.tool_pending", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        if (payload && typeof payload === "object") {
+          setPendingIntentInfo(null);
+          setPendingPreflightInfo(null);
+          setPendingRequiredInput(null);
+          setPendingTool(payload as PendingToolCall);
+        }
+      });
+
+      source.addEventListener("assistant.tool_rejected", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        const msg = typeof payload === "object" && payload !== null
+          ? String((payload as { message?: string }).message ?? "操作已取消")
+          : "操作已取消";
+        appendMessage("system", msg);
+        setPendingTool(null);
+        setPendingIntentInfo(null);
+        setPendingPreflightInfo(null);
+        setPendingRequiredInput(null);
+        setIsGenerating(false);
+        resetThinkingSteps();
+        resetTaskTodoItems();
+        closeStream();
+      });
+
       source.addEventListener("assistant.done", (event) => {
         hasCustomEventsRef.current = true;
         const payload = parsePayload((event as MessageEvent).data);
         const { message: doneMessage, artifacts, sources } = normalizeDonePayload(payload);
         setIsGenerating(false);
+        setPendingIntentInfo(null);
+        setPendingPreflightInfo(null);
+        setPendingRequiredInput(null);
         commitAssistantBuffer(artifacts, doneMessage, sources);
         closeStream();
       });
@@ -566,6 +1134,11 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         setError(errMsg);
         appendMessage("system", `错误: ${errMsg}`);
         setIsGenerating(false);
+        setPendingIntentInfo(null);
+        setPendingPreflightInfo(null);
+        setPendingRequiredInput(null);
+        resetThinkingSteps();
+        resetTaskTodoItems();
         resetAssistantBuffer();
         closeStream();
       });
@@ -575,6 +1148,8 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
         const payload = parsePayload(event.data);
         if (payload === null || payload === "null") {
           setIsGenerating(false);
+          resetThinkingSteps();
+          resetTaskTodoItems();
           closeStream();
           return;
         }
@@ -583,6 +1158,8 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
           setError(errMsg);
           appendMessage("system", `错误: ${errMsg}`);
           setIsGenerating(false);
+          resetThinkingSteps();
+          resetTaskTodoItems();
           closeStream();
           return;
         }
@@ -598,9 +1175,20 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       };
 
       source.onerror = () => {
+        if (!shouldHandleSseDisconnectError({
+          isActiveSource: eventSourceRef.current === source,
+          readyState: source.readyState,
+        })) {
+          return;
+        }
         setError("连接中断");
         appendMessage("system", "错误: 连接中断");
         setIsGenerating(false);
+        setPendingIntentInfo(null);
+        setPendingPreflightInfo(null);
+        setPendingRequiredInput(null);
+        resetThinkingSteps();
+        resetTaskTodoItems();
         resetAssistantBuffer();
         closeStream();
       };
@@ -609,18 +1197,24 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       setError(errMsg);
       appendMessage("system", `错误: ${errMsg}`);
       setIsGenerating(false);
+      resetThinkingSteps();
+      resetTaskTodoItems();
       resetAssistantBuffer();
       closeStream();
     }
   }, [
     appendMessage,
+    appendThinkingStep,
     canSend,
     closeStream,
     commitAssistantBuffer,
     handleDelta,
     input,
+    upsertTaskTodoItem,
     projectKey,
     resetAssistantBuffer,
+    resetThinkingSteps,
+    resetTaskTodoItems,
     sessionId,
     mentions,
     selectedCommand,
@@ -628,6 +1222,24 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
 
   const handleClearHistory = useCallback(async () => {
     if (!projectKey || !sessionId) return;
+
+    // Clear per-session command history (both in-memory and persisted).
+    try {
+      if (historyKey) {
+        localStorage.removeItem(historyKey);
+      }
+      localStorage.removeItem(`zeus-task-todo-expanded-${projectKey}-${sessionId}`);
+    } catch {
+      // Ignore storage errors
+    }
+    setLoadedHistoryKey("");
+    setCommandHistory([]);
+    setHistoryIndex(-1);
+    currentInputRef.current = null;
+    resetAssistantBuffer();
+    resetThinkingSteps();
+    resetTaskTodoItems();
+
     try {
       await clearChatSession(projectKey, sessionId);
       setMessages([]);
@@ -636,7 +1248,47 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       setMessages([]);
       setSessionId(`session-${createId()}`);
     }
-  }, [projectKey, sessionId]);
+  }, [historyKey, projectKey, resetAssistantBuffer, resetThinkingSteps, resetTaskTodoItems, sessionId, setSessionId]);
+
+  const handleNewSession = useCallback(async () => {
+    if (!projectKey) return;
+
+    // Reset command history navigation state; do NOT delete persisted history for the old session.
+    // Setting loadedHistoryKey first prevents the save effect from removing the old key.
+    setLoadedHistoryKey("");
+    setCommandHistory([]);
+    setHistoryIndex(-1);
+    currentInputRef.current = null;
+    resetAssistantBuffer();
+    resetThinkingSteps();
+    resetTaskTodoItems();
+
+    // Do not create empty sessions in backend; persist only after first message is sent.
+    setMessages([]);
+    setSessionId(`session-${createId()}`);
+  }, [projectKey, resetAssistantBuffer, resetThinkingSteps, resetTaskTodoItems, setSessionId]);
+
+  /**
+   * Stop the current generation
+   * Closes the SSE stream and saves partial response if any
+   */
+  const handleStop = useCallback(() => {
+    // Close the stream connection
+    closeStream();
+    setPendingIntentInfo(null);
+    setPendingPreflightInfo(null);
+    setPendingRequiredInput(null);
+    resetThinkingSteps();
+    resetTaskTodoItems();
+
+    // If there's a partial response in the buffer, save it
+    if (assistantBufferRef.current) {
+      appendMessage("assistant", assistantBufferRef.current + "\n\n[已停止]");
+      resetAssistantBuffer();
+    }
+    
+    setIsGenerating(false);
+  }, [appendMessage, closeStream, resetAssistantBuffer, resetThinkingSteps, resetTaskTodoItems]);
 
   const handleDraftApplied = useCallback((docId: string, isNew: boolean) => {
     setPendingDraft(null);
@@ -649,6 +1301,105 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     setPendingDraft(null);
   }, []);
 
+  const handleConfirmTool = useCallback(async () => {
+    const runId = currentRunIdRef.current;
+    if (!projectKey || !runId || !pendingTool) return;
+
+    try {
+      await confirmTool(projectKey, runId);
+      setPendingTool(null);
+      // The SSE stream will continue after confirmation
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "确认失败";
+      appendMessage("system", `错误: ${msg}`);
+      setPendingTool(null);
+      setIsGenerating(false);
+    }
+  }, [projectKey, pendingTool, appendMessage]);
+
+  const handleRejectTool = useCallback(async () => {
+    const runId = currentRunIdRef.current;
+    if (!projectKey || !runId) {
+      setPendingTool(null);
+      return;
+    }
+
+    try {
+      await rejectTool(projectKey, runId);
+      setPendingTool(null);
+      appendMessage("system", "操作已取消");
+      setIsGenerating(false);
+      resetThinkingSteps();
+      resetTaskTodoItems();
+      closeStream();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "取消失败";
+      appendMessage("system", `错误: ${msg}`);
+      setPendingTool(null);
+      setIsGenerating(false);
+    }
+  }, [projectKey, appendMessage, closeStream, resetThinkingSteps, resetTaskTodoItems]);
+
+  const handleSelectIntent = useCallback(async (option: IntentOption) => {
+    const runId = currentRunIdRef.current;
+    if (!projectKey || !runId) {
+      setPendingIntentInfo(null);
+      return;
+    }
+
+    try {
+      await selectIntent(projectKey, runId, option);
+      setPendingIntentInfo(null);
+      // The SSE stream will continue after selection.
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "选择失败";
+      appendMessage("system", `错误: ${msg}`);
+      setPendingIntentInfo(null);
+      setIsGenerating(false);
+      closeStream();
+    }
+  }, [projectKey, appendMessage, closeStream]);
+
+  const handleProvidePreflightInput = useCallback(async (payload: ProvidePreflightInputPayload) => {
+    const runId = currentRunIdRef.current;
+    if (!projectKey || !runId) {
+      setPendingPreflightInfo(null);
+      return;
+    }
+
+    try {
+      await providePreflightInput(projectKey, runId, payload);
+      setPendingPreflightInfo(null);
+      // SSE stream will continue after providing preflight input.
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "提交失败";
+      appendMessage("system", `错误: ${msg}`);
+      setPendingPreflightInfo(null);
+      setIsGenerating(false);
+      closeStream();
+    }
+  }, [projectKey, appendMessage, closeStream]);
+
+  const handleProvideRequiredInput = useCallback(async (payload: ProvideRequiredInputPayload) => {
+    const runId = currentRunIdRef.current;
+    if (!projectKey || !runId) {
+      setPendingRequiredInput(null);
+      return;
+    }
+
+    try {
+      await provideRequiredInput(projectKey, runId, payload);
+      setPendingRequiredInput(null);
+      // SSE stream will continue after providing input.
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "提交失败";
+      appendMessage("system", `错误: ${msg}`);
+      setPendingRequiredInput(null);
+      setIsGenerating(false);
+      closeStream();
+    }
+  }, [projectKey, appendMessage, closeStream]);
+
   const mentionStateRef = useRef(mentionState);
   useEffect(() => {
     mentionStateRef.current = mentionState;
@@ -659,7 +1410,11 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
       const currentMentionState = mentionStateRef.current;
 
       setMentions((prev) => {
-        if (prev.some((m) => m.docId === item.docId)) {
+        if (item.kind === "plugin_template") {
+          const filtered = prev.filter((m) => m.kind !== "plugin_template");
+          return [...filtered, item];
+        }
+        if (prev.some((m) => m.docId === item.docId && m.kind !== "plugin_template")) {
           return prev;
         }
         return [...prev, item];
@@ -680,9 +1435,45 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     setMentionState({ active: false, query: "", startPos: 0 });
   }, []);
 
-  const handleRemoveMention = useCallback((docId: string) => {
-    setMentions((prev) => prev.filter((m) => m.docId !== docId));
+  const handleRemoveMention = useCallback((mentionId: string) => {
+    setMentions((prev) => prev.filter((m) => m.docId !== mentionId));
   }, []);
+
+  // Paste handling for attachments
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      if (!projectKey) return;
+
+      // Check for files (images, etc.)
+      const files = e.clipboardData?.files;
+      if (files && files.length > 0) {
+        e.preventDefault();
+        for (let i = 0; i < files.length; i++) {
+          addAttachmentFile(projectKey, files[i]);
+        }
+        return;
+      }
+
+      // Check for URL text
+      const text = e.clipboardData?.getData("text/plain") || "";
+      const trimmedText = text.trim();
+      if (isValidUrl(trimmedText)) {
+        e.preventDefault();
+        addAttachmentUrl(projectKey, trimmedText);
+        return;
+      }
+
+      // Let normal paste behavior continue for plain text
+    },
+    [projectKey, addAttachmentFile, addAttachmentUrl]
+  );
+
+  const handleAddAttachmentFile = useCallback((file: File) => {
+    if (!projectKey || !file) {
+      return;
+    }
+    addAttachmentFile(projectKey, file);
+  }, [addAttachmentFile, projectKey]);
 
   const filteredSlashCommands = useMemo(() => {
     if (!slashActive) return [];
@@ -869,12 +1660,19 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     messages,
     input,
     isGenerating,
+    deepSearchEnabled,
     error,
     assistantBuffer,
+    thinkingSteps,
+    taskTodoItems,
     llmConfig,
     mentions,
     mentionState,
     pendingDraft,
+    pendingTool,
+    pendingIntentInfo,
+    pendingPreflightInfo,
+    pendingRequiredInput,
     slashActive,
     slashQuery,
     slashSelectedIndex,
@@ -884,6 +1682,11 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     canSend,
     projectKey,
 
+    // Attachments
+    attachments,
+    hasAttachments,
+    attachmentsLoading,
+
     // Refs
     messagesRef,
     inputRef,
@@ -892,8 +1695,13 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     setInput,
     setError,
     setSlashSelectedIndex,
+    setDeepSearchEnabled,
+    handleMessagesScroll,
     handleSend,
+    handleStop,
     handleClearHistory,
+    handleNewSession,
+    sessionId,
     handleInputChange,
     handleKeyDown,
     handleMentionSelect,
@@ -904,7 +1712,15 @@ export function useChatLogic(options: UseChatLogicOptions = {}): UseChatLogicRet
     handleDraftClose,
     handleDocumentNavigate,
     handleProposalAction,
+    handleConfirmTool,
+    handleRejectTool,
+    handleSelectIntent,
+    handleProvidePreflightInput,
+    handleProvideRequiredInput,
     toggleSourcesExpanded,
+    handlePaste,
+    handleAddAttachmentFile,
+    removeAttachment,
 
     // Render helpers
     renderMarkdown,

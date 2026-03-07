@@ -6,46 +6,15 @@
  */
 
 import type { NormalizedBlock, LCSMatch } from "./types";
+import { createMarkdownFingerprint } from "./block-markdown";
 
 /**
- * Create a simple content fingerprint for matching.
- * Only looks at top-level structure, not deeply nested content.
+ * Create a content fingerprint for matching.
+ * Uses Markdown representation as canonical form for comparison.
+ * This ensures content-equivalent blocks match even if their JSON structure differs.
  */
 function createContentFingerprint(block: NormalizedBlock): string {
-  const parts: string[] = [block.type];
-
-  // Add key attributes (not deeply nested)
-  if (block.attrs) {
-    // For images, use src as key identifier
-    if (block.attrs.src) {
-      parts.push(`src:${String(block.attrs.src)}`);
-    }
-    // For links, use href
-    if (block.attrs.href) {
-      parts.push(`href:${String(block.attrs.href)}`);
-    }
-    // For files, use fileId or name
-    if (block.attrs.fileId) {
-      parts.push(`fileId:${String(block.attrs.fileId)}`);
-    }
-    // For code blocks, use language as key identifier
-    if (block.attrs.language) {
-      parts.push(`lang:${String(block.attrs.language)}`);
-    }
-  }
-
-  // Add text content if present (truncate to avoid huge fingerprints)
-  if (block.text) {
-    const textPrefix = block.text.length > 50 ? block.text.slice(0, 50) : block.text;
-    parts.push(`text:${textPrefix}`);
-  }
-
-  // Add content length as a simple indicator
-  if (block.content && block.content.length > 0) {
-    parts.push(`contentLen:${block.content.length}`);
-  }
-
-  return parts.join("|");
+  return createMarkdownFingerprint(block);
 }
 
 /**
@@ -120,6 +89,11 @@ export function buildLCSTable(
 /**
  * Check if blocks match (for backtracking).
  * This is a simpler version that uses pre-computed keys.
+ * 
+ * Matching priority:
+ * 1. If both have same ID -> match
+ * 2. If types differ -> no match
+ * 3. If content fingerprints match -> match (even if IDs differ)
  */
 function blocksMatchSimple(
   a: NormalizedBlock,
@@ -127,9 +101,9 @@ function blocksMatchSimple(
   aKey: string | undefined,
   bKey: string | undefined
 ): boolean {
-  // First try ID match (both must have IDs)
-  if (a.id && b.id) {
-    return a.id === b.id;
+  // If both have IDs and they match, it's a match
+  if (a.id && b.id && a.id === b.id) {
+    return true;
   }
   
   // If types don't match, they can't be the same block
@@ -137,9 +111,10 @@ function blocksMatchSimple(
     return false;
   }
   
-  // For blocks where at least one doesn't have an ID,
-  // fall back to content fingerprint matching
-  // This handles the case where old content has no IDs but new content does
+  // Fall back to content fingerprint matching
+  // This handles:
+  // - Blocks where at least one doesn't have an ID
+  // - Blocks with different IDs but identical content (e.g., AI-regenerated content)
   if (aKey !== undefined && bKey !== undefined) {
     return aKey === bKey;
   }
@@ -235,14 +210,28 @@ export function generateDiffPath(
   let oi = 0; // original index
   let ei = 0; // edited index
   let mi = 0; // match index
-  let iterations = 0;
-  const maxIterations = (originalLength + editedLength) * 2;
 
   while (oi < originalLength || ei < editedLength) {
-    iterations++;
-    if (iterations > maxIterations) {
-      console.error(`[LCS] generateDiffPath exceeded max iterations! oi=${oi}, ei=${ei}, mi=${mi}`);
-      break;
+    // If we've exhausted original, add remaining edited as "added"
+    if (oi >= originalLength) {
+      path.push({
+        type: "added",
+        originalIndex: null,
+        editedIndex: ei,
+      });
+      ei++;
+      continue;
+    }
+
+    // If we've exhausted edited, add remaining original as "removed"
+    if (ei >= editedLength) {
+      path.push({
+        type: "removed",
+        originalIndex: oi,
+        editedIndex: null,
+      });
+      oi++;
+      continue;
     }
 
     const match = mi < matches.length ? matches[mi] : null;
@@ -265,24 +254,25 @@ export function generateDiffPath(
         editedIndex: null,
       });
       oi++;
-    } else if (!match || oi < match.originalIndex) {
-      // Original has extra block - removed
+    } else if (match && oi < match.originalIndex) {
+      // Original has extra block before next match - removed
       path.push({
         type: "removed",
         originalIndex: oi,
         editedIndex: null,
       });
       oi++;
-    } else if (!match || ei < match.editedIndex) {
-      // Edited has extra block - added
+    } else if (match && ei < match.editedIndex) {
+      // Edited has extra block before next match - added
       path.push({
         type: "added",
         originalIndex: null,
         editedIndex: ei,
       });
       ei++;
-    } else {
-      // Shouldn't happen, but handle gracefully
+    } else if (!match) {
+      // No more matches - process remaining blocks
+      // Prefer removing original blocks first, then adding edited blocks
       if (oi < originalLength) {
         path.push({
           type: "removed",
@@ -290,7 +280,7 @@ export function generateDiffPath(
           editedIndex: null,
         });
         oi++;
-      } else if (ei < editedLength) {
+      } else {
         path.push({
           type: "added",
           originalIndex: null,
@@ -298,10 +288,19 @@ export function generateDiffPath(
         });
         ei++;
       }
+    } else {
+      // Fallback: should not reach here, but advance to prevent infinite loop
+      console.warn(`[LCS] generateDiffPath unexpected state: oi=${oi}, ei=${ei}, mi=${mi}, match=${JSON.stringify(match)}`);
+      if (oi < originalLength) {
+        oi++;
+      }
+      if (ei < editedLength) {
+        ei++;
+      }
     }
   }
 
-  console.log(`[LCS] generateDiffPath done, iterations=${iterations}, pathLen=${path.length}`);
+  console.log(`[LCS] generateDiffPath done, pathLen=${path.length}`);
   return path;
 }
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Alert, Button, Modal, Segmented, Space, Spin } from "antd";
 
 import type { ModelRuntime, ModelRuntimeInput } from "../api/model";
 import ModelScenarioConfigPanel, {
@@ -10,7 +11,7 @@ const scenarioOrder: ScenarioKey[] = ["chat", "embedding", "multimodal"];
 
 const scenarioTitles: Record<ScenarioKey, string> = {
   chat: "对话模型",
-  embedding: "Embedding 模型",
+  embedding: "向量模型",
   multimodal: "多模态模型",
 };
 
@@ -36,7 +37,7 @@ const defaultScenarioName = (scenario: ScenarioKey) => {
     case "chat":
       return "对话";
     case "embedding":
-      return "Embedding";
+      return "向量";
     case "multimodal":
       return "多模态";
     default:
@@ -116,7 +117,7 @@ function ModelSettingsModal({
     }
     const parsed = JSON.parse(trimmed);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      throw new Error("Parameters must be a JSON object");
+      throw new Error("参数必须是 JSON 对象");
     }
     if (scenario === "embedding" && "temperature" in parsed) {
       const clone = { ...(parsed as Record<string, unknown>) };
@@ -148,7 +149,7 @@ function ModelSettingsModal({
             apiKey: draft.apiKey,
             modelName: draft.modelName,
             parameters,
-            isActive: true,
+            isActive: draft.isActive,
           }),
         );
       });
@@ -189,85 +190,89 @@ function ModelSettingsModal({
     activeTab === "multimodal" || !activeDraft.modelName || saving || testing;
 
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true" onClick={onClose}>
-      <div
-        className="modal-card model-settings-modal"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="modal-header">
-          <h2>模型设置</h2>
-          <button className="modal-close" type="button" onClick={onClose}>
-            Close
-          </button>
+    <Modal
+      open={isOpen}
+      centered
+      width={760}
+      title="模型设置"
+      onCancel={onClose}
+      destroyOnHidden
+      footer={(
+        <Space>
+          <Button onClick={onClose} disabled={saving}>取消</Button>
+          <Button onClick={handleTest} disabled={testDisabled} loading={testing}>
+            测试连接
+          </Button>
+          <Button type="primary" onClick={handleSave} loading={saving}>
+            保存
+          </Button>
+        </Space>
+      )}
+    >
+      {displayError ? (
+        <Alert
+          type="error"
+          message={displayError}
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+      ) : null}
+      {testStatus ? (
+        <Alert
+          type="success"
+          message={testStatus}
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+      ) : null}
+      {loading ? (
+        <div className="model-loading">
+          <Spin size="small" style={{ marginRight: 8 }} />
+          加载配置中...
         </div>
-        {displayError ? <div className="modal-error">{displayError}</div> : null}
-        {loading ? <div className="model-loading">加载配置中...</div> : null}
-        <div className="model-tabs">
-          {scenarioOrder.map((scenario) => {
-            const disabled = scenario === "multimodal";
-            const active = activeTab === scenario;
-            return (
-              <button
-                key={scenario}
-                className={`model-tab${active ? " active" : ""}${disabled ? " disabled" : ""}`}
-                type="button"
-                onClick={() => !disabled && setActiveTab(scenario)}
-                disabled={disabled}
-              >
-                {scenarioTitles[scenario]}
-              </button>
-            );
-          })}
-        </div>
-        <div className="model-tab-panel">
-          {activeTab === "chat" ? (
-            <ModelScenarioConfigPanel
-              scenario="chat"
-              title="对话模型"
-              draft={drafts.chat}
-              onChange={(patch) => handleChange("chat", patch)}
-              onRefreshModels={onRefreshModels}
-            />
-          ) : null}
-          {activeTab === "embedding" ? (
-            <ModelScenarioConfigPanel
-              scenario="embedding"
-              title="Embedding 模型"
-              draft={drafts.embedding}
-              onChange={(patch) => handleChange("embedding", patch)}
-              onRefreshModels={onRefreshModels}
-            />
-          ) : null}
-          {activeTab === "multimodal" ? (
-            <ModelScenarioConfigPanel
-              scenario="multimodal"
-              title="多模态模型"
-              draft={drafts.multimodal}
-              onChange={(patch) => handleChange("multimodal", patch)}
-              onRefreshModels={onRefreshModels}
-              disabled
-            />
-          ) : null}
-        </div>
-        {testStatus ? <div className="model-success">{testStatus}</div> : null}
-        <div className="modal-actions">
-          <button className="btn ghost" type="button" onClick={onClose} disabled={saving}>
-            Cancel
-          </button>
-          <button
-            className="btn ghost"
-            type="button"
-            onClick={handleTest}
-            disabled={testDisabled}
-          >
-            {testing ? "测试中..." : "测试"}
-          </button>
-          <button className="btn primary" type="button" onClick={handleSave} disabled={saving}>
-            {saving ? "保存中..." : "保存"}
-          </button>
-        </div>
+      ) : null}
+      <Segmented
+        block
+        style={{ marginBottom: 16 }}
+        value={activeTab}
+        onChange={(value) => setActiveTab(value as ScenarioKey)}
+        options={scenarioOrder.map((scenario) => ({
+          value: scenario,
+          label: scenarioTitles[scenario],
+          disabled: scenario === "multimodal",
+        }))}
+      />
+      <div className="model-tab-panel">
+        {activeTab === "chat" ? (
+          <ModelScenarioConfigPanel
+            scenario="chat"
+            title="对话模型"
+            draft={drafts.chat}
+            onChange={(patch) => handleChange("chat", patch)}
+            onRefreshModels={onRefreshModels}
+          />
+        ) : null}
+        {activeTab === "embedding" ? (
+          <ModelScenarioConfigPanel
+            scenario="embedding"
+            title="向量模型"
+            draft={drafts.embedding}
+            onChange={(patch) => handleChange("embedding", patch)}
+            onRefreshModels={onRefreshModels}
+          />
+        ) : null}
+        {activeTab === "multimodal" ? (
+          <ModelScenarioConfigPanel
+            scenario="multimodal"
+            title="多模态模型"
+            draft={drafts.multimodal}
+            onChange={(patch) => handleChange("multimodal", patch)}
+            onRefreshModels={onRefreshModels}
+            disabled
+          />
+        ) : null}
       </div>
-    </div>
+    </Modal>
   );
 }
 

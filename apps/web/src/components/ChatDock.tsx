@@ -1,10 +1,11 @@
 import type { KeyboardEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
-import { DownOutlined, UpOutlined } from "@ant-design/icons";
+import { DownOutlined, UpOutlined, StopOutlined, SendOutlined, SearchOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 
-import { createChatRun, buildChatStreamUrl } from "../api/chat";
+import { createChatRun, buildChatStreamUrl, confirmTool, rejectTool, type PendingToolCall } from "../api/chat";
 import { applyProposal, rejectProposal } from "../api/documents";
+import ToolConfirmDialog from "./ToolConfirmDialog";
 import { executeCommand } from "../api/commands";
 import { useProjectContext } from "../context/ProjectContext";
 import type { PromptTemplate } from "../lib/promptRegistry";
@@ -12,6 +13,9 @@ import { filterPromptTemplates, findPromptTemplate } from "../lib/promptRegistry
 import SlashCommandPanel from "./SlashCommandPanel";
 import PromptSlashPanel from "./PromptSlashPanel";
 import { parseZeusText, renderZeusText } from "../lib/zeusText";
+import ChatAttachmentTags from "./ChatAttachmentTags";
+import { useChatAttachments, isValidUrl } from "../hooks/useChatAttachments";
+import { shouldHandleSseDisconnectError } from "../features/chat/sse-error";
 
 
 type ChatArtifact = {
@@ -35,7 +39,7 @@ const extractDocsFromArtifacts = (
   return items
     .map((item) => ({
       id: String(item?.id ?? item?.doc_id ?? "").trim(),
-      title: String(item?.title ?? "").trim() || "Untitled",
+      title: String(item?.title ?? "").trim() || "无标题文档",
     }))
     .filter((item) => item.id);
 };
@@ -181,12 +185,13 @@ const buildPromptMessage = (message: string, prompt?: PromptTemplate) => {
 
 function ChatDock() {
   const { currentProject } = useProjectContext();
-  const projectKey = currentProject?.key ?? "";
+  const projectKey = currentProject?.projectRef ?? "";
   const navigate = useNavigate();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputState, dispatchInput] = useReducer(inputReducer, initialInputState);
   const input = inputState.rawText;
   const [isGenerating, setIsGenerating] = useState(false);
+  const [deepSearchEnabled, setDeepSearchEnabled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [assistantBuffer, setAssistantBuffer] = useState("");
   const [assistantActive, setAssistantActive] = useState(false);
@@ -197,6 +202,8 @@ function ChatDock() {
     [],
   );
   const [activeDropdownKey, setActiveDropdownKey] = useState<string | null>(null);
+  const [pendingTool, setPendingTool] = useState<PendingToolCall | null>(null);
+  const currentRunIdRef = useRef<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const hasCustomEventsRef = useRef(false);
   const prevInputModeRef = useRef<InputMode>("normal");
@@ -205,6 +212,16 @@ function ChatDock() {
   const resizeStartRef = useRef<{ y: number; height: number } | null>(null);
   const inputRef = useRef<HTMLDivElement>(null);
   const lastAppliedCaretRef = useRef<number | null>(null);
+
+  // Attachments
+  const {
+    attachments,
+    addFile: addAttachmentFile,
+    addUrl: addAttachmentUrl,
+    removeAttachment,
+    clearAttachments,
+    getAttachmentsContext,
+  } = useChatAttachments();
 
   const canSend = useMemo(() => {
     return !isGenerating && input.trim().length > 0 && projectKey !== "";
@@ -638,14 +655,42 @@ function ChatDock() {
     [appendMessage, resetAssistantBuffer],
   );
 
+  /**
+   * Stop the current generation
+   * Closes the SSE stream and saves partial response if any
+   */
+  const handleStop = useCallback(() => {
+    // Close the stream connection
+    closeStream();
+    
+    // If there's a partial response in the buffer, save it
+    if (assistantBufferRef.current) {
+      appendMessage("assistant", assistantBufferRef.current + "\n\n[已停止]");
+      resetAssistantBuffer();
+    }
+    
+    setIsGenerating(false);
+  }, [closeStream, appendMessage, resetAssistantBuffer]);
+
   const handleSend = useCallback(async () => {
     if (!canSend) {
       return;
     }
     const message = input.trim();
+    
+    // Get attachments context before clearing
+    const attachmentsContext = getAttachmentsContext();
+    const currentAttachments = [...attachments];
+    
     dispatchInput({ type: "RESET" });
     setError(null);
-    appendMessage("user", message);
+    clearAttachments();
+    
+    // Build display message with attachments info
+    const attachmentInfo = currentAttachments.length > 0
+      ? `[附件: ${currentAttachments.map((a) => a.name).join(", ")}]\n`
+      : "";
+    appendMessage("user", attachmentInfo + message);
     setHistoryOpen(true);
     setIsGenerating(true);
     resetAssistantBuffer();
@@ -654,13 +699,35 @@ function ChatDock() {
     try {
       if (message.startsWith("/op:")) {
         const result = await executeCommand(projectKey, message);
-        const reply = result.message || "Command completed.";
+        const reply = result.message || "命令执行完成。";
         appendMessage("assistant", reply, result.artifacts);
         setIsGenerating(false);
         return;
       }
       const outboundMessage = buildPromptMessage(message, inputState.activePrompt);
-      const runId = await createChatRun(projectKey, outboundMessage);
+      
+      // Combine message with attachments context
+      const fullMessage = attachmentsContext
+        ? `${outboundMessage}\n\n---\n附件内容:\n${attachmentsContext}`
+        : outboundMessage;
+
+      const attachmentAssets = currentAttachments.flatMap((a) => {
+        if (a.status !== "ready" || !a.assetId) return [];
+        if (a.type !== "file" && a.type !== "image") return [];
+        return [{
+          assetId: a.assetId,
+          name: a.name,
+          mimeType: a.mimeType,
+          size: a.size,
+          type: a.type,
+        }];
+      });
+      
+      const runId = await createChatRun(projectKey, fullMessage, {
+        ...(attachmentAssets.length > 0 ? { attachments: attachmentAssets } : {}),
+        deepSearch: deepSearchEnabled,
+      });
+      currentRunIdRef.current = runId;
       const url = buildChatStreamUrl(projectKey, runId);
       const source = new EventSource(url, { withCredentials: true });
       eventSourceRef.current = source;
@@ -683,15 +750,35 @@ function ChatDock() {
         closeStream();
       });
 
+      source.addEventListener("assistant.tool_pending", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        if (payload && typeof payload === "object") {
+          setPendingTool(payload as PendingToolCall);
+        }
+      });
+
+      source.addEventListener("assistant.tool_rejected", (event) => {
+        hasCustomEventsRef.current = true;
+        const payload = parsePayload((event as MessageEvent).data);
+        const msg = typeof payload === "object" && payload !== null
+          ? String((payload as { message?: string }).message ?? "操作已取消")
+          : "操作已取消";
+        appendMessage("system", msg);
+        setPendingTool(null);
+        setIsGenerating(false);
+        closeStream();
+      });
+
       source.addEventListener("run.error", (event) => {
         hasCustomEventsRef.current = true;
         const payload = parsePayload((event as MessageEvent).data);
         const messageText =
           typeof payload === "string"
             ? payload
-            : String(payload?.error ?? "Chat run failed");
+            : String(payload?.error ?? "对话运行失败");
         setError(messageText);
-        appendMessage("system", `Error: ${messageText}`);
+        appendMessage("system", `错误：${messageText}`);
         setIsGenerating(false);
         resetAssistantBuffer();
         closeStream();
@@ -708,9 +795,9 @@ function ChatDock() {
           return;
         }
         if (payload && typeof payload === "object" && "error" in payload) {
-          const messageText = String((payload as { error?: string }).error ?? "Chat run failed");
+          const messageText = String((payload as { error?: string }).error ?? "对话运行失败");
           setError(messageText);
-          appendMessage("system", `Error: ${messageText}`);
+          appendMessage("system", `错误：${messageText}`);
           setIsGenerating(false);
           closeStream();
           return;
@@ -729,16 +816,22 @@ function ChatDock() {
       };
 
       source.onerror = () => {
-        setError("Stream connection lost");
-        appendMessage("system", "Error: Stream connection lost");
+        if (!shouldHandleSseDisconnectError({
+          isActiveSource: eventSourceRef.current === source,
+          readyState: source.readyState,
+        })) {
+          return;
+        }
+        setError("流式连接已断开");
+        appendMessage("system", "错误：流式连接已断开");
         setIsGenerating(false);
         resetAssistantBuffer();
         closeStream();
       };
     } catch (err) {
-      const messageText = err instanceof Error ? err.message : "Failed to send message";
+      const messageText = err instanceof Error ? err.message : "发送消息失败";
       setError(messageText);
-      appendMessage("system", `Error: ${messageText}`);
+      appendMessage("system", `错误：${messageText}`);
       setIsGenerating(false);
       resetAssistantBuffer();
       closeStream();
@@ -898,6 +991,35 @@ function ChatDock() {
     [input, inputState.isComposing, updateInput],
   );
 
+  // Paste handling for attachments
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      if (!projectKey) return;
+
+      // Check for files (images, etc.)
+      const files = e.clipboardData?.files;
+      if (files && files.length > 0) {
+        e.preventDefault();
+        for (let i = 0; i < files.length; i++) {
+          addAttachmentFile(projectKey, files[i]);
+        }
+        return;
+      }
+
+      // Check for URL text
+      const text = e.clipboardData?.getData("text/plain") || "";
+      const trimmedText = text.trim();
+      if (isValidUrl(trimmedText)) {
+        e.preventDefault();
+        addAttachmentUrl(projectKey, trimmedText);
+        return;
+      }
+
+      // Let normal paste behavior continue for plain text
+    },
+    [projectKey, addAttachmentFile, addAttachmentUrl]
+  );
+
   const handleProposalAction = useCallback(
     async (action: string, docId: string, proposalId: string) => {
       if (!projectKey || !docId) {
@@ -913,18 +1035,55 @@ function ChatDock() {
       try {
         if (action === "apply") {
           await applyProposal(projectKey, docId, proposalId);
-          appendMessage("system", "Applied proposal.");
+          appendMessage("system", "已应用建议。");
         } else {
           await rejectProposal(projectKey, docId, proposalId);
-          appendMessage("system", "Rejected proposal.");
+          appendMessage("system", "已拒绝建议。");
         }
       } catch (err) {
-        const messageText = err instanceof Error ? err.message : "proposal action failed";
-        appendMessage("system", `Error: ${messageText}`);
+        const messageText = err instanceof Error ? err.message : "处理建议操作失败";
+        appendMessage("system", `错误：${messageText}`);
       }
     },
     [appendMessage, handleDocumentNavigate, projectKey],
   );
+
+  const handleConfirmTool = useCallback(async () => {
+    const runId = currentRunIdRef.current;
+    if (!projectKey || !runId || !pendingTool) return;
+
+    try {
+      await confirmTool(projectKey, runId);
+      setPendingTool(null);
+      // The SSE stream will continue after confirmation
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "确认失败";
+      appendMessage("system", `错误：${msg}`);
+      setPendingTool(null);
+      setIsGenerating(false);
+    }
+  }, [projectKey, pendingTool, appendMessage]);
+
+  const handleRejectTool = useCallback(async () => {
+    const runId = currentRunIdRef.current;
+    if (!projectKey || !runId) {
+      setPendingTool(null);
+      return;
+    }
+
+    try {
+      await rejectTool(projectKey, runId);
+      setPendingTool(null);
+      appendMessage("system", "操作已取消");
+      setIsGenerating(false);
+      closeStream();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "取消失败";
+      appendMessage("system", `错误：${msg}`);
+      setPendingTool(null);
+      setIsGenerating(false);
+    }
+  }, [projectKey, appendMessage, closeStream]);
 
   const applySlashSelection = useCallback(
     (value: string) => {
@@ -995,7 +1154,7 @@ function ChatDock() {
             return (
               <div key={`${artifact.type}-${index}`} className="chat-dock-artifact">
                 <div className="chat-dock-artifact-title">
-                  {artifact.title || "Documents"}
+                  {artifact.title || "文档"}
                 </div>
                 <div className="chat-dock-artifact-list">
                   {items.map((item, itemIndex) => (
@@ -1005,7 +1164,7 @@ function ChatDock() {
                       className="chat-dock-artifact-link"
                       onClick={() => handleDocumentNavigate(String(item.id ?? ""))}
                     >
-                      {String(item.title ?? item.id ?? "Document")}
+                      {String(item.title ?? item.id ?? "文档")}
                     </button>
                   ))}
                 </div>
@@ -1018,14 +1177,14 @@ function ChatDock() {
             return (
               <div key={`${artifact.type}-${index}`} className="chat-dock-artifact">
                 <div className="chat-dock-artifact-title">
-                  {artifact.title || "Change Proposal"}
+                  {artifact.title || "修改建议"}
                 </div>
                 <button
                   type="button"
                   className="chat-dock-artifact-link"
                   onClick={() => handleDocumentNavigate(docId, proposalId)}
                 >
-                  View diff
+                  查看修改
                 </button>
               </div>
             );
@@ -1044,7 +1203,7 @@ function ChatDock() {
             return (
               <div key={`${artifact.type}-${index}`} className="chat-dock-artifact">
                 <div className="chat-dock-artifact-title">
-                  {artifact.title || "Change Proposals"}
+                  {artifact.title || "修改建议"}
                 </div>
                 <div className="chat-dock-artifact-list">
                   {items.map((item, itemIndex) => (
@@ -1060,7 +1219,7 @@ function ChatDock() {
                           )
                         }
                       >
-                        {String(item.title ?? item.doc_id ?? "Document")}
+                        {String(item.title ?? item.doc_id ?? "文档")}
                       </button>
                       <div className="chat-dock-artifact-actions">
                         {actions.map((action, actionIndex) => (
@@ -1076,7 +1235,7 @@ function ChatDock() {
                               )
                             }
                           >
-                            {action.label ?? action.type ?? "Action"}
+                            {action.label ?? action.type ?? "操作"}
                           </button>
                         ))}
                       </div>
@@ -1134,6 +1293,13 @@ function ChatDock() {
 
   return (
     <section className="chat-dock">
+      {/* Tool Confirmation Dialog */}
+      <ToolConfirmDialog
+        visible={!!pendingTool}
+        pendingTool={pendingTool}
+        onConfirm={handleConfirmTool}
+        onReject={handleRejectTool}
+      />
       {showPanel ? (
         <div className="chat-dock-panel" style={{ height: `${historyHeight}px` }}>
           <div
@@ -1187,7 +1353,12 @@ function ChatDock() {
         </div>
       ) : null}
       <div className="chat-dock-bar">
-        {isGenerating ? <span className="chat-dock-bar-status">Generating...</span> : null}
+        {/* Attachment Tags */}
+        <ChatAttachmentTags
+          attachments={attachments}
+          onRemove={removeAttachment}
+        />
+        {isGenerating ? <span className="chat-dock-bar-status">生成中...</span> : null}
         <div className="chat-dock-input">
           <div className="chat-dock-input-body">
             {inputState.activePrompt ? (
@@ -1224,9 +1395,9 @@ function ChatDock() {
                 filterOption={false}
                 notFoundContent={
                   promptSlashState.active
-                    ? "No matching prompts"
+                    ? "没有匹配的提示词"
                     : docSearchState.active
-                      ? "No matching documents"
+                      ? "没有匹配的文档"
                       : null
                 }
                 onKeyDown={(event) => {
@@ -1315,13 +1486,34 @@ function ChatDock() {
                 }}
                 onCompositionStart={() => setComposing(true)}
                 onCompositionEnd={() => setComposing(false)}
+                onPaste={handlePaste}
                 disabled={!projectKey || isGenerating}
                 activeKey={activeDropdownKey}
               />
               <div className="chat-dock-actions">
-                <button type="button" onClick={handleSend} disabled={!canSend}>
-                  发送
+                <button
+                  type="button"
+                  className={`chat-dock-deep-search-toggle ${deepSearchEnabled ? "active" : ""}`}
+                  onClick={() => setDeepSearchEnabled((prev) => !prev)}
+                  title={deepSearchEnabled ? "关闭深度搜索" : "开启深度搜索"}
+                  disabled={isGenerating}
+                >
+                  <SearchOutlined />
                 </button>
+                {isGenerating ? (
+                  <button
+                    type="button"
+                    className="chat-dock-stop-btn"
+                    onClick={handleStop}
+                    title="停止生成"
+                  >
+                    <StopOutlined /> 停止
+                  </button>
+                ) : (
+                  <button type="button" onClick={handleSend} disabled={!canSend}>
+                    <SendOutlined /> 发送
+                  </button>
+                )}
                 <button
                   type="button"
                   className="chat-dock-toggle"

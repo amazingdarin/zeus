@@ -10,6 +10,8 @@ export interface DocViewerProps {
   extensions?: Extensions
   linkPreviewFetchHtml?: (url: string) => Promise<string>
   onEditorReady?: (editor: Editor | null) => void
+  /** Callback when a task item checkbox is toggled in view mode */
+  onTaskCheckChange?: (blockId: string, checked: boolean) => void
 }
 
 export function DocViewer({
@@ -17,6 +19,7 @@ export function DocViewer({
   extensions = [],
   linkPreviewFetchHtml,
   onEditorReady,
+  onTaskCheckChange,
 }: DocViewerProps) {
   const contentKey = useMemo(() => JSON.stringify(content ?? {}), [content])
   return (
@@ -27,6 +30,7 @@ export function DocViewer({
       linkPreviewFetchHtml={linkPreviewFetchHtml}
       mode="view"
       onEditorReady={onEditorReady}
+      onTaskCheckChange={onTaskCheckChange}
     />
   )
 }

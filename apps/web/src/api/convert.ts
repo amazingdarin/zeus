@@ -1,4 +1,4 @@
-import { apiFetch } from "../config/api";
+import { apiFetch, encodeProjectRef } from "../config/api";
 
 export type ConvertResponse = {
   content: string;
@@ -16,7 +16,7 @@ export const convertDocument = async (
   form.append("file", file);
 
   const response = await apiFetch(
-    `/api/app/projects/${encodeURIComponent(projectKey)}/convert?${params.toString()}`,
+    `/api/app/projects/${encodeProjectRef(projectKey)}/convert?${params.toString()}`,
     { method: "POST", body: form },
   );
   if (!response.ok) {

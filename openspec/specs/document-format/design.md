@@ -61,6 +61,7 @@ Zeus 扩展的自定义节点：
 | `imageUpload` | 图片上传占位符 | ✅ |
 | `link_preview` | 链接预览卡片 | ✅ |
 | `file_block` | 文件附件块 | ✅ |
+| `mindmap` | 脑图（ECharts tree） | ✅ |
 
 ### 3. 内联 Marks
 
@@ -114,6 +115,7 @@ Zeus 为特定节点自动生成唯一 ID，用于块级引用和追踪：
 - `imageUpload`
 - `link_preview`
 - `file_block`
+- `mindmap`
 
 ## 文本对齐
 

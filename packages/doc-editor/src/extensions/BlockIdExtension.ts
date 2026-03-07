@@ -3,10 +3,13 @@ import { type JSONContent } from "@tiptap/react"
 import type { EditorState, Transaction } from "@tiptap/pm/state"
 import { Plugin, PluginKey } from "@tiptap/pm/state"
 
-const BLOCK_ID_NODE_TYPES = [
+const BASE_BLOCK_ID_NODE_TYPES = [
   "paragraph",
   "heading",
   "codeBlock",
+  "bulletList",
+  "orderedList",
+  "taskList",
   "plantuml",
   "listItem",
   "taskItem",
@@ -20,9 +23,32 @@ const BLOCK_ID_NODE_TYPES = [
   "openapi",
   "openapiRef",
   "toc",
+  "unsupportedPluginBlock",
+  "columns",
+  "column",
 ] as const
 
-const BLOCK_ID_NODE_SET = new Set<string>(BLOCK_ID_NODE_TYPES)
+const extraBlockIdNodeTypes = new Set<string>()
+
+export function registerDocEditorBlockIdNodeTypes(nodeTypes: string[]): void {
+  for (const nodeType of nodeTypes || []) {
+    const normalized = String(nodeType || "").trim()
+    if (normalized) {
+      extraBlockIdNodeTypes.add(normalized)
+    }
+  }
+}
+
+export function getDocEditorBlockIdNodeTypes(): string[] {
+  return Array.from(new Set<string>([...BASE_BLOCK_ID_NODE_TYPES, ...extraBlockIdNodeTypes]))
+}
+
+const getBlockIdNodeSet = (extraNodeTypes?: string[]) => {
+  const normalizedExtra = (extraNodeTypes || [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+  return new Set<string>([...BASE_BLOCK_ID_NODE_TYPES, ...extraBlockIdNodeTypes, ...normalizedExtra])
+}
 
 const createBlockId = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -38,13 +64,13 @@ const normalizeId = (value: unknown) => {
   return value.trim()
 }
 
-const applyBlockIdsToDoc = (state: EditorState) => {
+const applyBlockIdsToDoc = (state: EditorState, nodeSet: Set<string>) => {
   const usedIds = new Set<string>()
   const tr = state.tr
   let changed = false
 
   state.doc.descendants((node, pos) => {
-    if (!BLOCK_ID_NODE_SET.has(node.type.name)) {
+    if (!nodeSet.has(node.type.name)) {
       return
     }
     const currentId = normalizeId(node.attrs?.id)
@@ -65,7 +91,11 @@ const applyBlockIdsToDoc = (state: EditorState) => {
   return tr
 }
 
-export const ensureBlockIds = (content: JSONContent): JSONContent => {
+export const ensureBlockIds = (
+  content: JSONContent,
+  options?: { extraNodeTypes?: string[] }
+): JSONContent => {
+  const nodeSet = getBlockIdNodeSet(options?.extraNodeTypes)
   const usedIds = new Set<string>()
 
   const visit = (node: JSONContent): JSONContent => {
@@ -89,7 +119,7 @@ export const ensureBlockIds = (content: JSONContent): JSONContent => {
     }
 
     const type = node.type ?? ""
-    if (BLOCK_ID_NODE_SET.has(type)) {
+    if (nodeSet.has(type)) {
       const currentId = normalizeId(node.attrs?.id)
       if (!currentId || usedIds.has(currentId)) {
         const nextId = createBlockId()
@@ -114,10 +144,18 @@ export const ensureBlockIds = (content: JSONContent): JSONContent => {
 export const BlockIdExtension = Extension.create({
   name: "blockId",
 
+  addOptions() {
+    return {
+      extraNodeTypes: [] as string[],
+    }
+  },
+
   addGlobalAttributes() {
+    const nodeTypes = getDocEditorBlockIdNodeTypes()
+      .concat((this.options.extraNodeTypes || []).map((item: string) => String(item || "").trim()).filter(Boolean))
     return [
       {
-        types: [...BLOCK_ID_NODE_TYPES],
+        types: Array.from(new Set(nodeTypes)),
         attributes: {
           id: {
             default: null as string | null,
@@ -150,7 +188,8 @@ export const BlockIdExtension = Extension.create({
           if (!transactions.some((tr) => tr.docChanged)) {
             return null
           }
-          return applyBlockIdsToDoc(newState)
+          const nodeSet = getBlockIdNodeSet(this.options.extraNodeTypes)
+          return applyBlockIdsToDoc(newState, nodeSet)
         },
       }),
     ]

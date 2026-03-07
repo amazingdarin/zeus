@@ -1,0 +1,64 @@
+// Math Button Styles
+
+.math-dropdown {
+  z-index: 1000;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--tt-bg-color, #fff);
+  border: 1px solid var(--tt-border-color, rgba(31, 35, 40, 0.15));
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.math-dropdown-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  text-align: left;
+
+  &:hover {
+    background-color: rgba(31, 35, 40, 0.06);
+  }
+}
+
+.math-dropdown-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--tt-text-color, #1f2328);
+}
+
+.math-dropdown-example {
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--tt-text-muted-color, #656d76);
+}
+
+// Dark mode
+[data-theme="dark"] {
+  .math-dropdown {
+    background: var(--tt-bg-color-dark, #1c2128);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .math-dropdown-option {
+    &:hover {
+      background-color: rgba(255, 255, 255, 0.06);
+    }
+  }
+
+  .math-dropdown-label {
+    color: var(--tt-text-color-dark, #e6edf3);
+  }
+
+  .math-dropdown-example {
+    color: var(--tt-text-muted-color-dark, #848d97);
+  }
+}

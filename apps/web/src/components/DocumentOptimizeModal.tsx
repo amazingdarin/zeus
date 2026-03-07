@@ -6,7 +6,8 @@
 
 import { useState, useCallback, useRef, useEffect, memo } from "react";
 import type { JSONContent } from "@tiptap/react";
-import ReactMarkdown from "react-markdown";
+import { Alert, Button, Modal, Radio, Space, Spin, Typography } from "antd";
+import Markdown from "./Markdown";
 
 import {
   startOptimize,
@@ -106,7 +107,7 @@ function DocumentOptimizeModal({
       const { taskId } = await startOptimize(projectKey, docId, { mode });
 
       if (!taskId) {
-        throw new Error("Failed to get task ID");
+        throw new Error("获取任务 ID 失败");
       }
 
       setStatus("streaming");
@@ -136,7 +137,7 @@ function DocumentOptimizeModal({
 
       source.addEventListener("optimize.error", (event) => {
         const data = parseOptimizeEvent((event as MessageEvent).data);
-        setError(data.error || "Optimization failed");
+        setError(data.error || "优化失败");
         setStatus("error");
         source.close();
         eventSourceRef.current = null;
@@ -151,7 +152,7 @@ function DocumentOptimizeModal({
         eventSourceRef.current = null;
       };
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to start optimization";
+      const message = err instanceof Error ? err.message : "启动优化失败";
       setError(message);
       setStatus("error");
     }
@@ -178,130 +179,98 @@ function DocumentOptimizeModal({
   const showPreview = status === "streaming" || status === "completed";
 
   return (
-    <div className="modal-overlay" role="presentation">
-      <button
-        className="modal-overlay-button"
-        type="button"
-        aria-label="关闭优化对话框"
-        onClick={handleClose}
-      />
-      <div
-        className="modal-card optimize-modal"
-        role="dialog"
-        aria-modal="true"
-        tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
-      >
-        <div className="modal-header">
-          <h2>文档优化</h2>
-          <button className="modal-close" type="button" onClick={handleClose}>
-            关闭
-          </button>
-        </div>
-
-        <div className="modal-body optimize-modal-body">
-          {/* Document Title */}
-          <div className="optimize-doc-title">
-            <span className="optimize-doc-label">文档：</span>
-            <span className="optimize-doc-name">{docTitle}</span>
-          </div>
-
-          {/* Mode Selection */}
-          <div className="optimize-mode-section">
-            <div className="optimize-mode-label">优化模式</div>
-            <div className="optimize-mode-options">
-              {MODES.map((m) => (
-                <label
-                  key={m.value}
-                  className={`optimize-mode-option${mode === m.value ? " active" : ""}${isProcessing ? " disabled" : ""}`}
-                >
-                  <input
-                    type="radio"
-                    name="optimize-mode"
-                    value={m.value}
-                    checked={mode === m.value}
-                    onChange={() => setMode(m.value)}
-                    disabled={isProcessing}
-                  />
-                  <div className="optimize-mode-content">
-                    <div className="optimize-mode-title">{m.label}</div>
-                    <div className="optimize-mode-desc">{m.description}</div>
-                  </div>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {/* Error Display */}
-          {error && <div className="optimize-error">{error}</div>}
-
-          {/* Preview Area */}
-          {showPreview && (
-            <div className="optimize-preview-section">
-              <div className="optimize-preview-header">
-                <span>{status === "streaming" ? "优化中..." : "优化完成"}</span>
-              </div>
-              <div className="optimize-preview-container">
-                {result ? (
-                  <>
-                    <div className="optimize-preview-panel">
-                      <div className="optimize-preview-title">原文</div>
-                      <div className="optimize-preview-content">
-                        <ReactMarkdown>{result.originalMarkdown}</ReactMarkdown>
-                      </div>
-                    </div>
-                    <div className="optimize-preview-panel">
-                      <div className="optimize-preview-title">优化后</div>
-                      <div className="optimize-preview-content">
-                        <ReactMarkdown>{result.optimizedMarkdown}</ReactMarkdown>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="optimize-streaming-panel">
-                    <div className="optimize-preview-title">优化中...</div>
-                    <div className="optimize-preview-content optimize-streaming">
-                      <ReactMarkdown>{streamingContent}</ReactMarkdown>
-                      <span className="optimize-cursor" />
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
+    <Modal
+      open={isOpen}
+      centered
+      width={1080}
+      title="文档优化"
+      onCancel={handleClose}
+      destroyOnHidden
+      footer={(
+        <Space>
+          <Button onClick={handleClose} disabled={isProcessing}>取消</Button>
+          {status === "completed" && result ? (
+            <Button type="primary" onClick={handleApply}>应用优化</Button>
+          ) : (
+            <Button type="primary" onClick={handleStartOptimize} loading={isProcessing}>
+              开始优化
+            </Button>
           )}
-        </div>
+        </Space>
+      )}
+    >
+      <div className="optimize-modal-body">
+        <Typography.Paragraph style={{ marginBottom: 12 }}>
+          <Typography.Text strong>文档：</Typography.Text>
+          <Typography.Text>{docTitle || "未命名文档"}</Typography.Text>
+        </Typography.Paragraph>
 
-        <div className="modal-footer optimize-modal-footer">
-          <button
-            className="optimize-btn optimize-btn-secondary"
-            type="button"
-            onClick={handleClose}
+        <div className="optimize-mode-section">
+          <div className="optimize-mode-label">优化模式</div>
+          <Radio.Group
+            value={mode}
+            onChange={(event) => setMode(event.target.value as OptimizeMode)}
             disabled={isProcessing}
           >
-            取消
-          </button>
-          {status === "completed" && result ? (
-            <button
-              className="optimize-btn optimize-btn-primary"
-              type="button"
-              onClick={handleApply}
-            >
-              应用优化
-            </button>
-          ) : (
-            <button
-              className="optimize-btn optimize-btn-primary"
-              type="button"
-              onClick={handleStartOptimize}
-              disabled={isProcessing}
-            >
-              {isProcessing ? "优化中..." : "开始优化"}
-            </button>
-          )}
+            <Space direction="vertical" style={{ width: "100%" }}>
+              {MODES.map((item) => (
+                <Radio key={item.value} value={item.value}>
+                  <Space direction="vertical" size={0}>
+                    <Typography.Text strong>{item.label}</Typography.Text>
+                    <Typography.Text type="secondary">{item.description}</Typography.Text>
+                  </Space>
+                </Radio>
+              ))}
+            </Space>
+          </Radio.Group>
         </div>
+
+        {error ? (
+          <Alert
+            type="error"
+            message={error}
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
+        ) : null}
+
+        {showPreview ? (
+          <div className="optimize-preview-section">
+            <div className="optimize-preview-header">
+              <span>{status === "streaming" ? "优化中..." : "优化完成"}</span>
+            </div>
+            <div className="optimize-preview-container">
+              {result ? (
+                <>
+                  <div className="optimize-preview-panel">
+                    <div className="optimize-preview-title">原文</div>
+                    <div className="optimize-preview-content">
+                      <Markdown content={result.originalMarkdown} />
+                    </div>
+                  </div>
+                  <div className="optimize-preview-panel">
+                    <div className="optimize-preview-title">优化后</div>
+                    <div className="optimize-preview-content">
+                      <Markdown content={result.optimizedMarkdown} />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="optimize-streaming-panel">
+                  <div className="optimize-preview-title">
+                    优化中... <Spin size="small" style={{ marginLeft: 6 }} />
+                  </div>
+                  <div className="optimize-preview-content optimize-streaming">
+                    <Markdown content={streamingContent} />
+                    <span className="optimize-cursor" />
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
       </div>
-    </div>
+    </Modal>
   );
 }
 

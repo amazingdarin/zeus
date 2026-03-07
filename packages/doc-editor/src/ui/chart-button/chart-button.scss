@@ -1,0 +1,53 @@
+/* Chart Button Dropdown Styles */
+
+.chart-dropdown {
+  background: white;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 4px;
+  min-width: 140px;
+  z-index: 10000;
+
+  .chart-dropdown-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    font-size: 13px;
+    color: var(--ink, #374151);
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s;
+
+    &:hover {
+      background: var(--surface, #f3f4f6);
+    }
+
+    .chart-dropdown-icon {
+      font-size: 16px;
+    }
+
+    .chart-dropdown-label {
+      flex: 1;
+    }
+  }
+}
+
+/* Dark mode */
+[data-theme="dark"] .chart-dropdown {
+  background: #22272e;
+  border-color: #30363d;
+
+  .chart-dropdown-option {
+    color: #c9d1d9;
+
+    &:hover {
+      background: #30363d;
+    }
+  }
+}

@@ -1,0 +1,20 @@
+apiVersion: v2
+name: langfuse
+description: Langfuse - Open Source LLM Observability Platform
+type: application
+version: 1.0.0
+appVersion: "2.0"
+
+keywords:
+  - langfuse
+  - llm
+  - observability
+  - tracing
+  - monitoring
+
+home: https://langfuse.com
+sources:
+  - https://github.com/langfuse/langfuse
+
+maintainers:
+  - name: Zeus Team

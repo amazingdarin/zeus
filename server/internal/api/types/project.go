@@ -10,33 +10,47 @@ type ProjectDTO struct {
 	RepoName    string `json:"repo_name"`
 	Status      string `json:"status"`
 	CreatedAt   string `json:"created_at"`
+	OwnerType   string `json:"owner_type"`
+	OwnerKey    string `json:"owner_key"`
+	OwnerID     string `json:"owner_id"`
+	OwnerName   string `json:"owner_name"`
+	CanWrite    bool   `json:"can_write"`
+}
+
+type ProjectOwnerContextDTO struct {
+	OwnerType string `json:"owner_type"`
+	OwnerKey  string `json:"owner_key"`
+	OwnerID   string `json:"owner_id"`
+	OwnerName string `json:"owner_name"`
+	MyRole    string `json:"my_role"`
+	CanCreate bool   `json:"can_create"`
 }
 
 type CreateProjectRequest struct {
 	Key         string `json:"key" binding:"required"`
 	Name        string `json:"name" binding:"required"`
 	Description string `json:"description,omitempty"`
+	OwnerType   string `json:"owner_type"`
+	OwnerKey    string `json:"owner_key"`
 }
 
 type CreateProjectResponse struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-
-	Data struct {
-		ID          string `json:"id"`
-		RepoURL     string `json:"repo_url"`
-		RepoBaseURL string `json:"repo_base_url"`
-		RepoName    string `json:"repo_name"`
-		CreatedAt   string `json:"created_at"`
-	} `json:"data"`
+	Code    string      `json:"code"`
+	Message string      `json:"message"`
+	Data    *ProjectDTO `json:"data,omitempty"`
 }
 
 type ListProjectRequest struct{}
 
+type ListProjectResponseData struct {
+	Contexts []*ProjectOwnerContextDTO `json:"contexts"`
+	Projects []*ProjectDTO             `json:"projects"`
+}
+
 type ListProjectResponse struct {
-	Code    string        `json:"code"`
-	Message string        `json:"message"`
-	Data    []*ProjectDTO `json:"data"`
+	Code    string                   `json:"code"`
+	Message string                   `json:"message"`
+	Data    *ListProjectResponseData `json:"data"`
 }
 
 type ProjectDocumentDTO struct {

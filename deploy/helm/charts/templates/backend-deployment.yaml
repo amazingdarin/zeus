@@ -17,9 +17,19 @@ spec:
       labels:
         app.kubernetes.io/name: {{ include "zeus.name" . }}-backend
         app.kubernetes.io/instance: {{ .Release.Name }}
+      {{- with .Values.backend.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       {{- if .Values.global.hostNetwork }}
       hostNetwork: true
+      {{- end }}
+      {{- if .Values.backend.image.pullSecrets }}
+      imagePullSecrets:
+        {{- range .Values.backend.image.pullSecrets }}
+        - name: {{ . | quote }}
+        {{- end }}
       {{- end }}
       containers:
         - name: backend
@@ -39,6 +49,18 @@ spec:
               readOnly: true
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
+      {{- with .Values.backend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumes:
         - name: config
           configMap:

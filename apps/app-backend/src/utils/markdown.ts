@@ -16,6 +16,10 @@ import {
   defaultMarkdownSerializer,
   type ParseSpec,
 } from "prosemirror-markdown";
+import {
+  getPluginMarkdownSerializer,
+  getPluginTextExtractor,
+} from "../plugins/block-registry.js";
 
 // ============================================================================
 // Schema (defined directly using prosemirror-model)
@@ -353,14 +357,16 @@ function getSerializer(): MarkdownSerializer {
         state.write("```");
         state.closeBlock(node);
       },
-    } as Record<string, unknown>,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any,
     {
       bold: baseMarks.strong,
       italic: baseMarks.em,
       strike: baseMarks.del,
       code: baseMarks.code,
       link: baseMarks.link,
-    } as Record<string, unknown>,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any,
   );
 
   return cachedSerializer;
@@ -440,7 +446,24 @@ function extractTextFromJson(node: JSONContent, depth = 0): string {
     parts.push(`![${alt}](${src})`);
   } else if (node.type === "hardBreak") {
     parts.push("\n");
+  } else if (node.type === "unsupportedPluginBlock") {
+    const originalType = String(node.attrs?.originalType || "unknown");
+    parts.push(`[Unsupported plugin block: ${originalType}]`);
   } else {
+    const pluginType = String(node.type || "");
+    if (pluginType) {
+      const serializer = getPluginMarkdownSerializer(pluginType);
+      if (serializer) {
+        parts.push(String(serializer(node) || ""));
+        return parts.join("\n\n").replace(/\n{3,}/g, "\n\n");
+      }
+      const extractor = getPluginTextExtractor(pluginType);
+      if (extractor) {
+        parts.push(String(extractor(node) || ""));
+        return parts.join("\n\n").replace(/\n{3,}/g, "\n\n");
+      }
+    }
+
     // Generic handler for other nodes with content
     const contentArr = getContentArray(node);
     if (contentArr.length > 0) {

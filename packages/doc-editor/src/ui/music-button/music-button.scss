@@ -1,0 +1,64 @@
+// Music Button Dropdown Styles
+
+.music-dropdown {
+  background-color: var(--tt-bg-color, #fff);
+  border: 1px solid rgba(31, 35, 40, 0.15);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 4px;
+  z-index: 9999;
+  min-width: 180px;
+}
+
+.music-dropdown-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background-color 0.15s ease;
+  text-align: left;
+
+  &:hover {
+    background-color: rgba(31, 35, 40, 0.06);
+  }
+}
+
+.music-dropdown-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink, #374151);
+}
+
+.music-dropdown-example {
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--muted, #6b7280);
+  margin-top: 2px;
+}
+
+// Dark mode
+[data-theme="dark"] {
+  .music-dropdown {
+    background-color: var(--tt-bg-color-dark, #1c2128);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .music-dropdown-option {
+    &:hover {
+      background-color: rgba(255, 255, 255, 0.06);
+    }
+  }
+
+  .music-dropdown-label {
+    color: var(--ink-dark, #e6edf3);
+  }
+
+  .music-dropdown-example {
+    color: var(--muted-dark, #8b949e);
+  }
+}

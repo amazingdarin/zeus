@@ -1,0 +1,36 @@
+{
+  "id": "edu-plugin",
+  "version": "0.1.0",
+  "displayName": "Edu Plugin",
+  "description": "Question-set doc-editor block for quiz authoring (choice/blank/essay).",
+  "pluginApiVersion": 2,
+  "engines": {
+    "zeusAppBackend": ">=0.1.0",
+    "zeusWeb": ">=0.1.0"
+  },
+  "capabilities": [
+    "docs.block.register"
+  ],
+  "activation": {
+    "commands": [],
+    "routes": [],
+    "tools": [],
+    "documentEvents": []
+  },
+  "frontend": {
+    "entry": "frontend/index.mjs"
+  },
+  "contributes": {
+    "blocks": [
+      {
+        "blockType": "edu_question_set",
+        "requiresBlockId": true
+      }
+    ]
+  },
+  "permissions": {
+    "allowedHttpHosts": [],
+    "maxExecutionMs": 5000,
+    "maxHookExecutionMs": 2000
+  }
+}

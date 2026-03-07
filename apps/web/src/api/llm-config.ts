@@ -10,9 +10,9 @@ import { apiFetch } from "../config/api";
 export type LLMProviderId = "openai" | "anthropic" | "google" | "ollama" | "openai-compatible" | "paddleocr";
 
 /**
- * Configuration type: LLM for chat/completion, embedding for embeddings
+ * Configuration type
  */
-export type ConfigType = "llm" | "embedding" | "vision";
+export type ConfigType = "llm" | "embedding" | "vision" | "transcription";
 
 /**
  * Provider configuration status
@@ -113,7 +113,7 @@ export async function getConfig(id: string): Promise<ProviderConfig> {
 }
 
 /**
- * Get provider configuration by type (llm or embedding)
+ * Get provider configuration by type
  */
 export async function getConfigByType(configType: ConfigType): Promise<ProviderConfig | null> {
   const response = await apiFetch(`/api/llm/configs/type/${configType}`);

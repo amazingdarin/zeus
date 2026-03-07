@@ -22,7 +22,7 @@ function BlockRenderer({ blocks, actions, onAction }: BlockRendererProps) {
     if (block.type === "doc_list") {
       return (
         <div className="chat-block">
-          <div className="chat-block-title">Documents</div>
+          <div className="chat-block-title">文档</div>
           <ul className="chat-block-list">
             {block.items.map((item) => (
               <li key={item.id}>
@@ -42,7 +42,7 @@ function BlockRenderer({ blocks, actions, onAction }: BlockRendererProps) {
     if (block.type === "repo_list") {
       return (
         <div className="chat-block">
-          <div className="chat-block-title">Repositories</div>
+          <div className="chat-block-title">仓库</div>
           <ul className="chat-block-list">
             {block.items.map((item) => (
               <li key={item.id}>
@@ -62,7 +62,7 @@ function BlockRenderer({ blocks, actions, onAction }: BlockRendererProps) {
     if (block.type === "diff_list") {
       return (
         <div className="chat-block">
-          <div className="chat-block-title">Document Changes</div>
+          <div className="chat-block-title">文档变更</div>
           <ul className="chat-block-list">
             {block.items.map((item) => (
               <li key={`${item.docId}-${item.proposalId ?? "current"}`}>

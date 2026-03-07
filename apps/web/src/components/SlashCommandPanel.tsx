@@ -1,6 +1,6 @@
 import { Dropdown } from "antd";
 import type { DefaultOptionType } from "antd/es/select";
-import type { KeyboardEvent, ReactNode, RefObject } from "react";
+import type { KeyboardEvent, ClipboardEvent, ReactNode, RefObject } from "react";
 import { useLayoutEffect, useMemo, useRef } from "react";
 
 export type SlashCommandPanelProps = {
@@ -17,6 +17,7 @@ export type SlashCommandPanelProps = {
   onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
   onCompositionStart: () => void;
   onCompositionEnd: () => void;
+  onPaste?: (event: ClipboardEvent<HTMLDivElement>) => void;
   disabled?: boolean;
   activeKey?: string | null;
   renderHtml?: string;
@@ -36,6 +37,7 @@ function SlashCommandPanel({
   onKeyDown,
   onCompositionStart,
   onCompositionEnd,
+  onPaste,
   disabled,
   activeKey,
   renderHtml,
@@ -159,6 +161,7 @@ function SlashCommandPanel({
           const { rawText, caret } = readEditableContent();
           onChange(rawText, caret);
         }}
+        onPaste={onPaste}
         suppressContentEditableWarning
       >
       </div>

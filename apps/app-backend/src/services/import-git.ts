@@ -1,15 +1,13 @@
 import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
-import simpleGit from "simple-git";
+import { simpleGit } from "simple-git";
 import { v4 as uuidv4 } from "uuid";
 
-import { convertDocument } from "./convert.js";
-import { optimizeFormatSync } from "./optimize.js";
+import { traceManager, type TraceContext } from "../observability/index.js";
 import { documentStore } from "../storage/document-store.js";
-import { assetStore } from "../storage/asset-store.js";
 import { knowledgeSearch } from "../knowledge/search.js";
-import { ensureBlockIds } from "../utils/block-id.js";
 import type { Document } from "../storage/types.js";
+import { importFileAsDocument } from "./smart-import.js";
 
 export type SmartImportType = "markdown" | "word" | "pdf" | "image";
 export type FileTypeFilter = "all" | "images" | "office" | "text" | "markdown";
@@ -19,6 +17,10 @@ export type ImportGitRequest = {
   branch?: string;
   subdir?: string;
   parent_id?: string;
+  submodule_parent_repo?: string;
+  submodule_parent_branch?: string;
+  submodule_path?: string;
+  auto_import_submodules?: boolean;
   // Options for Smart Import
   smart_import?: boolean;
   smart_import_types?: SmartImportType[];
@@ -27,12 +29,34 @@ export type ImportGitRequest = {
   enable_format_optimize?: boolean;
 };
 
+export type GitSubmoduleInfo = {
+  name?: string;
+  path?: string;
+  url?: string;
+  branch?: string;
+};
+
 export type ImportGitResult = {
   directories: number;
   files: number;
   skipped: number;
   converted: number;
   fallback: number;
+  root_folder_id?: string;
+  submodules?: GitSubmoduleInfo[];
+  resolved_branch?: string;
+};
+
+export type ImportGitProgress = {
+  phase: "clone" | "scan" | "folders" | "import";
+  processed?: number;
+  total?: number;
+  percent?: number;
+  message?: string;
+};
+
+export type ImportGitOptions = {
+  onProgress?: (progress: ImportGitProgress) => void | Promise<void>;
 };
 
 type DirectoryEntry = {
@@ -84,6 +108,89 @@ const EXT_TO_MIME: Record<string, string> = {
   markdown: "text/markdown",
 };
 
+const parseGitmodules = (content: string, defaultBranch?: string): GitSubmoduleInfo[] => {
+  const lines = content.split(/\r?\n/);
+  const results: GitSubmoduleInfo[] = [];
+  let current: GitSubmoduleInfo | null = null;
+
+  const pushCurrent = () => {
+    if (!current) return;
+    if (current.url || current.path) {
+      results.push(current);
+    }
+    current = null;
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#") || line.startsWith(";")) {
+      continue;
+    }
+    if (line.startsWith("[") && line.endsWith("]")) {
+      pushCurrent();
+      const match = line.match(/submodule\s+\"([^\"]+)\"/i);
+      current = match ? { name: match[1] } : {};
+      continue;
+    }
+    const eqIndex = line.indexOf("=");
+    if (eqIndex === -1 || !current) {
+      continue;
+    }
+    const key = line.slice(0, eqIndex).trim().toLowerCase();
+    const value = line.slice(eqIndex + 1).trim();
+    if (!value) {
+      continue;
+    }
+    if (key === "path") current.path = value;
+    if (key === "url") current.url = value;
+    if (key === "branch") current.branch = value;
+  }
+
+  pushCurrent();
+  return results
+    .filter((item) => item.url)
+    .map((item) => ({
+      ...item,
+      branch: item.branch || defaultBranch,
+    }));
+};
+
+const readGitmodules = async (
+  repoDir: string,
+  defaultBranch?: string,
+): Promise<GitSubmoduleInfo[]> => {
+  try {
+    const raw = await readFile(path.join(repoDir, ".gitmodules"), "utf8");
+    return parseGitmodules(raw, defaultBranch);
+  } catch {
+    return [];
+  }
+};
+
+const resolveRemoteDefaultBranch = async (
+  git: ReturnType<typeof simpleGit>,
+  repoUrl: string,
+): Promise<string | null> => {
+  try {
+    const output = await git.listRemote([repoUrl, "--symref", "HEAD"]);
+    const match = output.match(/ref:\s+refs\/heads\/([^\t\n]+)\s+HEAD/);
+    if (match && match[1]) {
+      return match[1];
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+};
+
+const updateSubmoduleInRepo = async (
+  repoDir: string,
+  submodulePath: string,
+): Promise<void> => {
+  const repoGit = simpleGit(repoDir);
+  await repoGit.raw(["submodule", "update", "--init", "--recursive", submodulePath]);
+};
+
 /**
  * Build the set of allowed extensions from file type filters
  */
@@ -109,33 +216,6 @@ const buildAllowedExtensions = (fileTypes: FileTypeFilter[]): Set<string> | null
 const isExtensionAllowed = (ext: string, allowedExtensions: Set<string> | null): boolean => {
   if (!allowedExtensions) return true;
   return allowedExtensions.has(ext.toLowerCase());
-};
-
-/**
- * Check if a file should use smart import (convert to tiptap with content)
- */
-const shouldSmartImport = (
-  ext: string,
-  smartImport: boolean,
-  smartImportTypes: Set<SmartImportType>,
-): { enabled: boolean; type: SmartImportType | null } => {
-  if (!smartImport) {
-    return { enabled: false, type: null };
-  }
-
-  const lowerExt = ext.toLowerCase();
-
-  if (smartImportTypes.has("markdown") && ["md", "markdown"].includes(lowerExt)) {
-    return { enabled: true, type: "markdown" };
-  }
-  if (smartImportTypes.has("word") && lowerExt === "docx") {
-    return { enabled: true, type: "word" };
-  }
-  if (smartImportTypes.has("pdf") && lowerExt === "pdf") {
-    return { enabled: true, type: "pdf" };
-  }
-
-  return { enabled: false, type: null };
 };
 
 /**
@@ -166,97 +246,235 @@ const extractRepoName = (repoUrl: string): string => {
   return name;
 };
 
-export const importGit = async (
+const sanitizeRepoUrlForTrace = (repoUrl: string): string => {
+  const trimmed = repoUrl.trim();
+  try {
+    const u = new URL(trimmed);
+    // Avoid logging credentials to observability backends.
+    if (u.username || u.password) {
+      u.username = "";
+      u.password = "";
+    }
+    return u.toString();
+  } catch {
+    // Best-effort: remove anything like https://user:pass@host/...
+    return trimmed.replace(/\/\/[^@]*@/, "//");
+  }
+};
+
+type ImportDirectoryOptions = {
+  userId: string;
+  projectKey: string;
+  baseDir: string;
+  parentId: string;
+  repoName: string;
+  allowedExtensions: Set<string> | null;
+  smartImport: boolean;
+  smartImportTypes: Set<SmartImportType>;
+  enableFormatOptimize: boolean;
+  traceContext?: TraceContext;
+  emitProgress?: (progress: ImportGitProgress) => Promise<void>;
+  traceMetadataBase?: Record<string, unknown>;
+  skipRootFolder?: boolean;
+};
+
+const ensureFolderPath = async (
+  userId: string,
   projectKey: string,
-  req: ImportGitRequest,
-): Promise<ImportGitResult> => {
-  const repoUrl = String(req.repo_url ?? "").trim();
-  if (!repoUrl.startsWith("http://") && !repoUrl.startsWith("https://")) {
-    throw new Error("repo_url must be http or https");
+  parentId: string,
+  relativePath: string,
+): Promise<string> => {
+  const segments = relativePath
+    .split(/[\\/]/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  let currentId = parentId;
+  for (const segment of segments) {
+    const children = await documentStore.getChildren(userId, projectKey, currentId);
+    const existing = children.find((child) => child.kind === "dir" && child.title === segment);
+    if (existing) {
+      currentId = existing.id;
+      continue;
+    }
+    currentId = await createFolder(userId, projectKey, segment, currentId);
+  }
+  return currentId;
+};
+
+const importFromDirectory = async (options: ImportDirectoryOptions): Promise<ImportGitResult> => {
+  const emitProgress = options.emitProgress ?? (async () => undefined);
+  const result: ImportGitResult = {
+    directories: 0,
+    files: 0,
+    skipped: 0,
+    converted: 0,
+    fallback: 0,
+  };
+
+  await emitProgress({ phase: "scan", message: "Scanning repository" });
+  const scanSpan = options.traceContext
+    ? traceManager.startSpan(options.traceContext, "scan-entries", {
+        subdir: ".",
+      })
+    : null;
+  const scanStart = Date.now();
+  const { directories, files } = await scanEntries(options.baseDir);
+  if (scanSpan) {
+    traceManager.endSpan(scanSpan, {
+      durationMs: Date.now() - scanStart,
+      directoryCount: directories.length,
+      fileCount: files.length,
+    });
+  }
+  await emitProgress({
+    phase: "scan",
+    message: `Found ${files.length} files`,
+    total: files.length,
+  });
+
+  // Step 1: Filter files by allowed extensions
+  const filteredFiles: FileEntry[] = [];
+  for (const file of files) {
+    if (!isExtensionAllowed(file.ext, options.allowedExtensions)) {
+      result.skipped += 1;
+      continue;
+    }
+    filteredFiles.push(file);
   }
 
-  const branch = String(req.branch ?? "main").trim() || "main";
-  const subdir = String(req.subdir ?? "").trim();
-  const parentId = String(req.parent_id ?? "root");
-  const smartImport = req.smart_import ?? false;
-  const smartImportTypes = new Set<SmartImportType>(req.smart_import_types ?? []);
-  const allowedExtensions = buildAllowedExtensions(req.file_types ?? []);
-  const enableFormatOptimize = req.enable_format_optimize ?? false;
+  // Step 2: Collect all directories that contain filtered files
+  const requiredDirs = new Set<string>();
+  for (const file of filteredFiles) {
+    const parentPaths = collectParentPaths(file.parent);
+    for (const p of parentPaths) {
+      requiredDirs.add(p);
+    }
+  }
 
-  const tempDir = path.join(process.cwd(), ".tmp", `git-import-${uuidv4()}`);
-  await mkdir(tempDir, { recursive: true });
+  // Step 3: Filter directories to only include those with matching files
+  const filteredDirs = directories.filter((dir) => requiredDirs.has(dir.path));
 
+  // Step 4: Create directories
+  const directoryMap = new Map<string, string>();
+  let rootParentId = options.parentId;
+  let repoFolderId: string | null = null;
+  const includeRootFolder = !options.skipRootFolder && filteredFiles.length > 0;
+
+  const foldersSpan = options.traceContext
+    ? traceManager.startSpan(options.traceContext, "create-folders", {
+        repoName: options.repoName,
+        filteredDirCount: filteredDirs.length,
+        hasFiles: filteredFiles.length > 0,
+      })
+    : null;
+  const foldersStart = Date.now();
   try {
-    const git = simpleGit();
-    await git.clone(repoUrl, tempDir, ["--depth=1", "--branch", branch]);
-
-    const baseDir = subdir ? path.join(tempDir, subdir) : tempDir;
-    const { directories, files } = await scanEntries(baseDir);
-
-    const result: ImportGitResult = {
-      directories: 0,
-      files: 0,
-      skipped: 0,
-      converted: 0,
-      fallback: 0,
-    };
-
-    // Step 1: Filter files by allowed extensions
-    const filteredFiles: FileEntry[] = [];
-    for (const file of files) {
-      if (!isExtensionAllowed(file.ext, allowedExtensions)) {
-        result.skipped += 1;
-        continue;
-      }
-      filteredFiles.push(file);
-    }
-
-    // Step 2: Collect all directories that contain filtered files
-    const requiredDirs = new Set<string>();
-    for (const file of filteredFiles) {
-      const parentPaths = collectParentPaths(file.parent);
-      for (const p of parentPaths) {
-        requiredDirs.add(p);
-      }
-    }
-
-    // Step 3: Filter directories to only include those with matching files
-    const filteredDirs = directories.filter((dir) => requiredDirs.has(dir.path));
-
-    // Step 4: Create directories
-    const directoryMap = new Map<string, string>();
-
-    // Always create a root folder with the Git repo name
-    const repoName = extractRepoName(repoUrl);
-    let rootParentId = parentId;
-    
-    if (filteredFiles.length > 0) {
-      // Create the Git project root folder
-      const repoFolderId = await createFolder(projectKey, repoName, parentId);
+    if (includeRootFolder) {
+      repoFolderId = await createFolder(options.userId, options.projectKey, options.repoName, options.parentId);
       directoryMap.set(".", repoFolderId);
       rootParentId = repoFolderId;
       result.directories += 1;
+    } else {
+      directoryMap.set(".", rootParentId);
     }
+
+    await emitProgress({
+      phase: "folders",
+      message: "Creating folders",
+      total: filteredDirs.length + (includeRootFolder ? 1 : 0),
+      processed: 0,
+    });
 
     for (const dir of filteredDirs) {
       const parentKey = dir.parent ?? ".";
       const resolvedParent =
         parentKey === "." ? rootParentId : (directoryMap.get(parentKey) ?? rootParentId);
-      const folderId = await createFolder(projectKey, dir.name, resolvedParent);
+      const folderId = await createFolder(options.userId, options.projectKey, dir.name, resolvedParent);
       directoryMap.set(dir.path, folderId);
       result.directories += 1;
+      await emitProgress({
+        phase: "folders",
+        message: `Creating ${dir.name}`,
+        total: filteredDirs.length + (includeRootFolder ? 1 : 0),
+        processed: result.directories,
+      });
     }
 
-    // Step 5: Import files
+    if (foldersSpan) {
+      traceManager.endSpan(foldersSpan, {
+        durationMs: Date.now() - foldersStart,
+        created: result.directories,
+      });
+    }
+    await emitProgress({
+      phase: "folders",
+      message: "Folders created",
+      total: filteredDirs.length + (includeRootFolder ? 1 : 0),
+      processed: result.directories,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (foldersSpan) {
+      traceManager.endSpan(
+        foldersSpan,
+        {
+          durationMs: Date.now() - foldersStart,
+          created: result.directories,
+          error: msg,
+        },
+        "ERROR",
+      );
+    }
+    throw err;
+  }
+
+  // Step 5: Import files
+  const importSpan = options.traceContext
+    ? traceManager.startSpan(options.traceContext, "import-files", {
+        fileCount: filteredFiles.length,
+        smartImport: options.smartImport,
+        smartImportTypes: Array.from(options.smartImportTypes),
+        enableFormatOptimize: options.enableFormatOptimize,
+        limits: { maxFiles: MAX_FILES, maxBytes: MAX_BYTES },
+      })
+    : null;
+  const importStart = Date.now();
+  try {
+    let processed = 0;
+    const total = filteredFiles.length;
+    await emitProgress({
+      phase: "import",
+      message: total > 0 ? "Importing files" : "No files to import",
+      processed,
+      total,
+      percent: total > 0 ? 0 : 100,
+    });
+
     for (const file of filteredFiles) {
       if (result.files >= MAX_FILES) {
         result.skipped += 1;
+        processed += 1;
+        await emitProgress({
+          phase: "import",
+          message: `Skipped ${file.relativePath} (limit reached)`,
+          processed,
+          total,
+          percent: total > 0 ? Math.round((processed / total) * 100) : 100,
+        });
         continue;
       }
 
       const info = await stat(file.fullPath);
       if (info.size > MAX_BYTES) {
         result.skipped += 1;
+        processed += 1;
+        await emitProgress({
+          phase: "import",
+          message: `Skipped ${file.relativePath} (too large)`,
+          processed,
+          total,
+          percent: total > 0 ? Math.round((processed / total) * 100) : 100,
+        });
         continue;
       }
 
@@ -265,42 +483,317 @@ export const importGit = async (
         ? (directoryMap.get(file.parent) ?? rootParentId)
         : rootParentId;
 
-      // Check if should use smart import
-      const smartResult = shouldSmartImport(file.ext, smartImport, smartImportTypes);
+      const mime = EXT_TO_MIME[file.ext.toLowerCase()] ?? "application/octet-stream";
+      const originalname = file.ext ? `${file.name}.${file.ext}` : file.name;
+      const imported = await importFileAsDocument(options.userId, options.projectKey, {
+        parentId: resolvedParent,
+        title: file.name,
+        file: {
+          buffer: content,
+          originalname,
+          mimetype: mime,
+          size: info.size,
+        },
+        smartImport: options.smartImport,
+        smartImportTypes: Array.from(options.smartImportTypes),
+        enableFormatOptimize: options.enableFormatOptimize,
+        traceContext: options.traceContext,
+        traceMetadata: {
+          source: "git",
+          ...(options.traceMetadataBase ?? {}),
+          relativePath: file.relativePath,
+        },
+      });
 
-      if (smartResult.enabled) {
-        // Smart import: convert to tiptap document with file block + content
-        try {
-          const markdown = await convertFileToMarkdown(file.ext, content);
-          if (markdown) {
-            // Upload as asset first
-            const assetMeta = await uploadAsset(projectKey, file, content);
-            // Create document with file block + converted content
-            await createSmartDocument(projectKey, file.name, resolvedParent, markdown, assetMeta, enableFormatOptimize);
-            result.converted += 1;
-          } else {
-            // Conversion failed, fallback to regular file import
-            await createDocumentWithAsset(projectKey, file, content, resolvedParent);
-            result.fallback += 1;
-          }
-        } catch (err) {
-          console.error("Smart import error:", err);
-          // Fallback to regular file import
-          await createDocumentWithAsset(projectKey, file, content, resolvedParent);
-          result.fallback += 1;
-        }
+      if (imported.mode === "smart") {
+        result.converted += 1;
       } else {
-        // Regular import: upload as asset and create document with file block only
-        await createDocumentWithAsset(projectKey, file, content, resolvedParent);
         result.fallback += 1;
       }
       result.files += 1;
+      processed += 1;
+      await emitProgress({
+        phase: "import",
+        message: `Imported ${file.relativePath}`,
+        processed,
+        total,
+        percent: total > 0 ? Math.round((processed / total) * 100) : 100,
+      });
     }
 
+    if (importSpan) {
+      traceManager.endSpan(importSpan, {
+        durationMs: Date.now() - importStart,
+        files: result.files,
+        skipped: result.skipped,
+        converted: result.converted,
+        fallback: result.fallback,
+      });
+    }
+    await emitProgress({
+      phase: "import",
+      message: "Import completed",
+      processed: filteredFiles.length,
+      total: filteredFiles.length,
+      percent: filteredFiles.length > 0 ? 100 : 100,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (importSpan) {
+      traceManager.endSpan(
+        importSpan,
+        {
+          durationMs: Date.now() - importStart,
+          files: result.files,
+          skipped: result.skipped,
+          converted: result.converted,
+          fallback: result.fallback,
+          error: msg,
+        },
+        "ERROR",
+      );
+    }
+    throw err;
+  }
+
+  if (repoFolderId) {
+    result.root_folder_id = repoFolderId;
+  }
+
+  return result;
+};
+
+export const importGit = async (
+  userId: string,
+  projectKey: string,
+  req: ImportGitRequest,
+  traceContext?: TraceContext,
+  options?: ImportGitOptions,
+): Promise<ImportGitResult> => {
+  const repoUrl = String(req.repo_url ?? "").trim();
+  if (!repoUrl.startsWith("http://") && !repoUrl.startsWith("https://")) {
+    throw new Error("repo_url must be http or https");
+  }
+
+  const requestedBranch = String(req.branch ?? "main").trim() || "main";
+  const explicitBranch = typeof req.branch === "string" && req.branch.trim().length > 0;
+  let resolvedBranch = requestedBranch;
+  const subdir = String(req.subdir ?? "").trim();
+  const parentId = String(req.parent_id ?? "root");
+  const smartImport = req.smart_import ?? false;
+  const smartImportTypes = new Set<SmartImportType>(req.smart_import_types ?? []);
+  const allowedExtensions = buildAllowedExtensions(req.file_types ?? []);
+  const enableFormatOptimize = req.enable_format_optimize ?? false;
+  const repoUrlForTrace = sanitizeRepoUrlForTrace(repoUrl);
+
+  const tempDir = path.join(process.cwd(), ".tmp", `git-import-${uuidv4()}`);
+  await mkdir(tempDir, { recursive: true });
+
+  const emitProgress = async (progress: ImportGitProgress) => {
+    if (!options?.onProgress) {
+      return;
+    }
+    try {
+      await options.onProgress(progress);
+    } catch (err) {
+      console.warn("[import-git] progress callback error:", err);
+    }
+  };
+
+  try {
+    const git = simpleGit();
+    let submodules: GitSubmoduleInfo[] = [];
+
+    if (!explicitBranch) {
+      const defaultBranch = await resolveRemoteDefaultBranch(git, repoUrl);
+      if (defaultBranch) {
+        resolvedBranch = defaultBranch;
+      }
+    }
+
+    await emitProgress({ phase: "clone", message: "Cloning repository" });
+    const cloneSpan = traceContext
+      ? traceManager.startSpan(traceContext, "git-clone", {
+          repo_url: repoUrlForTrace,
+          branch: resolvedBranch,
+          depth: 1,
+        })
+      : null;
+    const cloneStart = Date.now();
+    try {
+      await git.clone(repoUrl, tempDir, ["--depth=1", "--branch", resolvedBranch]);
+      if (cloneSpan) {
+        traceManager.endSpan(cloneSpan, { durationMs: Date.now() - cloneStart });
+      }
+      await emitProgress({ phase: "clone", message: "Clone completed" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (cloneSpan) {
+        traceManager.endSpan(
+          cloneSpan,
+          { durationMs: Date.now() - cloneStart, error: msg },
+          "ERROR",
+        );
+      }
+      if (!explicitBranch && requestedBranch === "main") {
+        // Retry with master branch for legacy repos.
+        resolvedBranch = "master";
+        await emitProgress({ phase: "clone", message: "Retrying with master branch" });
+        await git.clone(repoUrl, tempDir, ["--depth=1", "--branch", resolvedBranch]);
+      } else {
+        throw err;
+      }
+    }
+
+    submodules = await readGitmodules(tempDir, resolvedBranch);
+
+    const baseDir = subdir ? path.join(tempDir, subdir) : tempDir;
+    const repoName = extractRepoName(repoUrl);
+    const result = await importFromDirectory({
+      userId,
+      projectKey,
+      baseDir,
+      parentId,
+      repoName,
+      allowedExtensions,
+      smartImport,
+      smartImportTypes,
+      enableFormatOptimize,
+      traceContext,
+      emitProgress,
+      traceMetadataBase: { repoUrl: repoUrlForTrace },
+    });
+
+    if (submodules.length > 0) {
+      result.submodules = submodules;
+    }
+    if (resolvedBranch) {
+      result.resolved_branch = resolvedBranch;
+    }
     return result;
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
+};
+
+export const importGitSubmodule = async (
+  userId: string,
+  projectKey: string,
+  req: ImportGitRequest,
+  traceContext?: TraceContext,
+  options?: ImportGitOptions,
+): Promise<ImportGitResult> => {
+  const parentRepoUrl = String(req.submodule_parent_repo ?? "").trim();
+  if (!parentRepoUrl.startsWith("http://") && !parentRepoUrl.startsWith("https://")) {
+    throw new Error("submodule_parent_repo must be http or https");
+  }
+
+  const submodulePath = String(req.submodule_path ?? "").trim();
+  if (!submodulePath) {
+    throw new Error("submodule_path is required");
+  }
+
+  const requestedBranch = String(req.submodule_parent_branch ?? req.branch ?? "main").trim() || "main";
+  const explicitBranch = typeof req.submodule_parent_branch === "string" && req.submodule_parent_branch.trim().length > 0;
+  let resolvedBranch = requestedBranch;
+
+  const parentId = String(req.parent_id ?? "root");
+  const smartImport = req.smart_import ?? false;
+  const smartImportTypes = new Set<SmartImportType>(req.smart_import_types ?? []);
+  const allowedExtensions = buildAllowedExtensions(req.file_types ?? []);
+  const enableFormatOptimize = req.enable_format_optimize ?? false;
+  const repoUrlForTrace = sanitizeRepoUrlForTrace(req.repo_url ?? parentRepoUrl);
+
+  const tempDir = path.join(process.cwd(), ".tmp", `git-submodule-${uuidv4()}`);
+  await mkdir(tempDir, { recursive: true });
+
+  const emitProgress = async (progress: ImportGitProgress) => {
+    if (!options?.onProgress) {
+      return;
+    }
+    try {
+      await options.onProgress(progress);
+    } catch (err) {
+      console.warn("[import-git-submodule] progress callback error:", err);
+    }
+  };
+
+  try {
+    const git = simpleGit();
+
+    if (!explicitBranch) {
+      const defaultBranch = await resolveRemoteDefaultBranch(git, parentRepoUrl);
+      if (defaultBranch) {
+        resolvedBranch = defaultBranch;
+      }
+    }
+
+    await emitProgress({ phase: "clone", message: "Cloning parent repository" });
+    const cloneSpan = traceContext
+      ? traceManager.startSpan(traceContext, "git-clone", {
+          repo_url: sanitizeRepoUrlForTrace(parentRepoUrl),
+          branch: resolvedBranch,
+          depth: 1,
+        })
+      : null;
+    const cloneStart = Date.now();
+    try {
+      await git.clone(parentRepoUrl, tempDir, ["--depth=1", "--branch", resolvedBranch]);
+      if (cloneSpan) {
+        traceManager.endSpan(cloneSpan, { durationMs: Date.now() - cloneStart });
+      }
+      await emitProgress({ phase: "clone", message: "Clone completed" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (cloneSpan) {
+        traceManager.endSpan(
+          cloneSpan,
+          { durationMs: Date.now() - cloneStart, error: msg },
+          "ERROR",
+        );
+      }
+      if (!explicitBranch && requestedBranch === "main") {
+        resolvedBranch = "master";
+        await emitProgress({ phase: "clone", message: "Retrying with master branch" });
+        await git.clone(parentRepoUrl, tempDir, ["--depth=1", "--branch", resolvedBranch]);
+      } else {
+        throw err;
+      }
+    }
+
+    await emitProgress({ phase: "clone", message: "Updating submodule" });
+    await updateSubmoduleInRepo(tempDir, submodulePath);
+
+    const baseDir = path.join(tempDir, submodulePath);
+    const submoduleFolderId = await ensureFolderPath(userId, projectKey, parentId, submodulePath);
+
+    const repoName = extractRepoName(req.repo_url ?? parentRepoUrl);
+    const result = await importFromDirectory({
+      userId,
+      projectKey,
+      baseDir,
+      parentId: submoduleFolderId,
+      repoName,
+      allowedExtensions,
+      smartImport,
+      smartImportTypes,
+      enableFormatOptimize,
+      traceContext,
+      emitProgress,
+      traceMetadataBase: { repoUrl: repoUrlForTrace },
+      skipRootFolder: true,
+    });
+
+    result.root_folder_id = submoduleFolderId;
+    result.resolved_branch = resolvedBranch;
+    return result;
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+};
+
+export const __test__ = {
+  updateSubmoduleInRepo,
 };
 
 const scanEntries = async (
@@ -342,56 +835,8 @@ const scanEntries = async (
   return { directories, files };
 };
 
-const convertFileToMarkdown = async (ext: string, content: Buffer): Promise<string> => {
-  const lowerExt = ext.toLowerCase();
-  if (["md", "markdown"].includes(lowerExt)) {
-    return content.toString("utf-8");
-  }
-  if (["docx", "pdf"].includes(lowerExt)) {
-    try {
-      const result = await convertDocument(
-        "",
-        {
-          buffer: content,
-          originalname: `file.${ext}`,
-          mimetype: "",
-          fieldname: "file",
-          size: content.length,
-          destination: "",
-          encoding: "",
-          filename: "",
-          path: "",
-          stream: undefined,
-        } as unknown as Express.Multer.File,
-        ext,
-        "markdown",
-      );
-      return result.content;
-    } catch (err) {
-      console.error("Convert error:", err);
-      return "";
-    }
-  }
-  return "";
-};
-
-const uploadAsset = async (
-  projectKey: string,
-  file: FileEntry,
-  content: Buffer,
-): Promise<{ id: string; filename: string; mime: string; size: number }> => {
-  const filename = `${file.name}.${file.ext}`;
-  const mime = EXT_TO_MIME[file.ext.toLowerCase()] ?? "application/octet-stream";
-  const meta = await assetStore.save(projectKey, filename, mime, content);
-  return {
-    id: meta.id,
-    filename: meta.filename,
-    mime: meta.mime,
-    size: meta.size,
-  };
-};
-
 const createFolder = async (
+  userId: string,
   projectKey: string,
   title: string,
   parentId: string,
@@ -418,237 +863,12 @@ const createFolder = async (
     },
   };
 
-  const saved = await documentStore.save(projectKey, doc);
+  const saved = await documentStore.save(userId, projectKey, doc);
 
   // Index asynchronously
-  knowledgeSearch.indexDocument(projectKey, saved).catch((err) => {
+  knowledgeSearch.indexDocument(userId, projectKey, saved).catch((err) => {
     console.error("Index error:", err);
   });
 
   return saved.meta.id;
 };
-
-const createDocumentWithAsset = async (
-  projectKey: string,
-  file: FileEntry,
-  content: Buffer,
-  parentId: string,
-): Promise<void> => {
-  // Upload as asset
-  const assetMeta = await uploadAsset(projectKey, file, content);
-
-  // Create document with file block only
-  const doc: Document = {
-    meta: {
-      id: uuidv4(),
-      schema_version: "v1",
-      title: file.name,
-      slug: "",
-      path: "",
-      parent_id: parentId,
-      created_at: "",
-      updated_at: "",
-      extra: {
-        status: "draft",
-        tags: [],
-      },
-    },
-    body: {
-      type: "tiptap",
-      content: buildFileBlockDoc(assetMeta),
-    },
-  };
-
-  const saved = await documentStore.save(projectKey, doc);
-
-  // Index asynchronously
-  knowledgeSearch.indexDocument(projectKey, saved).catch((err) => {
-    console.error("Index error:", err);
-  });
-};
-
-const createSmartDocument = async (
-  projectKey: string,
-  title: string,
-  parentId: string,
-  markdown: string,
-  assetMeta: { id: string; filename: string; mime: string; size: number },
-  enableFormatOptimize: boolean = false,
-): Promise<void> => {
-  // Optionally optimize the markdown format using LLM
-  // This is fail-safe: if optimization fails, original markdown is used
-  let finalMarkdown = markdown;
-  if (enableFormatOptimize) {
-    console.log(`[smart-import] Starting format optimization for: ${title}`);
-    finalMarkdown = await optimizeFormatSync(markdown);
-  }
-
-  // Create document with file block at top, followed by converted content
-  const fileBlock = buildFileBlockNode(assetMeta);
-  const tiptapContent = markdownToTiptap(finalMarkdown);
-
-  // Build content and ensure all blocks have IDs
-  const rawContent = {
-    type: "doc",
-    content: [
-      fileBlock,
-      ...(Array.isArray(tiptapContent.content) ? tiptapContent.content : []),
-    ],
-  };
-  const contentWithIds = ensureBlockIds(rawContent);
-
-  const doc: Document = {
-    meta: {
-      id: uuidv4(),
-      schema_version: "v1",
-      title,
-      slug: "",
-      path: "",
-      parent_id: parentId,
-      created_at: "",
-      updated_at: "",
-      extra: {
-        status: "draft",
-        tags: [],
-      },
-    },
-    body: {
-      type: "tiptap",
-      content: contentWithIds,
-    },
-  };
-
-  const saved = await documentStore.save(projectKey, doc);
-
-  // Index asynchronously
-  knowledgeSearch.indexDocument(projectKey, saved).catch((err) => {
-    console.error("Index error:", err);
-  });
-};
-
-/**
- * Convert markdown text to tiptap JSON structure
- */
-function markdownToTiptap(markdown: string): { type: string; content: unknown[] } {
-  // Simple conversion: split by paragraphs
-  const paragraphs = markdown.split(/\n\n+/).filter((p) => p.trim());
-  const content: unknown[] = [];
-
-  for (const para of paragraphs) {
-    const trimmed = para.trim();
-    if (!trimmed) continue;
-
-    // Check for headings
-    const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
-    if (headingMatch) {
-      content.push({
-        type: "heading",
-        attrs: { level: headingMatch[1].length },
-        content: [{ type: "text", text: headingMatch[2] }],
-      });
-      continue;
-    }
-
-    // Check for code blocks
-    if (trimmed.startsWith("```")) {
-      const lines = trimmed.split("\n");
-      const lang = lines[0].replace(/^```/, "").trim();
-      const code = lines.slice(1, -1).join("\n");
-      content.push({
-        type: "codeBlock",
-        attrs: { language: lang || null },
-        content: [{ type: "text", text: code }],
-      });
-      continue;
-    }
-
-    // Regular paragraph
-    content.push({
-      type: "paragraph",
-      content: [{ type: "text", text: trimmed }],
-    });
-  }
-
-  return { type: "doc", content };
-}
-
-/**
- * Build a Tiptap document with a file block (with block IDs)
- */
-function buildFileBlockDoc(assetMeta: {
-  id: string;
-  filename: string;
-  mime: string;
-  size: number;
-}): unknown {
-  const doc = {
-    type: "doc",
-    content: [buildFileBlockNode(assetMeta)],
-  };
-  return ensureBlockIds(doc);
-}
-
-/**
- * Build a file block node
- */
-function buildFileBlockNode(assetMeta: {
-  id: string;
-  filename: string;
-  mime: string;
-  size: number;
-}): unknown {
-  const { fileType, officeType } = resolveFileKind(assetMeta.filename, assetMeta.mime);
-  return {
-    type: "file_block",  // Use snake_case to match tiptap node name
-    attrs: {
-      asset_id: assetMeta.id,
-      file_name: assetMeta.filename,
-      mime: assetMeta.mime,
-      size: assetMeta.size,
-      file_type: fileType,
-      office_type: officeType,
-    },
-  };
-}
-
-/**
- * Resolve file kind from filename and MIME type
- */
-function resolveFileKind(
-  fileName: string,
-  mime: string,
-): { fileType: "office" | "text" | "unknown"; officeType?: string } {
-  const OFFICE_MIME_MAP: Record<string, string> = {
-    "application/pdf": "pdf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
-  };
-
-  const OFFICE_EXT_MAP: Record<string, string> = {
-    pdf: "pdf",
-    docx: "docx",
-    pptx: "pptx",
-    xlsx: "xlsx",
-  };
-
-  const TEXT_EXTENSIONS = new Set(["txt", "md", "csv", "json", "yaml", "yml", "log"]);
-
-  const normalizedMime = mime.toLowerCase();
-  if (normalizedMime in OFFICE_MIME_MAP) {
-    return { fileType: "office", officeType: OFFICE_MIME_MAP[normalizedMime] };
-  }
-  if (normalizedMime.startsWith("text/")) {
-    return { fileType: "text" };
-  }
-
-  const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
-  if (ext in OFFICE_EXT_MAP) {
-    return { fileType: "office", officeType: OFFICE_EXT_MAP[ext] };
-  }
-  if (TEXT_EXTENSIONS.has(ext)) {
-    return { fileType: "text" };
-  }
-
-  return { fileType: "unknown" };
-}

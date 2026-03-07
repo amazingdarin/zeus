@@ -1,0 +1,108 @@
+global:
+  hostNetwork: false
+
+postgres:
+  enabled: false
+
+langfuse:
+  enabled: false
+
+faster-whisper:
+  enabled: false
+
+banana-slides:
+  enabled: false
+
+backend:
+  enabled: true
+  replicas: 1
+  image:
+    repository: 43.139.120.149:30002/zeus/server
+    tag: "v20260305"
+    pullPolicy: IfNotPresent
+    pullSecrets:
+      - harbor-regcred
+  service:
+    type: ClusterIP
+    port: 8080
+  ingress:
+    enabled: true
+    className: nginx
+    hosts:
+      - host: zeus.tail.dkbgc.com
+        paths:
+          - /api
+    tls: []
+  config: |
+    server:
+      addr: ":8080"
+
+    code_runner:
+      addr: ":8091"
+      internal_token: "zeus-code-runner-token"
+      namespace: "zeus"
+      default_timeout_seconds: 10
+      max_output_bytes: 262144
+
+    postgres:
+      host: postgres.postgres.svc.cluster.local
+      port: 5432
+      user: zeus
+      password: "__REPLACE_POSTGRES_PASSWORD__"
+      database: zeus
+      ssl_mode: disable
+      time_zone: UTC
+      max_open_conns: 20
+      max_idle_conns: 10
+      conn_max_lifetime: 30m
+
+    asset:
+      meta_root: /var/lib/zeus/assets
+
+    git:
+      repo_root: /var/lib/zeus/repos
+      session_repo_root: /var/lib/zeus/git-sessions
+      bare_repo_root: /var/lib/zeus/git
+      repo_url_prefix: ""
+      author_name: Zeus
+      author_email: zeus@local
+      default_branch: main
+
+    search:
+      index_root: /var/lib/zeus/index
+
+    security:
+      encryption_key: "__REPLACE_ENCRYPTION_KEY__"
+      encryption_keys: []
+      active_key_id: ""
+      active_key_version: 0
+
+    auth:
+      jwt_secret: "__REPLACE_JWT_SECRET__"
+      access_token_ttl: "15m"
+      refresh_token_ttl: "168h"
+      bcrypt_cost: 12
+
+frontend:
+  enabled: true
+  replicas: 1
+  image:
+    repository: 43.139.120.149:30002/zeus/web
+    tag: "v20260305"
+    pullPolicy: IfNotPresent
+    pullSecrets:
+      - harbor-regcred
+  service:
+    type: ClusterIP
+    port: 80
+  ingress:
+    enabled: true
+    className: nginx
+    hosts:
+      - host: zeus.tail.dkbgc.com
+        paths:
+          - /
+    tls: []
+
+codeRunner:
+  enabled: false

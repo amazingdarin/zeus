@@ -6,6 +6,7 @@
 
 import type { JSONContent } from "@tiptap/core";
 import { v4 as uuidv4 } from "uuid";
+import { getRegisteredPluginBlockTypes } from "../../plugins/block-registry.js";
 
 /**
  * Valid block node types
@@ -29,13 +30,35 @@ const BLOCK_TYPES = new Set([
   "tableRow",
   "tableCell",
   "tableHeader",
+  "columns",
+  "column",
   "toc",
+  "chart",      // ECharts 图表
+  "mindmap",
+  "openapi",
+  "openapi_ref",
+  "block_ref",
+  "edu_question_set",
+  "unsupportedPluginBlock",
 ]);
+
+function isKnownBlockType(type: string): boolean {
+  if (BLOCK_TYPES.has(type)) {
+    return true;
+  }
+  return getRegisteredPluginBlockTypes().includes(type);
+}
 
 /**
  * Valid inline node types
+ * Note: math and music can display as block but are inline nodes by default
  */
-const INLINE_TYPES = new Set(["text", "hardBreak"]);
+const INLINE_TYPES = new Set([
+  "text",
+  "hardBreak",
+  "math",       // 数学公式 (KaTeX)
+  "music",      // 乐谱 (ABC Notation)
+]);
 
 /**
  * Valid mark types
@@ -61,6 +84,7 @@ const CHILD_CONSTRAINTS: Record<string, string[]> = {
   taskList: ["taskItem"],
   table: ["tableRow"],
   tableRow: ["tableCell", "tableHeader"],
+  columns: ["column"],
 };
 
 /**
@@ -133,12 +157,12 @@ function validateBlock(
   }
 
   // Check if type is valid
-  if (!BLOCK_TYPES.has(node.type) && !INLINE_TYPES.has(node.type)) {
+  if (!isKnownBlockType(node.type) && !INLINE_TYPES.has(node.type)) {
     warnings.push(`${path}: Unknown node type "${node.type}"`);
   }
 
   // Check block ID
-  if (BLOCK_TYPES.has(node.type)) {
+  if (isKnownBlockType(node.type)) {
     const attrs = node.attrs as Record<string, unknown> | undefined;
     if (!attrs?.id) {
       warnings.push(`${path}: Block "${node.type}" should have an id attribute`);
@@ -182,6 +206,40 @@ function validateBlock(
     }
   }
 
+  // Validate math node
+  if (node.type === "math") {
+    const attrs = node.attrs as { latex?: string; display?: boolean } | undefined;
+    if (typeof attrs?.latex !== "string") {
+      warnings.push(`${path}: math node should have a "latex" attribute`);
+    }
+  }
+
+  // Validate music node
+  if (node.type === "music") {
+    const attrs = node.attrs as { abc?: string; display?: boolean } | undefined;
+    if (typeof attrs?.abc !== "string") {
+      warnings.push(`${path}: music node should have an "abc" attribute`);
+    }
+  }
+
+  // Validate chart node
+  if (node.type === "chart") {
+    const attrs = node.attrs as { 
+      chartType?: string; 
+      mode?: string;
+      simpleData?: string;
+      options?: string;
+    } | undefined;
+    const validChartTypes = ["bar", "line", "pie", "scatter", "radar", "funnel"];
+    if (attrs?.chartType && !validChartTypes.includes(attrs.chartType)) {
+      warnings.push(`${path}: chart node has invalid chartType "${attrs.chartType}", expected one of: ${validChartTypes.join(", ")}`);
+    }
+    const validModes = ["simple", "advanced"];
+    if (attrs?.mode && !validModes.includes(attrs.mode)) {
+      warnings.push(`${path}: chart node has invalid mode "${attrs.mode}", expected "simple" or "advanced"`);
+    }
+  }
+
   // Recursively validate children
   if (Array.isArray(node.content)) {
     for (let i = 0; i < node.content.length; i++) {
@@ -222,7 +280,7 @@ function fixBlock(block: JSONContent): JSONContent {
   const fixed = { ...block };
 
   // Ensure block has attrs with id
-  if (BLOCK_TYPES.has(fixed.type || "")) {
+  if (isKnownBlockType(fixed.type || "")) {
     fixed.attrs = {
       ...(fixed.attrs as Record<string, unknown> || {}),
     };
@@ -290,7 +348,7 @@ export function ensureBlockIds(content: JSONContent[]): JSONContent[] {
   return content.map((block) => {
     const fixed = { ...block };
 
-    if (BLOCK_TYPES.has(fixed.type || "")) {
+    if (isKnownBlockType(fixed.type || "")) {
       fixed.attrs = {
         ...(fixed.attrs as Record<string, unknown> || {}),
       };

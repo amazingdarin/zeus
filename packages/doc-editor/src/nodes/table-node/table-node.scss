@@ -1,0 +1,159 @@
+// Table Node Styles
+
+.tiptap.ProseMirror {
+  --tt-table-border-color: var(--zeus-table-border-color, var(--tt-border-color));
+  --tt-table-header-bg-color: var(
+    --zeus-table-header-bg,
+    var(--tt-gray-light-a-100)
+  );
+  --tt-table-cell-bg-color: var(--zeus-table-cell-bg, var(--tt-bg-color));
+  --tt-table-hover-bg-color: var(--zeus-table-hover-bg, var(--tt-gray-light-a-50));
+  --tt-table-header-hover-bg-color: var(
+    --zeus-table-header-hover-bg,
+    var(--tt-gray-light-a-200)
+  );
+  --tt-table-selected-bg-color: var(
+    --zeus-table-selected-bg,
+    var(--tt-selection-color)
+  );
+  --tt-table-selected-outline-color: var(
+    --zeus-primary-color,
+    var(--tt-cursor-color)
+  );
+  --tt-table-resize-handle-color: var(--zeus-primary-color, var(--tt-cursor-color));
+  --tt-table-shadow-color: var(--tt-gray-light-a-100);
+
+  [data-theme="dark"] & {
+    --tt-table-border-color: var(
+      --zeus-table-border-color-dark,
+      var(--tt-gray-dark-a-200)
+    );
+    --tt-table-header-bg-color: var(
+      --zeus-table-header-bg-dark,
+      var(--tt-gray-dark-a-100)
+    );
+    --tt-table-cell-bg-color: var(--zeus-table-cell-bg-dark, var(--tt-bg-color));
+    --tt-table-hover-bg-color: var(
+      --zeus-table-hover-bg-dark,
+      var(--tt-gray-dark-a-50)
+    );
+    --tt-table-header-hover-bg-color: var(
+      --zeus-table-header-hover-bg-dark,
+      var(--tt-gray-dark-a-200)
+    );
+    --tt-table-selected-bg-color: var(
+      --zeus-table-selected-bg-dark,
+      var(--tt-selection-color)
+    );
+    --tt-table-selected-outline-color: var(
+      --zeus-primary-color,
+      var(--tt-cursor-color)
+    );
+    --tt-table-resize-handle-color: var(
+      --zeus-primary-color,
+      var(--tt-cursor-color)
+    );
+    --tt-table-shadow-color: var(--tt-gray-dark-a-100);
+  }
+
+  // Table wrapper (Tiptap default)
+  .tableWrapper {
+    overflow-x: auto;
+    margin: 1em 0;
+  }
+
+  // Table container - match both .zeus-table and native table
+  table,
+  .zeus-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
+    width: 100%;
+    margin: 0;
+    border: 1px solid var(--tt-table-border-color);
+    border-radius: var(--tt-radius-md, 0.5rem);
+    box-shadow: 0 1px 2px var(--tt-table-shadow-color);
+    overflow: hidden;
+
+    // Common cell styles
+    td,
+    th {
+      min-width: 5rem;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--tt-table-border-color);
+      border-right: 1px solid var(--tt-table-border-color);
+      vertical-align: top;
+      box-sizing: border-box;
+      position: relative;
+      background-color: var(--tt-table-cell-bg-color);
+
+      // Remove right border on last cell
+      &:last-child {
+        border-right: none;
+      }
+
+      // Paragraph inside cell
+      > p {
+        margin: 0;
+      }
+
+      // Selection state
+      &.selectedCell {
+        background-color: var(--tt-table-selected-bg-color);
+      }
+    }
+
+    // Remove bottom border on last row
+    tr:last-child td,
+    tr:last-child th {
+      border-bottom: none;
+    }
+
+    // Header cell styles
+    th {
+      background-color: var(--tt-table-header-bg-color);
+      font-weight: 600;
+      text-align: left;
+    }
+
+    // Row hover effect
+    tr:hover td:not(.selectedCell),
+    tr:hover th:not(.selectedCell) {
+      background-color: var(--tt-table-hover-bg-color);
+    }
+
+    tr:hover th:not(.selectedCell) {
+      background-color: var(--tt-table-header-hover-bg-color);
+    }
+  }
+
+  // Column resize handle
+  .column-resize-handle {
+    position: absolute;
+    right: -2px;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background-color: var(--tt-table-resize-handle-color);
+    pointer-events: none;
+    z-index: 20;
+  }
+
+  // Resize cursor
+  &.resize-cursor {
+    cursor: col-resize;
+  }
+
+  // Selected cells border
+  .selectedCell::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    border: 2px solid var(--tt-table-selected-outline-color);
+    z-index: 10;
+  }
+}

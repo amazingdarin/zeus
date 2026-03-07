@@ -11,6 +11,7 @@ import { generateText } from "ai";
 import { configStore, type ProviderConfigInternal } from "../llm/index.js";
 import { providerRegistry } from "../llm/providers.js";
 import { ensureBlockIds } from "../utils/block-id.js";
+import { traceManager, type TraceContext } from "../observability/index.js";
 
 // ============================================================================
 // Types
@@ -42,6 +43,11 @@ export type OCRProviderStatus = {
     available: boolean;
     endpoint?: string;
   };
+};
+
+type OCRTraceOptions = {
+  traceContext?: TraceContext;
+  metadata?: Record<string, unknown>;
 };
 
 // ============================================================================
@@ -230,10 +236,25 @@ async function checkPaddleOCR(): Promise<{ available: boolean; endpoint: string 
 /**
  * Parse image using PaddleOCR service
  */
-async function parseWithPaddleOCR(request: OCRRequest, endpoint: string): Promise<OCRResponse> {
+async function parseWithPaddleOCR(
+  request: OCRRequest,
+  endpoint: string,
+  options?: OCRTraceOptions,
+): Promise<OCRResponse> {
   const outputFormat = request.outputFormat || "tiptap";
+  const traceContext = options?.traceContext;
+  const traceMetadata = options?.metadata ?? {};
 
   console.log(`[OCR] Processing image with PaddleOCR at ${endpoint}`);
+
+  const span = traceContext
+    ? traceManager.startSpan(traceContext, "ocr-paddle", {
+        outputFormat,
+        language: request.language || "auto",
+        ...traceMetadata,
+      })
+    : null;
+  const start = Date.now();
 
   try {
     const response = await fetch(`${endpoint}/api/ocr/parse-base64`, {
@@ -283,6 +304,16 @@ async function parseWithPaddleOCR(request: OCRRequest, endpoint: string): Promis
     }
     console.log(`[OCR] ========================================`);
 
+    if (span) {
+      traceManager.endSpan(span, {
+        provider: "paddle",
+        durationMs: Date.now() - start,
+        outputFormat,
+        markdownChars: typeof result.markdown === "string" ? result.markdown.length : 0,
+        nodeCount: Array.isArray(result.content?.content) ? result.content.content.length : 0,
+      });
+    }
+
     return {
       content: ensureBlockIds(result.content) as JSONContent,
       markdown: result.markdown,
@@ -290,8 +321,20 @@ async function parseWithPaddleOCR(request: OCRRequest, endpoint: string): Promis
       provider: `PaddleOCR (${endpoint})`,
     };
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (span) {
+      traceManager.endSpan(
+        span,
+        {
+          provider: "paddle",
+          durationMs: Date.now() - start,
+          error: msg,
+        },
+        "ERROR",
+      );
+    }
     console.error("[OCR] PaddleOCR error:", err);
-    throw new Error(`PaddleOCR failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    throw new Error(`PaddleOCR failed: ${msg || "Unknown error"}`);
   }
 }
 
@@ -452,7 +495,10 @@ function parseOCRResponse(response: string): JSONContent {
  * Parse image using LLM vision
  * Uses dedicated vision config if available, otherwise falls back to LLM config
  */
-async function parseWithLLMVision(request: OCRRequest): Promise<OCRResponse> {
+async function parseWithLLMVision(
+  request: OCRRequest,
+  options?: OCRTraceOptions,
+): Promise<OCRResponse> {
   const config = await getVisionCapableConfig();
   if (!config || !config.enabled) {
     throw new Error("未配置视觉模型。请在设置中配置视觉模型或 LLM 提供商。");
@@ -482,6 +528,10 @@ async function parseWithLLMVision(request: OCRRequest): Promise<OCRResponse> {
     ? { type: "image" as const, image: request.image }
     : { type: "image" as const, image: new URL(request.image) };
 
+  const traceContext = options?.traceContext;
+  const traceMetadata = options?.metadata ?? {};
+  const generationStartTime = new Date();
+
   try {
     const result = await generateText({
       model,
@@ -495,10 +545,34 @@ async function parseWithLLMVision(request: OCRRequest): Promise<OCRResponse> {
         },
       ],
       temperature: 0.1, // Low temperature for more deterministic output
-      maxTokens: 4096,
+      maxOutputTokens: 4096,  // AI SDK 6.x renamed maxTokens to maxOutputTokens
     });
 
+    const generationEndTime = new Date();
     const rawResponse = result.text;
+    const usage = {
+      promptTokens: result.usage?.inputTokens || 0,
+      completionTokens: result.usage?.outputTokens || 0,
+      totalTokens: result.usage?.totalTokens || 0,
+    };
+
+    if (traceContext) {
+      traceManager.logGeneration(traceContext, {
+        name: "ocr-vision",
+        model: config.defaultModel,
+        provider: config.providerId,
+        input: {
+          outputFormat,
+          language: request.language,
+          imageKind: request.image.startsWith("data:") ? "data-url" : "url",
+          ...traceMetadata,
+        },
+        output: JSON.stringify({ responseChars: rawResponse.length }),
+        usage,
+        startTime: generationStartTime,
+        endTime: generationEndTime,
+      });
+    }
     
     // Detailed logging for debugging
     console.log(`[OCR] ========== LLM Vision Result ==========`);
@@ -538,6 +612,26 @@ async function parseWithLLMVision(request: OCRRequest): Promise<OCRResponse> {
       provider: `LLM Vision (${config.providerId}/${config.defaultModel})`,
     };
   } catch (err) {
+    const generationEndTime = new Date();
+    const msg = err instanceof Error ? err.message : String(err);
+    if (traceContext) {
+      traceManager.logGeneration(traceContext, {
+        name: "ocr-vision",
+        model: config.defaultModel,
+        provider: config.providerId,
+        input: {
+          outputFormat,
+          language: request.language,
+          imageKind: request.image.startsWith("data:") ? "data-url" : "url",
+          ...traceMetadata,
+        },
+        output: JSON.stringify({ error: msg }),
+        startTime: generationStartTime,
+        endTime: generationEndTime,
+        level: "ERROR",
+        statusMessage: msg,
+      });
+    }
     console.error("[OCR] LLM Vision API error:", err);
     throw new Error(`LLM Vision OCR failed: ${err instanceof Error ? err.message : "Unknown error"}`);
   }
@@ -555,7 +649,10 @@ async function parseWithLLMVision(request: OCRRequest): Promise<OCRResponse> {
  * 2. If PaddleOCR is available, prefer it for better accuracy
  * 3. Fall back to LLM vision if available
  */
-export async function parseImage(request: OCRRequest): Promise<OCRResponse> {
+export async function parseImage(
+  request: OCRRequest,
+  options?: OCRTraceOptions,
+): Promise<OCRResponse> {
   const preferredProvider = request.provider;
 
   // If specific provider is requested
@@ -564,11 +661,11 @@ export async function parseImage(request: OCRRequest): Promise<OCRResponse> {
     if (!paddle.available || !paddle.endpoint) {
       throw new Error("PaddleOCR service is not available. Please configure it in settings or use LLM vision.");
     }
-    return parseWithPaddleOCR(request, paddle.endpoint);
+    return parseWithPaddleOCR(request, paddle.endpoint, options);
   }
 
   if (preferredProvider === "llm") {
-    return parseWithLLMVision(request);
+    return parseWithLLMVision(request, options);
   }
 
   // Auto-select provider
@@ -579,7 +676,7 @@ export async function parseImage(request: OCRRequest): Promise<OCRResponse> {
     if (paddle.available && paddle.endpoint) {
       console.log(`[OCR] Using PaddleOCR from config: ${paddle.endpoint}`);
       try {
-        return await parseWithPaddleOCR(request, paddle.endpoint);
+        return await parseWithPaddleOCR(request, paddle.endpoint, options);
       } catch (err) {
         console.warn("[OCR] PaddleOCR failed, falling back to LLM Vision:", err instanceof Error ? err.message : err);
       }
@@ -590,7 +687,7 @@ export async function parseImage(request: OCRRequest): Promise<OCRResponse> {
   const llmConfig = await getVisionCapableConfig();
   if (llmConfig && llmConfig.enabled && llmConfig.providerId !== "paddleocr") {
     console.log("[OCR] Using LLM Vision");
-    return parseWithLLMVision(request);
+    return parseWithLLMVision(request, options);
   }
 
   throw new Error("没有可用的 OCR 服务。请在设置中配置 OCR 文档识别模型或 PaddleOCR 服务。");
@@ -672,7 +769,7 @@ export async function getProviderStatus(): Promise<OCRProviderStatus> {
 
   return {
     llm: {
-      available: llmVisionAvailable || llmFallbackAvailable,
+      available: !!(llmVisionAvailable || llmFallbackAvailable),  // Ensure boolean type
       model: llmVisionAvailable ? visionConfig?.defaultModel : llmConfig?.defaultModel,
     },
     paddle: {

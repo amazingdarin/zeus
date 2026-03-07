@@ -258,6 +258,89 @@ ${spec}
 }
 
 /**
+ * Build system prompt for Step 1:
+ * Generate a structured PPT-outline document in Tiptap JSON.
+ */
+export function buildPptOutlineDocumentPrompt(): string {
+  const spec = loadDocumentSpec();
+  return `你是 Zeus 文档助手。你的任务：把“源文档”改写为“结构化类 PPT 说明文档”，并输出 Zeus 支持的 Tiptap JSON 文档正文（body）。
+
+${spec}
+
+重要：只输出 JSON（一个对象，必须是 {"type":"doc","content":[...]} 结构），不要输出任何解释文字，不要用 \`\`\` 包裹。
+
+## 强制结构规则
+1. 每一页必须以 Heading 1 开始，格式："幻灯片 N：<页面标题>"。
+2. 每页紧跟一个 table，用于描述页面设计说明。
+3. 每页可选一个 bulletList，最多 6 条关键点，每条短句。
+4. 页与页之间必须使用 horizontalRule 分隔；最后一页可不加分割线。
+5. 除页首 Heading 1 外，页内不得出现 level=1 的 heading。
+
+## table 字段规范（强制）
+- 封面页（幻灯片1）table 至少包含行：
+  - 标题（居中）
+  - 副标题
+  - 视觉元素
+  - 补充信息（报告人、报告时间）
+- 内容页 table 至少包含行：
+  - 页面目标
+  - 核心要点
+  - 视觉建议
+  - 版式建议
+  - 讲解备注
+
+## 内容约束
+- 不要编造源文档没有的事实、数字或结论；不确定时用“待补充/未知”占位。
+- 单页内容保持简洁，避免超长段落。
+- 输出应便于下游 HTML 渲染器稳定解析。
+
+你的输出风格应像“可直接用于演讲准备的结构化脚本”。`;
+}
+
+/**
+ * Backward-compatible alias prompt for doc-optimize-ppt.
+ */
+export function buildPptOptimizeDocumentPrompt(): string {
+  return buildPptOutlineDocumentPrompt();
+}
+
+/**
+ * Build system prompt for Step 2:
+ * Convert PPT-outline document to a normalized JSON model for HTML rendering.
+ */
+export function buildPptHtmlModelPrompt(): string {
+  return `你是 Zeus 演示稿渲染助手。请将输入的“结构化类 PPT 文档”转换为严格 JSON 模型。
+
+只输出 JSON，不要输出解释。
+
+输出结构（严格）：
+{
+  "deckTitle": "string",
+  "subtitle": "string (optional)",
+  "presenter": "string (optional)",
+  "reportTime": "string (optional)",
+  "slides": [
+    {
+      "title": "string",
+      "subtitle": "string (optional)",
+      "goal": "string (optional)",
+      "bullets": ["string", "..."],
+      "visualHint": "string (optional)",
+      "layoutHint": "string (optional)",
+      "speakerNotes": "string (optional)"
+    }
+  ]
+}
+
+规则：
+1. 不要输出 HTML。
+2. slides 至少 1 页。
+3. bullets 最多 8 条，每条简短。
+4. 缺失信息用“待补充”。
+5. 不允许输出额外字段。`;
+}
+
+/**
  * Try to load raw spec file (for debugging/advanced use)
  */
 export function loadRawSpec(filename: string): string | null {

@@ -56,6 +56,7 @@ export const draftService = {
     const now = Date.now();
     const draft: DocumentDraft = {
       id: uuidv4(),
+      userId: input.userId,
       projectKey: input.projectKey,
       docId: input.docId ?? null,
       parentId: input.parentId ?? null,
@@ -90,6 +91,8 @@ export const draftService = {
   /**
    * Apply a draft (save to document store)
    * @param modifiedContent - Optional modified content (if user made changes in DIFF view)
+   * @param saveAsNew - If true, create a new document even if draft has docId (for "save as copy")
+   * @param newTitle - Title for the new document when saveAsNew is true
    */
   async apply(
     projectKey: string,
@@ -97,6 +100,8 @@ export const draftService = {
     options?: {
       modifiedContent?: JSONContent;
       parentId?: string | null;
+      saveAsNew?: boolean;
+      newTitle?: string;
     },
   ): Promise<{ docId: string; isNew: boolean }> {
     const draft = this.get(draftId);
@@ -115,36 +120,43 @@ export const draftService = {
     const contentToSave = options?.modifiedContent ?? draft.proposedContent;
     // Use provided parentId if specified, otherwise fall back to draft's parentId
     const parentId = options?.parentId !== undefined ? options.parentId : draft.parentId;
+    const saveAsNew = options?.saveAsNew ?? false;
 
     try {
       let docId: string;
       let isNew = false;
 
-      if (draft.docId) {
-        // Update existing document
-        const existingDoc = await documentStore.get(projectKey, draft.docId);
-        await documentStore.save(projectKey, {
+      if (draft.docId && !saveAsNew) {
+        // Update existing document (normal edit mode)
+        const existingDoc = await documentStore.get(draft.userId, projectKey, draft.docId);
+        await documentStore.save(draft.userId, projectKey, {
           meta: {
             ...existingDoc.meta,
             title: draft.title,
           },
-          body: contentToSave,
+          body: { type: "tiptap", content: contentToSave },
         });
         docId = draft.docId;
       } else {
-        // Create new document
-        const newDoc = await documentStore.save(projectKey, {
+        // Create new document (either new document or save as copy)
+        const title = saveAsNew && options?.newTitle 
+          ? options.newTitle 
+          : saveAsNew 
+            ? `${draft.title} (副本)` 
+            : draft.title;
+        
+        const newDoc = await documentStore.save(draft.userId, projectKey, {
           meta: {
             id: uuidv4(),
             schema_version: "v1",
-            title: draft.title,
-            slug: generateSlug(draft.title),
+            title,
+            slug: generateSlug(title),
             path: "",
-            parent_id: parentId || null,
+            parent_id: parentId ?? "root",  // Use "root" instead of null
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           },
-          body: contentToSave,
+          body: { type: "tiptap", content: contentToSave },
         });
         docId = newDoc.meta.id;
         isNew = true;

@@ -3,16 +3,23 @@ HELM_CHART := deploy/helm/charts
 HELM_NAMESPACE ?= zeus
 NAMESPACE ?= $(HELM_NAMESPACE)
 CONFIG_PATH ?= /tmp/zeus-$(NAMESPACE)/config.yaml
+APP_BACKEND_NODE_IMAGE ?= node:22-alpine
 
-.PHONY: run-server run-app-backend run-app-web run-app-desktop install uninstall dev-install build-postgres-image build-backend-image build-frontend-image build-paddleocr-image start-deps start-deps-dev stop-deps stop-deps-dev clean-deps start-all stop-all clean-all test-integration setup-python-venv install-paddleocr run-paddleocr-docker stop-paddleocr-docker
+.PHONY: run-server run-code-runner run-app-backend run-app-web run-app-desktop init-app-mobile-android init-app-mobile-ios run-app-mobile-android run-app-mobile-ios build-app-mobile-android build-app-mobile-ios install uninstall dev-install build-postgres-image build-backend-image build-app-backend-image build-frontend-image build-paddleocr-image download-runtime-binaries package-desktop package-mobile-android package-mobile-ios package-mobile package-all start-deps start-deps-dev stop-deps stop-deps-dev clean-deps start-all stop-all clean-all test-integration setup-python-venv install-paddleocr run-paddleocr-docker stop-paddleocr-docker
 
 # Development run commands
 run-server:
 	cd server && go run ./cmd/zeus
 
+run-code-runner:
+	cd server && go run ./cmd/code-runner
+
 run-app-backend:
-	@if [ -f apps/app-backend/.env ]; then \
-		export $$(cat apps/app-backend/.env | grep -v '^#' | xargs) && cd apps/app-backend && npm run dev; \
+	@# Load env vars from apps/app-backend/.env and override with apps/app-backend/.env.local (gitignored).
+	@if [ -f apps/app-backend/.env ] || [ -f apps/app-backend/.env.local ]; then \
+		[ -f apps/app-backend/.env ] && export $$(cat apps/app-backend/.env | grep -v '^#' | xargs); \
+		[ -f apps/app-backend/.env.local ] && export $$(cat apps/app-backend/.env.local | grep -v '^#' | xargs); \
+		cd apps/app-backend && npm run dev; \
 	else \
 		cd apps/app-backend && npm run dev; \
 	fi
@@ -21,7 +28,30 @@ run-app-web:
 	cd apps/web && npm run dev
 
 run-app-desktop:
+	@# Clean stale Tauri cache if the desktop crate was moved from the old frontend/src-tauri path.
+	@if [ -d apps/desktop/target/debug/build ] && rg -q "frontend/src-tauri" apps/desktop/target/debug/build; then \
+		echo "Detected stale Tauri cache in apps/desktop/target, cleaning..."; \
+		rm -rf apps/desktop/target; \
+	fi
 	cd apps/desktop && cargo tauri dev
+
+init-app-mobile-android:
+	cd apps/desktop && cargo tauri android init --ci --skip-targets-install
+
+init-app-mobile-ios:
+	cd apps/desktop && cargo tauri ios init --ci --skip-targets-install
+
+run-app-mobile-android:
+	cd apps/desktop && cargo tauri android dev
+
+run-app-mobile-ios:
+	cd apps/desktop && cargo tauri ios dev
+
+build-app-mobile-android:
+	cd apps/desktop && cargo tauri android build
+
+build-app-mobile-ios:
+	cd apps/desktop && cargo tauri ios build
 
 install:
 	helm dependency build $(HELM_CHART)
@@ -40,8 +70,27 @@ build-postgres-image:
 build-backend-image:
 	docker build -t zeus:latest -f server/Dockerfile server
 
+build-app-backend-image:
+	docker build --build-arg NODE_IMAGE=$(APP_BACKEND_NODE_IMAGE) -t zeus/app-backend:latest -f apps/app-backend/Dockerfile .
+
 build-frontend-image:
 	docker build -t zeus-web:latest -f apps/web/Dockerfile apps/web
+
+download-runtime-binaries:
+	bash ./scripts/release/download-runtime-binaries.sh
+
+package-desktop: download-runtime-binaries
+	bash ./scripts/release/package-desktop.sh
+
+package-mobile-android: download-runtime-binaries
+	bash ./scripts/release/package-mobile.sh android
+
+package-mobile-ios: download-runtime-binaries
+	bash ./scripts/release/package-mobile.sh ios
+
+package-mobile: package-mobile-android package-mobile-ios
+
+package-all: package-desktop package-mobile
 
 # PaddleOCR Docker commands
 PADDLEOCR_IMAGE := zeus/paddleocr:latest
@@ -76,7 +125,7 @@ start-deps:
 	-kubectl create namespace $(NAMESPACE)
 	helm upgrade --install $(APP_NAME) $(HELM_CHART) --namespace $(NAMESPACE) --create-namespace -f deploy/helm/values.deps.yaml
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/postgres --timeout=120s
-	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/rustfs --timeout=120s
+	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/faster-whisper --timeout=180s
 
 start-deps-dev:
 	bash ./scripts/gen-config.sh $(NAMESPACE) $(CONFIG_PATH)
@@ -84,7 +133,7 @@ start-deps-dev:
 	-kubectl create namespace $(NAMESPACE)
 	helm upgrade --install $(APP_NAME) $(HELM_CHART) --namespace $(NAMESPACE) --create-namespace -f deploy/helm/values.deps-dev.yaml
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/postgres --timeout=120s
-	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/rustfs --timeout=120s
+	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/faster-whisper --timeout=180s
 
 stop-deps:
 	helm uninstall $(APP_NAME) --namespace $(NAMESPACE) || true
@@ -101,7 +150,7 @@ start-all:
 	-kubectl create namespace $(NAMESPACE)
 	helm upgrade --install $(APP_NAME) $(HELM_CHART) --namespace $(NAMESPACE) --create-namespace -f deploy/helm/values.full.yaml
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/postgres --timeout=120s
-	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/rustfs --timeout=120s
+	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/faster-whisper --timeout=180s
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/zeus-backend --timeout=120s
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/zeus-frontend --timeout=120s
 

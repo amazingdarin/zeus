@@ -43,5 +43,17 @@ export function useTiptapEditor(providedEditor?: Editor | null): {
     },
   })
 
-  return editorState || { editor: null }
+  if (editorState?.editor) {
+    return editorState
+  }
+
+  if (mainEditor) {
+    return {
+      editor: mainEditor,
+      editorState: mainEditor.state,
+      canCommand: mainEditor.can,
+    }
+  }
+
+  return { editor: null }
 }

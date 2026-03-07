@@ -1,8 +1,9 @@
 import type { JSONContent } from "@tiptap/react";
+import type { Extensions } from "@tiptap/core";
 import { markdownToTiptapJson as toTiptap, tiptapJsonToMarkdown as toMarkdown } from "@zeus/doc-editor";
 
 export type MarkdownOptions = {
-  extensions?: string[];
+  extensions?: Extensions;
 };
 
 export const markdownToTiptapJson = (

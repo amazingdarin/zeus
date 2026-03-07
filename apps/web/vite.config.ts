@@ -10,15 +10,13 @@ const host = process.env.TAURI_DEV_HOST;
 // Pattern to match app-backend routes
 const isAppBackendRoute = (url: string): boolean => {
   return (
-    /^\/api\/projects\/[^/]+\/documents/.test(url) ||
-    /^\/api\/projects\/[^/]+\/knowledge/.test(url) ||
-    /^\/api\/projects\/[^/]+\/assets/.test(url) ||
-    /^\/api\/projects\/[^/]+\/convert/.test(url) ||
-    /^\/api\/projects\/[^/]+\/rag/.test(url) ||
-    /^\/api\/projects\/[^/]+\/chat/.test(url) ||
-    /^\/api\/projects\/[^/]+\/drafts/.test(url) ||
+    /^\/api\/projects\/[^/]+\/[^/]+\/[^/]+(?:\/|$)/.test(url) ||
+    url.startsWith("/api/plugins/v2") ||
+    url.startsWith("/api/system-docs") ||
     url.startsWith("/api/llm") ||
     url.startsWith("/api/ocr") ||
+    url.startsWith("/api/skills") ||
+    url.startsWith("/api/settings") ||
     url.startsWith("/api/app")
   );
 };
@@ -78,13 +76,13 @@ function createApiProxyPlugin(apiTarget: string, appBackendTarget: string): Plug
 
 export default defineConfig(async ({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const apiTarget = (env.VITE_API_BASE_URL ?? "http://localhost:8080").trim();
+  const serverTarget = (env.VITE_SERVER_URL ?? "http://localhost:8080").trim();
   const appBackendTarget = (env.VITE_APP_BACKEND_URL ?? "http://localhost:4870").trim();
 
   return {
     plugins: [
       react(),
-      mode !== "production" && createApiProxyPlugin(apiTarget, appBackendTarget),
+      mode !== "production" && createApiProxyPlugin(serverTarget, appBackendTarget),
     ].filter(Boolean),
     clearScreen: false,
     server: {

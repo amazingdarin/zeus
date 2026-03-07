@@ -1,0 +1,29 @@
+FROM m.daocloud.io/docker.io/library/golang:1.25.2-alpine AS builder
+
+RUN apk add --no-cache git
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /bin/zeus ./cmd/zeus
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /bin/code-runner ./cmd/code-runner
+
+FROM m.daocloud.io/docker.io/library/alpine:3.20
+
+RUN adduser -D -u 10001 zeus
+
+WORKDIR /app
+
+COPY --from=builder /bin/zeus /app/zeus
+COPY --from=builder /bin/code-runner /app/code-runner
+
+USER 10001
+
+ENV ZEUS_PORT=8080
+EXPOSE 8080
+
+ENTRYPOINT ["/app/zeus"]

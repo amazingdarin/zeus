@@ -4,7 +4,7 @@ import pgvector from "pgvector/pg";
 const { Pool } = pg;
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || "postgres://localhost:5432/zeus",
+  connectionString: process.env.DATABASE_URL || "postgres://zeus@localhost:5432/zeus",
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
@@ -23,7 +23,7 @@ export const initPool = async (): Promise<void> => {
   }
 };
 
-export const query = async <T = Record<string, unknown>>(
+export const query = async <T extends pg.QueryResultRow = Record<string, unknown>>(
   text: string,
   params?: unknown[],
 ): Promise<pg.QueryResult<T>> => {

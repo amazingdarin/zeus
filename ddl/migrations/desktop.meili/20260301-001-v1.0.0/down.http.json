@@ -1,0 +1,9 @@
+{
+  "requests": [
+    {
+      "method": "DELETE",
+      "path": "/indexes/knowledge_index",
+      "expectStatus": [200, 202, 204, 404]
+    }
+  ]
+}

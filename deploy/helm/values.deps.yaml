@@ -3,3 +3,12 @@ backend:
 
 frontend:
   enabled: false
+
+langfuse:
+  enabled: false
+
+banana-slides:
+  enabled: false
+
+faster-whisper:
+  enabled: true

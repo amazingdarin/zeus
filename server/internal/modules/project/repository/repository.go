@@ -7,13 +7,18 @@ import (
 )
 
 type ProjectFilter struct {
-	Status domain.ProjectStatus
+	Status    domain.ProjectStatus
+	OwnerType domain.OwnerType
+	OwnerID   string
+	// UserID is used to find projects owned by user or their teams
+	UserID    string
+	// TeamIDs is used to find team projects the user can access
+	TeamIDs   []string
 }
 
 type ProjectOption struct {
-	PreloadStorageObject bool // 是否预加载存储
-	Limit                int
-	Offset               int
+	Limit  int
+	Offset int
 }
 
 type ProjectRepository interface {

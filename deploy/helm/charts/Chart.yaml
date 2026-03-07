@@ -8,6 +8,16 @@ dependencies:
   - name: postgres
     version: 0.1.0
     repository: "file://charts/postgres"
-  - name: rustfs
+    condition: postgres.enabled
+  - name: faster-whisper
     version: 0.1.0
-    repository: "file://charts/rustfs"
+    repository: "file://charts/faster-whisper"
+    condition: faster-whisper.enabled
+  - name: langfuse
+    version: 1.0.0
+    repository: "file://charts/langfuse"
+    condition: langfuse.enabled
+  - name: banana-slides
+    version: 0.1.0
+    repository: "file://charts/banana-slides"
+    condition: banana-slides.enabled

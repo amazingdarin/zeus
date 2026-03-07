@@ -5,7 +5,7 @@
  */
 
 import type { JSONContent } from "@tiptap/react";
-import { apiFetch } from "../config/api";
+import { apiFetch, encodeProjectRef } from "../config/api";
 
 /**
  * Document draft from the backend
@@ -18,6 +18,18 @@ export type DocumentDraft = {
   title: string;
   originalContent: JSONContent | null;
   proposedContent: JSONContent;
+  validation?: {
+    passed: boolean;
+    attempt: number;
+    policy: "protocol_only" | "additive_strict";
+    issues: Array<{
+      severity: "error" | "warning";
+      code: string;
+      message: string;
+      details?: Record<string, unknown>;
+    }>;
+    feedback?: string;
+  };
   status: "pending" | "applied" | "rejected";
   createdAt: number;
   expiresAt: number;
@@ -31,7 +43,7 @@ export async function getDraft(
   draftId: string,
 ): Promise<DocumentDraft> {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/drafts/${encodeURIComponent(draftId)}`,
+    `/api/projects/${encodeProjectRef(projectKey)}/drafts/${encodeURIComponent(draftId)}`,
   );
 
   if (!response.ok) {
@@ -52,18 +64,31 @@ export async function applyDraft(
   options?: {
     modifiedContent?: JSONContent;
     parentId?: string | null;
+    saveAsNew?: boolean;
+    newTitle?: string;
   },
 ): Promise<{ docId: string; isNew: boolean }> {
-  const body: { modifiedContent?: JSONContent; parentId?: string | null } = {};
+  const body: { 
+    modifiedContent?: JSONContent; 
+    parentId?: string | null;
+    saveAsNew?: boolean;
+    newTitle?: string;
+  } = {};
   if (options?.modifiedContent) {
     body.modifiedContent = options.modifiedContent;
   }
   if (options?.parentId !== undefined) {
     body.parentId = options.parentId;
   }
+  if (options?.saveAsNew !== undefined) {
+    body.saveAsNew = options.saveAsNew;
+  }
+  if (options?.newTitle !== undefined) {
+    body.newTitle = options.newTitle;
+  }
 
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/drafts/${encodeURIComponent(draftId)}/apply`,
+    `/api/projects/${encodeProjectRef(projectKey)}/drafts/${encodeURIComponent(draftId)}/apply`,
     {
       method: "POST",
       headers: {
@@ -90,7 +115,7 @@ export async function rejectDraft(
   draftId: string,
 ): Promise<void> {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/drafts/${encodeURIComponent(draftId)}`,
+    `/api/projects/${encodeProjectRef(projectKey)}/drafts/${encodeURIComponent(draftId)}`,
     {
       method: "DELETE",
     },
@@ -109,7 +134,7 @@ export async function listPendingDrafts(
   projectKey: string,
 ): Promise<DocumentDraft[]> {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/drafts`,
+    `/api/projects/${encodeProjectRef(projectKey)}/drafts`,
   );
 
   if (!response.ok) {

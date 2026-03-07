@@ -7,7 +7,7 @@ export type FileBlockAttrs = {
   file_name?: string
   mime?: string
   size?: number
-  file_type?: "office" | "text" | "unknown" | string
+  file_type?: "office" | "text" | "audio" | "video" | "unknown" | string
   office_type?: "docx" | "xlsx" | "pptx" | "pdf" | string
 }
 

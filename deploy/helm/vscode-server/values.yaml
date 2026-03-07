@@ -1,0 +1,47 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/coder/code-server
+  tag: "latest"
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+service:
+  type: ClusterIP
+  port: 8080
+  nodePort: null
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: vscode.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClassName: ""
+  mountPath: /home/coder
+
+resources: {}
+
+podSecurityContext: {}
+securityContext: {}
+
+auth:
+  mode: password
+  password: changeme
+  existingSecret: ""
+  secretKey: password
+
+command: []
+args: []
+
+extraEnv: []
+extraVolumes: []
+extraVolumeMounts: []

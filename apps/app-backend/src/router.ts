@@ -1,11 +1,26 @@
 import { Router, type Request, type Response } from "express";
+import { buildLocalizedErrorPayloadSync, localizedError } from "./services/i18n-error.js";
+import { getCurrentRequestLocale } from "./i18n/request-context.js";
 import multer from "multer";
+import path from "node:path";
+import { createReadStream } from "node:fs";
 import { v4 as uuidv4 } from "uuid";
+import type { JSONContent } from "@tiptap/core";
 
 import { convertDocument } from "./services/convert.js";
 import { fetchUrl } from "./services/fetch-url.js";
-import { importGit } from "./services/import-git.js";
+import { createImportGitTask } from "./services/import-git-task.js";
+import { createImportFolderTask } from "./services/import-folder-task.js";
+import { importFileAsDocument } from "./services/smart-import.js";
+import { parseMediaTranscription } from "./services/parse-service.js";
+import {
+  readAsset as readSystemDocAsset,
+  readMarkdown as readSystemDocMarkdown,
+  scanDocsTree,
+  SystemDocsError,
+} from "./services/system-docs.js";
 import { ensureBlockIds } from "./utils/block-id.js";
+import { traceManager } from "./observability/index.js";
 import {
   documentStore,
   DocumentNotFoundError,
@@ -14,7 +29,11 @@ import {
 import type { Document, CreateDocumentRequest, MoveDocumentRequest, SearchQuery } from "./storage/types.js";
 import { knowledgeSearch } from "./knowledge/search.js";
 import { rebuildTaskManager } from "./knowledge/rebuild-task.js";
+import { notifyDocumentMoved } from "./knowledge/tree-sync.js";
 import { assetStore } from "./storage/asset-store.js";
+import { authMiddleware, getUserId, optionalAuthMiddleware } from "./middleware/auth.js";
+import { projectScopeMiddleware } from "./middleware/project-scope.js";
+import { resolveProjectScope } from "./project-scope.js";
 import {
   llmGateway,
   configStore,
@@ -26,7 +45,18 @@ import {
   type LLMProviderId,
   type ConfigType,
 } from "./llm/index.js";
-import { createRun, getRun, streamRun, clearSession } from "./services/chat.js";
+import {
+  createRun,
+  getRun,
+  streamRun,
+  clearSession,
+  cancelRun,
+  confirmTool,
+  rejectTool,
+  selectIntent,
+  providePreflightInput,
+  provideRequiredInput,
+} from "./services/chat.js";
 import { draftService } from "./services/draft.js";
 import {
   createTask as createOptimizeTask,
@@ -35,8 +65,111 @@ import {
   optimizeFormatSync,
   type OptimizeMode,
 } from "./services/optimize.js";
+import {
+  exportDocumentToDocxBuffer,
+  ExportDocxError,
+} from "./services/export-docx.js";
+import { duplicateDocument } from "./services/document-duplicate.js";
+import {
+  applyDocumentLock,
+  assertDocumentUnlocked,
+  clearDocumentLock,
+  DocumentLockedError,
+  getDocumentLockInfo,
+} from "./services/document-lock.js";
+import {
+  canDeleteCommentMessage,
+  canWriteComment,
+} from "./services/document-block-comment-model.js";
+import {
+  parseCommentContentInput,
+  parseCommentListQuery,
+  parseCommentStatusInput,
+  resolveCommentActorRole,
+} from "./services/document-block-comment-http.js";
+import {
+  CommentMessageNotFoundError,
+  CommentThreadNotFoundError,
+  documentBlockCommentStore,
+} from "./services/document-block-comment-store.js";
+import { createCodeExecService } from "./services/code-exec/service.js";
+import { CodeExecGuardError } from "./services/code-exec/guard.js";
+import { CodeExecClientError } from "./services/code-exec/client.js";
+import { documentFavoriteStore } from "./services/document-favorite-store.js";
+import { documentRecentEditStore } from "./services/document-recent-edit-store.js";
+import { documentTrashStore } from "./services/document-trash/store.js";
+import { messageCenterBus, messageCenterStore } from "./services/message-center-store.js";
+import {
+  documentContainsAnyBlockType,
+  normalizeBlockTypeQuery,
+} from "./services/document-filter.js";
+import { skillConfigStore } from "./llm/skills/skill-config-store.js";
+import { agentSkillCatalog, projectSkillConfigStore } from "./llm/agent/index.js";
+import { zodObjectHasRequiredKey } from "./llm/zod.js";
+import { pluginManagerV2 } from "./plugins-v2/index.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
+const uploadWithPath = multer({ storage: multer.memoryStorage(), preservePath: true });
+const pluginManager = pluginManagerV2;
+const codeExecService = createCodeExecService();
+const VALID_CONFIG_TYPES = new Set<ConfigType>(["llm", "embedding", "vision", "transcription"]);
+const VALID_CONFIG_TYPE_MESSAGE =
+  "configType must be 'llm', 'embedding', 'vision', or 'transcription'";
+const TRANSCRIPTION_PROVIDER_IDS = new Set<LLMProviderId>(["openai", "openai-compatible"]);
+const DEFAULT_TRANSCRIPTION_PROVIDER: LLMProviderId = "openai-compatible";
+const DEFAULT_TRANSCRIPTION_DISPLAY_NAME = "Whisper Transcription";
+
+function isValidConfigType(configType: string): configType is ConfigType {
+  return VALID_CONFIG_TYPES.has(configType as ConfigType);
+}
+
+function isProviderAllowedForConfigType(configType: ConfigType, providerId: LLMProviderId): boolean {
+  if (configType === "transcription") {
+    return TRANSCRIPTION_PROVIDER_IDS.has(providerId);
+  }
+  return true;
+}
+
+function normalizeInputForConfigType(
+  configType: ConfigType,
+  input: Partial<ProviderConfigInput>,
+): Partial<ProviderConfigInput> {
+  if (configType !== "transcription") {
+    return input;
+  }
+  return {
+    ...input,
+    providerId: input.providerId || DEFAULT_TRANSCRIPTION_PROVIDER,
+    displayName: input.displayName || DEFAULT_TRANSCRIPTION_DISPLAY_NAME,
+  };
+}
+
+function createSilentWavBuffer(durationMs = 350, sampleRate = 16000): Buffer {
+  const channels = 1;
+  const bitsPerSample = 16;
+  const bytesPerSample = bitsPerSample / 8;
+  const sampleCount = Math.max(1, Math.floor((durationMs / 1000) * sampleRate));
+  const dataSize = sampleCount * channels * bytesPerSample;
+  const buffer = Buffer.alloc(44 + dataSize);
+  const byteRate = sampleRate * channels * bytesPerSample;
+  const blockAlign = channels * bytesPerSample;
+
+  buffer.write("RIFF", 0, "ascii");
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write("WAVE", 8, "ascii");
+  buffer.write("fmt ", 12, "ascii");
+  buffer.writeUInt32LE(16, 16); // PCM header length
+  buffer.writeUInt16LE(1, 20); // PCM format
+  buffer.writeUInt16LE(channels, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(byteRate, 28);
+  buffer.writeUInt16LE(blockAlign, 32);
+  buffer.writeUInt16LE(bitsPerSample, 34);
+  buffer.write("data", 36, "ascii");
+  buffer.writeUInt32LE(dataSize, 40);
+
+  return buffer;
+}
 
 /**
  * Determine asset kind from MIME type
@@ -60,6 +193,51 @@ function fixFilename(filename: string): string {
   return filename;
 }
 
+function parseBool(value: unknown, defaultValue = false): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "y", "on"].includes(normalized)) return true;
+    if (["false", "0", "no", "n", "off"].includes(normalized)) return false;
+  }
+  return defaultValue;
+}
+
+function parseStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((v) => String(v ?? "").trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed.map((v) => String(v ?? "").trim()).filter(Boolean);
+      }
+    } catch {
+      // Ignore
+    }
+    return trimmed.split(",").map((v) => v.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function sanitizeUrlForTrace(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  try {
+    const u = new URL(raw);
+    if (u.username || u.password) {
+      u.username = "";
+      u.password = "";
+    }
+    return u.toString();
+  } catch {
+    return raw.replace(/\/\/[^@]*@/, "//");
+  }
+}
+
 /**
  * Determine asset kind from MIME type
  */
@@ -76,6 +254,27 @@ function getAssetKind(mime: string): string {
 }
 
 /**
+ * Extract text content from HTML (simple extraction)
+ */
+function extractTextFromHtml(html: string): string {
+  // Remove scripts and styles
+  let text = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
+  text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
+  // Remove HTML tags
+  text = text.replace(/<[^>]+>/g, " ");
+  // Decode common HTML entities
+  text = text.replace(/&nbsp;/g, " ");
+  text = text.replace(/&amp;/g, "&");
+  text = text.replace(/&lt;/g, "<");
+  text = text.replace(/&gt;/g, ">");
+  text = text.replace(/&quot;/g, '"');
+  text = text.replace(/&#39;/g, "'");
+  // Normalize whitespace
+  text = text.replace(/\s+/g, " ").trim();
+  return text;
+}
+
+/**
  * Standard API response helper
  */
 function success<T>(res: Response, data: T, status = 200): void {
@@ -86,11 +285,321 @@ function success<T>(res: Response, data: T, status = 200): void {
  * Standard error response helper
  */
 function error(res: Response, code: string, message: string, status = 400): void {
-  res.status(status).json({ code, message });
+  const payload = buildLocalizedErrorPayloadSync({
+    locale: getCurrentRequestLocale(),
+    code,
+    fallbackMessage: message,
+  });
+  res.status(status).json(payload);
+}
+
+function extractBearerToken(authorizationHeader: unknown): string {
+  const raw = String(authorizationHeader ?? "").trim();
+  if (!raw) {
+    return "";
+  }
+  const parts = raw.split(" ");
+  if (parts.length !== 2 || parts[0].toLowerCase() !== "bearer") {
+    return "";
+  }
+  return String(parts[1] ?? "").trim();
+}
+
+type DocumentHookEvent =
+  | "document.create"
+  | "document.update"
+  | "document.delete"
+  | "document.move"
+  | "document.import"
+  | "document.optimize";
+
+async function applyDocumentBeforeHooks(
+  req: Request,
+  res: Response,
+  event: DocumentHookEvent,
+  payload: Record<string, unknown>,
+): Promise<{ payload: Record<string, unknown>; requestId: string } | null> {
+  try {
+    const userId = getUserId(req);
+    const projectKey = String(req.params.projectKey || "").trim();
+    const requestId = `plugin-hook-${uuidv4()}`;
+
+    const result = await pluginManager.runBeforeHooks({
+      userId,
+      projectKey,
+      event,
+      payload,
+      requestId,
+    });
+
+    if (!result.allowed) {
+      const rejection = result.rejection || {
+        code: "PLUGIN_HOOK_REJECTED",
+        message: "Operation rejected by plugin hook",
+        status: 400,
+      };
+      error(res, rejection.code, rejection.message, rejection.status);
+      return null;
+    }
+
+    return {
+      payload: result.payload,
+      requestId,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Plugin before-hook execution failed";
+    error(res, "PLUGIN_HOOK_FAILED", message, 500);
+    return null;
+  }
+}
+
+function dispatchDocumentAfterHooks(
+  req: Request,
+  event: DocumentHookEvent,
+  payload: Record<string, unknown>,
+  requestId: string,
+): void {
+  const userId = getUserId(req);
+  const projectKey = String(req.params.projectKey || "").trim();
+  pluginManager.dispatchAfterHooks({
+    userId,
+    projectKey,
+    event,
+    payload,
+    requestId,
+  });
+
+  const accessToken = extractBearerToken(req.headers.authorization);
+  const isAuthenticated = Boolean(req.user?.id && accessToken);
+  const scope = req.projectScope
+    ? {
+      ownerType: req.projectScope.ownerType,
+      ownerId: req.projectScope.ownerId,
+      projectKey: req.projectScope.projectKey,
+    }
+    : undefined;
+
+  void import("./services/document-version/dispatch.js")
+    .then(({ documentVersionDispatcher }) =>
+      documentVersionDispatcher({
+        userId,
+        projectKey,
+        event,
+        payload,
+        isAuthenticated,
+        accessToken,
+        scope,
+      }))
+    .catch((err) => {
+      console.warn("[doc-version] failed to dispatch version event:", err);
+    });
+}
+
+/**
+ * Recursively update block attributes in document content
+ */
+function updateBlockAttrsInContent(
+  content: JSONContent,
+  blockId: string,
+  newAttrs: Record<string, unknown>,
+): boolean {
+  // Check if this node matches
+  if (content.attrs?.id === blockId) {
+    content.attrs = { ...content.attrs, ...newAttrs };
+    return true;
+  }
+
+  // Recursively check children
+  if (content.content && Array.isArray(content.content)) {
+    for (const child of content.content) {
+      if (updateBlockAttrsInContent(child, blockId, newAttrs)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+async function loadUnlockedDocument(
+  userId: string,
+  projectKey: string,
+  docId: string,
+): Promise<Document> {
+  const doc = await documentStore.get(userId, projectKey, docId);
+  assertDocumentUnlocked(doc.meta);
+  return doc;
+}
+
+function respondDocumentLocked(res: Response, err: DocumentLockedError): void {
+  res.status(err.status).json({
+    code: err.code,
+    message: err.message,
+    data: {
+      lock: err.lock,
+    },
+  });
+}
+
+async function respondCodeExecError(req: Request, res: Response, err: unknown): Promise<void> {
+  if (err instanceof DocumentNotFoundError) {
+    await localizedError(res, req, "NOT_FOUND", err.message, 404);
+    return;
+  }
+  if (err instanceof BlockNotFoundError) {
+    await localizedError(res, req, "BLOCK_NOT_FOUND", err.message, 404);
+    return;
+  }
+  if (err instanceof DocumentLockedError) {
+    respondDocumentLocked(res, err);
+    return;
+  }
+  if (err instanceof CodeExecGuardError) {
+    await localizedError(res, req, err.code, err.message, err.status);
+    return;
+  }
+  if (err instanceof CodeExecClientError) {
+    await localizedError(res, req, err.code, err.message, err.status);
+    return;
+  }
+  const message = err instanceof Error ? err.message : "Code execution failed";
+  await localizedError(res, req, "CODE_EXEC_FAILED", message, 500);
 }
 
 export const buildRouter = () => {
   const router = Router();
+
+  // ============================================
+  // System Docs APIs (read-only, filesystem-based)
+  // ============================================
+
+  /**
+   * Get system docs tree
+   * GET /system-docs/tree
+   */
+  router.get("/system-docs/tree", async (req: Request, res: Response) => {
+    try {
+      const language = String(req.query.lang ?? "");
+      const tree = await scanDocsTree(language);
+      success(res, tree);
+    } catch (err) {
+      if (err instanceof SystemDocsError) {
+        error(res, err.code, err.message, err.status);
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Get system docs tree failed";
+      error(res, "SYSTEM_DOCS_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Get markdown content from system docs
+   * GET /system-docs/content?path=xxx
+   */
+  router.get("/system-docs/content", async (req: Request, res: Response) => {
+    try {
+      const relativePath = String(req.query.path ?? "");
+      const language = String(req.query.lang ?? "");
+      const data = await readSystemDocMarkdown(relativePath, language);
+      success(res, data);
+    } catch (err) {
+      if (err instanceof SystemDocsError) {
+        error(res, err.code, err.message, err.status);
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Read system doc failed";
+      error(res, "SYSTEM_DOCS_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Get static asset from system docs
+   * GET /system-docs/asset?path=xxx
+   */
+  router.get("/system-docs/asset", async (req: Request, res: Response) => {
+    try {
+      const relativePath = String(req.query.path ?? "");
+      const data = await readSystemDocAsset(relativePath);
+
+      res.setHeader("Content-Type", data.mime);
+      const asciiFilename = path.basename(data.path).replace(/[^\x20-\x7E]/g, "_");
+      const encodedFilename = encodeURIComponent(path.basename(data.path));
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`,
+      );
+      res.send(data.buffer);
+    } catch (err) {
+      if (err instanceof SystemDocsError) {
+        error(res, err.code, err.message, err.status);
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Read system doc asset failed";
+      error(res, "SYSTEM_DOCS_FAILED", message, 500);
+    }
+  });
+
+  router.use(optionalAuthMiddleware);
+  router.use("/projects/:ownerType/:ownerKey/:projectKey", projectScopeMiddleware);
+
+  // ============================================
+  // Message Center APIs
+  // ============================================
+
+  /**
+   * List message center items (active + history)
+   * GET /projects/:ownerType/:ownerKey/:projectKey/message-center
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/message-center",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey } = req.params;
+        const userId = getUserId(req);
+        const limit = Number(req.query.limit ?? 50);
+        const cursor = typeof req.query.cursor === "string" ? req.query.cursor : undefined;
+        const type = typeof req.query.type === "string" ? req.query.type : undefined;
+        const result = await messageCenterStore.listTasks(userId, projectKey, { limit, cursor, type });
+        success(res, result);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "List message center failed";
+        error(res, "MESSAGE_CENTER_LIST_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Stream message center updates (SSE)
+   * GET /projects/:ownerType/:ownerKey/:projectKey/message-center/stream
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/message-center/stream",
+    async (req: Request, res: Response) => {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const scope = resolveProjectScope(userId, projectKey);
+      const scopeKey = `${userId}::${scope.ownerType}::${scope.ownerId}::${scope.projectKey}`;
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+
+      const unsubscribe = messageCenterBus.subscribe(scopeKey, (item) => {
+        res.write(`event: message.update\ndata: ${JSON.stringify(item)}\n\n`);
+      });
+
+      const heartbeat = setInterval(() => {
+        res.write(`event: message.ping\ndata: {}\n\n`);
+      }, 25000);
+
+      req.on("close", () => {
+        clearInterval(heartbeat);
+        unsubscribe();
+      });
+    },
+  );
 
   // ============================================
   // Document CRUD APIs
@@ -98,13 +607,14 @@ export const buildRouter = () => {
 
   /**
    * List documents under a parent
-   * GET /projects/:projectKey/documents?parent_id=xxx
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents?parent_id=xxx
    */
-  router.get("/projects/:projectKey/documents", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/documents", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
       const parentId = String(req.query.parent_id ?? "");
-      const items = await documentStore.getChildren(projectKey, parentId);
+      const items = await documentStore.getChildren(userId, projectKey, parentId);
       success(res, items);
     } catch (err) {
       const message = err instanceof Error ? err.message : "List failed";
@@ -114,12 +624,13 @@ export const buildRouter = () => {
 
   /**
    * Get the full document tree (all documents with nested children)
-   * GET /projects/:projectKey/documents/tree
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/tree
    */
-  router.get("/projects/:projectKey/documents/tree", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/documents/tree", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
-      const tree = await documentStore.getFullTree(projectKey);
+      const userId = getUserId(req);
+      const tree = await documentStore.getFullTree(userId, projectKey);
       success(res, tree);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Get tree failed";
@@ -128,16 +639,129 @@ export const buildRouter = () => {
   });
 
   /**
-   * Suggest documents matching a query (for @ mention autocomplete)
-   * GET /projects/:projectKey/documents/suggest?q=xxx&limit=10
+   * Trigger document git sync-on-open
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/sync
    */
-  router.get("/projects/:projectKey/documents/suggest", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/documents/sync", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const accessToken = extractBearerToken(req.headers.authorization);
+      const isAuthenticated = Boolean(req.user?.id && accessToken);
+      const scope = req.projectScope
+        ? {
+          ownerType: req.projectScope.ownerType,
+          ownerId: req.projectScope.ownerId,
+          projectKey: req.projectScope.projectKey,
+        }
+        : undefined;
+
+      const { documentVersionService } = await import("./services/document-version/service.js");
+      const result = await documentVersionService.syncOnOpen({
+        userId,
+        projectKey,
+        isAuthenticated,
+        accessToken,
+        scope,
+      });
+
+      success(res, {
+        status: result.status,
+        syncMode: result.syncMode,
+        synced: result.synced === true,
+      }, 202);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Sync failed";
+      error(res, "DOCUMENT_SYNC_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Filter documents by metadata (generated_by / doc_type / title query)
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/filter
+   */
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/documents/filter", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const generatedBy = String(req.query.generated_by || "").trim();
+      const docType = String(req.query.doc_type || "").trim();
+      const containsBlockType = normalizeBlockTypeQuery(String(req.query.contains_block_type || ""));
+      const query = String(req.query.q || "").trim().toLowerCase();
+      const limit = Math.min(Math.max(1, Number(req.query.limit) || 200), 1000);
+
+      const docs = await documentStore.getAllDocuments(userId, projectKey);
+      const filtered = docs
+        .filter((doc) => {
+          const meta = doc.meta && typeof doc.meta === "object"
+            ? (doc.meta as unknown as Record<string, unknown>)
+            : {};
+          const extra = meta.extra && typeof meta.extra === "object"
+            ? (meta.extra as Record<string, unknown>)
+            : {};
+          const title = String(meta.title || "").trim();
+          const rowGeneratedBy = String(extra.generated_by || "").trim();
+          const rowDocType = String(extra.doc_type || "").trim();
+
+          if (generatedBy && rowGeneratedBy !== generatedBy) return false;
+          if (docType && rowDocType !== docType) return false;
+          if (containsBlockType.size > 0 && !documentContainsAnyBlockType(doc.body, containsBlockType)) {
+            return false;
+          }
+          if (query && !title.toLowerCase().includes(query)) return false;
+          return true;
+        })
+        .map((doc) => {
+          const meta = doc.meta && typeof doc.meta === "object"
+            ? (doc.meta as unknown as Record<string, unknown>)
+            : {};
+          const extra = meta.extra && typeof meta.extra === "object"
+            ? (meta.extra as Record<string, unknown>)
+            : {};
+          return {
+            id: String(meta.id || ""),
+            title: String(meta.title || "").trim(),
+            slug: String(meta.slug || "").trim(),
+            created_at: String(meta.created_at || "").trim(),
+            updated_at: String(meta.updated_at || "").trim(),
+            extra: {
+              doc_type: String(extra.doc_type || "").trim() || undefined,
+              generated_by: String(extra.generated_by || "").trim() || undefined,
+              source_doc_ids: Array.isArray(extra.source_doc_ids) ? extra.source_doc_ids : undefined,
+              knowledge_queries: Array.isArray(extra.knowledge_queries) ? extra.knowledge_queries : undefined,
+            },
+          };
+        })
+        .filter((row) => row.id && row.title);
+
+      filtered.sort((a, b) => {
+        const aTime = Date.parse(a.updated_at || a.created_at || "") || 0;
+        const bTime = Date.parse(b.updated_at || b.created_at || "") || 0;
+        return bTime - aTime;
+      });
+
+      success(res, filtered.slice(0, limit));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Filter failed";
+      error(res, "FILTER_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Suggest documents matching a query (for @ mention autocomplete)
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/suggest?q=xxx&limit=10&parentId=xxx
+   * @param parentId - Optional: Only search children of this parent ("root" or "" for root level)
+   */
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/documents/suggest", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
       const query = String(req.query.q || "");
       const limit = Math.min(Math.max(1, Number(req.query.limit) || 10), 50);
+      // parentId: undefined = search all, "root" or "" = root level only, other = children of that doc
+      const parentId = req.query.parentId !== undefined ? String(req.query.parentId) : undefined;
 
-      const suggestions = await documentStore.suggest(projectKey, query, limit);
+      const suggestions = await documentStore.suggest(userId, projectKey, query, limit, parentId);
       success(res, suggestions);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Suggest failed";
@@ -146,17 +770,96 @@ export const buildRouter = () => {
   });
 
   /**
-   * Get a document by ID
-   * GET /projects/:projectKey/documents/:docId
+   * List favorite documents for current user + project
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/favorites
    */
-  router.get("/projects/:projectKey/documents/:docId", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/documents/favorites", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const favorites = await documentFavoriteStore.list(userId, projectKey);
+      success(res, favorites);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "List favorites failed";
+      error(res, "LIST_FAVORITES_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * List recently edited documents for current user + project
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/recent-edits
+   */
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/documents/recent-edits", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const recentEdits = await documentRecentEditStore.list(userId, projectKey);
+      success(res, recentEdits);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "List recent edits failed";
+      error(res, "LIST_RECENT_EDITS_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Favorite a document (idempotent, repeats move to top)
+   * PUT /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/favorite
+   */
+  router.put(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/favorite",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+
+        await documentFavoriteStore.add(userId, projectKey, docId);
+        const favorites = await documentFavoriteStore.list(userId, projectKey);
+        success(res, favorites);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Favorite failed";
+        error(res, "FAVORITE_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Remove document from favorites (idempotent)
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/favorite
+   */
+  router.delete(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/favorite",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+
+        await documentFavoriteStore.remove(userId, projectKey, docId);
+        const favorites = await documentFavoriteStore.list(userId, projectKey);
+        success(res, favorites);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unfavorite failed";
+        error(res, "UNFAVORITE_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Get a document by ID
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId
+   */
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/documents/:docId", async (req: Request, res: Response) => {
     try {
       const { projectKey, docId } = req.params;
-      const doc = await documentStore.get(projectKey, docId);
+      const userId = getUserId(req);
+      const doc = await documentStore.get(userId, projectKey, docId);
       success(res, { meta: doc.meta, body: doc.body });
     } catch (err) {
       if (err instanceof DocumentNotFoundError) {
-        error(res, "NOT_FOUND", err.message, 404);
+        await localizedError(res, req, "NOT_FOUND", err.message, 404);
         return;
       }
       const message = err instanceof Error ? err.message : "Get failed";
@@ -165,15 +868,71 @@ export const buildRouter = () => {
   });
 
   /**
-   * Get document hierarchy (ancestor chain)
-   * GET /projects/:projectKey/documents/:docId/hierarchy
+   * Lock a document
+   * PUT /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/lock
    */
-  router.get(
-    "/projects/:projectKey/documents/:docId/hierarchy",
+  router.put(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/lock",
     async (req: Request, res: Response) => {
       try {
         const { projectKey, docId } = req.params;
-        const chain = await documentStore.getHierarchy(projectKey, docId);
+        const userId = getUserId(req);
+        const doc = await documentStore.get(userId, projectKey, docId);
+        const existingLock = getDocumentLockInfo(doc.meta);
+        if (existingLock?.locked) {
+          success(res, { lock: existingLock });
+          return;
+        }
+        const lock = applyDocumentLock(doc.meta, userId, new Date().toISOString());
+        const saved = await documentStore.save(userId, projectKey, doc);
+        success(res, { lock: getDocumentLockInfo(saved.meta) ?? lock });
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Lock failed";
+        error(res, "LOCK_DOCUMENT_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Unlock a document
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/lock
+   */
+  router.delete(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/lock",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+        const doc = await documentStore.get(userId, projectKey, docId);
+        clearDocumentLock(doc.meta);
+        const saved = await documentStore.save(userId, projectKey, doc);
+        success(res, { lock: getDocumentLockInfo(saved.meta) });
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Unlock failed";
+        error(res, "UNLOCK_DOCUMENT_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Get document hierarchy (ancestor chain)
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/hierarchy
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/hierarchy",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+        const chain = await documentStore.getHierarchy(userId, projectKey, docId);
         const items = chain.map((m) => ({
           id: m.id,
           title: m.title,
@@ -182,7 +941,7 @@ export const buildRouter = () => {
         success(res, items);
       } catch (err) {
         if (err instanceof DocumentNotFoundError) {
-          error(res, "NOT_FOUND", err.message, 404);
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
           return;
         }
         const message = err instanceof Error ? err.message : "Get hierarchy failed";
@@ -192,69 +951,556 @@ export const buildRouter = () => {
   );
 
   /**
+   * Duplicate a document under the same parent
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/duplicate
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/duplicate",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+
+        const duplicated = await duplicateDocument({
+          userId,
+          projectKey,
+          docId,
+        });
+
+        knowledgeSearch.indexDocument(userId, projectKey, duplicated).catch((err) => {
+          console.error("Index error:", err);
+        });
+
+        success(res, { meta: duplicated.meta, body: duplicated.body }, 201);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Duplicate failed";
+        error(res, "DUPLICATE_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Export current document to Word (.docx)
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/export-docx
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/export-docx",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+
+        const result = await exportDocumentToDocxBuffer({
+          userId,
+          projectKey,
+          docId,
+        });
+
+        res.status(200);
+        res.setHeader("Content-Type", result.contentType);
+        res.setHeader("Content-Length", String(result.buffer.length));
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${result.asciiFilename}"; filename*=UTF-8''${encodeURIComponent(result.filename)}`,
+        );
+        res.send(result.buffer);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        if (err instanceof ExportDocxError) {
+          error(res, err.code, err.message, err.status);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Failed to export docx";
+        error(res, "EXPORT_DOCX_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
    * Get a specific block from a document
-   * GET /projects/:projectKey/documents/:docId/blocks/:blockId
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/blocks/:blockId
    */
   router.get(
-    "/projects/:projectKey/documents/:docId/blocks/:blockId",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/blocks/:blockId",
     async (req: Request, res: Response) => {
       try {
         const { projectKey, docId, blockId } = req.params;
-        const doc = await documentStore.getBlockById(projectKey, docId, blockId);
+        const userId = getUserId(req);
+        const doc = await documentStore.getBlockById(userId, projectKey, docId, blockId);
         success(res, { meta: doc.meta, body: doc.body });
       } catch (err) {
         if (err instanceof DocumentNotFoundError) {
-          error(res, "NOT_FOUND", err.message, 404);
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
           return;
         }
         if (err instanceof BlockNotFoundError) {
-          error(res, "BLOCK_NOT_FOUND", err.message, 404);
+          await localizedError(res, req, "BLOCK_NOT_FOUND", err.message, 404);
           return;
         }
         const message = err instanceof Error ? err.message : "Get block failed";
-        error(res, "GET_BLOCK_FAILED", message, 500);
+        await localizedError(res, req, "GET_BLOCK_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * List block comment threads
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+        await documentStore.get(userId, projectKey, docId);
+
+        const listQuery = parseCommentListQuery(req.query as unknown as Record<string, unknown>);
+        const data = await documentBlockCommentStore.listThreads({
+          userId,
+          projectKey,
+          docId,
+          blockId: listQuery.blockId,
+          status: listQuery.status,
+          cursor: listQuery.cursor,
+          limit: listQuery.limit,
+        });
+        success(res, data);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "List block comments failed";
+        await localizedError(res, req, "LIST_BLOCK_COMMENTS_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Get block comment thread detail
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/:threadId
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/:threadId",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId, threadId } = req.params;
+        const userId = getUserId(req);
+        await documentStore.get(userId, projectKey, docId);
+
+        const data = await documentBlockCommentStore.getThread({
+          userId,
+          projectKey,
+          docId,
+          threadId,
+        });
+        success(res, data);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        if (err instanceof CommentThreadNotFoundError) {
+          await localizedError(res, req, err.code, err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Get block comment thread failed";
+        await localizedError(res, req, "GET_BLOCK_COMMENT_THREAD_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Create a block comment thread
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+        const scope = req.projectScope;
+        if (!scope) {
+          await localizedError(res, req, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
+          return;
+        }
+
+        const role = await resolveCommentActorRole(scope, userId);
+        if (!canWriteComment(role)) {
+          await localizedError(res, req, "COMMENT_PERMISSION_DENIED", "insufficient permission", 403);
+          return;
+        }
+
+        const blockId = String(req.body?.blockId ?? "").trim();
+        const content = parseCommentContentInput(req.body?.content);
+        if (!blockId) {
+          await localizedError(res, req, "BLOCK_ID_REQUIRED", "blockId is required", 400);
+          return;
+        }
+        if (!content) {
+          await localizedError(res, req, "COMMENT_CONTENT_REQUIRED", "content is required", 400);
+          return;
+        }
+
+        await documentStore.getBlockById(userId, projectKey, docId, blockId);
+        const created = await documentBlockCommentStore.createThread({
+          userId,
+          projectKey,
+          docId,
+          blockId,
+          content,
+        });
+        success(res, created, 201);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        if (err instanceof BlockNotFoundError) {
+          await localizedError(res, req, "BLOCK_NOT_FOUND", err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Create block comment thread failed";
+        await localizedError(res, req, "CREATE_BLOCK_COMMENT_THREAD_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Create a block comment message
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/:threadId/messages
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/:threadId/messages",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId, threadId } = req.params;
+        const userId = getUserId(req);
+        const scope = req.projectScope;
+        if (!scope) {
+          await localizedError(res, req, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
+          return;
+        }
+
+        const role = await resolveCommentActorRole(scope, userId);
+        if (!canWriteComment(role)) {
+          await localizedError(res, req, "COMMENT_PERMISSION_DENIED", "insufficient permission", 403);
+          return;
+        }
+
+        const content = parseCommentContentInput(req.body?.content);
+        if (!content) {
+          await localizedError(res, req, "COMMENT_CONTENT_REQUIRED", "content is required", 400);
+          return;
+        }
+
+        await documentStore.get(userId, projectKey, docId);
+        const messageRow = await documentBlockCommentStore.addMessage({
+          userId,
+          projectKey,
+          docId,
+          threadId,
+          content,
+        });
+        success(res, messageRow, 201);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        if (err instanceof CommentThreadNotFoundError) {
+          await localizedError(res, req, err.code, err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Create block comment message failed";
+        await localizedError(res, req, "CREATE_BLOCK_COMMENT_MESSAGE_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Update block comment thread status
+   * PATCH /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/:threadId
+   */
+  router.patch(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/:threadId",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId, threadId } = req.params;
+        const userId = getUserId(req);
+        const scope = req.projectScope;
+        if (!scope) {
+          await localizedError(res, req, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
+          return;
+        }
+
+        const role = await resolveCommentActorRole(scope, userId);
+        if (!canWriteComment(role)) {
+          await localizedError(res, req, "COMMENT_PERMISSION_DENIED", "insufficient permission", 403);
+          return;
+        }
+
+        const status = parseCommentStatusInput(req.body as Record<string, unknown> | undefined);
+        if (!status) {
+          await localizedError(res, req, "INVALID_COMMENT_STATUS", "status must be open or resolved", 400);
+          return;
+        }
+
+        await documentStore.get(userId, projectKey, docId);
+        const thread = await documentBlockCommentStore.setThreadStatus({
+          userId,
+          projectKey,
+          docId,
+          threadId,
+          status,
+        });
+        success(res, thread);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        if (err instanceof CommentThreadNotFoundError) {
+          await localizedError(res, req, err.code, err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Update block comment thread failed";
+        await localizedError(res, req, "UPDATE_BLOCK_COMMENT_THREAD_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Delete block comment message
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/messages/:messageId
+   */
+  router.delete(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/messages/:messageId",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId, messageId } = req.params;
+        const userId = getUserId(req);
+        const scope = req.projectScope;
+        if (!scope) {
+          await localizedError(res, req, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
+          return;
+        }
+
+        await documentStore.get(userId, projectKey, docId);
+        const found = await documentBlockCommentStore.findMessage({
+          userId,
+          projectKey,
+          docId,
+          messageId,
+        });
+        const role = await resolveCommentActorRole(scope, userId);
+        if (!canDeleteCommentMessage({
+          actorId: userId,
+          authorId: found.message.authorId,
+          role,
+        })) {
+          await localizedError(res, req, "COMMENT_PERMISSION_DENIED", "insufficient permission", 403);
+          return;
+        }
+
+        await documentBlockCommentStore.deleteMessage({
+          userId,
+          projectKey,
+          docId,
+          messageId,
+        });
+        success(res, { messageId });
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        if (err instanceof CommentMessageNotFoundError) {
+          await localizedError(res, req, err.code, err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Delete block comment message failed";
+        await localizedError(res, req, "DELETE_BLOCK_COMMENT_MESSAGE_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Execute a code block in a document
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/code-exec/run
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/code-exec/run",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+        const scope = req.projectScope;
+        if (!scope) {
+          await localizedError(res, req, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
+          return;
+        }
+
+        const blockId = String(req.body?.blockId ?? "").trim();
+        const language = String(req.body?.language ?? "").trim();
+        const code = String(req.body?.code ?? "");
+        const timeoutRaw = Number(req.body?.timeoutMs ?? 10_000);
+        const timeoutMs = Number.isFinite(timeoutRaw) ? Math.max(1000, Math.floor(timeoutRaw)) : 10_000;
+
+        if (!blockId) {
+          await localizedError(res, req, "BLOCK_ID_REQUIRED", "blockId is required", 400);
+          return;
+        }
+        if (!language) {
+          await localizedError(res, req, "LANGUAGE_REQUIRED", "language is required", 400);
+          return;
+        }
+
+        const run = await codeExecService.run({
+          userId,
+          ownerType: scope.ownerType,
+          ownerId: scope.ownerId,
+          projectKey,
+          docId,
+          blockId,
+          language,
+          code,
+          timeoutMs,
+        });
+        success(res, run);
+      } catch (err) {
+        await respondCodeExecError(req, res, err);
+      }
+    },
+  );
+
+  /**
+   * List code execution runs
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/code-exec/runs
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/code-exec/runs",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const scope = req.projectScope;
+        if (!scope) {
+          await localizedError(res, req, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
+          return;
+        }
+        const blockId = String(req.query.blockId ?? "").trim() || undefined;
+        const cursor = String(req.query.cursor ?? "").trim() || undefined;
+        const limitRaw = Number(req.query.limit ?? 20);
+        const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, Math.floor(limitRaw))) : 20;
+
+        const data = await codeExecService.listRuns({
+          ownerType: scope.ownerType,
+          ownerId: scope.ownerId,
+          projectKey,
+          docId,
+          blockId,
+          cursor,
+          limit,
+        });
+        success(res, data);
+      } catch (err) {
+        await respondCodeExecError(req, res, err);
+      }
+    },
+  );
+
+  /**
+   * Get one code execution run
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/code-exec/runs/:runId
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/code-exec/runs/:runId",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId, runId } = req.params;
+        const scope = req.projectScope;
+        if (!scope) {
+          await localizedError(res, req, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
+          return;
+        }
+
+        const data = await codeExecService.getRun({
+          ownerType: scope.ownerType,
+          ownerId: scope.ownerId,
+          projectKey,
+          docId,
+          runId,
+        });
+        success(res, data);
+      } catch (err) {
+        await respondCodeExecError(req, res, err);
       }
     },
   );
 
   /**
    * Create a new document
-   * POST /projects/:projectKey/documents
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents
    */
-  router.post("/projects/:projectKey/documents", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/documents", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
       const body = req.body as CreateDocumentRequest;
 
-      if (!body.meta?.title) {
+      const before = await applyDocumentBeforeHooks(req, res, "document.create", {
+        body,
+      });
+      if (!before) {
+        return;
+      }
+      const nextBody = (before.payload.body && typeof before.payload.body === "object"
+        ? before.payload.body
+        : body) as CreateDocumentRequest;
+
+      if (!nextBody.meta?.title) {
         error(res, "MISSING_TITLE", "title is required");
         return;
       }
 
       const doc: Document = {
         meta: {
-          id: body.meta.id || uuidv4(),
-          schema_version: body.meta.schema_version || "v1",
-          title: body.meta.title,
-          slug: body.meta.slug || "",
+          id: nextBody.meta.id || uuidv4(),
+          schema_version: nextBody.meta.schema_version || "v1",
+          title: nextBody.meta.title,
+          slug: nextBody.meta.slug || "",
           path: "",
-          parent_id: body.meta.parent_id || "root",
+          parent_id: nextBody.meta.parent_id || "root",
           created_at: "",
           updated_at: "",
-          extra: body.meta.extra,
+          extra: nextBody.meta.extra,
         },
         body: {
-          ...body.body,
-          content: body.body?.content ? ensureBlockIds(body.body.content) : body.body?.content,
+          ...nextBody.body,
+          content: nextBody.body?.content ? ensureBlockIds(nextBody.body.content as JSONContent) : nextBody.body?.content,
         },
       };
 
-      const saved = await documentStore.save(projectKey, doc);
+      const saved = await documentStore.save(userId, projectKey, doc);
 
       // Index the document asynchronously
-      knowledgeSearch.indexDocument(projectKey, saved).catch((err) => {
+      knowledgeSearch.indexDocument(userId, projectKey, saved).catch((err) => {
         console.error("Index error:", err);
       });
+
+      dispatchDocumentAfterHooks(req, "document.create", {
+        request: before.payload,
+        saved,
+      }, before.requestId);
 
       success(res, { meta: saved.meta, body: saved.body }, 201);
     } catch (err) {
@@ -265,41 +1511,62 @@ export const buildRouter = () => {
 
   /**
    * Update an existing document
-   * PUT /projects/:projectKey/documents/:docId
+   * PUT /projects/:ownerType/:ownerKey/:projectKey/documents/:docId
    */
-  router.put("/projects/:projectKey/documents/:docId", async (req: Request, res: Response) => {
+  router.put("/projects/:ownerType/:ownerKey/:projectKey/documents/:docId", async (req: Request, res: Response) => {
     try {
       const { projectKey, docId } = req.params;
+      const userId = getUserId(req);
       const body = req.body as CreateDocumentRequest;
 
+      const before = await applyDocumentBeforeHooks(req, res, "document.update", {
+        docId,
+        body,
+      });
+      if (!before) {
+        return;
+      }
+      const nextBody = (before.payload.body && typeof before.payload.body === "object"
+        ? before.payload.body
+        : body) as CreateDocumentRequest;
+
       // Get existing document
-      const existing = await documentStore.get(projectKey, docId);
+      const existing = await loadUnlockedDocument(userId, projectKey, docId);
 
       // Merge updates
-      const updatedBody = body.body || existing.body;
+      const updatedBody = nextBody.body || existing.body;
       const doc: Document = {
         meta: {
           ...existing.meta,
-          ...body.meta,
+          ...nextBody.meta,
           id: docId, // Ensure ID doesn't change
         },
         body: {
           ...updatedBody,
-          content: updatedBody?.content ? ensureBlockIds(updatedBody.content) : updatedBody?.content,
+          content: updatedBody?.content ? ensureBlockIds(updatedBody.content as JSONContent) : updatedBody?.content,
         },
       };
 
-      const saved = await documentStore.save(projectKey, doc);
+      const saved = await documentStore.save(userId, projectKey, doc);
 
       // Re-index the document asynchronously
-      knowledgeSearch.indexDocument(projectKey, saved).catch((err) => {
+      knowledgeSearch.indexDocument(userId, projectKey, saved).catch((err) => {
         console.error("Index error:", err);
       });
+
+      dispatchDocumentAfterHooks(req, "document.update", {
+        request: before.payload,
+        saved,
+      }, before.requestId);
 
       success(res, { meta: saved.meta, body: saved.body });
     } catch (err) {
       if (err instanceof DocumentNotFoundError) {
-        error(res, "NOT_FOUND", err.message, 404);
+        await localizedError(res, req, "NOT_FOUND", err.message, 404);
+        return;
+      }
+      if (err instanceof DocumentLockedError) {
+        respondDocumentLocked(res, err);
         return;
       }
       const message = err instanceof Error ? err.message : "Update failed";
@@ -309,26 +1576,64 @@ export const buildRouter = () => {
 
   /**
    * Delete a document (optionally recursive)
-   * DELETE /projects/:projectKey/documents/:docId?recursive=true
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/documents/:docId?recursive=true
    */
-  router.delete("/projects/:projectKey/documents/:docId", async (req: Request, res: Response) => {
+  router.delete("/projects/:ownerType/:ownerKey/:projectKey/documents/:docId", async (req: Request, res: Response) => {
     try {
       const { projectKey, docId } = req.params;
+      const userId = getUserId(req);
       const recursive = req.query.recursive === "true";
-      
-      const deletedIds = await documentStore.delete(projectKey, docId, recursive);
+
+      const before = await applyDocumentBeforeHooks(req, res, "document.delete", {
+        docId,
+        recursive,
+      });
+      if (!before) {
+        return;
+      }
+      const nextDocId = typeof before.payload.docId === "string" && before.payload.docId.trim()
+        ? before.payload.docId.trim()
+        : docId;
+      const nextRecursive = before.payload.recursive === true || recursive;
+
+      await loadUnlockedDocument(userId, projectKey, nextDocId);
+
+      const moved = await documentTrashStore.moveToTrash({
+        userId,
+        projectKey,
+        docId: nextDocId,
+        recursive: nextRecursive,
+        deletedBy: userId,
+      });
+      const deletedIds = moved.deletedIds;
+
+      await documentFavoriteStore.removeMany(userId, projectKey, deletedIds);
+
+      documentRecentEditStore.removeMany(userId, projectKey, deletedIds).catch((cleanupErr) => {
+        console.error("Cleanup recent edits error:", cleanupErr);
+      });
 
       // Remove all deleted documents from index asynchronously
       for (const deletedId of deletedIds) {
-        knowledgeSearch.removeDocument(projectKey, deletedId).catch((err) => {
+        knowledgeSearch.removeDocument(userId, projectKey, deletedId).catch((err) => {
           console.error("Remove index error:", err);
         });
       }
 
-      success(res, { deleted_ids: deletedIds, count: deletedIds.length });
+      dispatchDocumentAfterHooks(req, "document.delete", {
+        request: before.payload,
+        deletedIds,
+        trashId: moved.entry.trashId,
+      }, before.requestId);
+
+      success(res, { deleted_ids: deletedIds, count: deletedIds.length, trash_id: moved.entry.trashId });
     } catch (err) {
       if (err instanceof DocumentNotFoundError) {
-        error(res, "NOT_FOUND", err.message, 404);
+        await localizedError(res, req, "NOT_FOUND", err.message, 404);
+        return;
+      }
+      if (err instanceof DocumentLockedError) {
+        respondDocumentLocked(res, err);
         return;
       }
       const message = err instanceof Error ? err.message : "Delete failed";
@@ -337,28 +1642,267 @@ export const buildRouter = () => {
   });
 
   /**
-   * Move a document to a new parent
-   * PATCH /projects/:projectKey/documents/:docId/move
+   * List trash entries
+   * GET /projects/:ownerType/:ownerKey/:projectKey/trash
+   */
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/trash", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const entries = await documentTrashStore.list({ userId, projectKey });
+      success(res, entries);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "List trash failed";
+      error(res, "TRASH_LIST_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Get one trash snapshot (for read-only preview/tree)
+   * GET /projects/:ownerType/:ownerKey/:projectKey/trash/:trashId/snapshot
+   */
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/trash/:trashId/snapshot", async (req: Request, res: Response) => {
+    try {
+      const { projectKey, trashId } = req.params;
+      const userId = getUserId(req);
+      const snapshot = await documentTrashStore.getSnapshot({
+        userId,
+        projectKey,
+        trashId,
+      });
+      success(res, {
+        root_doc_id: snapshot.rootDocId,
+        docs: snapshot.docs,
+      });
+    } catch (err) {
+      if (err instanceof DocumentNotFoundError) {
+        await localizedError(res, req, "NOT_FOUND", err.message, 404);
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Get trash snapshot failed";
+      error(res, "TRASH_SNAPSHOT_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Restore one trash entry
+   * POST /projects/:ownerType/:ownerKey/:projectKey/trash/:trashId/restore
+   */
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/trash/:trashId/restore", async (req: Request, res: Response) => {
+    try {
+      const { projectKey, trashId } = req.params;
+      const userId = getUserId(req);
+      const restored = await documentTrashStore.restore({
+        userId,
+        projectKey,
+        trashId,
+      });
+
+      for (const restoredId of restored.restoredIds) {
+        documentStore.get(userId, projectKey, restoredId).then((doc) => {
+          return knowledgeSearch.indexDocument(userId, projectKey, doc);
+        }).catch((indexErr) => {
+          console.error("Restore index error:", indexErr);
+        });
+      }
+
+      success(res, {
+        root: restored.root,
+        fallback_to_root: restored.fallbackToRoot,
+        restored_ids: restored.restoredIds,
+      });
+    } catch (err) {
+      if (err instanceof DocumentNotFoundError) {
+        await localizedError(res, req, "NOT_FOUND", err.message, 404);
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Restore trash failed";
+      error(res, "TRASH_RESTORE_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Purge one trash entry
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/trash/:trashId
+   */
+  router.delete("/projects/:ownerType/:ownerKey/:projectKey/trash/:trashId", async (req: Request, res: Response) => {
+    try {
+      const { projectKey, trashId } = req.params;
+      const userId = getUserId(req);
+      const result = await documentTrashStore.purgeOne({
+        userId,
+        projectKey,
+        trashId,
+      });
+      success(res, result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Purge trash failed";
+      error(res, "TRASH_PURGE_ONE_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Purge all trash entries
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/trash
+   */
+  router.delete("/projects/:ownerType/:ownerKey/:projectKey/trash", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const result = await documentTrashStore.purgeAll({
+        userId,
+        projectKey,
+      });
+      success(res, result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Purge all trash failed";
+      error(res, "TRASH_PURGE_ALL_FAILED", message, 500);
+    }
+  });
+
+  /**
+   * Update block attributes (for taskItem checked state, etc.)
+   * PATCH /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/blocks/:blockId
    */
   router.patch(
-    "/projects/:projectKey/documents/:docId/move",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/blocks/:blockId",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId, blockId } = req.params;
+        const userId = getUserId(req);
+        const { attrs } = req.body as { attrs: Record<string, unknown> };
+
+        if (!attrs || typeof attrs !== "object") {
+          error(res, "INVALID_REQUEST", "attrs is required and must be an object");
+          return;
+        }
+
+        // Get existing document
+        const doc = await loadUnlockedDocument(userId, projectKey, docId);
+
+        // Update block attrs in content
+        // Document structure: body.content = { meta: {...}, content: { type: "doc", content: [...] } }
+        // or body.content = { type: "doc", content: [...] }
+        const bodyContent = doc.body?.content as JSONContent | undefined;
+        if (!bodyContent) {
+          error(res, "INVALID_DOCUMENT", "Document has no content");
+          return;
+        }
+
+        // Extract the actual tiptap document content
+        let docContent: JSONContent;
+        if (bodyContent.type === "doc") {
+          // Direct tiptap format
+          docContent = bodyContent;
+        } else if (bodyContent.content && typeof bodyContent.content === "object" && (bodyContent.content as JSONContent).type === "doc") {
+          // Nested format: { meta: {...}, content: { type: "doc", ... } }
+          docContent = bodyContent.content as JSONContent;
+        } else {
+          error(res, "INVALID_DOCUMENT", "Invalid document content structure");
+          return;
+        }
+
+        const updated = updateBlockAttrsInContent(docContent, blockId, attrs);
+        if (!updated) {
+          error(res, "BLOCK_NOT_FOUND", `Block ${blockId} not found in document`, 404);
+          return;
+        }
+
+        // Save updated document
+        const savedDoc: Document = {
+          meta: doc.meta,
+          body: doc.body,
+        };
+        await documentStore.save(userId, projectKey, savedDoc);
+
+        // Re-index asynchronously
+        knowledgeSearch.indexDocument(userId, projectKey, savedDoc).catch((err) => {
+          console.error("Index error:", err);
+        });
+
+        success(res, { blockId, attrs });
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        if (err instanceof DocumentLockedError) {
+          respondDocumentLocked(res, err);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Update block failed";
+        error(res, "UPDATE_BLOCK_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Move a document to a new parent
+   * PATCH /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/move
+   */
+  router.patch(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/move",
     async (req: Request, res: Response) => {
       try {
         const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
         const body = req.body as MoveDocumentRequest;
 
-        await documentStore.move(
-          projectKey,
+        const beforeHook = await applyDocumentBeforeHooks(req, res, "document.move", {
           docId,
-          body.target_parent_id,
-          body.before_doc_id,
-          body.after_doc_id,
+          body,
+        });
+        if (!beforeHook) {
+          return;
+        }
+        const nextDocId = typeof beforeHook.payload.docId === "string" && beforeHook.payload.docId.trim()
+          ? beforeHook.payload.docId.trim()
+          : docId;
+        const nextBody = (beforeHook.payload.body && typeof beforeHook.payload.body === "object"
+          ? beforeHook.payload.body
+          : body) as MoveDocumentRequest;
+
+        // Capture old/new parent ids so we can sync knowledge_index paths after move.
+        const normalizeParentId = (id: string | null | undefined): string | null => {
+          const value = (id ?? "").trim();
+          if (!value || value === "root") return null;
+          return value;
+        };
+        const before = await loadUnlockedDocument(userId, projectKey, nextDocId);
+        const oldParentId = normalizeParentId(before.meta.parent_id);
+        const newParentId = normalizeParentId(nextBody.target_parent_id);
+
+        await documentStore.move(
+          userId,
+          projectKey,
+          nextDocId,
+          nextBody.target_parent_id,
+          nextBody.before_doc_id,
+          nextBody.after_doc_id,
         );
+
+        if (oldParentId !== newParentId) {
+          notifyDocumentMoved(userId, projectKey, nextDocId, oldParentId, newParentId).catch((err) => {
+            console.warn("[TreeSync] notifyDocumentMoved failed:", err);
+          });
+        }
+
+        dispatchDocumentAfterHooks(req, "document.move", {
+          request: beforeHook.payload,
+          moved: true,
+          docId: nextDocId,
+          oldParentId,
+          newParentId,
+        }, beforeHook.requestId);
 
         success(res, null);
       } catch (err) {
         if (err instanceof DocumentNotFoundError) {
-          error(res, "NOT_FOUND", err.message, 404);
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        if (err instanceof DocumentLockedError) {
+          respondDocumentLocked(res, err);
           return;
         }
         const message = err instanceof Error ? err.message : "Move failed";
@@ -373,31 +1917,49 @@ export const buildRouter = () => {
 
   /**
    * Start document optimization task
-   * POST /projects/:projectKey/documents/:docId/optimize
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/optimize
    */
   router.post(
-    "/projects/:projectKey/documents/:docId/optimize",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/optimize",
     async (req: Request, res: Response) => {
       try {
         const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
         const body = req.body as { mode?: OptimizeMode; preserveStructure?: boolean; language?: string };
 
-        const mode: OptimizeMode = body.mode || "full";
+        const before = await applyDocumentBeforeHooks(req, res, "document.optimize", {
+          docId,
+          body,
+        });
+        if (!before) {
+          return;
+        }
+        const nextBody = (before.payload.body && typeof before.payload.body === "object"
+          ? before.payload.body
+          : body) as { mode?: OptimizeMode; preserveStructure?: boolean; language?: string };
+
+        const mode: OptimizeMode = nextBody.mode || "full";
         if (!["format", "content", "full"].includes(mode)) {
           error(res, "INVALID_MODE", "mode must be 'format', 'content', or 'full'");
           return;
         }
 
-        const taskId = await createOptimizeTask(projectKey, docId, {
+        const taskId = await createOptimizeTask(userId, projectKey, docId, {
           mode,
-          preserveStructure: body.preserveStructure,
-          language: body.language,
+          preserveStructure: nextBody.preserveStructure,
+          language: nextBody.language,
         });
+
+        dispatchDocumentAfterHooks(req, "document.optimize", {
+          request: before.payload,
+          taskId,
+          docId,
+        }, before.requestId);
 
         success(res, { taskId }, 201);
       } catch (err) {
         if (err instanceof DocumentNotFoundError) {
-          error(res, "NOT_FOUND", err.message, 404);
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
           return;
         }
         const message = err instanceof Error ? err.message : "Failed to create optimization task";
@@ -408,10 +1970,10 @@ export const buildRouter = () => {
 
   /**
    * Stream optimization results
-   * GET /projects/:projectKey/documents/:docId/optimize/:taskId/stream
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/optimize/:taskId/stream
    */
   router.get(
-    "/projects/:projectKey/documents/:docId/optimize/:taskId/stream",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/optimize/:taskId/stream",
     async (req: Request, res: Response) => {
       const { taskId } = req.params;
 
@@ -455,10 +2017,10 @@ export const buildRouter = () => {
 
   /**
    * Get optimization task status
-   * GET /projects/:projectKey/documents/:docId/optimize/:taskId
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/optimize/:taskId
    */
   router.get(
-    "/projects/:projectKey/documents/:docId/optimize/:taskId",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/optimize/:taskId",
     async (req: Request, res: Response) => {
       const { taskId } = req.params;
 
@@ -486,21 +2048,22 @@ export const buildRouter = () => {
 
   /**
    * Convert document format
-   * POST /projects/:projectKey/convert
+   * POST /projects/:ownerType/:ownerKey/:projectKey/convert
    */
   router.post(
-    "/projects/:projectKey/convert",
+    "/projects/:ownerType/:ownerKey/:projectKey/convert",
     upload.single("file"),
     async (req: Request, res: Response) => {
       try {
         const { projectKey } = req.params;
+        const userId = getUserId(req);
         const from = String(req.query.from ?? "");
         const to = String(req.query.to ?? "");
         if (!req.file) {
           error(res, "INVALID_REQUEST", "file is required");
           return;
         }
-        const result = await convertDocument(projectKey, req.file, from, to);
+        const result = await convertDocument(userId, projectKey, req.file, from, to);
         success(res, result);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Convert failed";
@@ -511,13 +2074,14 @@ export const buildRouter = () => {
 
   /**
    * Fetch URL content
-   * POST /projects/:projectKey/documents/fetch-url
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/fetch-url
    */
-  router.post("/projects/:projectKey/documents/fetch-url", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/documents/fetch-url", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
       const url = String(req.body?.url ?? "");
-      const result = await fetchUrl(projectKey, url);
+      const result = await fetchUrl(userId, projectKey, url);
       success(res, result);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Fetch failed";
@@ -527,17 +2091,143 @@ export const buildRouter = () => {
 
   /**
    * Import from Git repository
-   * POST /projects/:projectKey/documents/import-git
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/import-git
    */
   router.post(
-    "/projects/:projectKey/documents/import-git",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/import-git",
     async (req: Request, res: Response) => {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const traceId = `import-git-${uuidv4()}`;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+
+      const before = await applyDocumentBeforeHooks(req, res, "document.import", {
+        source: "git",
+        body,
+      });
+      if (!before) {
+        return;
+      }
+      const nextBody = before.payload.body && typeof before.payload.body === "object"
+        ? before.payload.body as Record<string, unknown>
+        : body;
+
+      const traceContext = traceManager.startTrace(traceId, {
+        name: "import-git",
+        userId,
+        projectKey,
+        tags: ["import", "import-git"],
+        metadata: {
+          repo_url: sanitizeUrlForTrace(nextBody.repo_url),
+          branch: nextBody.branch,
+          subdir: nextBody.subdir,
+          parent_id: nextBody.parent_id,
+          smart_import: nextBody.smart_import,
+          smart_import_types: nextBody.smart_import_types,
+          file_types: nextBody.file_types,
+          enable_format_optimize: nextBody.enable_format_optimize,
+        },
+      });
+
       try {
-        const { projectKey } = req.params;
-        const result = await importGit(projectKey, req.body ?? {});
-        success(res, result);
+        const repoUrl = String(nextBody.repo_url ?? "").trim();
+        if (!repoUrl.startsWith("http://") && !repoUrl.startsWith("https://")) {
+          traceManager.updateTrace(traceContext, { output: { error: "repo_url must be http or https" } });
+          traceManager.endTrace(traceId);
+          error(res, "INVALID_REQUEST", "repo_url must be http or https");
+          return;
+        }
+
+        const { taskId } = await createImportGitTask(userId, projectKey, nextBody as any, {
+          traceContext,
+          hook: {
+            requestId: before.requestId,
+            payload: before.payload,
+          },
+        });
+        traceManager.updateTrace(traceContext, { output: { taskId } });
+        success(res, { taskId }, 202);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Import failed";
+        traceManager.updateTrace(traceContext, { output: { error: message } });
+        traceManager.endTrace(traceId);
+        error(res, "IMPORT_FAILED", message);
+      }
+    },
+  );
+
+  /**
+   * Import folder as documents (async)
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/import-folder
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/import-folder",
+    uploadWithPath.array("files"),
+    async (req: Request, res: Response) => {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const files = Array.isArray(req.files) ? req.files : [];
+      if (files.length === 0) {
+        error(res, "INVALID_REQUEST", "files is required");
+        return;
+      }
+
+      const before = await applyDocumentBeforeHooks(req, res, "document.import", {
+        source: "import-folder",
+        file_count: files.length,
+        body: req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {},
+      });
+      if (!before) {
+        return;
+      }
+
+      const parentId = String(req.body?.parent_id ?? "root");
+      const smartImport = parseBool(req.body?.smart_import, false);
+      const smartImportTypes = parseStringArray(req.body?.smart_import_types).filter((t) =>
+        t === "markdown" || t === "word" || t === "pdf" || t === "image",
+      );
+      const enableFormatOptimize = parseBool(req.body?.enable_format_optimize, false);
+
+      const traceId = `import-folder-${uuidv4()}`;
+      const traceContext = traceManager.startTrace(traceId, {
+        name: "import-folder",
+        userId,
+        projectKey,
+        tags: ["import", "import-folder"],
+        metadata: {
+          file_count: files.length,
+          parent_id: parentId,
+          smart_import: smartImport,
+          smart_import_types: smartImportTypes,
+          enable_format_optimize: enableFormatOptimize,
+        },
+      });
+
+      try {
+        const { taskId } = await createImportFolderTask(
+          userId,
+          projectKey,
+          {
+            parent_id: parentId,
+            smart_import: smartImport,
+            smart_import_types: smartImportTypes,
+            enable_format_optimize: enableFormatOptimize,
+          },
+          files,
+          {
+            traceContext,
+            hook: {
+              requestId: before.requestId,
+              payload: before.payload,
+            },
+          },
+        );
+        traceManager.updateTrace(traceContext, { output: { taskId } });
+        success(res, { taskId }, 202);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Import failed";
+        traceManager.updateTrace(traceContext, { output: { error: message } });
+        traceManager.endTrace(traceId);
         error(res, "IMPORT_FAILED", message);
       }
     },
@@ -545,26 +2235,39 @@ export const buildRouter = () => {
 
   /**
    * Upload file as document (creates a document directly)
-   * POST /projects/:projectKey/documents/upload
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/upload
    */
   router.post(
-    "/projects/:projectKey/documents/upload",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/upload",
     upload.single("file"),
     async (req: Request, res: Response) => {
       try {
         const { projectKey } = req.params;
+        const userId = getUserId(req);
         const file = req.file;
         if (!file) {
           error(res, "INVALID_REQUEST", "file is required");
           return;
         }
+
+        const before = await applyDocumentBeforeHooks(req, res, "document.import", {
+          source: "upload",
+          filename: file.originalname,
+          mime: file.mimetype,
+          size: file.size,
+          body: req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {},
+        });
+        if (!before) {
+          return;
+        }
+
         const parentId = String(req.query.parent_id ?? "root");
         const filename = fixFilename(file.originalname);
         const sourceType = String(req.body?.source_type ?? "").trim().toLowerCase();
         const from = sourceType || filename.split(".").pop() || "";
         
         // Convert the file to markdown
-        const converted = await convertDocument(projectKey, file, from, "markdown");
+        const converted = await convertDocument(userId, projectKey, file, from, "markdown");
         
         // Create a document with the converted content
         const title = filename.replace(/\.[^/.]+$/, "") || "Untitled";
@@ -585,12 +2288,18 @@ export const buildRouter = () => {
           },
         };
         
-        const saved = await documentStore.save(projectKey, doc);
+        const saved = await documentStore.save(userId, projectKey, doc);
         
         // Index the document asynchronously
-        knowledgeSearch.indexDocument(projectKey, saved).catch((err) => {
+        knowledgeSearch.indexDocument(userId, projectKey, saved).catch((err) => {
           console.error("Index error:", err);
         });
+
+        dispatchDocumentAfterHooks(req, "document.import", {
+          request: before.payload,
+          source: "upload",
+          saved,
+        }, before.requestId);
         
         success(res, { meta: saved.meta, body: saved.body }, 201);
       } catch (err) {
@@ -601,11 +2310,108 @@ export const buildRouter = () => {
   );
 
   /**
-   * Import file as document (returns converted content without saving)
-   * POST /projects/:projectKey/documents/import
+   * Import a file and create a document (smart import if enabled)
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/import-file
+   *
+   * FormData fields:
+   * - file: required
+   * - parent_id: optional (default: root)
+   * - title: optional (default: filename without extension)
+   * - smart_import: optional boolean
+   * - smart_import_types: optional JSON array or comma-separated string
+   * - enable_format_optimize: optional boolean
    */
   router.post(
-    "/projects/:projectKey/documents/import",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/import-file",
+    upload.single("file"),
+    async (req: Request, res: Response) => {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const file = req.file;
+      if (!file) {
+        error(res, "INVALID_REQUEST", "file is required");
+        return;
+      }
+
+      const before = await applyDocumentBeforeHooks(req, res, "document.import", {
+        source: "import-file",
+        filename: file.originalname,
+        mime: file.mimetype,
+        size: file.size,
+        body: req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {},
+      });
+      if (!before) {
+        return;
+      }
+
+      const parentId = String(req.body?.parent_id ?? "root");
+      const title = String(req.body?.title ?? "").trim() || undefined;
+      const smartImport = parseBool(req.body?.smart_import, false);
+      const smartImportTypes = parseStringArray(req.body?.smart_import_types).filter((t) =>
+        t === "markdown" || t === "word" || t === "pdf" || t === "image",
+      ) as Array<"markdown" | "word" | "pdf" | "image">;
+      const enableFormatOptimize = parseBool(req.body?.enable_format_optimize, false);
+
+      const filename = fixFilename(file.originalname);
+      const traceId = `import-file-${uuidv4()}`;
+      const traceContext = traceManager.startTrace(traceId, {
+        name: "import-file",
+        userId,
+        projectKey,
+        tags: ["import", "import-file"],
+        metadata: {
+          filename,
+          mime: file.mimetype,
+          size: file.size,
+          parentId,
+          title,
+          smartImport,
+          smartImportTypes,
+          enableFormatOptimize,
+        },
+      });
+
+      try {
+        const result = await importFileAsDocument(userId, projectKey, {
+          parentId,
+          title,
+          file: {
+            buffer: file.buffer,
+            originalname: filename,
+            mimetype: file.mimetype,
+            size: file.size,
+          },
+          smartImport,
+          smartImportTypes,
+          enableFormatOptimize,
+          traceContext,
+        });
+
+        traceManager.updateTrace(traceContext, {
+          output: { docId: result.docId, title: result.title, mode: result.mode },
+        });
+        dispatchDocumentAfterHooks(req, "document.import", {
+          request: before.payload,
+          source: "import-file",
+          result,
+        }, before.requestId);
+        success(res, { id: result.docId, title: result.title, mode: result.mode }, 201);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Import failed";
+        traceManager.updateTrace(traceContext, { output: { error: message } });
+        error(res, "IMPORT_FAILED", message, 500);
+      } finally {
+        traceManager.endTrace(traceId);
+      }
+    },
+  );
+
+  /**
+   * Import file as document (returns converted content without saving)
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/import
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/import",
     upload.single("file"),
     async (req: Request, res: Response) => {
       try {
@@ -615,10 +2421,11 @@ export const buildRouter = () => {
           error(res, "INVALID_REQUEST", "file is required");
           return;
         }
+        const userId = getUserId(req);
         const filename = fixFilename(file.originalname);
         const sourceType = String(req.body?.source_type ?? "").trim().toLowerCase();
         const from = sourceType || filename.split(".").pop() || "";
-        const converted = await convertDocument(projectKey, file, from, "markdown");
+        const converted = await convertDocument(userId, projectKey, file, from, "markdown");
         success(res, converted);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Import failed";
@@ -629,30 +2436,62 @@ export const buildRouter = () => {
 
   /**
    * Optimize markdown format using LLM
-   * POST /projects/:projectKey/documents/optimize-format
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/optimize-format
    * Body: { markdown: string }
    * 
    * This is a fail-safe endpoint: if optimization fails, returns original markdown.
    */
   router.post(
-    "/projects/:projectKey/documents/optimize-format",
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/optimize-format",
     async (req: Request, res: Response) => {
-      try {
-        const markdown = String(req.body?.markdown ?? "");
-        if (!markdown.trim()) {
-          error(res, "INVALID_REQUEST", "markdown is required");
-          return;
-        }
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
 
-        const optimized = await optimizeFormatSync(markdown);
-        success(res, { 
+      const markdown = String(req.body?.markdown ?? "");
+      if (!markdown.trim()) {
+        error(res, "INVALID_REQUEST", "markdown is required");
+        return;
+      }
+
+      const traceId = `optimize-format-${uuidv4()}`;
+      const traceContext = traceManager.startTrace(traceId, {
+        name: "optimize-format",
+        userId,
+        projectKey,
+        tags: ["llm", "optimize-format"],
+        metadata: {
+          markdownChars: markdown.length,
+        },
+      });
+
+      try {
+        const optimized = await optimizeFormatSync(markdown, {
+          traceContext,
+          traceMetadata: {
+            source: "api",
+            endpoint: "documents/optimize-format",
+          },
+        });
+
+        traceManager.updateTrace(traceContext, {
+          output: {
+            optimized: optimized !== markdown,
+            markdownChars: markdown.length,
+            optimizedChars: optimized.length,
+          },
+        });
+
+        success(res, {
           markdown: optimized,
           optimized: optimized !== markdown,
         });
       } catch (err) {
         // This should not happen as optimizeFormatSync is fail-safe
         const message = err instanceof Error ? err.message : "Optimization failed";
+        traceManager.updateTrace(traceContext, { output: { error: message } });
         error(res, "OPTIMIZE_FAILED", message);
+      } finally {
+        traceManager.endTrace(traceId);
       }
     },
   );
@@ -663,14 +2502,15 @@ export const buildRouter = () => {
 
   /**
    * Upload an asset (image, file, etc.)
-   * POST /projects/:projectKey/assets/import
+   * POST /projects/:ownerType/:ownerKey/:projectKey/assets/import
    */
   router.post(
-    "/projects/:projectKey/assets/import",
+    "/projects/:ownerType/:ownerKey/:projectKey/assets/import",
     upload.single("file"),
     async (req: Request, res: Response) => {
       try {
         const { projectKey } = req.params;
+        const userId = getUserId(req);
         const file = req.file;
         if (!file) {
           error(res, "INVALID_REQUEST", "file is required");
@@ -679,6 +2519,7 @@ export const buildRouter = () => {
         
         const filename = fixFilename(file.originalname);
         const meta = await assetStore.save(
+          userId,
           projectKey,
           filename,
           file.mimetype,
@@ -700,29 +2541,80 @@ export const buildRouter = () => {
 
   /**
    * Get asset content
-   * GET /projects/:projectKey/assets/:assetId/content
+   * GET /projects/:ownerType/:ownerKey/:projectKey/assets/:assetId/content
    */
   router.get(
-    "/projects/:projectKey/assets/:assetId/content",
+    "/projects/:ownerType/:ownerKey/:projectKey/assets/:assetId/content",
     async (req: Request, res: Response) => {
       try {
         const { projectKey, assetId } = req.params;
-        const result = await assetStore.getContent(projectKey, assetId);
-        
+        const userId = getUserId(req);
+        const result = await assetStore.getContentFile(userId, projectKey, assetId);
+
         if (!result) {
           error(res, "NOT_FOUND", "Asset not found", 404);
           return;
         }
-        
-        res.setHeader("Content-Type", result.meta.mime);
+
+        const { meta, filePath, size } = result;
+        const mime = String(meta.mime || "application/octet-stream");
+        res.setHeader("Content-Type", mime);
+        res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("Content-Length", String(size));
         // Use RFC 5987 encoding for non-ASCII filenames
-        const asciiFilename = result.meta.filename.replace(/[^\x20-\x7E]/g, "_");
-        const encodedFilename = encodeURIComponent(result.meta.filename);
+        const asciiFilename = meta.filename.replace(/[^\x20-\x7E]/g, "_");
+        const encodedFilename = encodeURIComponent(meta.filename);
         res.setHeader(
           "Content-Disposition",
           `inline; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`
         );
-        res.send(result.buffer);
+
+        const rangeHeader = String(req.headers.range ?? "").trim();
+        if (!rangeHeader) {
+          createReadStream(filePath).pipe(res);
+          return;
+        }
+
+        const matched = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader);
+        if (!matched) {
+          res.status(416);
+          res.setHeader("Content-Range", `bytes */${size}`);
+          return res.end();
+        }
+
+        const startText = matched[1] ?? "";
+        const endText = matched[2] ?? "";
+        let start = startText ? Number.parseInt(startText, 10) : 0;
+        let end = endText ? Number.parseInt(endText, 10) : size - 1;
+
+        if (Number.isNaN(start) || Number.isNaN(end)) {
+          res.status(416);
+          res.setHeader("Content-Range", `bytes */${size}`);
+          return res.end();
+        }
+        if (!startText) {
+          // bytes=-N: last N bytes
+          const suffixLength = Number.parseInt(endText, 10);
+          if (!Number.isFinite(suffixLength) || suffixLength <= 0) {
+            res.status(416);
+            res.setHeader("Content-Range", `bytes */${size}`);
+            return res.end();
+          }
+          start = Math.max(size - suffixLength, 0);
+          end = size - 1;
+        }
+        if (start >= size || end < start) {
+          res.status(416);
+          res.setHeader("Content-Range", `bytes */${size}`);
+          return res.end();
+        }
+        end = Math.min(end, size - 1);
+
+        const chunkSize = end - start + 1;
+        res.status(206);
+        res.setHeader("Content-Range", `bytes ${start}-${end}/${size}`);
+        res.setHeader("Content-Length", String(chunkSize));
+        createReadStream(filePath, { start, end }).pipe(res);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Get content failed";
         error(res, "GET_CONTENT_FAILED", message, 500);
@@ -732,14 +2624,15 @@ export const buildRouter = () => {
 
   /**
    * Get asset kind/info
-   * GET /projects/:projectKey/assets/:assetId/kind
+   * GET /projects/:ownerType/:ownerKey/:projectKey/assets/:assetId/kind
    */
   router.get(
-    "/projects/:projectKey/assets/:assetId/kind",
+    "/projects/:ownerType/:ownerKey/:projectKey/assets/:assetId/kind",
     async (req: Request, res: Response) => {
       try {
         const { projectKey, assetId } = req.params;
-        const meta = await assetStore.getMeta(projectKey, assetId);
+        const userId = getUserId(req);
+        const meta = await assetStore.getMeta(userId, projectKey, assetId);
         
         if (!meta) {
           error(res, "NOT_FOUND", "Asset not found", 404);
@@ -766,13 +2659,14 @@ export const buildRouter = () => {
 
   /**
    * Search knowledge base
-   * POST /projects/:projectKey/knowledge/search
+   * POST /projects/:ownerType/:ownerKey/:projectKey/knowledge/search
    */
-  router.post("/projects/:projectKey/knowledge/search", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/knowledge/search", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
       const query = req.body as SearchQuery;
-      const results = await knowledgeSearch.search(projectKey, projectKey, query);
+      const results = await knowledgeSearch.search(userId, projectKey, query);
       success(res, results);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Search failed";
@@ -786,12 +2680,13 @@ export const buildRouter = () => {
 
   /**
    * Start async rebuild of all document indexes for a project
-   * POST /projects/:projectKey/rag/rebuild
+   * POST /projects/:ownerType/:ownerKey/:projectKey/rag/rebuild
    * Returns task ID for progress tracking
    */
-  router.post("/projects/:projectKey/rag/rebuild", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/rag/rebuild", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
+      const userId = getUserId(req);
       
       // Check if rebuild is already running
       if (rebuildTaskManager.isRunning(projectKey)) {
@@ -805,7 +2700,7 @@ export const buildRouter = () => {
       }
 
       // Get all documents for the project
-      const documents = await documentStore.getAllDocuments(projectKey);
+      const documents = await documentStore.getAllDocuments(userId, projectKey);
       
       if (documents.length === 0) {
         success(res, {
@@ -824,7 +2719,7 @@ export const buildRouter = () => {
       // Start rebuild in background (don't await)
       void (async () => {
         try {
-          await knowledgeSearch.rebuildAll(projectKey, documents, (progress) => {
+          await knowledgeSearch.rebuildAll(userId, projectKey, documents, (progress) => {
             rebuildTaskManager.updateProgress(task.id, {
               processed: progress.processed,
               succeeded: progress.succeeded,
@@ -851,9 +2746,9 @@ export const buildRouter = () => {
 
   /**
    * Get rebuild task status
-   * GET /projects/:projectKey/rag/rebuild/status
+   * GET /projects/:ownerType/:ownerKey/:projectKey/rag/rebuild/status
    */
-  router.get("/projects/:projectKey/rag/rebuild/status", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/rag/rebuild/status", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
       const task = rebuildTaskManager.getActiveTask(projectKey);
@@ -886,17 +2781,18 @@ export const buildRouter = () => {
 
   /**
    * Rebuild index for a single document
-   * POST /projects/:projectKey/rag/rebuild/documents/:docId
+   * POST /projects/:ownerType/:ownerKey/:projectKey/rag/rebuild/documents/:docId
    */
-  router.post("/projects/:projectKey/rag/rebuild/documents/:docId", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/rag/rebuild/documents/:docId", async (req: Request, res: Response) => {
     try {
       const { projectKey, docId } = req.params;
+      const userId = getUserId(req);
       
       // Get the document
-      const doc = await documentStore.get(projectKey, docId);
+      const doc = await documentStore.get(userId, projectKey, docId);
       
       // Rebuild its index
-      await knowledgeSearch.rebuildDocument(projectKey, doc);
+      await knowledgeSearch.rebuildDocument(userId, projectKey, doc);
       
       success(res, {
         status: "completed",
@@ -904,7 +2800,7 @@ export const buildRouter = () => {
       });
     } catch (err) {
       if (err instanceof DocumentNotFoundError) {
-        error(res, "NOT_FOUND", err.message, 404);
+        await localizedError(res, req, "NOT_FOUND", err.message, 404);
         return;
       }
       const message = err instanceof Error ? err.message : "Rebuild failed";
@@ -1032,26 +2928,26 @@ export const buildRouter = () => {
    * List all provider configurations
    * GET /llm/configs
    */
-  router.get("/llm/configs", async (_req: Request, res: Response) => {
+  router.get("/llm/configs", async (req: Request, res: Response) => {
     try {
       const configs = await configStore.list();
       success(res, configs);
     } catch (err) {
       const message = err instanceof Error ? err.message : "List configs failed";
-      error(res, "LIST_CONFIGS_FAILED", message, 500);
+      await localizedError(res, req, "LIST_CONFIGS_FAILED", message, 500);
     }
   });
 
   /**
-   * Get provider configuration by type (llm or embedding)
+   * Get provider configuration by type
    * GET /llm/configs/type/:configType
    */
   router.get("/llm/configs/type/:configType", async (req: Request, res: Response) => {
     try {
       const { configType } = req.params;
       
-      if (configType !== "llm" && configType !== "embedding" && configType !== "vision") {
-        error(res, "INVALID_TYPE", "configType must be 'llm', 'embedding', or 'vision'");
+      if (!isValidConfigType(configType)) {
+        await localizedError(res, req, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE, 400);
         return;
       }
       
@@ -1059,7 +2955,7 @@ export const buildRouter = () => {
       success(res, config); // Returns null if not found, which is valid
     } catch (err) {
       const message = err instanceof Error ? err.message : "Get config failed";
-      error(res, "GET_CONFIG_FAILED", message, 500);
+      await localizedError(res, req, "GET_CONFIG_FAILED", message, 500);
     }
   });
 
@@ -1072,24 +2968,40 @@ export const buildRouter = () => {
       const { configType } = req.params;
       const input = req.body as Omit<ProviderConfigInput, "configType">;
       
-      if (configType !== "llm" && configType !== "embedding" && configType !== "vision") {
-        error(res, "INVALID_TYPE", "configType must be 'llm', 'embedding', or 'vision'");
+      if (!isValidConfigType(configType)) {
+        await localizedError(res, req, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE, 400);
         return;
       }
+
+      const normalizedInput = normalizeInputForConfigType(configType, input) as Omit<
+        ProviderConfigInput,
+        "configType"
+      >;
       
-      if (!input.providerId || !input.displayName) {
-        error(res, "INVALID_REQUEST", "providerId and displayName are required");
+      if (!normalizedInput.providerId || !normalizedInput.displayName) {
+        await localizedError(res, req, "INVALID_REQUEST", "providerId and displayName are required", 400);
         return;
       }
 
       // Validate provider ID
       const validProviders: LLMProviderId[] = ["openai", "anthropic", "google", "ollama", "openai-compatible", "paddleocr"];
-      if (!validProviders.includes(input.providerId)) {
-        error(res, "INVALID_PROVIDER", `Invalid provider: ${input.providerId}`);
+      if (!validProviders.includes(normalizedInput.providerId)) {
+        await localizedError(res, req, "INVALID_PROVIDER", `Invalid provider: ${normalizedInput.providerId}`, 400);
         return;
       }
 
-      const config = await configStore.upsertByType(configType as ConfigType, input);
+      if (!isProviderAllowedForConfigType(configType as ConfigType, normalizedInput.providerId)) {
+        await localizedError(
+          res,
+          req,
+          "INVALID_PROVIDER_FOR_TYPE",
+          "transcription config only supports 'openai' or 'openai-compatible'",
+          400,
+        );
+        return;
+      }
+
+      const config = await configStore.upsertByType(configType as ConfigType, normalizedInput);
       
       // Refresh provider registry
       await providerRegistry.refresh();
@@ -1097,7 +3009,7 @@ export const buildRouter = () => {
       success(res, config);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Upsert config failed";
-      error(res, "UPSERT_CONFIG_FAILED", message, 500);
+      await localizedError(res, req, "UPSERT_CONFIG_FAILED", message, 500);
     }
   });
 
@@ -1109,15 +3021,15 @@ export const buildRouter = () => {
     try {
       const { configType } = req.params;
       
-      if (configType !== "llm" && configType !== "embedding" && configType !== "vision") {
-        error(res, "INVALID_TYPE", "configType must be 'llm', 'embedding', or 'vision'");
+      if (!isValidConfigType(configType)) {
+        await localizedError(res, req, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE, 400);
         return;
       }
       
       const deleted = await configStore.deleteByType(configType as ConfigType);
       
       if (!deleted) {
-        error(res, "NOT_FOUND", "Configuration not found", 404);
+        await localizedError(res, req, "NOT_FOUND", "Configuration not found", 404);
         return;
       }
       
@@ -1127,7 +3039,7 @@ export const buildRouter = () => {
       success(res, { deleted: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Delete config failed";
-      error(res, "DELETE_CONFIG_FAILED", message, 500);
+      await localizedError(res, req, "DELETE_CONFIG_FAILED", message, 500);
     }
   });
 
@@ -1139,8 +3051,8 @@ export const buildRouter = () => {
     try {
       const { configType } = req.params;
       
-      if (configType !== "llm" && configType !== "embedding" && configType !== "vision") {
-        error(res, "INVALID_TYPE", "configType must be 'llm', 'embedding', or 'vision'");
+      if (!isValidConfigType(configType)) {
+        await localizedError(res, req, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE, 400);
         return;
       }
       
@@ -1148,7 +3060,7 @@ export const buildRouter = () => {
       const config = await configStore.getInternalByType(configType as ConfigType);
       
       if (!config) {
-        error(res, "NOT_FOUND", "Configuration not found", 404);
+        await localizedError(res, req, "NOT_FOUND", "Configuration not found", 404);
         return;
       }
       
@@ -1189,6 +3101,12 @@ export const buildRouter = () => {
             provider: config.providerId,
             apiKey: config.apiKey,
             baseUrl: config.baseUrl,
+          });
+        } else if (configType === "transcription") {
+          console.log("[LLM Test] Calling transcription API...");
+          const sampleAudio = createSilentWavBuffer();
+          await parseMediaTranscription(sampleAudio, "transcription-test.wav", "audio/wav", {
+            model: config.defaultModel || undefined,
           });
         } else {
           // Test LLM chat (for LLM and vision types with LLM providers)
@@ -1241,14 +3159,14 @@ export const buildRouter = () => {
       const config = await configStore.get(id);
       
       if (!config) {
-        error(res, "NOT_FOUND", "Configuration not found", 404);
+        await localizedError(res, req, "NOT_FOUND", "Configuration not found", 404);
         return;
       }
       
       success(res, config);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Get config failed";
-      error(res, "GET_CONFIG_FAILED", message, 500);
+      await localizedError(res, req, "GET_CONFIG_FAILED", message, 500);
     }
   });
 
@@ -1259,20 +3177,37 @@ export const buildRouter = () => {
   router.post("/llm/configs", async (req: Request, res: Response) => {
     try {
       const input = req.body as ProviderConfigInput;
-      
-      if (!input.providerId || !input.displayName) {
-        error(res, "INVALID_REQUEST", "providerId and displayName are required");
+      const configType = input.configType || "llm";
+      if (!isValidConfigType(configType)) {
+        await localizedError(res, req, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE, 400);
+        return;
+      }
+
+      const normalizedInput = normalizeInputForConfigType(configType, input) as ProviderConfigInput;
+      if (!normalizedInput.providerId || !normalizedInput.displayName) {
+        await localizedError(res, req, "INVALID_REQUEST", "providerId and displayName are required", 400);
         return;
       }
 
       // Validate provider ID
       const validProviders: LLMProviderId[] = ["openai", "anthropic", "google", "ollama", "openai-compatible", "paddleocr"];
-      if (!validProviders.includes(input.providerId)) {
-        error(res, "INVALID_PROVIDER", `Invalid provider: ${input.providerId}`);
+      if (!validProviders.includes(normalizedInput.providerId)) {
+        await localizedError(res, req, "INVALID_PROVIDER", `Invalid provider: ${normalizedInput.providerId}`, 400);
         return;
       }
 
-      const config = await configStore.create(input);
+      if (!isProviderAllowedForConfigType(configType, normalizedInput.providerId)) {
+        await localizedError(
+          res,
+          req,
+          "INVALID_PROVIDER_FOR_TYPE",
+          "transcription config only supports 'openai' or 'openai-compatible'",
+          400,
+        );
+        return;
+      }
+
+      const config = await configStore.create(normalizedInput);
       
       // Refresh provider registry
       await providerRegistry.refresh();
@@ -1301,7 +3236,7 @@ export const buildRouter = () => {
       success(res, config);
     } catch (err) {
       if (err instanceof Error && err.message.includes("not found")) {
-        error(res, "NOT_FOUND", err.message, 404);
+        await localizedError(res, req, "NOT_FOUND", err.message, 404);
         return;
       }
       const message = err instanceof Error ? err.message : "Update config failed";
@@ -1319,7 +3254,7 @@ export const buildRouter = () => {
       const deleted = await configStore.delete(id);
       
       if (!deleted) {
-        error(res, "NOT_FOUND", "Configuration not found", 404);
+        await localizedError(res, req, "NOT_FOUND", "Configuration not found", 404);
         return;
       }
       
@@ -1329,7 +3264,7 @@ export const buildRouter = () => {
       success(res, { deleted: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Delete config failed";
-      error(res, "DELETE_CONFIG_FAILED", message, 500);
+      await localizedError(res, req, "DELETE_CONFIG_FAILED", message, 500);
     }
   });
 
@@ -1344,14 +3279,14 @@ export const buildRouter = () => {
       // Get the configuration with decrypted API key
       const config = await configStore.getInternal(id);
       if (!config) {
-        error(res, "NOT_FOUND", "Configuration not found", 404);
+        await localizedError(res, req, "NOT_FOUND", "Configuration not found", 404);
         return;
       }
 
       // Get model to test with
       const model = config.defaultModel || getDefaultModelForProvider(config.providerId);
       if (!model) {
-        error(res, "NO_MODEL", "No model configured for testing");
+        await localizedError(res, req, "NO_MODEL", "No model configured for testing", 400);
         return;
       }
 
@@ -1382,11 +3317,11 @@ export const buildRouter = () => {
         console.error(`[test] Failed:`, testErr);
         await configStore.updateStatus(id, "error", errorMessage);
         
-        error(res, "TEST_FAILED", errorMessage);
+        await localizedError(res, req, "TEST_FAILED", errorMessage, 400);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Test failed";
-      error(res, "TEST_FAILED", message, 500);
+      await localizedError(res, req, "TEST_FAILED", message, 500);
     }
   });
 
@@ -1582,15 +3517,24 @@ export const buildRouter = () => {
 
   /**
    * Create a chat run
-   * POST /projects/:projectKey/chat/runs
+   * POST /projects/:ownerType/:ownerKey/:projectKey/chat/runs
    */
-  router.post("/projects/:projectKey/chat/runs", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/chat/runs", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
-      const { session_id, message, document_scope } = req.body as { 
+      const userId = getUserId(req);
+      const { session_id, message, document_scope, deep_search, attachments } = req.body as { 
         session_id?: string; 
         message?: string;
         document_scope?: Array<{ doc_id: string; include_children: boolean }>;
+        deep_search?: boolean;
+        attachments?: Array<{
+          asset_id?: string;
+          name?: string;
+          mime_type?: string;
+          size?: number;
+          type?: string;
+        }>;
       };
 
       if (!message || typeof message !== "string" || !message.trim()) {
@@ -1611,7 +3555,22 @@ export const buildRouter = () => {
             }))
         : undefined;
 
-      const runId = await createRun(projectKey, sessionId, message.trim(), docScope);
+      const normalizedAttachments = Array.isArray(attachments)
+        ? attachments
+            .map((a) => ({
+              assetId: typeof a?.asset_id === "string" ? a.asset_id.trim() : "",
+              name: typeof a?.name === "string" ? a.name : undefined,
+              mimeType: typeof a?.mime_type === "string" ? a.mime_type : undefined,
+              size: typeof a?.size === "number" ? a.size : undefined,
+              type: typeof a?.type === "string" ? a.type : undefined,
+            }))
+            .filter((a) => a.assetId)
+        : undefined;
+
+      const runId = await createRun(userId, projectKey, sessionId, message.trim(), docScope, {
+        deepSearch: deep_search === true,
+        attachments: normalizedAttachments,
+      });
 
       success(res, { run_id: runId });
     } catch (err) {
@@ -1622,9 +3581,9 @@ export const buildRouter = () => {
 
   /**
    * Stream a chat run response (SSE)
-   * GET /projects/:projectKey/chat/runs/:runId/stream
+   * GET /projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/stream
    */
-  router.get("/projects/:projectKey/chat/runs/:runId/stream", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/stream", async (req: Request, res: Response) => {
     const { runId } = req.params;
 
     // Set SSE headers
@@ -1633,6 +3592,16 @@ export const buildRouter = () => {
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
+
+    // Listen for client disconnect to cancel the run
+    let clientDisconnected = false;
+    req.on("close", () => {
+      clientDisconnected = true;
+      const cancelled = cancelRun(runId);
+      if (cancelled) {
+        console.log(`[chat-stream] Client disconnected, cancelled run ${runId}`);
+      }
+    });
 
     try {
       const run = getRun(runId);
@@ -1644,10 +3613,35 @@ export const buildRouter = () => {
 
       // Stream the response
       for await (const chunk of streamRun(runId)) {
+        // Stop writing if client disconnected
+        if (clientDisconnected) {
+          break;
+        }
+
         if (chunk.type === "delta") {
           res.write(`event: assistant.delta\ndata: ${JSON.stringify(chunk.content)}\n\n`);
         } else if (chunk.type === "thinking") {
-          res.write(`event: assistant.thinking\ndata: ${JSON.stringify({ content: chunk.content })}\n\n`);
+          const payload = {
+            content: chunk.content,
+            phase: chunk.phase,
+            subQueries: chunk.subQueries,
+            searchQuery: chunk.searchQuery,
+            resultCount: chunk.resultCount,
+          };
+          res.write(`event: assistant.thinking\ndata: ${JSON.stringify(payload)}\n\n`);
+        } else if (chunk.type === "search_start") {
+          res.write(`event: assistant.search_start\ndata: ${JSON.stringify({
+            content: chunk.content,
+            phase: chunk.phase,
+            searchQuery: chunk.searchQuery,
+          })}\n\n`);
+        } else if (chunk.type === "search_result") {
+          res.write(`event: assistant.search_result\ndata: ${JSON.stringify({
+            content: chunk.content,
+            phase: chunk.phase,
+            searchQuery: chunk.searchQuery,
+            resultCount: chunk.resultCount,
+          })}\n\n`);
         } else if (chunk.type === "draft") {
           res.write(`event: assistant.draft\ndata: ${JSON.stringify(chunk.draft)}\n\n`);
         } else if (chunk.type === "done") {
@@ -1655,31 +3649,302 @@ export const buildRouter = () => {
             message: chunk.message,
             sources: chunk.sources || [],
           })}\n\n`);
+        } else if (chunk.type === "task_status") {
+          res.write(`event: assistant.task_status\ndata: ${JSON.stringify(chunk.taskStatus)}\n\n`);
+        } else if (chunk.type === "tool_pending") {
+          res.write(`event: assistant.tool_pending\ndata: ${JSON.stringify(chunk.pendingTool)}\n\n`);
+        } else if (chunk.type === "intent_pending") {
+          res.write(`event: assistant.intent_pending\ndata: ${JSON.stringify(chunk.pendingIntent)}\n\n`);
+        } else if (chunk.type === "preflight_pending") {
+          res.write(`event: assistant.preflight_pending\ndata: ${JSON.stringify(chunk.pendingPreflight)}\n\n`);
+        } else if (chunk.type === "input_pending") {
+          res.write(`event: assistant.input_pending\ndata: ${JSON.stringify(chunk.pendingInput)}\n\n`);
+        } else if (chunk.type === "tool_rejected") {
+          res.write(`event: assistant.tool_rejected\ndata: ${JSON.stringify({ message: chunk.message })}\n\n`);
         } else if (chunk.type === "error") {
           res.write(`event: run.error\ndata: ${JSON.stringify({ error: chunk.error })}\n\n`);
         }
       }
 
-      res.end();
+      if (!clientDisconnected) {
+        res.end();
+      }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Stream failed";
-      res.write(`event: run.error\ndata: ${JSON.stringify({ error: msg })}\n\n`);
-      res.end();
+      if (!clientDisconnected) {
+        const msg = err instanceof Error ? err.message : "Stream failed";
+        res.write(`event: run.error\ndata: ${JSON.stringify({ error: msg })}\n\n`);
+        res.end();
+      }
     }
   });
 
   /**
-   * Clear chat session history
-   * DELETE /projects/:projectKey/chat/sessions/:sessionId
+   * Cancel a chat run
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId
    */
-  router.delete("/projects/:projectKey/chat/sessions/:sessionId", async (req: Request, res: Response) => {
+  router.delete("/projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId", async (req: Request, res: Response) => {
     try {
-      const { sessionId } = req.params;
-      clearSession(sessionId);
-      success(res, { cleared: true });
+      const { runId } = req.params;
+      const cancelled = cancelRun(runId);
+      success(res, { cancelled });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to clear session";
-      error(res, "CLEAR_SESSION_FAILED", msg, 500);
+      const msg = err instanceof Error ? err.message : "Failed to cancel run";
+      error(res, "CANCEL_RUN_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Confirm a pending tool execution
+   * POST /projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/confirm-tool
+   */
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/confirm-tool", async (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const confirmed = confirmTool(runId);
+      if (!confirmed) {
+        error(res, "NOT_FOUND", "No pending tool confirmation for this run", 404);
+        return;
+      }
+      success(res, { confirmed: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to confirm tool";
+      error(res, "CONFIRM_TOOL_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Reject a pending tool execution
+   * POST /projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/reject-tool
+   */
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/reject-tool", async (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const rejected = rejectTool(runId);
+      if (!rejected) {
+        error(res, "NOT_FOUND", "No pending tool confirmation for this run", 404);
+        return;
+      }
+      success(res, { rejected: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to reject tool";
+      error(res, "REJECT_TOOL_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Select an intent option for a pending intent clarification
+   * POST /projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/select-intent
+   */
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/select-intent", async (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const option = req.body as { type?: string; skillHint?: string; label?: string; confidence?: number };
+      if (!option?.type) {
+        error(res, "INVALID_REQUEST", "option.type is required");
+        return;
+      }
+      const selected = selectIntent(runId, {
+        type: option.type as "command" | "skill" | "deep_search" | "chat",
+        skillHint: option.skillHint,
+        label: option.label || option.type,
+        confidence: option.confidence ?? 1.0,
+      });
+      if (!selected) {
+        error(res, "NOT_FOUND", "No pending intent selection for this run", 404);
+        return;
+      }
+      success(res, { selected: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to select intent";
+      error(res, "SELECT_INTENT_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Provide required input for a pending input clarification (e.g. doc scope)
+   * POST /projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/provide-input
+   */
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/provide-input", async (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const raw = req.body as unknown;
+      const payload: Record<string, unknown> =
+        raw && typeof raw === "object" && raw !== null
+          ? (raw as Record<string, unknown>)
+          : {};
+
+      // Normalize common fields
+      if (typeof payload.doc_id === "string") {
+        payload.doc_id = payload.doc_id.trim();
+      }
+
+      if ("args" in payload) {
+        const args = (payload as { args?: unknown }).args;
+        if (!args || typeof args !== "object" || Array.isArray(args)) {
+          payload.args = {};
+        }
+      }
+
+      const ok = provideRequiredInput(runId, payload);
+      if (!ok) {
+        error(res, "NOT_FOUND", "No pending input for this run", 404);
+        return;
+      }
+      success(res, { provided: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to provide input";
+      error(res, "PROVIDE_INPUT_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Provide preflight input for pending preflight clarification.
+   * POST /projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/provide-preflight-input
+   */
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/chat/runs/:runId/provide-preflight-input", async (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const raw = req.body as unknown;
+      const payload: Record<string, unknown> =
+        raw && typeof raw === "object" && raw !== null
+          ? (raw as Record<string, unknown>)
+          : {};
+
+      const normalizedTaskInputs = Array.isArray(payload.taskInputs)
+        ? payload.taskInputs
+            .filter((item) => item && typeof item === "object")
+            .map((item) => {
+              const input = item as Record<string, unknown>;
+              const taskId = typeof input.taskId === "string" ? input.taskId.trim() : "";
+              const docId = typeof input.doc_id === "string" ? input.doc_id.trim() : undefined;
+              const args = input.args && typeof input.args === "object" && !Array.isArray(input.args)
+                ? input.args
+                : undefined;
+              return {
+                ...(taskId ? { taskId } : {}),
+                ...(docId !== undefined ? { doc_id: docId } : {}),
+                ...(args ? { args } : {}),
+              };
+            })
+        : [];
+
+      const ok = providePreflightInput(runId, { taskInputs: normalizedTaskInputs });
+      if (!ok) {
+        error(res, "NOT_FOUND", "No pending preflight input for this run", 404);
+        return;
+      }
+      success(res, { provided: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to provide preflight input";
+      error(res, "PROVIDE_PREFLIGHT_INPUT_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * List chat sessions
+   * GET /projects/:ownerType/:ownerKey/:projectKey/chat/sessions
+   */
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/chat/sessions", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const limit = Math.min(Number(req.query.limit) || 50, 100);
+      const offset = Math.max(Number(req.query.offset) || 0, 0);
+
+      const { chatSessionStore } = await import("./services/chat-session-store.js");
+      const sessions = await chatSessionStore.listSessions(userId, projectKey, limit, offset);
+      success(res, { sessions });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list sessions";
+      await localizedError(res, req, "LIST_SESSIONS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Create a new chat session
+   * POST /projects/:ownerType/:ownerKey/:projectKey/chat/sessions
+   */
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/chat/sessions", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const { title } = req.body as { title?: string };
+
+      const { chatSessionStore } = await import("./services/chat-session-store.js");
+      const session = await chatSessionStore.createSession(userId, projectKey, title || undefined);
+      success(res, session);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to create session";
+      await localizedError(res, req, "CREATE_SESSION_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Get messages for a chat session
+   * GET /projects/:ownerType/:ownerKey/:projectKey/chat/sessions/:sessionId/messages
+   */
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/chat/sessions/:sessionId/messages", async (req: Request, res: Response) => {
+    try {
+      const { sessionId, projectKey } = req.params;
+      const userId = getUserId(req);
+
+      const { chatSessionStore } = await import("./services/chat-session-store.js");
+      const messages = await chatSessionStore.getMessages(userId, projectKey, sessionId);
+      success(res, { messages });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to get session messages";
+      await localizedError(res, req, "GET_SESSION_MESSAGES_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Rename a chat session
+   * PATCH /projects/:ownerType/:ownerKey/:projectKey/chat/sessions/:sessionId
+   */
+  router.patch("/projects/:ownerType/:ownerKey/:projectKey/chat/sessions/:sessionId", async (req: Request, res: Response) => {
+    try {
+      const { sessionId, projectKey } = req.params;
+      const userId = getUserId(req);
+      const { title } = req.body as { title?: string };
+
+      if (!title || typeof title !== "string" || !title.trim()) {
+        error(res, "INVALID_REQUEST", "title is required");
+        return;
+      }
+
+      const { chatSessionStore } = await import("./services/chat-session-store.js");
+      const session = await chatSessionStore.renameSession(userId, projectKey, sessionId, title.trim());
+      if (!session) {
+        error(res, "NOT_FOUND", "Session not found", 404);
+        return;
+      }
+      success(res, session);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to rename session";
+      await localizedError(res, req, "RENAME_SESSION_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Delete a chat session (replaces old clear-session endpoint)
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/chat/sessions/:sessionId
+   */
+  router.delete("/projects/:ownerType/:ownerKey/:projectKey/chat/sessions/:sessionId", async (req: Request, res: Response) => {
+    try {
+      const { sessionId, projectKey } = req.params;
+      const userId = getUserId(req);
+
+      // Clear in-memory cache
+      clearSession(sessionId);
+
+      // Delete from DB (cascade deletes messages)
+      const { chatSessionStore } = await import("./services/chat-session-store.js");
+      await chatSessionStore.deleteSession(userId, projectKey, sessionId);
+
+      success(res, { deleted: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to delete session";
+      await localizedError(res, req, "DELETE_SESSION_FAILED", msg, 500);
     }
   });
 
@@ -1689,9 +3954,9 @@ export const buildRouter = () => {
 
   /**
    * Get a draft by ID
-   * GET /projects/:projectKey/drafts/:draftId
+   * GET /projects/:ownerType/:ownerKey/:projectKey/drafts/:draftId
    */
-  router.get("/projects/:projectKey/drafts/:draftId", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/drafts/:draftId", async (req: Request, res: Response) => {
     try {
       const { projectKey, draftId } = req.params;
       const draft = draftService.get(draftId);
@@ -1715,25 +3980,42 @@ export const buildRouter = () => {
 
   /**
    * Apply a draft (save the document)
-   * POST /projects/:projectKey/drafts/:draftId/apply
+   * POST /projects/:ownerType/:ownerKey/:projectKey/drafts/:draftId/apply
    */
-  router.post("/projects/:projectKey/drafts/:draftId/apply", async (req: Request, res: Response) => {
+  router.post("/projects/:ownerType/:ownerKey/:projectKey/drafts/:draftId/apply", async (req: Request, res: Response) => {
     try {
       const { projectKey, draftId } = req.params;
-      const { modifiedContent, parentId } = req.body as {
+      const userId = getUserId(req);
+      const { modifiedContent, parentId, saveAsNew, newTitle } = req.body as {
         modifiedContent?: unknown;
         parentId?: string | null;
+        saveAsNew?: boolean;
+        newTitle?: string;
       };
+      const draft = draftService.get(draftId);
+      if (!draft) {
+        error(res, "NOT_FOUND", "Draft not found or expired", 404);
+        return;
+      }
+      if (draft.projectKey !== projectKey) {
+        error(res, "FORBIDDEN", "Draft does not belong to this project", 403);
+        return;
+      }
+      if (!saveAsNew && draft.docId) {
+        await loadUnlockedDocument(userId, projectKey, draft.docId);
+      }
 
       // Validate modified content if provided
-      let validatedContent = undefined;
+      let validatedContent: JSONContent | undefined = undefined;
       if (modifiedContent && typeof modifiedContent === "object") {
-        validatedContent = modifiedContent as { type: string; content?: unknown[] };
+        validatedContent = modifiedContent as JSONContent;
       }
 
       const result = await draftService.apply(projectKey, draftId, {
         modifiedContent: validatedContent,
         parentId,
+        saveAsNew,
+        newTitle,
       });
 
       success(res, {
@@ -1742,6 +4024,10 @@ export const buildRouter = () => {
         applied: true,
       });
     } catch (err) {
+      if (err instanceof DocumentLockedError) {
+        respondDocumentLocked(res, err);
+        return;
+      }
       const msg = err instanceof Error ? err.message : "Failed to apply draft";
       error(res, "APPLY_DRAFT_FAILED", msg, 500);
     }
@@ -1749,9 +4035,9 @@ export const buildRouter = () => {
 
   /**
    * Reject a draft
-   * DELETE /projects/:projectKey/drafts/:draftId
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/drafts/:draftId
    */
-  router.delete("/projects/:projectKey/drafts/:draftId", async (req: Request, res: Response) => {
+  router.delete("/projects/:ownerType/:ownerKey/:projectKey/drafts/:draftId", async (req: Request, res: Response) => {
     try {
       const { projectKey, draftId } = req.params;
       const draft = draftService.get(draftId);
@@ -1778,9 +4064,9 @@ export const buildRouter = () => {
 
   /**
    * List pending drafts for a project
-   * GET /projects/:projectKey/drafts
+   * GET /projects/:ownerType/:ownerKey/:projectKey/drafts
    */
-  router.get("/projects/:projectKey/drafts", async (req: Request, res: Response) => {
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/drafts", async (req: Request, res: Response) => {
     try {
       const { projectKey } = req.params;
       const drafts = draftService.listPending(projectKey);
@@ -1788,6 +4074,1323 @@ export const buildRouter = () => {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to list drafts";
       error(res, "LIST_DRAFTS_FAILED", msg, 500);
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Skills Configuration API
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Plugin APIs
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * List plugins from store (v2)
+   * GET /plugins/v2/store?q=keyword
+   */
+  router.get("/plugins/v2/store", async (req: Request, res: Response) => {
+    try {
+      const q = String(req.query.q || "");
+      const plugins = await pluginManager.listStorePlugins(q);
+      success(res, { plugins });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list plugin store";
+      error(res, "LIST_PLUGIN_STORE_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * List plugin versions from store (v2)
+   * GET /plugins/v2/store/:pluginId/versions
+   */
+  router.get("/plugins/v2/store/:pluginId/versions", async (req: Request, res: Response) => {
+    try {
+      const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+      if (!pluginId) {
+        await localizedError(res, req, "INVALID_REQUEST", "pluginId is required", 400);
+        return;
+      }
+      const versions = await pluginManager.listStorePluginVersions(pluginId);
+      success(res, { versions });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list plugin versions";
+      error(res, "LIST_PLUGIN_VERSIONS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * List current user's plugins (v2)
+   * GET /plugins/v2/me
+   */
+  router.get("/plugins/v2/me", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const plugins = await pluginManager.listUserPlugins(userId);
+      success(
+        res,
+        plugins.map((item) => ({
+          installation: item.installation,
+          manifest: item.manifest,
+        })),
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list installed plugins";
+      await localizedError(res, req, "LIST_INSTALLED_PLUGINS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Install a plugin for current user (v2)
+   * POST /plugins/v2/me/install
+   */
+  router.post("/plugins/v2/me/install", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const pluginId = String(req.body?.pluginId || "").trim();
+      const version = String(req.body?.version || "").trim() || undefined;
+      if (!pluginId) {
+        await localizedError(res, req, "INVALID_REQUEST", "pluginId is required", 400);
+        return;
+      }
+
+      const result = await pluginManager.installPlugin(userId, pluginId, version);
+      success(res, result, 201);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to install plugin";
+      await localizedError(res, req, "INSTALL_PLUGIN_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Toggle plugin enabled state (v2)
+   * PATCH /plugins/v2/me/:pluginId
+   */
+  router.patch("/plugins/v2/me/:pluginId", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+      const enabled = req.body?.enabled;
+      if (typeof enabled !== "boolean") {
+        error(res, "INVALID_REQUEST", "enabled must be boolean");
+        return;
+      }
+      const installation = await pluginManager.setPluginEnabled(userId, pluginId, enabled);
+      success(res, installation);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update plugin state";
+      await localizedError(res, req, "UPDATE_PLUGIN_STATE_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Uninstall plugin (v2)
+   * DELETE /plugins/v2/me/:pluginId
+   */
+  router.delete("/plugins/v2/me/:pluginId", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+      const deleted = await pluginManager.uninstallPlugin(userId, pluginId);
+      success(res, { deleted });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to uninstall plugin";
+      await localizedError(res, req, "UNINSTALL_PLUGIN_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Runtime manifest for current user (v2)
+   * GET /plugins/v2/me/runtime
+   */
+  router.get("/plugins/v2/me/runtime", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const items = await pluginManager.getRuntimeForUser(userId);
+      success(res, { plugins: items });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to get plugin runtime";
+      await localizedError(res, req, "GET_PLUGIN_RUNTIME_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Runtime command registry for current user (v2)
+   * GET /plugins/v2/me/commands
+   */
+  router.get("/plugins/v2/me/commands", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const commands = await pluginManager.getRuntimeCommandsForUser(userId);
+      success(res, { commands });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list plugin commands";
+      await localizedError(res, req, "LIST_PLUGIN_COMMANDS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Get plugin settings for current user (v2)
+   * GET /plugins/v2/me/:pluginId/settings
+   */
+  router.get("/plugins/v2/me/:pluginId/settings", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+      const settings = await pluginManager.getPluginSettings(userId, pluginId);
+      success(res, { settings });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to get plugin settings";
+      await localizedError(res, req, "GET_PLUGIN_SETTINGS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Update plugin settings for current user (v2)
+   * PUT /plugins/v2/me/:pluginId/settings
+   */
+  router.put("/plugins/v2/me/:pluginId/settings", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+      const settings = req.body && typeof req.body === "object"
+        ? req.body as Record<string, unknown>
+        : {};
+      const next = await pluginManager.setPluginSettings(userId, pluginId, settings);
+      success(res, { settings: next });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update plugin settings";
+      await localizedError(res, req, "UPDATE_PLUGIN_SETTINGS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * List plugin local data files in project scope (v2)
+   * GET /projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/local-data/files
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/local-data/files",
+    async (req: Request, res: Response) => {
+      try {
+        const userId = getUserId(req);
+        const { projectKey } = req.params;
+        const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+        const scopeRaw = String(req.query.scope || "project").trim().toLowerCase();
+        const scope = scopeRaw === "global" ? "global" : "project";
+        const dir = String(req.query.dir || "").trim();
+        const limit = Number(req.query.limit || 200);
+        if (!pluginId) {
+          await localizedError(res, req, "INVALID_REQUEST", "pluginId is required", 400);
+          return;
+        }
+        const files = await pluginManager.listLocalDataFiles({
+          userId,
+          projectKey,
+          pluginId,
+          scope,
+          dir,
+          limit,
+        });
+        success(res, { files });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to list plugin local data files";
+        await localizedError(res, req, "LIST_PLUGIN_LOCAL_DATA_FAILED", msg, 500);
+      }
+    },
+  );
+
+  /**
+   * Read plugin local data file in project scope (v2)
+   * GET /projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/local-data/file?path=...
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/local-data/file",
+    async (req: Request, res: Response) => {
+      try {
+        const userId = getUserId(req);
+        const { projectKey } = req.params;
+        const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+        const scopeRaw = String(req.query.scope || "project").trim().toLowerCase();
+        const scope = scopeRaw === "global" ? "global" : "project";
+        const filePath = String(req.query.path || "").trim();
+        const encodingRaw = String(req.query.encoding || "utf8").trim().toLowerCase();
+        const encoding = encodingRaw === "base64" ? "base64" : "utf8";
+        if (!pluginId || !filePath) {
+          error(res, "INVALID_REQUEST", "pluginId and path are required");
+          return;
+        }
+        const file = await pluginManager.readLocalDataFile({
+          userId,
+          projectKey,
+          pluginId,
+          scope,
+          path: filePath,
+          encoding,
+        });
+        success(res, { file });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to read plugin local data file";
+        await localizedError(res, req, "READ_PLUGIN_LOCAL_DATA_FAILED", msg, 500);
+      }
+    },
+  );
+
+  /**
+   * Write plugin local data file in project scope (v2)
+   * PUT /projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/local-data/file
+   */
+  router.put(
+    "/projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/local-data/file",
+    async (req: Request, res: Response) => {
+      try {
+        const userId = getUserId(req);
+        const { projectKey } = req.params;
+        const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+        const scopeRaw = String(req.body?.scope || req.query.scope || "project").trim().toLowerCase();
+        const scope = scopeRaw === "global" ? "global" : "project";
+        const filePath = String(req.body?.path || "").trim();
+        const encodingRaw = String(req.body?.encoding || "utf8").trim().toLowerCase();
+        const encoding = encodingRaw === "base64" ? "base64" : "utf8";
+        const overwrite = req.body?.overwrite !== false;
+        const content = typeof req.body?.content === "string" ? req.body.content : "";
+        if (!pluginId || !filePath) {
+          error(res, "INVALID_REQUEST", "pluginId and path are required");
+          return;
+        }
+        const file = await pluginManager.writeLocalDataFile({
+          userId,
+          projectKey,
+          pluginId,
+          scope,
+          path: filePath,
+          content,
+          encoding,
+          overwrite,
+        });
+        success(res, { file });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to write plugin local data file";
+        await localizedError(res, req, "WRITE_PLUGIN_LOCAL_DATA_FAILED", msg, 500);
+      }
+    },
+  );
+
+  /**
+   * Delete plugin local data file in project scope (v2)
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/local-data/file?path=...
+   */
+  router.delete(
+    "/projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/local-data/file",
+    async (req: Request, res: Response) => {
+      try {
+        const userId = getUserId(req);
+        const { projectKey } = req.params;
+        const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+        const scopeRaw = String(req.query.scope || "project").trim().toLowerCase();
+        const scope = scopeRaw === "global" ? "global" : "project";
+        const filePath = String(req.query.path || "").trim();
+        if (!pluginId || !filePath) {
+          error(res, "INVALID_REQUEST", "pluginId and path are required");
+          return;
+        }
+        const result = await pluginManager.deleteLocalDataFile({
+          userId,
+          projectKey,
+          pluginId,
+          scope,
+          path: filePath,
+        });
+        success(res, result);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to delete plugin local data file";
+        await localizedError(res, req, "DELETE_PLUGIN_LOCAL_DATA_FAILED", msg, 500);
+      }
+    },
+  );
+
+  /**
+   * Serve plugin frontend assets for current user (v2)
+   * GET /plugins/v2/assets/:pluginId/:version/*
+   */
+  router.get("/plugins/v2/assets/:pluginId/:version/*", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+      const version = decodeURIComponent(String(req.params.version || "").trim());
+      const assetPath = String(req.params[0] || "").trim();
+      if (!assetPath) {
+        error(res, "INVALID_REQUEST", "asset path is required");
+        return;
+      }
+
+      const asset = await pluginManager.readAsset(userId, pluginId, version, assetPath);
+      res.setHeader("Content-Type", asset.mime);
+      res.setHeader("Cache-Control", "private, max-age=60");
+      res.send(asset.content);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to read plugin asset";
+      await localizedError(res, req, "READ_PLUGIN_ASSET_FAILED", msg, 404);
+    }
+  });
+
+  /**
+   * Execute plugin command in project scope (v2)
+   * POST /projects/:ownerType/:ownerKey/:projectKey/plugin-commands/:commandId/execute
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/plugin-commands/:commandId/execute",
+    async (req: Request, res: Response) => {
+      try {
+        const userId = getUserId(req);
+        const { projectKey } = req.params;
+        const commandId = decodeURIComponent(String(req.params.commandId || "").trim());
+        const rawBody = req.body && typeof req.body === "object"
+          ? { ...(req.body as Record<string, unknown>) }
+          : {};
+        const sourceRaw = String(rawBody.__source || "").trim().toLowerCase();
+        delete rawBody.__source;
+        const source = (sourceRaw === "palette" || sourceRaw === "tool" || sourceRaw === "api")
+          ? sourceRaw as "api" | "palette" | "tool"
+          : "api";
+        const requestId = `plugin-command-${uuidv4()}`;
+
+        const data = await pluginManager.executeCommand({
+          userId,
+          projectKey,
+          commandId,
+          args: rawBody,
+          source,
+          requestId,
+        });
+        success(res, data);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to execute plugin command";
+        if (/requires doc_id/i.test(msg)) {
+          await localizedError(res, req, "INVALID_REQUEST", msg, 400);
+          return;
+        }
+        if (/not available/i.test(msg)) {
+          await localizedError(res, req, "NOT_FOUND", msg, 404);
+          return;
+        }
+        if (/not enabled for api execution/i.test(msg)) {
+          await localizedError(res, req, "FORBIDDEN", msg, 403);
+          return;
+        }
+        await localizedError(res, req, "EXECUTE_PLUGIN_COMMAND_FAILED", msg, 500);
+      }
+    },
+  );
+
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/plugin-commands/:commandId\\:execute",
+    async (req: Request, res: Response) => {
+      try {
+        const userId = getUserId(req);
+        const { projectKey } = req.params;
+        const commandId = decodeURIComponent(String(req.params.commandId || "").trim());
+        const rawBody = req.body && typeof req.body === "object"
+          ? { ...(req.body as Record<string, unknown>) }
+          : {};
+        const sourceRaw = String(rawBody.__source || "").trim().toLowerCase();
+        delete rawBody.__source;
+        const source = (sourceRaw === "palette" || sourceRaw === "tool" || sourceRaw === "api")
+          ? sourceRaw as "api" | "palette" | "tool"
+          : "api";
+        const requestId = `plugin-command-${uuidv4()}`;
+
+        const data = await pluginManager.executeCommand({
+          userId,
+          projectKey,
+          commandId,
+          args: rawBody,
+          source,
+          requestId,
+        });
+        success(res, data);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to execute plugin command";
+        if (/requires doc_id/i.test(msg)) {
+          await localizedError(res, req, "INVALID_REQUEST", msg, 400);
+          return;
+        }
+        if (/not available/i.test(msg)) {
+          await localizedError(res, req, "NOT_FOUND", msg, 404);
+          return;
+        }
+        if (/not enabled for api execution/i.test(msg)) {
+          await localizedError(res, req, "FORBIDDEN", msg, 403);
+          return;
+        }
+        await localizedError(res, req, "EXECUTE_PLUGIN_COMMAND_FAILED", msg, 500);
+      }
+    },
+  );
+
+  /**
+   * Plugin trace bridge for web plugins (v2)
+   * POST /projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/trace
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/plugins/v2/:pluginId/trace",
+    async (req: Request, res: Response) => {
+      try {
+        const userId = getUserId(req);
+        const { projectKey } = req.params;
+        const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
+        if (!pluginId) {
+          await localizedError(res, req, "INVALID_REQUEST", "pluginId is required", 400);
+          return;
+        }
+        const method = String(req.body?.method || "").trim();
+        if (!method) {
+          error(res, "INVALID_REQUEST", "trace method is required");
+          return;
+        }
+        const args = req.body?.args && typeof req.body.args === "object"
+          ? req.body.args as Record<string, unknown>
+          : {};
+
+        const data = await pluginManager.traceFromWeb({
+          userId,
+          projectKey,
+          pluginId,
+          method,
+          args,
+        });
+        success(res, data);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to handle plugin trace";
+        if (/trace method is required|unknown trace method/i.test(msg)) {
+          await localizedError(res, req, "INVALID_REQUEST", msg, 400);
+          return;
+        }
+        if (/not installed or disabled/i.test(msg) || /not available/i.test(msg)) {
+          await localizedError(res, req, "NOT_FOUND", msg, 404);
+          return;
+        }
+        error(res, "PLUGIN_TRACE_FAILED", msg, 500);
+      }
+    },
+  );
+
+  /**
+   * Get all skills grouped by category
+   * GET /skills
+   */
+  router.get("/skills", async (_req: Request, res: Response) => {
+    try {
+      const categories = await skillConfigStore.listByCategory();
+      success(res, { categories });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list skills";
+      error(res, "LIST_SKILLS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Get enabled skill commands (for frontend filtering)
+   * GET /skills/enabled-commands
+   */
+  router.get("/skills/enabled-commands", async (req: Request, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      const commands = await skillConfigStore.getEnabledCommands();
+      const pluginCommands = await pluginManager.listEnabledSlashCommandsForUser(userId);
+      const merged = new Set(commands);
+      for (const command of pluginCommands) {
+        merged.add(command);
+      }
+      success(res, { commands: Array.from(merged).sort((a, b) => a.localeCompare(b)) });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to get enabled commands";
+      error(res, "GET_COMMANDS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Update skill enabled status
+   * PATCH /skills/:skillName
+   */
+  router.patch("/skills/:skillName", async (req: Request, res: Response) => {
+    try {
+      const { skillName } = req.params;
+      const { enabled } = req.body as { enabled?: boolean };
+
+      if (typeof enabled !== "boolean") {
+        error(res, "INVALID_REQUEST", "enabled must be a boolean");
+        return;
+      }
+
+      const config = await skillConfigStore.updateEnabled(skillName, enabled);
+      success(res, config);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update skill";
+      error(res, "UPDATE_SKILL_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Batch update skill enabled status
+   * PATCH /skills
+   */
+  router.patch("/skills", async (req: Request, res: Response) => {
+    try {
+      const { updates } = req.body as {
+        updates?: Array<{ skillName: string; enabled: boolean }>;
+      };
+
+      if (!Array.isArray(updates)) {
+        error(res, "INVALID_REQUEST", "updates must be an array");
+        return;
+      }
+
+      await skillConfigStore.batchUpdateEnabled(updates);
+      success(res, { success: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to batch update skills";
+      error(res, "BATCH_UPDATE_FAILED", msg, 500);
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Anthropic Skills Configuration API (Extended Skills)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get all skills (Native + Anthropic) grouped by category
+   * GET /skills/all
+   */
+  router.get("/skills/all", async (_req: Request, res: Response) => {
+    try {
+      const categories = await skillConfigStore.listAllByCategory();
+      success(res, { categories });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list all skills";
+      error(res, "LIST_ALL_SKILLS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Get Anthropic skills with their config
+   * GET /skills/anthropic
+   */
+  router.get("/skills/anthropic", async (_req: Request, res: Response) => {
+    try {
+      const skillInfos = await skillConfigStore.listAnthropicSkillInfo();
+      const skills = skillInfos.map(({ skill, config, isConfigurable }) => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        category: skill.category || "general",
+        source: skill.source,
+        sourcePath: skill.sourcePath,
+        triggers: skill.triggers,
+        enabled: config.enabled,
+        isConfigurable,
+        loadedAt: skill.loadedAt,
+      }));
+      success(res, { skills });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list Anthropic skills";
+      error(res, "LIST_ANTHROPIC_SKILLS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Update Anthropic skill enabled status
+   * PATCH /skills/anthropic/:skillId
+   */
+  router.patch("/skills/anthropic/:skillId", async (req: Request, res: Response) => {
+    try {
+      const { skillId } = req.params;
+      const { enabled } = req.body as { enabled?: boolean };
+
+      if (typeof enabled !== "boolean") {
+        error(res, "INVALID_REQUEST", "enabled must be a boolean");
+        return;
+      }
+
+      const config = await skillConfigStore.updateAnthropicSkillEnabled(skillId, enabled);
+      success(res, config);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update Anthropic skill";
+      error(res, "UPDATE_ANTHROPIC_SKILL_FAILED", msg, 500);
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Project-Scoped Skills API (System Agent)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get all project skills grouped by category
+   * GET /projects/:ownerType/:ownerKey/:projectKey/skills
+   */
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/skills", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      await agentSkillCatalog.initialize();
+      await agentSkillCatalog.refreshPluginSkillsForUser(userId);
+      const skills = agentSkillCatalog.getAllSkills(userId);
+      const categories = await projectSkillConfigStore.listByCategory(projectKey, skills);
+      success(res, { categories });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list project skills";
+      error(res, "LIST_PROJECT_SKILLS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Update project skill enabled status
+   * PATCH /projects/:ownerType/:ownerKey/:projectKey/skills/:skillId
+   */
+  router.patch("/projects/:ownerType/:ownerKey/:projectKey/skills/:skillId", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const skillId = decodeURIComponent(req.params.skillId);
+      const { enabled } = req.body as { enabled?: boolean };
+
+      if (typeof enabled !== "boolean") {
+        error(res, "INVALID_REQUEST", "enabled must be a boolean");
+        return;
+      }
+
+      await agentSkillCatalog.initialize();
+      await agentSkillCatalog.refreshPluginSkillsForUser(userId);
+      const skill = agentSkillCatalog.getById(skillId, userId);
+      if (!skill) {
+        error(res, "NOT_FOUND", `Skill not found: ${skillId}`, 404);
+        return;
+      }
+
+      const config = await projectSkillConfigStore.updateEnabled(projectKey, skill, enabled);
+      success(res, config);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update project skill";
+      error(res, "UPDATE_PROJECT_SKILL_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Batch update project skill enabled status
+   * PATCH /projects/:ownerType/:ownerKey/:projectKey/skills
+   */
+  router.patch("/projects/:ownerType/:ownerKey/:projectKey/skills", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      const { updates } = req.body as {
+        updates?: Array<{ skillId: string; enabled: boolean }>;
+      };
+
+      if (!Array.isArray(updates)) {
+        error(res, "INVALID_REQUEST", "updates must be an array");
+        return;
+      }
+
+      await agentSkillCatalog.initialize();
+      await agentSkillCatalog.refreshPluginSkillsForUser(userId);
+      const allSkills = agentSkillCatalog.getAllSkills(userId);
+      await projectSkillConfigStore.batchUpdateEnabled(projectKey, allSkills, updates);
+      success(res, { success: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to batch update project skills";
+      error(res, "BATCH_UPDATE_PROJECT_SKILLS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Get enabled slash commands for a project
+   * GET /projects/:ownerType/:ownerKey/:projectKey/skills/enabled-commands
+   */
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/skills/enabled-commands", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      await agentSkillCatalog.initialize();
+      await agentSkillCatalog.refreshPluginSkillsForUser(userId);
+      const allSkills = agentSkillCatalog.getAllSkills(userId);
+      const enabledIds = new Set(
+        await projectSkillConfigStore.getEnabledSkillIds(projectKey, allSkills),
+      );
+
+      const commands = allSkills
+        .filter((skill) => enabledIds.has(skill.id) && typeof skill.command === "string")
+        .map((skill) => {
+          const fromMetadata = Boolean(skill.metadata && skill.metadata.requiresDocScope === true);
+          const fromSchema = zodObjectHasRequiredKey(skill.inputSchema, "doc_id");
+          return {
+            skill_id: skill.id,
+            command: skill.command as string,
+            name: skill.displayName,
+            description: skill.description,
+            category: skill.category,
+            source: skill.source,
+            requires_doc_scope: fromMetadata || fromSchema,
+          };
+        })
+        .sort((a, b) => a.command.localeCompare(b.command));
+      success(res, { commands });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list enabled commands";
+      error(res, "LIST_PROJECT_ENABLED_COMMANDS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Get enabled tool names for a project
+   * GET /projects/:ownerType/:ownerKey/:projectKey/skills/enabled-tools
+   */
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/skills/enabled-tools", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      await agentSkillCatalog.initialize();
+      await agentSkillCatalog.refreshPluginSkillsForUser(userId);
+      const allSkills = agentSkillCatalog.getAllSkills(userId);
+      const toolNames = await projectSkillConfigStore.getEnabledToolNames(projectKey, allSkills);
+      success(res, { tool_names: toolNames });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list enabled tools";
+      error(res, "LIST_ENABLED_TOOLS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Get skill source summary for a project
+   * GET /projects/:ownerType/:ownerKey/:projectKey/skills/sources
+   */
+  router.get("/projects/:ownerType/:ownerKey/:projectKey/skills/sources", async (req: Request, res: Response) => {
+    try {
+      const { projectKey } = req.params;
+      const userId = getUserId(req);
+      await agentSkillCatalog.initialize();
+      await agentSkillCatalog.refreshPluginSkillsForUser(userId);
+      const allSkills = agentSkillCatalog.getAllSkills(userId);
+      const sources = await projectSkillConfigStore.listSources(projectKey, allSkills);
+      success(res, { sources });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to list skill sources";
+      error(res, "LIST_SKILL_SOURCES_FAILED", msg, 500);
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // General Settings API
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get general settings
+   * GET /settings/general
+   */
+  router.get("/settings/general", optionalAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { generalSettingsStore } = await import("./services/general-settings-store.js");
+      const { resolveSyncMode } = await import("./services/general-settings-auth.js");
+
+      const userId = String(req.user?.id ?? "").trim();
+      const accessToken = extractBearerToken(req.headers.authorization);
+      const isAuthenticated = Boolean(req.user?.id && accessToken);
+      const settings = await generalSettingsStore.get(userId);
+      const syncMode = resolveSyncMode({
+        isAuthenticated,
+        documentAutoSync: settings.documentAutoSync,
+      });
+      success(res, {
+        ...settings,
+        syncMode,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to get general settings";
+      await localizedError(res, req, "GET_GENERAL_SETTINGS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Update general settings
+   * PUT /settings/general
+   */
+  router.put("/settings/general", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { generalSettingsStore } = await import("./services/general-settings-store.js");
+      const { resolveSyncMode } = await import("./services/general-settings-auth.js");
+      const { validateDocumentBlockShortcutsInput } = await import("./services/general-settings-shortcuts.js");
+      const {
+        use_remote_knowledge_base,
+        document_auto_sync,
+        trash_auto_cleanup_enabled,
+        trash_auto_cleanup_days,
+        document_block_shortcuts,
+      } = req.body as {
+        use_remote_knowledge_base?: boolean;
+        document_auto_sync?: boolean;
+        trash_auto_cleanup_enabled?: boolean;
+        trash_auto_cleanup_days?: number;
+        document_block_shortcuts?: unknown;
+      };
+
+      const userId = String(req.user?.id ?? "").trim();
+      if (!userId) {
+        await localizedError(res, req, "UNAUTHORIZED", "user not authenticated", 401);
+        return;
+      }
+
+      let documentBlockShortcuts: import("./services/general-settings-shortcuts.js").DocumentBlockShortcuts | undefined;
+      if (document_block_shortcuts !== undefined) {
+        const validation = validateDocumentBlockShortcutsInput(document_block_shortcuts);
+        if (!validation.ok) {
+          await localizedError(res, req, "INVALID_BLOCK_SHORTCUTS", validation.message, 400);
+          return;
+        }
+        documentBlockShortcuts = validation.value;
+      }
+
+      const settings = await generalSettingsStore.update(userId, {
+        useRemoteKnowledgeBase: typeof use_remote_knowledge_base === "boolean"
+          ? use_remote_knowledge_base
+          : undefined,
+        documentAutoSync: typeof document_auto_sync === "boolean"
+          ? document_auto_sync
+          : undefined,
+        trashAutoCleanupEnabled: typeof trash_auto_cleanup_enabled === "boolean"
+          ? trash_auto_cleanup_enabled
+          : undefined,
+        trashAutoCleanupDays: typeof trash_auto_cleanup_days === "number"
+          ? trash_auto_cleanup_days
+          : undefined,
+        documentBlockShortcuts,
+      });
+
+      const accessToken = extractBearerToken(req.headers.authorization);
+      const isAuthenticated = Boolean(req.user?.id && accessToken);
+      const syncMode = resolveSyncMode({
+        isAuthenticated,
+        documentAutoSync: settings.documentAutoSync,
+      });
+
+      success(res, {
+        ...settings,
+        syncMode,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update general settings";
+      error(res, "UPDATE_GENERAL_SETTINGS_FAILED", msg, 500);
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Chat Settings API
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get chat settings
+   * GET /settings/chat
+   */
+  router.get("/settings/chat", async (_req: Request, res: Response) => {
+    try {
+      const { chatSettingsStore } = await import("./services/chat-settings-store.js");
+      const settings = await chatSettingsStore.get();
+      success(res, settings);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to get chat settings";
+      error(res, "GET_CHAT_SETTINGS_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Update chat settings
+   * PUT /settings/chat
+   */
+  router.put("/settings/chat", async (req: Request, res: Response) => {
+    try {
+      const { chatSettingsStore } = await import("./services/chat-settings-store.js");
+      const { full_access } = req.body as { full_access?: boolean };
+
+      const settings = await chatSettingsStore.update({
+        fullAccess: full_access === true,
+      });
+
+      success(res, settings);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update chat settings";
+      error(res, "UPDATE_CHAT_SETTINGS_FAILED", msg, 500);
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Web Search Configuration API
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get web search configuration
+   * GET /settings/web-search
+   */
+  router.get("/settings/web-search", async (_req: Request, res: Response) => {
+    try {
+      const { webSearchConfigStore } = await import("./services/web-search-config.js");
+      const config = await webSearchConfigStore.get();
+      success(res, config);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to get web search config";
+      error(res, "GET_WEB_SEARCH_CONFIG_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Set (upsert) web search configuration
+   * PUT /settings/web-search
+   */
+  router.put("/settings/web-search", async (req: Request, res: Response) => {
+    try {
+      const { webSearchConfigStore } = await import("./services/web-search-config.js");
+      const { provider, api_key, enabled } = req.body as {
+        provider?: string;
+        api_key?: string;
+        enabled?: boolean;
+      };
+
+      if (!provider) {
+        error(res, "INVALID_REQUEST", "provider is required");
+        return;
+      }
+
+      if (!["tavily", "serpapi", "duckduckgo"].includes(provider)) {
+        error(res, "INVALID_REQUEST", "provider must be 'tavily', 'serpapi', or 'duckduckgo'");
+        return;
+      }
+
+      const config = await webSearchConfigStore.upsert({
+        provider: provider as "tavily" | "serpapi" | "duckduckgo",
+        apiKey: api_key,
+        enabled,
+      });
+
+      success(res, config);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to set web search config";
+      error(res, "SET_WEB_SEARCH_CONFIG_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Delete web search configuration
+   * DELETE /settings/web-search
+   */
+  router.delete("/settings/web-search", async (_req: Request, res: Response) => {
+    try {
+      const { webSearchConfigStore } = await import("./services/web-search-config.js");
+      const deleted = await webSearchConfigStore.delete();
+      success(res, { deleted });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to delete web search config";
+      error(res, "DELETE_WEB_SEARCH_CONFIG_FAILED", msg, 500);
+    }
+  });
+
+  /**
+   * Test web search
+   * POST /settings/web-search/test
+   */
+  router.post("/settings/web-search/test", async (req: Request, res: Response) => {
+    try {
+      const { webSearch, isWebSearchAvailable } = await import("./services/web-search.js");
+
+      const available = await isWebSearchAvailable();
+      if (!available) {
+        error(res, "NOT_CONFIGURED", "Web search is not configured or disabled");
+        return;
+      }
+
+      const { query: testQuery } = req.body as { query?: string };
+      const searchQuery = testQuery || "test search query";
+
+      const results = await webSearch(searchQuery, { limit: 3 });
+      success(res, { results });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Web search test failed";
+      error(res, "WEB_SEARCH_TEST_FAILED", msg, 500);
+    }
+  });
+
+  // ===== Chat Attachments =====
+
+  /**
+   * Upload a chat attachment (file or URL)
+   * POST /projects/:ownerType/:ownerKey/:projectKey/chat/attachments
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/chat/attachments",
+    upload.single("file"),
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey } = req.params;
+        const { url } = req.body as { url?: string };
+        const file = req.file;
+
+        // Handle URL attachment
+        if (url && typeof url === "string") {
+          const trimmedUrl = url.trim();
+          if (!trimmedUrl) {
+            error(res, "INVALID_URL", "URL is empty");
+            return;
+          }
+
+          try {
+            const userId = getUserId(req);
+            const result = await fetchUrl(userId, projectKey, trimmedUrl);
+            // Extract text content from HTML (simple extraction)
+            const textContent = extractTextFromHtml(result.html);
+            const truncatedContent = textContent.slice(0, 10000); // Limit content size
+
+            success(res, {
+              id: uuidv4(),
+              type: "url",
+              name: trimmedUrl,
+              content: truncatedContent,
+              originalUrl: result.url,
+              fetchedAt: result.fetched_at,
+            });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to fetch URL";
+            error(res, "FETCH_URL_FAILED", msg, 500);
+          }
+          return;
+        }
+
+        // Handle file attachment
+        if (!file) {
+          error(res, "NO_ATTACHMENT", "No file or URL provided");
+          return;
+        }
+
+        const fileName = fixFilename(file.originalname);
+        const mimeType = file.mimetype || "application/octet-stream";
+        const isImage = mimeType.startsWith("image/");
+        const isText = mimeType.startsWith("text/") || 
+                       mimeType === "application/json" ||
+                       mimeType === "application/xml";
+
+        // Persist as asset so chat skills can reference it later (e.g. doc-smart-import).
+        const userId = getUserId(req);
+        const assetMeta = await assetStore.save(userId, projectKey, fileName, mimeType, file.buffer);
+
+        let content = "";
+        let preview: string | undefined;
+
+        if (isText) {
+          // Extract text content from text files
+          content = file.buffer.toString("utf-8").slice(0, 10000);
+        } else if (isImage) {
+          // For images, create a base64 preview
+          preview = `data:${mimeType};base64,${file.buffer.toString("base64")}`;
+          content = `[Image: ${fileName}]`;
+        } else {
+          // For other files, just note the file type
+          content = `[File: ${fileName} (${mimeType})]`;
+        }
+
+        success(res, {
+          id: uuidv4(),
+          type: isImage ? "image" : "file",
+          name: fileName,
+          asset_id: assetMeta.id,
+          mimeType,
+          size: file.size,
+          content,
+          preview,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Attachment upload failed";
+        error(res, "ATTACHMENT_UPLOAD_FAILED", msg, 500);
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // PPT Generation API
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Export document to PPT
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/export-ppt
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/export-ppt",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+        const { style, options } = req.body as {
+          style?: {
+            description?: string;
+            templateId?: string;
+            templateImages?: string[];
+          };
+          options?: {
+            aspectRatio?: "16:9" | "4:3";
+            language?: string;
+          };
+        };
+
+        // Get the document
+        const doc = await documentStore.get(userId, projectKey, docId);
+        const body = doc.body?.content as JSONContent | undefined;
+
+        if (!body || body.type !== "doc") {
+          error(res, "INVALID_DOCUMENT", "Document has no valid Tiptap content");
+          return;
+        }
+
+        // Dynamic import to avoid loading if not used
+        const { pptService } = await import("./services/ppt/index.js");
+
+        // Check if service is available
+        const available = await pptService.isAvailable();
+        if (!available) {
+          error(res, "SERVICE_UNAVAILABLE", "PPT generation service is not available", 503);
+          return;
+        }
+
+        // Generate PPT
+        const result = await pptService.generateFromDocument(body, style, options);
+
+        success(res, {
+          task_id: result.taskId,
+          status: result.status,
+        }, 202);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        const msg = err instanceof Error ? err.message : "Failed to export PPT";
+        error(res, "EXPORT_PPT_FAILED", msg, 500);
+      }
+    }
+  );
+
+  /**
+   * Get PPT generation task status
+   * GET /projects/:ownerType/:ownerKey/:projectKey/ppt-tasks/:taskId
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/ppt-tasks/:taskId",
+    async (req: Request, res: Response) => {
+      try {
+        const { taskId } = req.params;
+
+        const { pptService } = await import("./services/ppt/index.js");
+        const status = await pptService.getTaskStatus(taskId);
+
+        success(res, {
+          task_id: status.taskId,
+          status: status.status,
+          progress: status.progress,
+          current_slide: status.currentSlide,
+          total_slides: status.totalSlides,
+          error: status.error,
+          created_at: status.createdAt,
+          updated_at: status.updatedAt,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to get task status";
+        error(res, "GET_TASK_STATUS_FAILED", msg, 500);
+      }
+    }
+  );
+
+  /**
+   * Download generated PPTX file
+   * GET /projects/:ownerType/:ownerKey/:projectKey/ppt-tasks/:taskId/download
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/ppt-tasks/:taskId/download",
+    async (req: Request, res: Response) => {
+      try {
+        const { taskId } = req.params;
+
+        const { pptService } = await import("./services/ppt/index.js");
+        const buffer = await pptService.downloadPPTX(taskId);
+
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+        res.setHeader("Content-Disposition", `attachment; filename="presentation-${taskId}.pptx"`);
+        res.send(buffer);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to download PPTX";
+        error(res, "DOWNLOAD_PPTX_FAILED", msg, 500);
+      }
+    }
+  );
+
+  /**
+   * Get slide previews for a task
+   * GET /projects/:ownerType/:ownerKey/:projectKey/ppt-tasks/:taskId/previews
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/ppt-tasks/:taskId/previews",
+    async (req: Request, res: Response) => {
+      try {
+        const { taskId } = req.params;
+
+        const { pptService } = await import("./services/ppt/index.js");
+        const previews = await pptService.getPreviews(taskId);
+
+        success(res, { previews });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to get previews";
+        error(res, "GET_PREVIEWS_FAILED", msg, 500);
+      }
+    }
+  );
+
+  /**
+   * Modify a slide using natural language
+   * POST /projects/:ownerType/:ownerKey/:projectKey/ppt-tasks/:taskId/modify
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/ppt-tasks/:taskId/modify",
+    async (req: Request, res: Response) => {
+      try {
+        const { taskId } = req.params;
+        const { slide_index, instruction } = req.body as {
+          slide_index: number;
+          instruction: string;
+        };
+
+        if (typeof slide_index !== "number" || !instruction) {
+          error(res, "INVALID_REQUEST", "slide_index and instruction are required");
+          return;
+        }
+
+        const { pptService } = await import("./services/ppt/index.js");
+        const result = await pptService.modifySlide(taskId, slide_index, instruction);
+
+        success(res, {
+          task_id: result.taskId,
+          status: result.status,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to modify slide";
+        error(res, "MODIFY_SLIDE_FAILED", msg, 500);
+      }
+    }
+  );
+
+  /**
+   * Check PPT service availability
+   * GET /ppt-service/status
+   */
+  router.get("/ppt-service/status", async (_req: Request, res: Response) => {
+    try {
+      const { pptService } = await import("./services/ppt/index.js");
+      const available = await pptService.isAvailable();
+      success(res, { available });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to check status";
+      error(res, "CHECK_STATUS_FAILED", msg, 500);
     }
   });
 

@@ -1,49 +1,181 @@
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").trim();
-const appBackendUrl = (import.meta.env.VITE_APP_BACKEND_URL ?? "http://localhost:4870").trim();
-const useProxy = Boolean(import.meta.env.DEV);
+import { getLocaleRequestHeaders, resolveRequestLocale } from "../i18n/request-locale";
+const env = (((import.meta as unknown as { env?: Record<string, unknown> }).env ?? {}) as Record<string, unknown>);
+const apiBaseUrl = String(env.VITE_API_BASE_URL ?? "").trim();
+const appBackendUrl = String(env.VITE_APP_BACKEND_URL ?? "http://localhost:4870").trim();
+const serverUrl = String(env.VITE_SERVER_URL ?? "http://localhost:8080").trim();
+const remoteKnowledgeBaseUrl = (
+  env.VITE_REMOTE_KNOWLEDGE_BASE_URL
+  ?? env.VITE_REMOTE_APP_BACKEND_URL
+  ?? ""
+).toString().trim();
+const useProxy = Boolean(env.DEV);
+const remoteKnowledgeBaseStorageKey = "zeus.settings.use_remote_knowledge_base";
+
+const PROJECT_REF_SEPARATOR = "::";
+
+export type ProjectRefOwnerType = "personal" | "team";
+
+export type ParsedProjectRef = {
+  ownerType: ProjectRefOwnerType;
+  ownerKey: string;
+  projectKey: string;
+};
+
+/**
+ * Get the Go server URL for auth and management APIs
+ */
+export const getServerUrl = (): string => {
+  if (useProxy || !serverUrl) {
+    return "";
+  }
+  return serverUrl;
+};
+
+export const buildProjectRef = (parts: ParsedProjectRef): string => {
+  const ownerType = parts.ownerType === "team" ? "team" : "personal";
+  const ownerKey = String(parts.ownerKey ?? "").trim() || "me";
+  const projectKey = String(parts.projectKey ?? "").trim();
+  return `${ownerType}${PROJECT_REF_SEPARATOR}${ownerKey}${PROJECT_REF_SEPARATOR}${projectKey}`;
+};
+
+export const parseProjectRef = (projectRef: string): ParsedProjectRef => {
+  const raw = String(projectRef ?? "").trim();
+  if (!raw) {
+    return { ownerType: "personal", ownerKey: "me", projectKey: "" };
+  }
+
+  const parts = raw.split(PROJECT_REF_SEPARATOR);
+  if (parts.length === 3) {
+    const ownerType = String(parts[0] ?? "").trim().toLowerCase() === "team" ? "team" : "personal";
+    const ownerKey = String(parts[1] ?? "").trim() || (ownerType === "personal" ? "me" : "");
+    const projectKey = String(parts[2] ?? "").trim();
+    return { ownerType, ownerKey, projectKey };
+  }
+
+  return { ownerType: "personal", ownerKey: "me", projectKey: raw };
+};
+
+export const encodeProjectRef = (projectRef: string): string => {
+  const parsed = parseProjectRef(projectRef);
+  return `${encodeURIComponent(parsed.ownerType)}/${encodeURIComponent(parsed.ownerKey)}/${encodeURIComponent(parsed.projectKey)}`;
+};
 
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, "");
 const trimLeadingSlash = (value: string) => value.replace(/^\/+/, "");
+let remoteKnowledgeBaseEnabledCache: boolean | null = null;
+
+function readRemoteKnowledgeBaseEnabledFromStorage(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  try {
+    return window.localStorage.getItem(remoteKnowledgeBaseStorageKey) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function isRemoteKnowledgeBaseEnabled(): boolean {
+  if (remoteKnowledgeBaseEnabledCache != null) {
+    return remoteKnowledgeBaseEnabledCache;
+  }
+  remoteKnowledgeBaseEnabledCache = readRemoteKnowledgeBaseEnabledFromStorage();
+  return remoteKnowledgeBaseEnabledCache;
+}
+
+export function setRemoteKnowledgeBaseEnabled(enabled: boolean): void {
+  remoteKnowledgeBaseEnabledCache = enabled;
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(remoteKnowledgeBaseStorageKey, enabled ? "1" : "0");
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+export function getRemoteKnowledgeBaseBackendUrl(): string {
+  return remoteKnowledgeBaseUrl;
+}
+
+const isScopedProjectPath = (path: string): boolean => {
+  return /^\/api\/projects\/[^/]+\/[^/]+\/[^/]+(?:\/|$)/.test(path);
+};
 
 /**
  * Check if a path should be routed to app-backend
  */
 const isAppBackendPath = (path: string): boolean => {
-  // Explicit app-backend prefix
   if (path.startsWith("/api/app")) return true;
-  // Document operations now handled by app-backend
-  if (path.match(/^\/api\/projects\/[^/]+\/documents/)) return true;
-  // Knowledge search
-  if (path.match(/^\/api\/projects\/[^/]+\/knowledge/)) return true;
-  // Asset operations
-  if (path.match(/^\/api\/projects\/[^/]+\/assets/)) return true;
+
+  if (isScopedProjectPath(path)) return true;
+  if (path.startsWith("/api/system-docs")) return true;
+
+  if (path.startsWith("/api/plugins")) return true;
+  if (path.startsWith("/api/skills")) return true;
+  if (path.startsWith("/api/llm/")) return true;
+  if (path.startsWith("/api/settings/")) return true;
+  return false;
+};
+
+const isKnowledgeBasePath = (path: string): boolean => {
+  if (isScopedProjectPath(path)) return true;
+  if (path.startsWith("/api/system-docs")) return true;
   return false;
 };
 
 export const buildApiUrl = (path: string) => {
   const normalizedPath = `/${trimLeadingSlash(path)}`;
-  
+
   if (isAppBackendPath(normalizedPath)) {
-    // Route to app-backend
     const appPath = normalizedPath.startsWith("/api/app")
       ? normalizedPath.replace("/api/app", "/api")
       : normalizedPath;
     if (useProxy) {
-      // In dev mode with proxy, use relative path
       return appPath;
     }
-    return `${trimTrailingSlash(appBackendUrl)}${appPath}`;
+    const shouldUseRemoteKnowledgeBase = Boolean(
+      remoteKnowledgeBaseUrl
+      && isRemoteKnowledgeBaseEnabled()
+      && isKnowledgeBasePath(appPath),
+    );
+    const targetBaseUrl = shouldUseRemoteKnowledgeBase
+      ? remoteKnowledgeBaseUrl
+      : appBackendUrl;
+    return `${trimTrailingSlash(targetBaseUrl)}${appPath}`;
   }
-  
-  // Route to Go server (projects, system, etc.)
+
   if (useProxy || !apiBaseUrl) {
     return normalizedPath;
   }
   return `${trimTrailingSlash(apiBaseUrl)}${normalizedPath}`;
 };
 
+const getAccessToken = (): string | null => {
+  return localStorage.getItem("zeus_access_token");
+};
+
+
 const fetchWithCredentials = (path: string, init: RequestInit = {}) => {
-  return fetch(buildApiUrl(path), { ...init, credentials: "include" });
+  const token = getAccessToken();
+  const headers = new Headers(init.headers);
+  const localeHeaders = getLocaleRequestHeaders(resolveRequestLocale());
+  for (const [headerName, headerValue] of Object.entries(localeHeaders)) {
+    if (!headers.has(headerName)) {
+      headers.set(headerName, headerValue);
+    }
+  }
+
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  return fetch(buildApiUrl(path), {
+    ...init,
+    headers,
+    credentials: "include",
+  });
 };
 
 const getCallerFrames = () => {
@@ -59,7 +191,7 @@ const getCallerFrames = () => {
 };
 
 export const apiFetch = (path: string, init: RequestInit = {}) => {
-  if (import.meta.env.DEV && path !== "/api/system") {
+  if (useProxy && path !== "/api/system") {
     const { caller3, caller4 } = getCallerFrames();
     const method = (init.method ?? "GET").toUpperCase();
     console.groupCollapsed(`[api] ${method} ${path}`);
@@ -104,6 +236,7 @@ const markSessionBootstrap = () => {
 };
 
 let sessionPromise: Promise<void> | null = null;
+let generalSettingsBootstrapPromise: Promise<void> | null = null;
 
 export const ensureSystemSession = async () => {
   if (hasSessionCookie() || hasSessionBootstrap()) {
@@ -121,4 +254,29 @@ export const ensureSystemSession = async () => {
       });
   }
   await sessionPromise;
+};
+
+export const bootstrapGeneralSettings = async () => {
+  if (generalSettingsBootstrapPromise) {
+    return generalSettingsBootstrapPromise;
+  }
+
+  generalSettingsBootstrapPromise = (async () => {
+    try {
+      const response = await fetchWithCredentials("/api/settings/general", { method: "GET" });
+      if (!response.ok) {
+        return;
+      }
+      const payload = await response.json().catch(() => null);
+      const data = payload?.data ?? payload ?? {};
+      const enabled = Boolean(data.useRemoteKnowledgeBase ?? false);
+      setRemoteKnowledgeBaseEnabled(enabled);
+    } catch {
+      // Ignore bootstrap failures and keep existing local value.
+    } finally {
+      generalSettingsBootstrapPromise = null;
+    }
+  })();
+
+  await generalSettingsBootstrapPromise;
 };

@@ -11,11 +11,15 @@ import {
 
 import { apiFetch } from "../config/api";
 import { fetchUrlHtml } from "../api/documents";
+import { usePluginRuntime } from "../context/PluginRuntimeContext";
+import DocEditorErrorBoundary from "./DocEditorErrorBoundary";
 
 interface RichTextViewerProps {
   content: JSONContent;
   projectKey?: string;
   onEditorReady?: (editor: Editor | null) => void;
+  /** Callback when a task item checkbox is toggled */
+  onTaskCheckChange?: (blockId: string, checked: boolean) => void;
 }
 
 const openApiExtensions = (projectKey?: string): Extensions => [
@@ -33,31 +37,36 @@ const openApiExtensions = (projectKey?: string): Extensions => [
   }),
 ];
 
-function RichTextViewer({ content, projectKey, onEditorReady }: RichTextViewerProps) {
+function RichTextViewer({ content, projectKey, onEditorReady, onTaskCheckChange }: RichTextViewerProps) {
+  const { editorContributions } = usePluginRuntime();
   const openapi = openApiExtensions(projectKey);
+  const viewerExtensions: Extensions = [...openapi, ...editorContributions.extraExtensions];
   const extensions: Extensions = [
-    ...openapi,
+    ...viewerExtensions,
     BlockRefNode.configure({
       projectKey,
       fetcher: apiFetch,
-      viewerExtensions: openapi,
+      viewerExtensions,
     }),
   ];
 
   return (
     <div className="rich-text-viewer">
-      <DocViewer
-        content={content}
-        extensions={extensions}
-        linkPreviewFetchHtml={async (url: string) => {
-          if (!projectKey) {
-            throw new Error("Missing project key")
-          }
-          const data = await fetchUrlHtml(projectKey, url)
-          return data.html
-        }}
-        onEditorReady={onEditorReady}
-      />
+      <DocEditorErrorBoundary>
+        <DocViewer
+          content={content}
+          extensions={extensions}
+          linkPreviewFetchHtml={async (url: string) => {
+            if (!projectKey) {
+              return ""
+            }
+            const data = await fetchUrlHtml(projectKey, url)
+            return data.html
+          }}
+          onEditorReady={onEditorReady}
+          onTaskCheckChange={onTaskCheckChange}
+        />
+      </DocEditorErrorBoundary>
     </div>
   );
 }

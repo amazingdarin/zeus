@@ -1,6 +1,16 @@
-import { useMemo, useState, memo, type DragEvent } from "react";
-import { DownOutlined, RightOutlined, ReloadOutlined } from "@ant-design/icons";
-import { Tooltip } from "antd";
+import { useCallback, useMemo, useState, memo, type DragEvent } from "react";
+import type { JSONContent } from "@tiptap/react";
+import {
+  ApartmentOutlined,
+  DatabaseOutlined,
+  DownOutlined,
+  MinusSquareOutlined,
+  PlusSquareOutlined,
+  ReloadOutlined,
+  RightOutlined,
+  UnorderedListOutlined,
+} from "@ant-design/icons";
+import { Popconfirm, Tooltip } from "antd";
 
 export type KnowledgeBaseDocument = {
   id: string;
@@ -13,6 +23,18 @@ export type KnowledgeBaseDocument = {
   storageObjectId: string;
 };
 
+export type FavoriteSideNavItem = {
+  docId: string;
+  title: string;
+  favoritedAt: string;
+};
+
+export type RecentEditSideNavItem = {
+  docId: string;
+  title: string;
+  editedAt: string;
+};
+
 export type KnowledgeBaseMoveRequest = {
   docId: string;
   newParentId: string;
@@ -22,38 +44,103 @@ export type KnowledgeBaseMoveRequest = {
   targetParentId: string;
 };
 
+export type TrashSideNavNode = {
+  key: string;
+  trashId: string;
+  docId: string;
+  title: string;
+  deletedAt: string;
+  children?: TrashSideNavNode[];
+};
+
+type RebuildProgress = {
+  total: number;
+  processed: number;
+  status: string;
+};
+
 type KnowledgeBaseSideNavProps = {
   documents: KnowledgeBaseDocument[];
   childrenByParent: Record<string, KnowledgeBaseDocument[]>;
+  favorites?: FavoriteSideNavItem[];
+  favoritesLoading?: boolean;
+  favoritePendingIds?: Record<string, boolean>;
+  recentEdits?: RecentEditSideNavItem[];
+  recentEditsLoading?: boolean;
+  trashNodes?: TrashSideNavNode[];
+  trashLoading?: boolean;
+  activeTrashKey?: string | null;
   expandedIds: Record<string, boolean>;
   activeId: string | null;
   loadingIds: Record<string, boolean>;
   rootLoading: boolean;
+  rebuildingIndex?: boolean;
+  rebuildProgress?: RebuildProgress | null;
   onSelect: (doc: KnowledgeBaseDocument) => void;
   onToggle: (doc: KnowledgeBaseDocument) => void;
   onMove: (request: KnowledgeBaseMoveRequest) => void;
   onRefresh?: () => void;
+  onOpenTrash?: () => void;
+  onSelectTrash?: (node: TrashSideNavNode) => void;
+  onRebuildIndex?: () => void;
+  onExpandAll?: () => void;
+  onCollapseToRoot?: () => void;
+  onUnfavorite?: (docId: string) => void;
   onEmptyAreaClick?: () => void;
+  onAddDocument?: () => void;
+  outlineMode?: boolean;
+  onToggleOutline?: () => void;
+  documentContent?: JSONContent | null;
+  errorMessage?: string | null;
+  emptyMessage?: string;
+  emptyClickable?: boolean;
 };
 
 const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
   documents,
   childrenByParent,
+  favorites = [],
+  favoritesLoading = false,
+  favoritePendingIds = {},
+  recentEdits = [],
+  recentEditsLoading = false,
+  trashNodes = [],
+  trashLoading = false,
+  activeTrashKey = null,
   expandedIds,
   activeId,
   loadingIds,
   rootLoading,
+  rebuildingIndex,
+  rebuildProgress,
   onSelect,
   onToggle,
   onMove,
   onRefresh,
+  onOpenTrash,
+  onSelectTrash,
+  onRebuildIndex,
+  onExpandAll,
+  onCollapseToRoot,
+  onUnfavorite,
   onEmptyAreaClick,
+  onAddDocument,
+  outlineMode,
+  onToggleOutline,
+  documentContent,
+  errorMessage,
+  emptyMessage = "点击添加文档",
+  emptyClickable = true,
 }: KnowledgeBaseSideNavProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{
     id: string;
     position: "before" | "after" | "inside";
   } | null>(null);
+  const [favoritesCollapsed, setFavoritesCollapsed] = useState(true);
+  const [recentCollapsed, setRecentCollapsed] = useState(true);
+  const [trashCollapsed, setTrashCollapsed] = useState(false);
+  const [trashExpandedIds, setTrashExpandedIds] = useState<Record<string, boolean>>({});
 
   const docMap = useMemo(() => {
     const map = new Map<string, KnowledgeBaseDocument>();
@@ -255,7 +342,7 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
                       className="kb-doc-toggle"
                       type="button"
                       onClick={() => onToggle(doc)}
-                      aria-label={isExpanded ? "Collapse" : "Expand"}
+                      aria-label={isExpanded ? "收起" : "展开"}
                       draggable={false}
                     >
                       {isExpanded ? <DownOutlined /> : <RightOutlined />}
@@ -270,7 +357,7 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
                   onClick={() => onSelect(doc)}
                   draggable={false}
                 >
-                  {doc.title || "Untitled"}
+                  {doc.title || "无标题文档"}
                 </button>
                 {isLoading ? (
                   <span className="kb-doc-spinner" aria-hidden="true" />
@@ -288,6 +375,267 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
     </div>
   );
 
+  const favoriteDocs = useMemo(
+    () => favorites.filter((item) => docMap.has(item.docId)),
+    [docMap, favorites],
+  );
+  const recentEditDocs = useMemo(
+    () => recentEdits.filter((item) => docMap.has(item.docId)),
+    [docMap, recentEdits],
+  );
+  const hasFavoriteSection = favoritesLoading || favorites.length > 0;
+  const hasRecentSection = recentEditsLoading || recentEdits.length > 0;
+  const hasOverviewSection = hasFavoriteSection || hasRecentSection;
+  const hasTrashSection =
+    Boolean(onOpenTrash || onSelectTrash) || trashLoading || trashNodes.length > 0;
+
+  const renderFavoriteList = () => {
+    if (!hasFavoriteSection) {
+      return null;
+    }
+
+    return (
+      <div className="kb-favorites-section">
+        <button
+          className="kb-favorites-header"
+          type="button"
+          onClick={() => setFavoritesCollapsed((prev) => !prev)}
+          aria-expanded={!favoritesCollapsed}
+          aria-label={favoritesCollapsed ? "展开收藏" : "收起收藏"}
+        >
+          <span className="kb-favorites-title">收藏</span>
+          <span className="kb-favorites-toggle" aria-hidden="true">
+            {favoritesCollapsed ? <RightOutlined /> : <DownOutlined />}
+          </span>
+        </button>
+        {!favoritesCollapsed ? (
+          favoritesLoading ? (
+            <div className="kb-favorites-loading">加载收藏中...</div>
+          ) : (
+            <div className="kb-favorites-list">
+              {favoriteDocs.map((favorite) => {
+                const doc = docMap.get(favorite.docId);
+                if (!doc) {
+                  return null;
+                }
+                const pending = Boolean(favoritePendingIds[favorite.docId]);
+                return (
+                  <div
+                    key={favorite.docId}
+                    className={`kb-favorite-item${activeId === favorite.docId ? " active" : ""}`}
+                    onClick={() => onSelect(doc)}
+                  >
+                    <button
+                      className="kb-favorite-item-title"
+                      type="button"
+                      title={favorite.title || doc.title || "无标题文档"}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onSelect(doc);
+                      }}
+                    >
+                      {favorite.title || doc.title || "无标题文档"}
+                    </button>
+                    {onUnfavorite ? (
+                      <Popconfirm
+                        title="取消收藏"
+                        description="确定取消收藏该文档吗？"
+                        onConfirm={(event) => {
+                          event?.stopPropagation();
+                          onUnfavorite(favorite.docId);
+                        }}
+                        okText="取消收藏"
+                        cancelText="保留"
+                        okButtonProps={{ danger: true }}
+                      >
+                        <button
+                          type="button"
+                          className="kb-favorite-unstar-btn"
+                          disabled={pending}
+                          aria-label="取消收藏"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                          }}
+                        >
+                          ★
+                        </button>
+                      </Popconfirm>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderRecentEditList = () => {
+    if (!hasRecentSection) {
+      return null;
+    }
+
+    return (
+      <div className="kb-recent-section">
+        <button
+          className="kb-recent-header"
+          type="button"
+          onClick={() => setRecentCollapsed((prev) => !prev)}
+          aria-expanded={!recentCollapsed}
+          aria-label={recentCollapsed ? "展开最近编辑" : "收起最近编辑"}
+        >
+          <span className="kb-recent-title">最近编辑</span>
+          <span className="kb-recent-toggle" aria-hidden="true">
+            {recentCollapsed ? <RightOutlined /> : <DownOutlined />}
+          </span>
+        </button>
+        {!recentCollapsed ? (
+          recentEditsLoading ? (
+            <div className="kb-recent-loading">加载最近编辑中...</div>
+          ) : (
+            <div className="kb-recent-list">
+              {recentEditDocs.map((recentEdit) => {
+                const doc = docMap.get(recentEdit.docId);
+                if (!doc) {
+                  return null;
+                }
+                return (
+                  <div
+                    key={recentEdit.docId}
+                    className={`kb-recent-item${activeId === recentEdit.docId ? " active" : ""}`}
+                    onClick={() => onSelect(doc)}
+                  >
+                    <button
+                      className="kb-recent-item-title"
+                      type="button"
+                      title={recentEdit.title || doc.title || "无标题文档"}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onSelect(doc);
+                      }}
+                    >
+                      {recentEdit.title || doc.title || "无标题文档"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderTrashTree = (nodes: TrashSideNavNode[], depth: number) => (
+    <div className="kb-trash-tree-group">
+      {nodes.map((node) => {
+        const children = node.children ?? [];
+        const hasChildren = children.length > 0;
+        const expanded = hasChildren ? trashExpandedIds[node.key] !== false : false;
+        const active = activeTrashKey === node.key;
+        return (
+          <div key={node.key} className="kb-trash-tree-node">
+            <button
+              className={`kb-trash-tree-row${active ? " active" : ""}`}
+              type="button"
+              style={{ paddingLeft: `${8 + depth * 14}px` }}
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenTrash?.();
+                onSelectTrash?.(node);
+              }}
+              disabled={rootLoading}
+            >
+              <span className="kb-trash-tree-toggle-wrap" aria-hidden="true">
+                {hasChildren ? (
+                  <span
+                    className="kb-trash-tree-toggle"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setTrashExpandedIds((prev) => ({
+                        ...prev,
+                        [node.key]: !prev[node.key],
+                      }));
+                    }}
+                  >
+                    {expanded ? <DownOutlined /> : <RightOutlined />}
+                  </span>
+                ) : (
+                  <span className="kb-trash-tree-dot" />
+                )}
+              </span>
+              <span className="kb-trash-tree-title">{node.title || "无标题文档"}</span>
+            </button>
+            {hasChildren && expanded ? renderTrashTree(children, depth + 1) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const renderTrashSection = () => (
+    <div className="kb-trash-section">
+      <button
+        className="kb-trash-header"
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onOpenTrash?.();
+          setTrashCollapsed((prev) => !prev);
+        }}
+        aria-expanded={!trashCollapsed}
+        aria-label={trashCollapsed ? "展开垃圾箱" : "收起垃圾箱"}
+      >
+        <span className="kb-trash-title">垃圾箱</span>
+        <span className="kb-trash-toggle" aria-hidden="true">
+          {trashCollapsed ? <RightOutlined /> : <DownOutlined />}
+        </span>
+      </button>
+      {!trashCollapsed ? (
+        trashLoading ? (
+          <div className="kb-trash-loading">加载垃圾箱中...</div>
+        ) : trashNodes.length > 0 ? (
+          renderTrashTree(trashNodes, 0)
+        ) : (
+          <div className="kb-trash-empty">垃圾箱为空</div>
+        )
+      ) : null}
+    </div>
+  );
+
+  const renderProjectDocumentsSection = () => {
+    if (rootLoading) {
+      return <div className="kb-doc-loading">加载中...</div>;
+    }
+    if (errorMessage) {
+      return <div className="kb-doc-error">{errorMessage}</div>;
+    }
+    if (documents.length === 0) {
+      return emptyClickable ? (
+        <div
+          className="kb-doc-empty kb-doc-empty-clickable"
+          onClick={() => onAddDocument?.()}
+        >
+          {emptyMessage}
+        </div>
+      ) : (
+        <div className="kb-doc-empty">{emptyMessage}</div>
+      );
+    }
+
+    return (
+      <>
+        {renderTree(documents, 0)}
+        <div
+          className="kb-sidebar-empty-area"
+          onClick={() => onEmptyAreaClick?.()}
+        />
+      </>
+    );
+  };
+
   return (
     <aside
       className="kb-sidebar"
@@ -299,20 +647,75 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
       }}
       onDrop={handleRootDrop}
     >
-      <div className="kb-sidebar-toolbar">
-        <div className="kb-sidebar-toolbar-spacer" />
-        {onRefresh && (
-          <Tooltip title="刷新文档树">
-            <button
-              className="kb-sidebar-toolbar-btn"
-              type="button"
-              onClick={onRefresh}
-              disabled={rootLoading}
+      <div className="kb-sidebar-topbar">
+        <div className="kb-sidebar-toolbar">
+          {onToggleOutline && (
+            <Tooltip title={outlineMode ? "文档树" : "文档结构"}>
+              <button
+                className={`kb-sidebar-toolbar-btn${outlineMode ? " active" : ""}`}
+                type="button"
+                onClick={onToggleOutline}
+              >
+                {outlineMode ? <ApartmentOutlined /> : <UnorderedListOutlined />}
+              </button>
+            </Tooltip>
+          )}
+          <div className="kb-sidebar-toolbar-spacer" />
+          {!outlineMode && onExpandAll && onCollapseToRoot && (
+            <>
+              <Tooltip title="全部展开">
+                <button
+                  className="kb-sidebar-toolbar-btn"
+                  type="button"
+                  onClick={onExpandAll}
+                  disabled={rootLoading || documents.length === 0}
+                >
+                  <PlusSquareOutlined />
+                </button>
+              </Tooltip>
+              <Tooltip title="缩小到根层级">
+                <button
+                  className="kb-sidebar-toolbar-btn"
+                  type="button"
+                  onClick={onCollapseToRoot}
+                  disabled={rootLoading || documents.length === 0}
+                >
+                  <MinusSquareOutlined />
+                </button>
+              </Tooltip>
+            </>
+          )}
+          {onRebuildIndex && (
+            <Tooltip 
+              title={
+                rebuildingIndex && rebuildProgress
+                  ? `重建中：${rebuildProgress.processed}/${rebuildProgress.total}`
+                  : "重建索引"
+              }
             >
-              <ReloadOutlined spin={rootLoading} />
-            </button>
-          </Tooltip>
-        )}
+              <button
+                className={`kb-sidebar-toolbar-btn${rebuildingIndex ? " rebuilding" : ""}`}
+                type="button"
+                onClick={onRebuildIndex}
+                disabled={rebuildingIndex || rootLoading}
+              >
+                <DatabaseOutlined spin={rebuildingIndex} />
+              </button>
+            </Tooltip>
+          )}
+          {onRefresh && (
+            <Tooltip title="刷新文档树">
+              <button
+                className="kb-sidebar-toolbar-btn"
+                type="button"
+                onClick={onRefresh}
+                disabled={rootLoading}
+              >
+                <ReloadOutlined spin={rootLoading} />
+              </button>
+            </Tooltip>
+          )}
+        </div>
       </div>
       <div
         className="kb-sidebar-content"
@@ -323,23 +726,30 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
           }
         }}
       >
-        {rootLoading ? (
-          <div className="kb-doc-loading">加载中...</div>
-        ) : documents.length === 0 ? (
-          <div 
-            className="kb-doc-empty kb-doc-empty-clickable"
-            onClick={() => onEmptyAreaClick?.()}
-          >
-            点击添加文档
-          </div>
+        {outlineMode ? (
+          <DocumentOutlineContent content={documentContent} />
         ) : (
           <>
-            {renderTree(documents, 0)}
-            {/* Clickable empty area at the bottom */}
-            <div 
-              className="kb-sidebar-empty-area"
-              onClick={() => onEmptyAreaClick?.()}
-            />
+            <div className="kb-sidebar-section" data-section="overview">
+              {renderFavoriteList()}
+              {renderRecentEditList()}
+              {!hasOverviewSection ? (
+                <div className="kb-sidebar-section-empty">暂无收藏或最近编辑</div>
+              ) : null}
+            </div>
+            <div className="kb-sidebar-section-divider" aria-hidden="true" />
+            <div className="kb-sidebar-section" data-section="documents">
+              <div className="kb-sidebar-section-title">项目文档</div>
+              {renderProjectDocumentsSection()}
+            </div>
+            {hasTrashSection ? (
+              <>
+                <div className="kb-sidebar-section-divider" aria-hidden="true" />
+                <div className="kb-sidebar-section" data-section="trash">
+                  {renderTrashSection()}
+                </div>
+              </>
+            ) : null}
           </>
         )}
       </div>
@@ -348,6 +758,83 @@ const KnowledgeBaseSideNav = memo(function KnowledgeBaseSideNav({
 });
 
 export default KnowledgeBaseSideNav;
+
+// ── Document Outline (heading tree) ────────────────────────────────────
+
+type HeadingItem = { id: string; level: number; text: string };
+
+function extractTextFromNode(node: JSONContent): string {
+  if (node.text) return node.text;
+  if (!node.content) return "";
+  return node.content.map(extractTextFromNode).join("");
+}
+
+function extractHeadingsFromJson(content: JSONContent | null | undefined): HeadingItem[] {
+  if (!content?.content) return [];
+  const headings: HeadingItem[] = [];
+
+  function walk(nodes: JSONContent[]) {
+    for (const node of nodes) {
+      if (
+        node.type === "heading" &&
+        typeof node.attrs?.level === "number" &&
+        node.attrs.level >= 1 &&
+        node.attrs.level <= 4
+      ) {
+        const text = extractTextFromNode(node);
+        if (text.trim()) {
+          headings.push({
+            id: (node.attrs.id as string) || "",
+            level: node.attrs.level as number,
+            text,
+          });
+        }
+      }
+      if (node.content) walk(node.content);
+    }
+  }
+
+  walk(content.content);
+  return headings;
+}
+
+function DocumentOutlineContent({ content }: { content: JSONContent | null | undefined }) {
+  const headings = useMemo(() => extractHeadingsFromJson(content), [content]);
+
+  const handleClick = useCallback((id: string) => {
+    if (!id) return;
+    const el = document.querySelector(`[data-block-id="${id}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      el.classList.add("block-highlight");
+      setTimeout(() => el.classList.remove("block-highlight"), 2000);
+    }
+  }, []);
+
+  if (headings.length === 0) {
+    return <div className="doc-outline-empty">暂无标题</div>;
+  }
+
+  return (
+    <div className="doc-outline-list">
+      {headings.map((h, i) => (
+        <button
+          key={h.id || `h-${i}`}
+          type="button"
+          className={`doc-outline-item doc-outline-item-h${h.level}`}
+          style={{ paddingLeft: `${8 + (h.level - 1) * 16}px` }}
+          onClick={() => handleClick(h.id)}
+          title={h.text}
+        >
+          <span className="doc-outline-level">H{h.level}</span>
+          <span className="doc-outline-text">{h.text}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────
 
 function isRootId(value: string): boolean {
   return value.trim() === "" || value.trim().toLowerCase() === "root";

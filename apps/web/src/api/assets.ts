@@ -1,4 +1,4 @@
-import { apiFetch } from "../config/api";
+import { apiFetch, encodeProjectRef } from "../config/api";
 
 export type UploadedAsset = {
     asset_id: string;
@@ -11,7 +11,7 @@ export const uploadAsset = async (projectKey: string, file: File): Promise<Uploa
     const form = new FormData();
     form.append("file", file);
     const response = await apiFetch(
-        `/api/projects/${encodeURIComponent(projectKey)}/assets/import`,
+        `/api/projects/${encodeProjectRef(projectKey)}/assets/import`,
         {
             method: "POST",
             body: form,

@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -10,20 +12,29 @@ import (
 
 type Config struct {
 	Server        ServerConfig        `mapstructure:"server"`
+	CodeRunner    CodeRunnerConfig    `mapstructure:"code_runner"`
 	Postgres      PostgresConfig      `mapstructure:"postgres"`
-	ObjectStorage ObjectStorageConfig `mapstructure:"object_storage"`
 	Asset         AssetConfig         `mapstructure:"asset"`
 	Git           GitConfig           `mapstructure:"git"`
 	Search        SearchConfig        `mapstructure:"search"`
 	Embedding     EmbeddingConfig     `mapstructure:"embedding"`
 	Security      SecurityConfig      `mapstructure:"security"`
 	Providers     ProvidersConfig     `mapstructure:"providers"`
+	Auth          AuthConfig          `mapstructure:"auth"`
 }
 
 var AppConfig *Config
 
 type ServerConfig struct {
 	Addr string `mapstructure:"addr"`
+}
+
+type CodeRunnerConfig struct {
+	Addr                 string `mapstructure:"addr"`
+	InternalToken        string `mapstructure:"internal_token"`
+	Namespace            string `mapstructure:"namespace"`
+	DefaultTimeoutSecond int    `mapstructure:"default_timeout_seconds"`
+	MaxOutputBytes       int    `mapstructure:"max_output_bytes"`
 }
 
 type PostgresConfig struct {
@@ -44,16 +55,6 @@ func (p PostgresConfig) ConnMaxLifetimeDuration() (time.Duration, error) {
 		return 0, nil
 	}
 	return time.ParseDuration(p.ConnMaxLifetime)
-}
-
-type ObjectStorageConfig struct {
-	Endpoint     string `mapstructure:"endpoint"`
-	Region       string `mapstructure:"region"`
-	AccessKey    string `mapstructure:"access_key"`
-	SecretKey    string `mapstructure:"secret_key"`
-	Bucket       string `mapstructure:"bucket"`
-	UsePathStyle bool   `mapstructure:"use_path_style"`
-	Insecure     bool   `mapstructure:"insecure"`
 }
 
 type AssetConfig struct {
@@ -102,6 +103,27 @@ type CopilotConfig struct {
 	Scopes   []string `mapstructure:"scopes"`
 }
 
+type AuthConfig struct {
+	JWTSecret       string `mapstructure:"jwt_secret"`
+	AccessTokenTTL  string `mapstructure:"access_token_ttl"`
+	RefreshTokenTTL string `mapstructure:"refresh_token_ttl"`
+	BcryptCost      int    `mapstructure:"bcrypt_cost"`
+}
+
+func (a AuthConfig) AccessTokenTTLDuration() (time.Duration, error) {
+	if a.AccessTokenTTL == "" {
+		return 15 * time.Minute, nil
+	}
+	return time.ParseDuration(a.AccessTokenTTL)
+}
+
+func (a AuthConfig) RefreshTokenTTLDuration() (time.Duration, error) {
+	if a.RefreshTokenTTL == "" {
+		return 7 * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(a.RefreshTokenTTL)
+}
+
 func Load(path string) (*Config, error) {
 	if path == "" {
 		return nil, fmt.Errorf("config path is required")
@@ -115,6 +137,18 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 
+	if overridePath := localOverridePath(path); overridePath != "" {
+		if _, err := os.Stat(overridePath); err == nil {
+			v.SetConfigFile(overridePath)
+			v.SetConfigType("yaml")
+			if err := v.MergeInConfig(); err != nil {
+				return nil, fmt.Errorf("merge local config: %w", err)
+			}
+		} else if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("stat local config: %w", err)
+		}
+	}
+
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
@@ -124,12 +158,39 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+func localOverridePath(path string) string {
+	if path == "" {
+		return ""
+	}
+
+	base := filepath.Base(path)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	if strings.HasSuffix(name, ".local") {
+		return ""
+	}
+
+	return filepath.Join(filepath.Dir(path), name+".local"+ext)
+}
+
 func applyDefaults(cfg *Config) {
 	if cfg == nil {
 		return
 	}
 	if cfg.Asset.MetaRoot == "" {
 		cfg.Asset.MetaRoot = "/var/lib/zeus/assets"
+	}
+	if cfg.CodeRunner.Addr == "" {
+		cfg.CodeRunner.Addr = ":8091"
+	}
+	if cfg.CodeRunner.Namespace == "" {
+		cfg.CodeRunner.Namespace = "default"
+	}
+	if cfg.CodeRunner.DefaultTimeoutSecond <= 0 {
+		cfg.CodeRunner.DefaultTimeoutSecond = 10
+	}
+	if cfg.CodeRunner.MaxOutputBytes <= 0 {
+		cfg.CodeRunner.MaxOutputBytes = 256 * 1024
 	}
 	if cfg.Git.BareRepoRoot == "" {
 		cfg.Git.BareRepoRoot = "/var/lib/zeus/git"
@@ -155,5 +216,18 @@ func applyDefaults(cfg *Config) {
 	if strings.TrimSpace(cfg.Security.ActiveKeyID) == "" || cfg.Security.ActiveKeyVersion == 0 {
 		cfg.Security.ActiveKeyID = strings.TrimSpace(cfg.Security.EncryptionKeys[0].ID)
 		cfg.Security.ActiveKeyVersion = cfg.Security.EncryptionKeys[0].Version
+	}
+	// Auth defaults
+	if cfg.Auth.JWTSecret == "" {
+		cfg.Auth.JWTSecret = "zeus-dev-jwt-secret-change-in-production"
+	}
+	if cfg.Auth.AccessTokenTTL == "" {
+		cfg.Auth.AccessTokenTTL = "15m"
+	}
+	if cfg.Auth.RefreshTokenTTL == "" {
+		cfg.Auth.RefreshTokenTTL = "168h" // 7 days
+	}
+	if cfg.Auth.BcryptCost == 0 {
+		cfg.Auth.BcryptCost = 12
 	}
 }

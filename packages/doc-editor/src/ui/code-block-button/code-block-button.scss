@@ -1,0 +1,119 @@
+.code-block-split-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border-radius: var(--tt-radius-lg, 0.75rem);
+  background-color: var(--tt-button-active-bg-color);
+  transition: background-color 0.15s ease;
+
+  // When code block content is hovered, deepen background
+  &[data-codeblock-hovered="true"] {
+    background-color: var(--tt-button-active-hover-bg-color);
+  }
+
+  // Hover on the whole container (same as codeblock hover)
+  &:hover {
+    background-color: var(--tt-button-active-hover-bg-color);
+  }
+
+  // Main button in split mode - override all background states
+  > .tiptap-button {
+    border-radius: var(--tt-radius-lg, 0.75rem) 0 0 var(--tt-radius-lg, 0.75rem);
+    padding-right: 4px;
+    background-color: transparent !important;
+    transition: background-color 0.15s ease;
+
+    &:hover {
+      background-color: rgba(0, 0, 0, 0.08) !important;
+    }
+  }
+
+  // Dropdown trigger
+  .code-block-dropdown-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 2rem;
+    border: none;
+    border-radius: 0 var(--tt-radius-lg, 0.75rem) var(--tt-radius-lg, 0.75rem) 0;
+    background-color: transparent;
+    color: var(--tt-button-active-icon-color);
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+
+    &:hover {
+      background-color: rgba(0, 0, 0, 0.08);
+    }
+  }
+}
+
+.code-block-lang-text {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--tt-button-default-text-color);
+  white-space: nowrap;
+}
+
+.code-block-dropdown-icon {
+  width: 10px;
+  height: 10px;
+  color: var(--tt-button-default-dropdown-arrows-color);
+  flex-shrink: 0;
+}
+
+.code-block-language-dropdown {
+  z-index: 1000;
+  min-width: 120px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--tt-bg-color, #fff);
+  border: 1px solid var(--tt-border-color, rgba(31, 35, 40, 0.15));
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.code-block-language-option {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--tt-text-color, #333);
+  text-align: left;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+
+  &:hover {
+    background-color: var(--tt-hover-bg-color, rgba(31, 35, 40, 0.06));
+  }
+
+  &[data-selected="true"] {
+    background-color: var(--tt-active-bg-color, rgba(31, 35, 40, 0.1));
+    color: var(--tt-active-text-color, #000);
+  }
+}
+
+/* Dark mode support */
+[data-theme="dark"] {
+  .code-block-language-dropdown {
+    background: var(--tt-bg-color-dark, #1c2128);
+    border-color: var(--tt-border-color-dark, rgba(255, 255, 255, 0.1));
+  }
+
+  .code-block-language-option {
+    color: var(--tt-text-color-dark, #e6edf3);
+
+    &:hover {
+      background-color: var(--tt-hover-bg-color-dark, rgba(255, 255, 255, 0.06));
+    }
+
+    &[data-selected="true"] {
+      background-color: var(--tt-active-bg-color-dark, rgba(255, 255, 255, 0.12));
+    }
+  }
+}

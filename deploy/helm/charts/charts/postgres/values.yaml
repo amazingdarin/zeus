@@ -2,9 +2,17 @@ image:
   repository: zeus/postgres
   tag: "pg15-zhparser"
   pullPolicy: IfNotPresent
+  # Optional: if you pull from a private registry, set this to a list of secret names.
+  # Example: ["harbor-regcred"]
+  pullSecrets: []
 
 service:
   type: ClusterIP
+  port: 5432
+  nodePort: null
+
+nodePortService:
+  enabled: false
   port: 5432
   nodePort: null
 

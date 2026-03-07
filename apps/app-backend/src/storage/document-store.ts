@@ -3,9 +3,9 @@ import path from "node:path";
 import { v4 as uuidv4 } from "uuid";
 
 import { indexManager } from "./index-manager.js";
-import type { Document, DocumentMeta, TreeItem } from "./types.js";
-
-const REPO_ROOT = process.env.REPO_ROOT || "./data/repos";
+import { getScopedDocsRoot, buildCacheKey } from "./paths.js";
+import type { Document, DocumentMeta, TreeItem, CachedDoc } from "./types.js";
+import { documentRecentEditStore } from "../services/document-recent-edit-store.js";
 
 export class DocumentNotFoundError extends Error {
   constructor(docId: string) {
@@ -22,10 +22,10 @@ export class BlockNotFoundError extends Error {
 }
 
 /**
- * Get the root path for a project
+ * Get the docs root path for a user's project
  */
-function projectRoot(projectKey: string): string {
-  return path.join(REPO_ROOT, projectKey);
+function docsRoot(userId: string, projectKey: string): string {
+  return getScopedDocsRoot(userId, projectKey);
 }
 
 /**
@@ -56,6 +56,28 @@ function normalizeSlug(title: string): string {
   }
 
   return result.replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Ensure a unique title among siblings.
+ * If the title already exists, appends "- 副本", "- 副本 2", etc.
+ */
+function ensureUniqueTitle(title: string, siblingTitles: Set<string>): string {
+  if (!siblingTitles.has(title)) {
+    return title;
+  }
+
+  const suffix = " - 副本";
+  let candidate = `${title}${suffix}`;
+  if (!siblingTitles.has(candidate)) {
+    return candidate;
+  }
+
+  let count = 2;
+  while (siblingTitles.has(`${title}${suffix} ${count}`)) {
+    count++;
+  }
+  return `${title}${suffix} ${count}`;
 }
 
 /**
@@ -104,11 +126,12 @@ export const documentStore = {
   /**
    * Get a document by ID
    */
-  async get(projectKey: string, docId: string): Promise<Document> {
-    const root = projectRoot(projectKey);
-    await indexManager.ensure(projectKey, root);
+  async get(userId: string, projectKey: string, docId: string): Promise<Document> {
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    await indexManager.ensure(cacheKey, root);
 
-    const cached = indexManager.get(projectKey, docId);
+    const cached = indexManager.get(cacheKey, docId);
     if (!cached) {
       throw new DocumentNotFoundError(docId);
     }
@@ -119,7 +142,7 @@ export const documentStore = {
       return JSON.parse(content) as Document;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        indexManager.remove(projectKey, docId);
+        indexManager.remove(cacheKey, docId);
         throw new DocumentNotFoundError(docId);
       }
       throw err;
@@ -129,16 +152,17 @@ export const documentStore = {
   /**
    * Save a document (create or update)
    */
-  async save(projectKey: string, doc: Document): Promise<Document> {
-    const root = projectRoot(projectKey);
-    await indexManager.ensure(projectKey, root);
+  async save(userId: string, projectKey: string, doc: Document): Promise<Document> {
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    await indexManager.ensure(cacheKey, root);
 
     // Ensure ID
     if (!doc.meta.id) {
       doc.meta.id = uuidv4();
     }
 
-    const cached = indexManager.get(projectKey, doc.meta.id);
+    const cached = indexManager.get(cacheKey, doc.meta.id);
     const exists = !!cached;
 
     // Determine target directory
@@ -149,7 +173,7 @@ export const documentStore = {
     } else {
       const parentId = doc.meta.parent_id;
       if (parentId && parentId !== "root") {
-        const parentCache = indexManager.get(projectKey, parentId);
+        const parentCache = indexManager.get(cacheKey, parentId);
         if (!parentCache) {
           throw new Error("Parent document not found");
         }
@@ -157,8 +181,22 @@ export const documentStore = {
         const ext = path.extname(parentPath);
         targetDir = parentPath.slice(0, -ext.length);
       } else {
-        targetDir = path.join(root, "docs");
+        targetDir = root;
       }
+    }
+
+    // Ensure unique title among siblings
+    const parentId = doc.meta.parent_id || "root";
+    if (exists && cached) {
+      // For updates: only deduplicate if title actually changed
+      if (cached.title !== doc.meta.title) {
+        const siblingTitles = indexManager.getSiblingTitles(cacheKey, parentId, doc.meta.id);
+        doc.meta.title = ensureUniqueTitle(doc.meta.title, siblingTitles);
+      }
+    } else {
+      // For new documents: always check
+      const siblingTitles = indexManager.getSiblingTitles(cacheKey, parentId, doc.meta.id);
+      doc.meta.title = ensureUniqueTitle(doc.meta.title, siblingTitles);
     }
 
     // Generate slug
@@ -199,7 +237,7 @@ export const documentStore = {
     }
 
     // Add to index file
-    await indexManager.addToIndexFile(projectKey, targetDir, doc.meta.id);
+    await indexManager.addToIndexFile(cacheKey, targetDir, doc.meta.id);
 
     // Update metadata
     const relPath = path.relative(root, fullPath);
@@ -216,10 +254,14 @@ export const documentStore = {
     await writeFile(fullPath, JSON.stringify(doc, null, 2), "utf-8");
 
     // Update in-memory index
-    indexManager.update(projectKey, doc.meta.id, {
+    indexManager.update(cacheKey, doc.meta.id, {
       path: relPath,
       title: doc.meta.title,
       parentId: doc.meta.parent_id || "",
+    });
+
+    documentRecentEditStore.touch(userId, projectKey, doc.meta.id).catch((err) => {
+      console.error("Touch recent edit failed:", err);
     });
 
     return doc;
@@ -229,11 +271,12 @@ export const documentStore = {
    * Delete a document (optionally recursive)
    * Returns the list of deleted document IDs
    */
-  async delete(projectKey: string, docId: string, recursive = false): Promise<string[]> {
-    const root = projectRoot(projectKey);
-    await indexManager.ensure(projectKey, root);
+  async delete(userId: string, projectKey: string, docId: string, recursive = false): Promise<string[]> {
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    await indexManager.ensure(cacheKey, root);
 
-    const cached = indexManager.get(projectKey, docId);
+    const cached = indexManager.get(cacheKey, docId);
     if (!cached) {
       throw new DocumentNotFoundError(docId);
     }
@@ -242,16 +285,16 @@ export const documentStore = {
 
     // If recursive, delete children first
     if (recursive) {
-      const childIds = await this.collectAllDescendantIds(projectKey, docId);
+      const childIds = await this.collectAllDescendantIds(userId, projectKey, docId);
       // Delete from bottom-up (children first)
       for (const childId of childIds.reverse()) {
-        await this.deleteSingle(projectKey, childId);
+        await this.deleteSingle(userId, projectKey, childId);
         deletedIds.push(childId);
       }
     }
 
     // Delete the document itself
-    await this.deleteSingle(projectKey, docId);
+    await this.deleteSingle(userId, projectKey, docId);
     deletedIds.push(docId);
 
     return deletedIds;
@@ -260,14 +303,14 @@ export const documentStore = {
   /**
    * Collect all descendant document IDs (for recursive deletion)
    */
-  async collectAllDescendantIds(projectKey: string, parentId: string): Promise<string[]> {
-    const children = await this.getChildren(projectKey, parentId);
+  async collectAllDescendantIds(userId: string, projectKey: string, parentId: string): Promise<string[]> {
+    const children = await this.getChildren(userId, projectKey, parentId);
     const ids: string[] = [];
 
     for (const child of children) {
       ids.push(child.id);
       // Recursively collect descendants
-      const descendants = await this.collectAllDescendantIds(projectKey, child.id);
+      const descendants = await this.collectAllDescendantIds(userId, projectKey, child.id);
       ids.push(...descendants);
     }
 
@@ -277,9 +320,10 @@ export const documentStore = {
   /**
    * Delete a single document (no recursion)
    */
-  async deleteSingle(projectKey: string, docId: string): Promise<void> {
-    const root = projectRoot(projectKey);
-    const cached = indexManager.get(projectKey, docId);
+  async deleteSingle(userId: string, projectKey: string, docId: string): Promise<void> {
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    const cached = indexManager.get(cacheKey, docId);
     if (!cached) {
       return; // Already deleted or doesn't exist
     }
@@ -305,7 +349,7 @@ export const documentStore = {
     await indexManager.removeFromIndexFile(parentDir, docId);
 
     // Remove from in-memory index
-    indexManager.remove(projectKey, docId);
+    indexManager.remove(cacheKey, docId);
 
     // If parent directory is now empty (except for .index), remove it
     // This converts the parent document from "dir" back to "file"
@@ -317,8 +361,7 @@ export const documentStore = {
    */
   async cleanupEmptyParentDir(dir: string, root: string): Promise<void> {
     // Don't remove the root docs directory
-    const docsDir = path.join(root, "docs");
-    if (dir === docsDir || !dir.startsWith(docsDir)) {
+    if (dir === root || !dir.startsWith(root)) {
       return;
     }
 
@@ -339,16 +382,18 @@ export const documentStore = {
    * Move a document to a new parent
    */
   async move(
+    userId: string,
     projectKey: string,
     docId: string,
     targetParentId: string,
     beforeDocId?: string,
     afterDocId?: string,
   ): Promise<void> {
-    const root = projectRoot(projectKey);
-    await indexManager.ensure(projectKey, root);
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    await indexManager.ensure(cacheKey, root);
 
-    const cached = indexManager.get(projectKey, docId);
+    const cached = indexManager.get(cacheKey, docId);
     if (!cached) {
       throw new DocumentNotFoundError(docId);
     }
@@ -359,9 +404,9 @@ export const documentStore = {
     // Determine target directory
     let targetDir: string;
     if (!targetParentId || targetParentId === "root") {
-      targetDir = path.join(root, "docs");
+      targetDir = root;
     } else {
-      const parentCache = indexManager.get(projectKey, targetParentId);
+      const parentCache = indexManager.get(cacheKey, targetParentId);
       if (!parentCache) {
         throw new Error("Target parent not found");
       }
@@ -382,6 +427,10 @@ export const documentStore = {
       newPath = path.join(targetDir, newFilename);
       await renameFileAndDir(oldPath, newPath);
 
+      // Ensure unique title in the new parent
+      const siblingTitles = indexManager.getSiblingTitles(cacheKey, targetParentId, docId);
+      const uniqueTitle = ensureUniqueTitle(cached.title, siblingTitles);
+
       // Update document metadata
       const content = await readFile(newPath, "utf-8");
       const doc = JSON.parse(content) as Document;
@@ -389,14 +438,15 @@ export const documentStore = {
 
       doc.meta.parent_id = targetParentId;
       doc.meta.path = relPath;
+      doc.meta.title = uniqueTitle;
       doc.meta.updated_at = new Date().toISOString();
 
       await writeFile(newPath, JSON.stringify(doc, null, 2), "utf-8");
 
       // Update in-memory index
-      indexManager.update(projectKey, docId, {
+      indexManager.update(cacheKey, docId, {
         path: relPath,
-        title: cached.title,
+        title: uniqueTitle,
         parentId: targetParentId,
       });
     }
@@ -411,15 +461,16 @@ export const documentStore = {
   /**
    * Get children of a parent document
    */
-  async getChildren(projectKey: string, parentId: string): Promise<TreeItem[]> {
-    const root = projectRoot(projectKey);
-    await indexManager.ensure(projectKey, root);
+  async getChildren(userId: string, projectKey: string, parentId: string): Promise<TreeItem[]> {
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    await indexManager.ensure(cacheKey, root);
 
     let targetDir: string;
     if (!parentId || parentId === "root") {
-      targetDir = path.join(root, "docs");
+      targetDir = root;
     } else {
-      const cached = indexManager.get(projectKey, parentId);
+      const cached = indexManager.get(cacheKey, parentId);
       if (!cached) {
         return [];
       }
@@ -428,11 +479,11 @@ export const documentStore = {
       targetDir = parentPath.slice(0, -ext.length);
     }
 
-    const order = await indexManager.getOrderedChildren(projectKey, targetDir);
+    const order = await indexManager.getOrderedChildren(cacheKey, targetDir);
 
     const items: TreeItem[] = [];
     for (const docId of order) {
-      const cached = indexManager.get(projectKey, docId);
+      const cached = indexManager.get(cacheKey, docId);
       if (!cached) continue;
 
       const slug = path.basename(cached.path, ".json");
@@ -463,12 +514,13 @@ export const documentStore = {
   /**
    * Get the full document tree recursively
    */
-  async getFullTree(projectKey: string): Promise<TreeItem[]> {
-    const root = projectRoot(projectKey);
-    await indexManager.ensure(projectKey, root);
+  async getFullTree(userId: string, projectKey: string): Promise<TreeItem[]> {
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    await indexManager.ensure(cacheKey, root);
 
     const buildTree = async (parentId: string): Promise<TreeItem[]> => {
-      const children = await this.getChildren(projectKey, parentId);
+      const children = await this.getChildren(userId, projectKey, parentId);
       const result: TreeItem[] = [];
 
       for (const child of children) {
@@ -499,15 +551,16 @@ export const documentStore = {
   /**
    * Get the hierarchy chain from root to document
    */
-  async getHierarchy(projectKey: string, docId: string): Promise<DocumentMeta[]> {
-    const root = projectRoot(projectKey);
-    await indexManager.ensure(projectKey, root);
+  async getHierarchy(userId: string, projectKey: string, docId: string): Promise<DocumentMeta[]> {
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    await indexManager.ensure(cacheKey, root);
 
     if (!docId.trim()) {
       throw new DocumentNotFoundError(docId);
     }
 
-    if (!indexManager.get(projectKey, docId)) {
+    if (!indexManager.get(cacheKey, docId)) {
       throw new DocumentNotFoundError(docId);
     }
 
@@ -519,7 +572,7 @@ export const documentStore = {
       if (visited.has(currentId)) break;
       visited.add(currentId);
 
-      const cached = indexManager.get(projectKey, currentId);
+      const cached = indexManager.get(cacheKey, currentId);
       if (!cached) break;
 
       chain.push({
@@ -547,11 +600,12 @@ export const documentStore = {
    * Get a specific block from a document
    */
   async getBlockById(
+    userId: string,
     projectKey: string,
     docId: string,
     blockId: string,
   ): Promise<Document> {
-    const doc = await this.get(projectKey, docId);
+    const doc = await this.get(userId, projectKey, docId);
 
     // Find block in content
     const block = findBlockById(doc.body.content, blockId);
@@ -575,22 +629,23 @@ export const documentStore = {
   /**
    * Get all document IDs for a project
    */
-  async getAllDocumentIds(projectKey: string): Promise<string[]> {
-    const root = projectRoot(projectKey);
-    await indexManager.ensure(projectKey, root);
-    return indexManager.getAllIds(projectKey);
+  async getAllDocumentIds(userId: string, projectKey: string): Promise<string[]> {
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    await indexManager.ensure(cacheKey, root);
+    return indexManager.getAllIds(cacheKey);
   },
 
   /**
    * Get all documents for a project (for indexing purposes)
    */
-  async getAllDocuments(projectKey: string): Promise<Document[]> {
-    const ids = await this.getAllDocumentIds(projectKey);
+  async getAllDocuments(userId: string, projectKey: string): Promise<Document[]> {
+    const ids = await this.getAllDocumentIds(userId, projectKey);
     const documents: Document[] = [];
     
     for (const docId of ids) {
       try {
-        const doc = await this.get(projectKey, docId);
+        const doc = await this.get(userId, projectKey, docId);
         documents.push(doc);
       } catch (err) {
         // Skip documents that fail to load
@@ -604,21 +659,122 @@ export const documentStore = {
   /**
    * Suggest documents matching a query string
    * Matches against document titles and title paths
+   * @param parentId - Optional: Only search children of this parent (empty string or "root" = root level)
    */
   async suggest(
+    userId: string,
     projectKey: string,
     query: string,
     limit = 10,
+    parentId?: string,
   ): Promise<Array<{
     id: string;
     title: string;
     titlePath: string;
     hasChildren: boolean;
   }>> {
-    const root = projectRoot(projectKey);
-    await indexManager.ensure(projectKey, root);
+    const root = docsRoot(userId, projectKey);
+    const cacheKey = buildCacheKey(userId, projectKey);
+    await indexManager.ensure(cacheKey, root);
 
-    const allDocs = indexManager.getAll(projectKey);
+    const queryLower = query.toLowerCase().trim();
+    const queryParts = queryLower.split("/").filter(Boolean);
+
+    // When parentId is provided (including "root"), return children in that layer's .index order.
+    // We only filter by query; we do NOT re-sort by relevance.
+    if (parentId !== undefined) {
+      const normalizedParentId = parentId === "" || parentId === "root" ? "root" : parentId;
+      const children = await this.getChildren(userId, projectKey, normalizedParentId);
+
+      const out: Array<{ id: string; title: string; titlePath: string; hasChildren: boolean }> = [];
+      for (const child of children) {
+        if (out.length >= limit) break;
+
+        const docId = child.id;
+        const cached = indexManager.get(cacheKey, docId);
+        if (!cached) continue;
+
+        const titlePath = indexManager.buildTitlePath(cacheKey, docId);
+        const titlePathLower = titlePath.toLowerCase();
+        const titleLower = cached.title.toLowerCase();
+
+        let score = 0;
+
+        // Match by title path (for hierarchical queries like "设计/用户")
+        if (queryParts.length > 0) {
+          const pathParts = titlePathLower.split("/");
+          let matchCount = 0;
+          let lastMatchIdx = -1;
+
+          for (const qPart of queryParts) {
+            for (let i = lastMatchIdx + 1; i < pathParts.length; i++) {
+              if (pathParts[i].includes(qPart)) {
+                matchCount++;
+                lastMatchIdx = i;
+                break;
+              }
+            }
+          }
+
+          if (matchCount === queryParts.length) {
+            // All query parts matched in order
+            score = 100 + matchCount * 10;
+            // Bonus for exact match at end
+            if (pathParts[pathParts.length - 1].startsWith(queryParts[queryParts.length - 1])) {
+              score += 20;
+            }
+          } else if (matchCount > 0) {
+            score = 50 + matchCount * 5;
+          }
+        }
+
+        // Simple title matching
+        if (score === 0 && queryLower) {
+          if (titleLower.startsWith(queryLower)) {
+            score = 80;
+          } else if (titleLower.includes(queryLower)) {
+            score = 60;
+          } else if (titlePathLower.includes(queryLower)) {
+            score = 40;
+          }
+        }
+
+        // If no query, include all documents with lower score
+        if (!queryLower) {
+          score = 10;
+        }
+
+        if (score <= 0) continue;
+
+        // Check if has children (non-empty companion directory).
+        let hasChildren = false;
+        if (child.kind === "dir") {
+          try {
+            const relPath = cached.path;
+            const slug = path.basename(relPath, ".json");
+            const parentDir = path.dirname(relPath);
+            const companionDir = path.join(root, parentDir, slug);
+            const ordered = await indexManager.getOrderedChildren(cacheKey, companionDir);
+            hasChildren = ordered.length > 0;
+          } catch {
+            // Ignore errors
+          }
+        }
+
+        out.push({
+          id: docId,
+          title: cached.title,
+          titlePath,
+          hasChildren,
+        });
+      }
+
+      return out;
+    }
+
+    // Global search mode (legacy): search across all docs and sort by relevance.
+    const docsToSearch: Array<[string, CachedDoc]> = Array.from(indexManager.getAll(cacheKey));
+
     const results: Array<{
       id: string;
       title: string;
@@ -627,11 +783,8 @@ export const documentStore = {
       score: number;
     }> = [];
 
-    const queryLower = query.toLowerCase().trim();
-    const queryParts = queryLower.split("/").filter(Boolean);
-
-    for (const [docId, cached] of allDocs) {
-      const titlePath = indexManager.buildTitlePath(projectKey, docId);
+    for (const [docId, cached] of docsToSearch) {
+      const titlePath = indexManager.buildTitlePath(cacheKey, docId);
       const titlePathLower = titlePath.toLowerCase();
       const titleLower = cached.title.toLowerCase();
 
@@ -685,7 +838,7 @@ export const documentStore = {
         // Check if has children
         let hasChildren = false;
         try {
-          const children = await this.getChildren(projectKey, docId);
+          const children = await this.getChildren(userId, projectKey, docId);
           hasChildren = children.length > 0;
         } catch {
           // Ignore errors

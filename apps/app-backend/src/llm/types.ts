@@ -2,6 +2,11 @@
  * LLM Gateway Type Definitions
  */
 
+import type { TraceContext } from "../observability/index.js";
+
+// Re-export TraceContext for convenience
+export type { TraceContext };
+
 /**
  * Supported LLM provider identifiers
  */
@@ -91,6 +96,10 @@ export type ChatOptions = {
   // OpenAI-compatible provider config
   baseUrl?: string;
   apiKey?: string;
+  // Abort signal for cancellation
+  abortSignal?: AbortSignal;
+  // Observability trace context
+  traceContext?: TraceContext;
 };
 
 /**
@@ -149,6 +158,8 @@ export type EmbeddingOptions = {
   // OpenAI-compatible provider config
   baseUrl?: string;
   apiKey?: string;
+  // Observability trace context
+  traceContext?: TraceContext;
 };
 
 /**
@@ -180,4 +191,67 @@ export type ModelInfo = {
   id: string;
   name: string;
   capabilities: LLMCapability[];
+};
+
+// ============================================================================
+// Tool Calling Types (OpenAI Function Calling compatible)
+// ============================================================================
+
+/**
+ * OpenAI-compatible tool definition
+ */
+export type OpenAIToolDef = {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: {
+      type: "object";
+      properties: Record<
+        string,
+        {
+          type: string;
+          description: string;
+          enum?: string[];
+        }
+      >;
+      required: string[];
+    };
+  };
+};
+
+/**
+ * Tool call returned by LLM
+ */
+export type ToolCall = {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string; // JSON string
+  };
+};
+
+/**
+ * Tool choice options
+ */
+export type ToolChoice =
+  | "auto" // LLM decides whether to use a tool
+  | "none" // LLM should not use any tool
+  | "required" // LLM must use a tool
+  | { type: "function"; function: { name: string } }; // Force specific tool
+
+/**
+ * Chat options with tools support
+ */
+export type ChatOptionsWithTools = ChatOptions & {
+  tools?: OpenAIToolDef[];
+  tool_choice?: ToolChoice;
+};
+
+/**
+ * Chat response with tool calls
+ */
+export type ChatResponseWithTools = ChatResponse & {
+  toolCalls?: ToolCall[];
 };

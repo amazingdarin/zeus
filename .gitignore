@@ -1,9 +1,55 @@
+# IDE
 .idea
 .vscode
+.cursor
 .opencode
-.venv
-.sysphus
-.pnpm-store
-resources
+
+# Dependencies
 node_modules
+.pnpm-store
+
+# Build outputs
+dist
+apps/app-backend/dist
+apps/web/dist
+apps/desktop/target
+apps/desktop/gen/
+packages/doc-editor/dist
+packages/shared/dist
+
+# App data (runtime generated)
 apps/app-backend/data
+apps/app-backend/.tmp/
+
+# Test fixtures and large files
+resources
+
+# Python
+.venv
+__pycache__
+*.pyc
+
+# Binary executables
+rustfs
+zeus
+
+# OS generated
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Misc
+.sysphus
+*.local
+*.env.local
+.worktrees/
+server/config.local.yaml
+
+deploy/k3s.yaml
+deploy/SecretKey.csv
+deploy/dev.yaml
+deploy/harbor/values.s3.yaml

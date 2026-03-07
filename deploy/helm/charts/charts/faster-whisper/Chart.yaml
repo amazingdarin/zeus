@@ -1,0 +1,6 @@
+apiVersion: v2
+name: faster-whisper
+description: Faster-Whisper OpenAI-compatible transcription service for Zeus
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

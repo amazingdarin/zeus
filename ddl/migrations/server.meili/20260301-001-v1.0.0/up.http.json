@@ -1,0 +1,13 @@
+{
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/indexes",
+      "body": {
+        "uid": "knowledge_index",
+        "primaryKey": "id"
+      },
+      "expectStatus": [200, 201, 202]
+    }
+  ]
+}

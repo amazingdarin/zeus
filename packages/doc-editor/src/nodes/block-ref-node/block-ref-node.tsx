@@ -6,6 +6,7 @@ import type { Extensions } from "@tiptap/core"
 import { NodeViewWrapper } from "@tiptap/react"
 
 import { DocViewer } from "../../templates/doc-viewer"
+import { encodeProjectRefPath } from "../../lib/project-scope"
 import "./block-ref-node.scss"
 
 type BlockRefState = {
@@ -116,7 +117,7 @@ export function BlockRefNodeView({
         if (!promise) {
           promise = (async () => {
             const response = await fetcher(
-              `/api/projects/${encodeURIComponent(projectKey)}/documents/${encodeURIComponent(
+              `/api/projects/${encodeProjectRefPath(projectKey)}/documents/${encodeURIComponent(
                 docID
               )}/blocks/${encodeURIComponent(blockID)}`
             )

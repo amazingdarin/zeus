@@ -112,8 +112,17 @@ type BlockNodeType =
   | "imageUpload"
   | "link_preview"
   | "file_block"
+  | "table"
+  | "tableRow"
+  | "tableHeader"
+  | "tableCell"
+  | "chart"           // ECharts 图表（块级）
 
-type InlineNodeType = "text" | "hardBreak"
+type InlineNodeType = 
+  | "text" 
+  | "hardBreak"
+  | "math"            // 数学公式（内联/块级）
+  | "music"           // 乐谱（内联/块级）
 
 type MarkType =
   | "bold"
@@ -186,3 +195,4 @@ type MarkType =
 3. `body.content` 只能包含块级节点
 4. 每个节点的 `type` 必须是有效的节点类型
 5. 支持 Block ID 的节点应包含 `attrs.id`
+6. 文本类块可选 `attrs.backgroundColor` 与 `attrs.textColor`（值来自预设 token）

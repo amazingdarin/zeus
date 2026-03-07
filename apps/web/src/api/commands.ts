@@ -1,4 +1,4 @@
-import { apiFetch } from "../config/api";
+import { apiFetch, encodeProjectRef } from "../config/api";
 
 export type CommandArtifact = {
   type: string;
@@ -22,7 +22,7 @@ export async function executeCommand(
   input: string,
 ): Promise<CommandResult> {
   const response = await apiFetch(
-    `/api/projects/${encodeURIComponent(projectKey)}/commands`,
+    `/api/projects/${encodeProjectRef(projectKey)}/commands`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },

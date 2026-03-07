@@ -1,0 +1,51 @@
+replicaCount: 1
+
+image:
+  repository: zeus/app-backend
+  tag: latest
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+service:
+  type: ClusterIP
+  port: 4870
+  nodePort: null
+
+ingress:
+  enabled: false
+  className: ""
+  hosts:
+    - host: ""
+      paths:
+        - /api/app
+  tls: []
+
+resources: {}
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+persistence:
+  enabled: true
+  size: 20Gi
+  storageClassName: ""
+  mountPath: /var/lib/zeus
+
+env:
+  APP_BACKEND_PORT: "4870"
+  APP_BACKEND_CORS: ""
+  APP_MODE: "multi-tenant"
+  AUTH_ENABLED: "true"
+  PROJECT_ISOLATION: "true"
+  AUTH_SERVER_URL: "http://zeus-backend.zeus.svc.cluster.local:8080"
+  ZEUS_DATA_ROOT: "/var/lib/zeus"
+  SYSTEM_DOCS_DIR: "/var/lib/zeus/system-docs"
+  LANGFUSE_ENABLED: "false"
+  BANANA_SLIDES_URL: "http://banana-slides:8080"
+
+secretEnv:
+  DATABASE_URL: "postgres://zeus:zeus@postgres.postgres.svc.cluster.local:5432/zeus"
+  JWT_SECRET: "zeus-dev-jwt-secret-change-in-production"
+  ENCRYPTION_KEY: "zeus-dev-key"

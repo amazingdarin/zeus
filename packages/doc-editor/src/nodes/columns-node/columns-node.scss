@@ -1,0 +1,131 @@
+.doc-editor-columns {
+  --doc-editor-columns-grid-template: repeat(2, minmax(0, 1fr));
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 10px 12px;
+  margin: 6px 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  overflow: visible;
+  transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.doc-editor-columns:hover,
+.doc-editor-columns:focus-within,
+.doc-editor-columns.is-resizing {
+  border-color: rgba(15, 23, 42, 0.16);
+}
+
+.doc-editor-columns-track {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.doc-editor-columns-track > [data-node-view-content-react] {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  align-items: start;
+  gap: 12px;
+  grid-template-columns: var(--doc-editor-columns-grid-template);
+}
+
+.doc-editor-columns-resize-handles {
+  position: absolute;
+  inset: 10px 12px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.doc-editor-columns-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  margin-left: -5px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  pointer-events: auto;
+  cursor: col-resize;
+}
+
+.doc-editor-columns-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 50%;
+  width: 2px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.18);
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity 0.16s ease, background-color 0.16s ease;
+}
+
+.doc-editor-columns:hover .doc-editor-columns-resize-handle::before,
+.doc-editor-columns:focus-within .doc-editor-columns-resize-handle::before,
+.doc-editor-columns.is-resizing .doc-editor-columns-resize-handle::before {
+  opacity: 1;
+}
+
+.doc-editor-columns-resize-handle:hover::before,
+.doc-editor-columns-resize-handle.is-active::before {
+  background: rgba(37, 99, 235, 0.62);
+  opacity: 1;
+}
+
+.doc-editor-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 86px;
+  padding: 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  transition: border-color 0.16s ease;
+}
+
+.doc-editor-columns:hover .doc-editor-column,
+.doc-editor-columns:focus-within .doc-editor-column,
+.doc-editor-columns.is-resizing .doc-editor-column {
+  border-color: rgba(15, 23, 42, 0.12);
+}
+
+.doc-editor-column > :last-child {
+  margin-bottom: 0;
+}
+
+[data-theme="dark"] .doc-editor-columns {
+  background: transparent;
+}
+
+[data-theme="dark"] .doc-editor-columns:hover,
+[data-theme="dark"] .doc-editor-columns:focus-within,
+[data-theme="dark"] .doc-editor-columns.is-resizing {
+  border-color: rgba(226, 232, 240, 0.2);
+}
+
+[data-theme="dark"] .doc-editor-column {
+  background: transparent;
+}
+
+[data-theme="dark"] .doc-editor-columns:hover .doc-editor-column,
+[data-theme="dark"] .doc-editor-columns:focus-within .doc-editor-column,
+[data-theme="dark"] .doc-editor-columns.is-resizing .doc-editor-column {
+  border-color: rgba(148, 163, 184, 0.24);
+}
+
+[data-theme="dark"] .doc-editor-columns-resize-handle::before {
+  background: rgba(148, 163, 184, 0.42);
+}
+
+[data-theme="dark"] .doc-editor-columns-resize-handle:hover::before,
+[data-theme="dark"] .doc-editor-columns-resize-handle.is-active::before {
+  background: rgba(96, 165, 250, 0.72);
+}

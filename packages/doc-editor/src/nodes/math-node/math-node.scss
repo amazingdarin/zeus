@@ -1,0 +1,228 @@
+// Math Node Styles
+
+.math-node {
+  position: relative;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  border-radius: 4px;
+
+  &:hover {
+    background-color: rgba(31, 35, 40, 0.04);
+  }
+
+  &.math-selected {
+    background-color: rgba(59, 130, 246, 0.1);
+    outline: 2px solid rgba(59, 130, 246, 0.4);
+    outline-offset: 1px;
+  }
+}
+
+// Inline math
+.math-inline {
+  display: inline;
+  padding: 0 2px;
+
+  .math-content {
+    display: inline;
+  }
+
+  .katex {
+    font-size: 1em;
+  }
+}
+
+// Block math
+.math-block {
+  display: block;
+  margin: 16px 0;
+  padding: 16px;
+  text-align: center;
+  background-color: rgba(31, 35, 40, 0.02);
+  border-radius: 8px;
+  border: 1px solid rgba(31, 35, 40, 0.08);
+
+  .math-content {
+    display: block;
+  }
+
+  .katex-display {
+    margin: 0;
+
+    > .katex {
+      font-size: 1.2em;
+    }
+  }
+}
+
+// Placeholder
+.math-placeholder {
+  color: var(--muted, #6b7280);
+  font-style: italic;
+  font-size: 13px;
+  padding: 2px 8px;
+  background-color: rgba(31, 35, 40, 0.04);
+  border-radius: 4px;
+  cursor: pointer;
+
+  &:hover {
+    background-color: rgba(31, 35, 40, 0.08);
+  }
+}
+
+// Error display
+.math-error {
+  color: #dc2626;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  padding: 4px 8px;
+  background-color: rgba(220, 38, 38, 0.08);
+  border-radius: 4px;
+}
+
+// Editing mode
+.math-editing {
+  background-color: transparent !important;
+}
+
+.math-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background-color: var(--tt-bg-color, #fff);
+  border: 1px solid rgba(31, 35, 40, 0.15);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.math-editor-input {
+  width: 100%;
+  padding: 8px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  border: 1px solid rgba(31, 35, 40, 0.15);
+  border-radius: 6px;
+  background-color: rgba(31, 35, 40, 0.02);
+  resize: vertical;
+  min-height: 36px;
+  outline: none;
+  transition: border-color 0.15s ease;
+
+  &:focus {
+    border-color: rgba(59, 130, 246, 0.5);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+
+  &::placeholder {
+    color: var(--muted, #9ca3af);
+  }
+}
+
+.math-editor-preview {
+  padding: 12px;
+  background-color: rgba(31, 35, 40, 0.02);
+  border-radius: 6px;
+  text-align: center;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  .math-placeholder {
+    background: none;
+    padding: 0;
+  }
+}
+
+.math-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.math-editor-btn {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.math-editor-btn-cancel {
+  background-color: rgba(31, 35, 40, 0.06);
+  color: var(--ink, #374151);
+
+  &:hover {
+    background-color: rgba(31, 35, 40, 0.1);
+  }
+}
+
+.math-editor-btn-save {
+  background-color: rgba(59, 130, 246, 0.9);
+  color: #fff;
+
+  &:hover {
+    background-color: rgba(59, 130, 246, 1);
+  }
+}
+
+// Dark mode support
+[data-theme="dark"] {
+  .math-node {
+    &:hover {
+      background-color: rgba(255, 255, 255, 0.04);
+    }
+
+    &.math-selected {
+      background-color: rgba(59, 130, 246, 0.15);
+    }
+  }
+
+  .math-block {
+    background-color: rgba(255, 255, 255, 0.02);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .math-placeholder {
+    background-color: rgba(255, 255, 255, 0.04);
+
+    &:hover {
+      background-color: rgba(255, 255, 255, 0.08);
+    }
+  }
+
+  .math-error {
+    background-color: rgba(220, 38, 38, 0.15);
+  }
+
+  .math-editor {
+    background-color: var(--tt-bg-color-dark, #1c2128);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .math-editor-input {
+    background-color: rgba(255, 255, 255, 0.02);
+    border-color: rgba(255, 255, 255, 0.1);
+    color: var(--ink-dark, #e6edf3);
+
+    &:focus {
+      border-color: rgba(59, 130, 246, 0.6);
+    }
+  }
+
+  .math-editor-preview {
+    background-color: rgba(255, 255, 255, 0.02);
+  }
+
+  .math-editor-btn-cancel {
+    background-color: rgba(255, 255, 255, 0.06);
+    color: var(--ink-dark, #e6edf3);
+
+    &:hover {
+      background-color: rgba(255, 255, 255, 0.1);
+    }
+  }
+}

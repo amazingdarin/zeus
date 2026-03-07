@@ -10,6 +10,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@tiptap/core": "^3.18.0",
     "@tiptap/react": "^3.14.0",
     "@zeus/doc-editor": "workspace:*"
   }

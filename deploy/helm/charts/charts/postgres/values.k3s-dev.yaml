@@ -1,0 +1,21 @@
+# Values for the standalone `postgres` Helm chart on the k3s dev cluster.
+# Prereq:
+# - Configure k3s/containerd to allow pulling from the Harbor HTTP registry:
+#   apply `deploy/k3s/configure-harbor-http-registry-job.yaml` (once per node).
+# - Create the image pull secret in the target namespace:
+#   kubectl -n dev create secret docker-registry harbor-regcred --docker-server=43.139.120.149:30002 --docker-username=admin --docker-password=... --docker-email=...
+
+image:
+  repository: 43.139.120.149:30002/zeus/postgres
+  tag: "pg15-zhparser"
+  pullPolicy: IfNotPresent
+  pullSecrets:
+    - harbor-regcred
+
+persistence:
+  enabled: true
+  storageClassName: local-path
+
+nodePortService:
+  enabled: true
+  nodePort: 30432

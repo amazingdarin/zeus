@@ -1,0 +1,21 @@
+{{- if .Values.nodePortService.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "postgres.fullname" . }}-nodeport
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+spec:
+  type: NodePort
+  ports:
+    - port: {{ .Values.nodePortService.port | default .Values.service.port }}
+      targetPort: postgres
+      protocol: TCP
+      name: postgres
+      {{- if .Values.nodePortService.nodePort }}
+      nodePort: {{ .Values.nodePortService.nodePort }}
+      {{- end }}
+  selector:
+    app.kubernetes.io/name: {{ include "postgres.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

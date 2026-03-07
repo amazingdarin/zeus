@@ -11,9 +11,13 @@ import { encrypt, decrypt, maskApiKey, isMaskedKey } from "../utils/crypto.js";
 import type { LLMProviderId } from "./types.js";
 
 /**
- * Configuration type: LLM for chat/completion, embedding for embeddings
+ * Configuration type:
+ * - llm: chat/completion
+ * - embedding: vector embedding
+ * - vision: OCR / multimodal understanding
+ * - transcription: audio/video transcription
  */
-export type ConfigType = "llm" | "embedding" | "vision";
+export type ConfigType = "llm" | "embedding" | "vision" | "transcription";
 
 /**
  * Provider configuration as stored in database
@@ -242,7 +246,7 @@ export const configStore = {
   },
 
   /**
-   * Get configuration by type (llm or embedding)
+   * Get configuration by type
    */
   async getByType(configType: ConfigType): Promise<ProviderConfig | null> {
     try {

@@ -1,0 +1,183 @@
+{
+  "plugins": [
+    {
+      "pluginId": "ppt-plugin",
+      "displayName": "PPT Plugin",
+      "description": "Unified PPT agent for generating deck-style documents and final PPT tasks.",
+      "tags": ["ppt", "agent", "plugin", "v2"],
+      "versions": [
+        {
+          "version": "0.3.0",
+          "packageUrl": "/Users/darin/mine/code/zeus/apps/app-backend/examples/plugins/dist/ppt-plugin-0.3.0.tgz",
+          "manifest": {
+            "id": "ppt-plugin",
+            "version": "0.3.0",
+            "displayName": "PPT Plugin",
+            "description": "Unified PPT agent for generating deck-style documents and final PPT tasks.",
+            "pluginApiVersion": 2,
+            "engines": {
+              "zeusAppBackend": ">=0.1.0",
+              "zeusWeb": ">=0.1.0"
+            },
+            "capabilities": [
+              "docs.read",
+              "docs.write",
+              "system.command.register",
+              "docs.tool.register",
+              "ui.menu.register",
+              "ui.route.register",
+              "system.service.register"
+            ],
+            "activation": {
+              "commands": [
+                "ppt-plugin.agent.generate",
+                "ppt-plugin.agent.task-status",
+                "ppt-plugin.list-templates"
+              ],
+              "routes": ["agent"],
+              "tools": ["ppt-agent-doc-tool"]
+            },
+            "frontend": {
+              "entry": "frontend/index.mjs"
+            },
+            "backend": {
+              "entry": "backend/index.mjs"
+            },
+            "permissions": {
+              "allowedHttpHosts": [],
+              "maxExecutionMs": 12000,
+              "maxHookExecutionMs": 3000
+            },
+            "contributes": {
+              "commands": [
+                {
+                  "id": "ppt-plugin.agent.generate",
+                  "title": "PPT Agent 生成演示稿",
+                  "description": "通过多个基础文档与知识检索结果生成 PPT 类文档，并触发最终 PPT 导出。",
+                  "category": "plugin",
+                  "slashAliases": ["/ppt-agent", "/ppt-generate"],
+                  "apiEnabled": true,
+                  "requiresDocScope": false,
+                  "handler": "agent-generate"
+                },
+                {
+                  "id": "ppt-plugin.agent.task-status",
+                  "title": "查询 PPT 导出任务",
+                  "description": "根据 task_id 查询 PPT 任务状态。",
+                  "category": "plugin",
+                  "slashAliases": ["/ppt-task"],
+                  "apiEnabled": true,
+                  "requiresDocScope": false,
+                  "handler": "task-status"
+                },
+                {
+                  "id": "ppt-plugin.list-templates",
+                  "title": "列出 PPT 模版",
+                  "description": "列出可用的 PPT 模版。",
+                  "category": "plugin",
+                  "slashAliases": ["/ppt-template-list"],
+                  "apiEnabled": true,
+                  "requiresDocScope": false,
+                  "handler": "list-templates"
+                }
+              ],
+              "docTools": [
+                {
+                  "id": "ppt-agent-doc-tool",
+                  "placement": "documentHeader",
+                  "commandId": "ppt-plugin.agent.generate",
+                  "title": "PPT Agent 生成",
+                  "order": 120,
+                  "requiresDocScope": false
+                }
+              ],
+              "menus": [
+                {
+                  "id": "ppt-agent-sidebar",
+                  "placement": "sidebar",
+                  "title": "PPT Agent",
+                  "order": 120,
+                  "routeId": "agent"
+                },
+                {
+                  "id": "ppt-agent-doc-header",
+                  "placement": "documentHeader",
+                  "title": "PPT Agent 生成",
+                  "order": 120,
+                  "commandId": "ppt-plugin.agent.generate"
+                }
+              ],
+              "routes": [
+                {
+                  "id": "agent",
+                  "path": "/plugins/ppt-plugin/agent",
+                  "title": "PPT Agent",
+                  "order": 120
+                }
+              ],
+              "services": [
+                {
+                  "id": "ppt-agent-analyzer",
+                  "kind": "analyzer",
+                  "commandId": "ppt-plugin.agent.generate",
+                  "title": "PPT Agent Analyzer",
+                  "description": "Analyze multiple docs and knowledge to generate deck-ready documents."
+                }
+              ]
+            }
+          },
+          "publishedAt": "2026-02-11T00:00:00Z"
+        }
+      ]
+    },
+    {
+      "pluginId": "edu-plugin",
+      "displayName": "Edu Plugin",
+      "description": "Question-set block for educational quiz authoring.",
+      "tags": ["edu", "quiz", "doc-editor", "plugin", "v2"],
+      "versions": [
+        {
+          "version": "0.1.0",
+          "packageUrl": "/Users/darin/mine/code/zeus/apps/app-backend/examples/plugins/dist/edu-plugin-0.1.0.tgz",
+          "manifest": {
+            "id": "edu-plugin",
+            "version": "0.1.0",
+            "displayName": "Edu Plugin",
+            "description": "Question-set doc-editor block for quiz authoring (choice/blank/essay).",
+            "pluginApiVersion": 2,
+            "engines": {
+              "zeusAppBackend": ">=0.1.0",
+              "zeusWeb": ">=0.1.0"
+            },
+            "capabilities": [
+              "docs.block.register"
+            ],
+            "activation": {
+              "commands": [],
+              "routes": [],
+              "tools": [],
+              "documentEvents": []
+            },
+            "frontend": {
+              "entry": "frontend/index.mjs"
+            },
+            "permissions": {
+              "allowedHttpHosts": [],
+              "maxExecutionMs": 5000,
+              "maxHookExecutionMs": 2000
+            },
+            "contributes": {
+              "blocks": [
+                {
+                  "blockType": "edu_question_set",
+                  "requiresBlockId": true
+                }
+              ]
+            }
+          },
+          "publishedAt": "2026-02-12T00:00:00Z"
+        }
+      ]
+    }
+  ]
+}

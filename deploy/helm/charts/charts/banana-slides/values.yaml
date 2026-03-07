@@ -1,0 +1,90 @@
+# Banana Slides PPT Generation Service
+# Default values
+
+# API Service
+api:
+  image:
+    repository: ghcr.io/anionex/banana-slides-api
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+
+# Worker Service (handles PPT generation)
+worker:
+  image:
+    repository: ghcr.io/anionex/banana-slides-worker
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "500m"
+    limits:
+      memory: "4Gi"
+      cpu: "2"
+  # GPU configuration for local inference
+  gpu:
+    enabled: false
+    count: 1
+    type: "nvidia.com/gpu"
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+  nodePort: null
+
+# Nano Banana Pro API configuration
+nanoBanana:
+  # API endpoint for Nano Banana Pro model
+  apiUrl: "https://api.nanobanana.ai/v1"
+  # API key (will be stored in secret)
+  apiKey: ""
+
+# Redis for task queue (optional, uses embedded if not specified)
+redis:
+  enabled: false
+  host: ""
+  port: 6379
+  password: ""
+
+# Storage for generated files
+storage:
+  enabled: true
+  size: "10Gi"
+  storageClassName: ""
+  # Mount path inside container
+  mountPath: "/data/output"
+
+# Default style templates
+templates:
+  enabled: true
+  # Preloaded template themes
+  presets:
+    - id: "tech-dark"
+      name: "科技深色"
+      description: "深蓝渐变，适合技术分享"
+    - id: "corp-blue"
+      name: "商务蓝"
+      description: "蓝白配色，适合企业汇报"
+    - id: "minimal-light"
+      name: "极简浅色"
+      description: "黑白灰，适合学术报告"
+    - id: "creative-gradient"
+      name: "创意渐变"
+      description: "多彩渐变，适合创意展示"
+    - id: "nature-green"
+      name: "自然绿"
+      description: "绿色系，适合环保/教育"
+
+# Global settings (inherited from parent chart)
+global:
+  hostNetwork: false
