@@ -9,7 +9,8 @@
     "reset:doc-flow": "node scripts/dev/document-flow-reset.mjs",
     "eval:doc-flow:smoke": "node scripts/dev/run-playwright-harness.mjs tests/harness/document-flow/playwright/smoke-login-documents.js",
     "eval:doc-flow:i18n": "node scripts/dev/run-playwright-harness.mjs tests/harness/document-flow/playwright/i18n.js",
-    "eval:doc-flow:ppt-context": "node scripts/dev/run-playwright-harness.mjs tests/harness/document-flow/playwright/ppt-context.js"
+    "eval:doc-flow:ppt-context": "node scripts/dev/run-playwright-harness.mjs tests/harness/document-flow/playwright/ppt-context.js",
+    "eval:doc-flow:api": "node tests/harness/document-flow/api/smoke.mjs && node tests/harness/document-flow/api/comments.mjs && node tests/harness/document-flow/api/lock.mjs"
   },
   "workspaces": [
     "packages/*",
