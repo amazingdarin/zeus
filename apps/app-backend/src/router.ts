@@ -77,21 +77,9 @@ import {
   DocumentLockedError,
   getDocumentLockInfo,
 } from "./services/document-lock.js";
-import {
-  canDeleteCommentMessage,
-  canWriteComment,
-} from "./services/document-block-comment-model.js";
-import {
-  parseCommentContentInput,
-  parseCommentListQuery,
-  parseCommentStatusInput,
-  resolveCommentActorRole,
-} from "./services/document-block-comment-http.js";
-import {
-  CommentMessageNotFoundError,
-  CommentThreadNotFoundError,
-  documentBlockCommentStore,
-} from "./services/document-block-comment-store.js";
+import { canDeleteCommentMessage, canWriteComment } from "./services/document-block-comment-model.js";
+import { parseCommentContentInput, parseCommentListQuery, parseCommentStatusInput, resolveCommentActorRole } from "./services/document-block-comment-http.js";
+import { CommentMessageNotFoundError, CommentThreadNotFoundError, documentBlockCommentStore } from "./services/document-block-comment-store.js";
 import { createCodeExecService } from "./services/code-exec/service.js";
 import { CodeExecGuardError } from "./services/code-exec/guard.js";
 import { CodeExecClientError } from "./services/code-exec/client.js";
@@ -107,6 +95,9 @@ import { skillConfigStore } from "./llm/skills/skill-config-store.js";
 import { agentSkillCatalog, projectSkillConfigStore } from "./llm/agent/index.js";
 import { zodObjectHasRequiredKey } from "./llm/zod.js";
 import { pluginManagerV2 } from "./plugins-v2/index.js";
+import { registerDocumentCommentRoutes } from "./router/document-comments.js";
+import { registerDocumentLockRoutes } from "./router/document-lock.js";
+import { registerDocumentReadRoutes } from "./router/documents.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 const uploadWithPath = multer({ storage: multer.memoryStorage(), preservePath: true });
@@ -542,6 +533,41 @@ export const buildRouter = () => {
   router.use(optionalAuthMiddleware);
   router.use("/projects/:ownerType/:ownerKey/:projectKey", projectScopeMiddleware);
 
+  registerDocumentReadRoutes({
+    router,
+    documentStore,
+    getUserId,
+    success,
+    localizedError,
+  });
+
+  registerDocumentLockRoutes({
+    router,
+    documentStore,
+    getUserId,
+    success,
+    error,
+    localizedError,
+    applyDocumentLock,
+    clearDocumentLock,
+    getDocumentLockInfo,
+  });
+
+  registerDocumentCommentRoutes({
+    router,
+    documentStore,
+    documentBlockCommentStore,
+    getUserId,
+    success,
+    localizedError,
+    parseCommentListQuery,
+    parseCommentContentInput,
+    parseCommentStatusInput,
+    resolveCommentActorRole,
+    canWriteComment,
+    canDeleteCommentMessage,
+  });
+
   // ============================================
   // Message Center APIs
   // ============================================
@@ -868,61 +894,6 @@ export const buildRouter = () => {
   });
 
   /**
-   * Lock a document
-   * PUT /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/lock
-   */
-  router.put(
-    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/lock",
-    async (req: Request, res: Response) => {
-      try {
-        const { projectKey, docId } = req.params;
-        const userId = getUserId(req);
-        const doc = await documentStore.get(userId, projectKey, docId);
-        const existingLock = getDocumentLockInfo(doc.meta);
-        if (existingLock?.locked) {
-          success(res, { lock: existingLock });
-          return;
-        }
-        const lock = applyDocumentLock(doc.meta, userId, new Date().toISOString());
-        const saved = await documentStore.save(userId, projectKey, doc);
-        success(res, { lock: getDocumentLockInfo(saved.meta) ?? lock });
-      } catch (err) {
-        if (err instanceof DocumentNotFoundError) {
-          await localizedError(res, req, "NOT_FOUND", err.message, 404);
-          return;
-        }
-        const message = err instanceof Error ? err.message : "Lock failed";
-        error(res, "LOCK_DOCUMENT_FAILED", message, 500);
-      }
-    },
-  );
-
-  /**
-   * Unlock a document
-   * DELETE /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/lock
-   */
-  router.delete(
-    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/lock",
-    async (req: Request, res: Response) => {
-      try {
-        const { projectKey, docId } = req.params;
-        const userId = getUserId(req);
-        const doc = await documentStore.get(userId, projectKey, docId);
-        clearDocumentLock(doc.meta);
-        const saved = await documentStore.save(userId, projectKey, doc);
-        success(res, { lock: getDocumentLockInfo(saved.meta) });
-      } catch (err) {
-        if (err instanceof DocumentNotFoundError) {
-          await localizedError(res, req, "NOT_FOUND", err.message, 404);
-          return;
-        }
-        const message = err instanceof Error ? err.message : "Unlock failed";
-        error(res, "UNLOCK_DOCUMENT_FAILED", message, 500);
-      }
-    },
-  );
-
-  /**
    * Get document hierarchy (ancestor chain)
    * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/hierarchy
    */
@@ -1019,317 +990,6 @@ export const buildRouter = () => {
         }
         const message = err instanceof Error ? err.message : "Failed to export docx";
         error(res, "EXPORT_DOCX_FAILED", message, 500);
-      }
-    },
-  );
-
-  /**
-   * Get a specific block from a document
-   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/blocks/:blockId
-   */
-  router.get(
-    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/blocks/:blockId",
-    async (req: Request, res: Response) => {
-      try {
-        const { projectKey, docId, blockId } = req.params;
-        const userId = getUserId(req);
-        const doc = await documentStore.getBlockById(userId, projectKey, docId, blockId);
-        success(res, { meta: doc.meta, body: doc.body });
-      } catch (err) {
-        if (err instanceof DocumentNotFoundError) {
-          await localizedError(res, req, "NOT_FOUND", err.message, 404);
-          return;
-        }
-        if (err instanceof BlockNotFoundError) {
-          await localizedError(res, req, "BLOCK_NOT_FOUND", err.message, 404);
-          return;
-        }
-        const message = err instanceof Error ? err.message : "Get block failed";
-        await localizedError(res, req, "GET_BLOCK_FAILED", message, 500);
-      }
-    },
-  );
-
-  /**
-   * List block comment threads
-   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments
-   */
-  router.get(
-    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments",
-    async (req: Request, res: Response) => {
-      try {
-        const { projectKey, docId } = req.params;
-        const userId = getUserId(req);
-        await documentStore.get(userId, projectKey, docId);
-
-        const listQuery = parseCommentListQuery(req.query as unknown as Record<string, unknown>);
-        const data = await documentBlockCommentStore.listThreads({
-          userId,
-          projectKey,
-          docId,
-          blockId: listQuery.blockId,
-          status: listQuery.status,
-          cursor: listQuery.cursor,
-          limit: listQuery.limit,
-        });
-        success(res, data);
-      } catch (err) {
-        if (err instanceof DocumentNotFoundError) {
-          await localizedError(res, req, "NOT_FOUND", err.message, 404);
-          return;
-        }
-        const message = err instanceof Error ? err.message : "List block comments failed";
-        await localizedError(res, req, "LIST_BLOCK_COMMENTS_FAILED", message, 500);
-      }
-    },
-  );
-
-  /**
-   * Get block comment thread detail
-   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/:threadId
-   */
-  router.get(
-    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/:threadId",
-    async (req: Request, res: Response) => {
-      try {
-        const { projectKey, docId, threadId } = req.params;
-        const userId = getUserId(req);
-        await documentStore.get(userId, projectKey, docId);
-
-        const data = await documentBlockCommentStore.getThread({
-          userId,
-          projectKey,
-          docId,
-          threadId,
-        });
-        success(res, data);
-      } catch (err) {
-        if (err instanceof DocumentNotFoundError) {
-          await localizedError(res, req, "NOT_FOUND", err.message, 404);
-          return;
-        }
-        if (err instanceof CommentThreadNotFoundError) {
-          await localizedError(res, req, err.code, err.message, 404);
-          return;
-        }
-        const message = err instanceof Error ? err.message : "Get block comment thread failed";
-        await localizedError(res, req, "GET_BLOCK_COMMENT_THREAD_FAILED", message, 500);
-      }
-    },
-  );
-
-  /**
-   * Create a block comment thread
-   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments
-   */
-  router.post(
-    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments",
-    async (req: Request, res: Response) => {
-      try {
-        const { projectKey, docId } = req.params;
-        const userId = getUserId(req);
-        const scope = req.projectScope;
-        if (!scope) {
-          await localizedError(res, req, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
-          return;
-        }
-
-        const role = await resolveCommentActorRole(scope, userId);
-        if (!canWriteComment(role)) {
-          await localizedError(res, req, "COMMENT_PERMISSION_DENIED", "insufficient permission", 403);
-          return;
-        }
-
-        const blockId = String(req.body?.blockId ?? "").trim();
-        const content = parseCommentContentInput(req.body?.content);
-        if (!blockId) {
-          await localizedError(res, req, "BLOCK_ID_REQUIRED", "blockId is required", 400);
-          return;
-        }
-        if (!content) {
-          await localizedError(res, req, "COMMENT_CONTENT_REQUIRED", "content is required", 400);
-          return;
-        }
-
-        await documentStore.getBlockById(userId, projectKey, docId, blockId);
-        const created = await documentBlockCommentStore.createThread({
-          userId,
-          projectKey,
-          docId,
-          blockId,
-          content,
-        });
-        success(res, created, 201);
-      } catch (err) {
-        if (err instanceof DocumentNotFoundError) {
-          await localizedError(res, req, "NOT_FOUND", err.message, 404);
-          return;
-        }
-        if (err instanceof BlockNotFoundError) {
-          await localizedError(res, req, "BLOCK_NOT_FOUND", err.message, 404);
-          return;
-        }
-        const message = err instanceof Error ? err.message : "Create block comment thread failed";
-        await localizedError(res, req, "CREATE_BLOCK_COMMENT_THREAD_FAILED", message, 500);
-      }
-    },
-  );
-
-  /**
-   * Create a block comment message
-   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/:threadId/messages
-   */
-  router.post(
-    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/:threadId/messages",
-    async (req: Request, res: Response) => {
-      try {
-        const { projectKey, docId, threadId } = req.params;
-        const userId = getUserId(req);
-        const scope = req.projectScope;
-        if (!scope) {
-          await localizedError(res, req, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
-          return;
-        }
-
-        const role = await resolveCommentActorRole(scope, userId);
-        if (!canWriteComment(role)) {
-          await localizedError(res, req, "COMMENT_PERMISSION_DENIED", "insufficient permission", 403);
-          return;
-        }
-
-        const content = parseCommentContentInput(req.body?.content);
-        if (!content) {
-          await localizedError(res, req, "COMMENT_CONTENT_REQUIRED", "content is required", 400);
-          return;
-        }
-
-        await documentStore.get(userId, projectKey, docId);
-        const messageRow = await documentBlockCommentStore.addMessage({
-          userId,
-          projectKey,
-          docId,
-          threadId,
-          content,
-        });
-        success(res, messageRow, 201);
-      } catch (err) {
-        if (err instanceof DocumentNotFoundError) {
-          await localizedError(res, req, "NOT_FOUND", err.message, 404);
-          return;
-        }
-        if (err instanceof CommentThreadNotFoundError) {
-          await localizedError(res, req, err.code, err.message, 404);
-          return;
-        }
-        const message = err instanceof Error ? err.message : "Create block comment message failed";
-        await localizedError(res, req, "CREATE_BLOCK_COMMENT_MESSAGE_FAILED", message, 500);
-      }
-    },
-  );
-
-  /**
-   * Update block comment thread status
-   * PATCH /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/:threadId
-   */
-  router.patch(
-    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/:threadId",
-    async (req: Request, res: Response) => {
-      try {
-        const { projectKey, docId, threadId } = req.params;
-        const userId = getUserId(req);
-        const scope = req.projectScope;
-        if (!scope) {
-          await localizedError(res, req, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
-          return;
-        }
-
-        const role = await resolveCommentActorRole(scope, userId);
-        if (!canWriteComment(role)) {
-          await localizedError(res, req, "COMMENT_PERMISSION_DENIED", "insufficient permission", 403);
-          return;
-        }
-
-        const status = parseCommentStatusInput(req.body as Record<string, unknown> | undefined);
-        if (!status) {
-          await localizedError(res, req, "INVALID_COMMENT_STATUS", "status must be open or resolved", 400);
-          return;
-        }
-
-        await documentStore.get(userId, projectKey, docId);
-        const thread = await documentBlockCommentStore.setThreadStatus({
-          userId,
-          projectKey,
-          docId,
-          threadId,
-          status,
-        });
-        success(res, thread);
-      } catch (err) {
-        if (err instanceof DocumentNotFoundError) {
-          await localizedError(res, req, "NOT_FOUND", err.message, 404);
-          return;
-        }
-        if (err instanceof CommentThreadNotFoundError) {
-          await localizedError(res, req, err.code, err.message, 404);
-          return;
-        }
-        const message = err instanceof Error ? err.message : "Update block comment thread failed";
-        await localizedError(res, req, "UPDATE_BLOCK_COMMENT_THREAD_FAILED", message, 500);
-      }
-    },
-  );
-
-  /**
-   * Delete block comment message
-   * DELETE /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/messages/:messageId
-   */
-  router.delete(
-    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/messages/:messageId",
-    async (req: Request, res: Response) => {
-      try {
-        const { projectKey, docId, messageId } = req.params;
-        const userId = getUserId(req);
-        const scope = req.projectScope;
-        if (!scope) {
-          await localizedError(res, req, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
-          return;
-        }
-
-        await documentStore.get(userId, projectKey, docId);
-        const found = await documentBlockCommentStore.findMessage({
-          userId,
-          projectKey,
-          docId,
-          messageId,
-        });
-        const role = await resolveCommentActorRole(scope, userId);
-        if (!canDeleteCommentMessage({
-          actorId: userId,
-          authorId: found.message.authorId,
-          role,
-        })) {
-          await localizedError(res, req, "COMMENT_PERMISSION_DENIED", "insufficient permission", 403);
-          return;
-        }
-
-        await documentBlockCommentStore.deleteMessage({
-          userId,
-          projectKey,
-          docId,
-          messageId,
-        });
-        success(res, { messageId });
-      } catch (err) {
-        if (err instanceof DocumentNotFoundError) {
-          await localizedError(res, req, "NOT_FOUND", err.message, 404);
-          return;
-        }
-        if (err instanceof CommentMessageNotFoundError) {
-          await localizedError(res, req, err.code, err.message, 404);
-          return;
-        }
-        const message = err instanceof Error ? err.message : "Delete block comment message failed";
-        await localizedError(res, req, "DELETE_BLOCK_COMMENT_MESSAGE_FAILED", message, 500);
       }
     },
   );
