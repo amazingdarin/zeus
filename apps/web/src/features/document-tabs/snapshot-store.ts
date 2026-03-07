@@ -6,6 +6,7 @@ export type DocSnapshot = {
   selection: { from: number; to: number } | null;
   draftTitle: string;
   draftContent: JSONContent;
+  locked?: boolean;
   saveStatus: DocumentEditorSaveStatus;
 };
 
@@ -27,6 +28,9 @@ export function upsertSnapshot(
 }
 
 export function removeSnapshot(store: SnapshotStore, docId: string): SnapshotStore {
+  if (!(docId in store)) {
+    return store;
+  }
   const next = { ...store };
   delete next[docId];
   return next;

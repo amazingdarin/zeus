@@ -3,8 +3,9 @@ HELM_CHART := deploy/helm/charts
 HELM_NAMESPACE ?= zeus
 NAMESPACE ?= $(HELM_NAMESPACE)
 CONFIG_PATH ?= /tmp/zeus-$(NAMESPACE)/config.yaml
+APP_BACKEND_NODE_IMAGE ?= node:22-alpine
 
-.PHONY: run-server run-code-runner run-app-backend run-app-web run-app-desktop init-app-mobile-android init-app-mobile-ios run-app-mobile-android run-app-mobile-ios build-app-mobile-android build-app-mobile-ios install uninstall dev-install build-postgres-image build-backend-image build-frontend-image build-paddleocr-image download-runtime-binaries package-desktop package-mobile-android package-mobile-ios package-mobile package-all start-deps start-deps-dev stop-deps stop-deps-dev clean-deps start-all stop-all clean-all test-integration setup-python-venv install-paddleocr run-paddleocr-docker stop-paddleocr-docker
+.PHONY: run-server run-code-runner run-app-backend run-app-web run-app-desktop init-app-mobile-android init-app-mobile-ios run-app-mobile-android run-app-mobile-ios build-app-mobile-android build-app-mobile-ios install uninstall dev-install build-postgres-image build-backend-image build-app-backend-image build-frontend-image build-paddleocr-image download-runtime-binaries package-desktop package-mobile-android package-mobile-ios package-mobile package-all start-deps start-deps-dev stop-deps stop-deps-dev clean-deps start-all stop-all clean-all test-integration setup-python-venv install-paddleocr run-paddleocr-docker stop-paddleocr-docker
 
 # Development run commands
 run-server:
@@ -69,6 +70,9 @@ build-postgres-image:
 build-backend-image:
 	docker build -t zeus:latest -f server/Dockerfile server
 
+build-app-backend-image:
+	docker build --build-arg NODE_IMAGE=$(APP_BACKEND_NODE_IMAGE) -t zeus/app-backend:latest -f apps/app-backend/Dockerfile .
+
 build-frontend-image:
 	docker build -t zeus-web:latest -f apps/web/Dockerfile apps/web
 
@@ -121,7 +125,6 @@ start-deps:
 	-kubectl create namespace $(NAMESPACE)
 	helm upgrade --install $(APP_NAME) $(HELM_CHART) --namespace $(NAMESPACE) --create-namespace -f deploy/helm/values.deps.yaml
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/postgres --timeout=120s
-	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/rustfs --timeout=120s
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/faster-whisper --timeout=180s
 
 start-deps-dev:
@@ -130,7 +133,6 @@ start-deps-dev:
 	-kubectl create namespace $(NAMESPACE)
 	helm upgrade --install $(APP_NAME) $(HELM_CHART) --namespace $(NAMESPACE) --create-namespace -f deploy/helm/values.deps-dev.yaml
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/postgres --timeout=120s
-	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/rustfs --timeout=120s
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/faster-whisper --timeout=180s
 
 stop-deps:
@@ -148,7 +150,6 @@ start-all:
 	-kubectl create namespace $(NAMESPACE)
 	helm upgrade --install $(APP_NAME) $(HELM_CHART) --namespace $(NAMESPACE) --create-namespace -f deploy/helm/values.full.yaml
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/postgres --timeout=120s
-	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/rustfs --timeout=120s
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/faster-whisper --timeout=180s
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/zeus-backend --timeout=120s
 	-kubectl wait --namespace $(NAMESPACE) --for=condition=available deployment/zeus-frontend --timeout=120s

@@ -7,6 +7,7 @@ DROP TABLE IF EXISTS document_favorites;
 DROP TABLE IF EXISTS chat_messages;
 DROP TABLE IF EXISTS chat_sessions;
 DROP TABLE IF EXISTS chat_settings;
+DROP TABLE IF EXISTS user_general_settings;
 DROP TABLE IF EXISTS web_search_config;
 DROP TABLE IF EXISTS project_skill_config;
 DROP TABLE IF EXISTS skill_config;

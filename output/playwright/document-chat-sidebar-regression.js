@@ -13,6 +13,8 @@ async (page) => {
     topbarInsideMainColumn: null,
     topbarOverlapSidebar: null,
     layoutMetrics: null,
+    emptyHeroFontSize: null,
+    quickActionPromptSent: null,
     screenshot: "/Users/darin/mine/code/zeus/output/playwright/document-chat-sidebar-regression.png",
   };
 
@@ -199,7 +201,31 @@ async (page) => {
     : null;
   expect(result.topbarOverlapSidebar === false, "Top operation area does not overlap right LLM sidebar");
 
+  result.emptyHeroFontSize = await page.evaluate(() => {
+    const target = document.querySelector(".doc-page-llm-sidebar .chat-dock-empty-side .chat-dock-empty-text");
+    if (!target) {
+      return "";
+    }
+    return window.getComputedStyle(target).fontSize;
+  });
+  expect(result.emptyHeroFontSize === "34px", "Sidebar hero title font-size is 34px");
+
+  const firstQuickAction = page.locator(".doc-page-llm-sidebar .chat-dock-side-quick-item").first();
+  await firstQuickAction.click();
+  await page.waitForTimeout(250);
+  result.quickActionPromptSent = await page
+    .locator(".doc-page-llm-sidebar .chat-msg-user .chat-msg-text", { hasText: "创建自定义代理" })
+    .first()
+    .isVisible()
+    .catch(() => false);
+  expect(result.quickActionPromptSent === true, "Clicking quick action sends mapped prompt immediately");
+
   const sidebarToggleButton = page.locator('button[aria-label="隐藏 AI 对话"], button[aria-label="显示 AI 对话"]').first();
+  await sidebarToggleButton.hover();
+  await page.waitForTimeout(120);
+  const hasHoverTooltipOverlay = await page.locator(".ant-tooltip").count().then((count) => count > 0).catch(() => false);
+  expect(hasHoverTooltipOverlay === false, "LLM toggle hover does not create ant tooltip overlay");
+
   await sidebarToggleButton.click();
   await page.waitForTimeout(300);
   result.sidebarHiddenAfterToggle = await page.locator(".doc-page-llm-sidebar.is-closed").first().isVisible().catch(() => false);

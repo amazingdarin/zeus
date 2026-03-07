@@ -128,7 +128,7 @@ function CreateProjectModal({ ownerContexts, defaultOwnerRef, onClose, onCreated
         ownerKey: parsedOwner.ownerKey,
       });
       if (!project.id) {
-        throw new Error("Project id is missing");
+        throw new Error("缺少项目 ID");
       }
       onCreated?.(project);
       onClose();
@@ -199,7 +199,7 @@ function CreateProjectModal({ ownerContexts, defaultOwnerRef, onClose, onCreated
             { pattern: /^[a-zA-Z0-9_-]+$/, message: "标识只能包含字母、数字、下划线和连字符" },
           ]}
         >
-          <Input placeholder="project-key" disabled={loading} />
+          <Input placeholder="例如：my-project" disabled={loading} />
         </Form.Item>
         <Form.Item
           name="name"

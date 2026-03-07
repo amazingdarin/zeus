@@ -32,13 +32,14 @@ type AuthResponse struct {
 
 // UserResponse represents user info in response
 type UserResponse struct {
-	ID          string     `json:"id"`
-	Email       string     `json:"email"`
-	Username    string     `json:"username"`
-	DisplayName string     `json:"display_name"`
-	AvatarURL   string     `json:"avatar_url,omitempty"`
-	Status      string     `json:"status"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID          string    `json:"id"`
+	Email       string    `json:"email"`
+	Username    string    `json:"username"`
+	DisplayName string    `json:"display_name"`
+	Language    string    `json:"language"`
+	AvatarURL   string    `json:"avatar_url,omitempty"`
+	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // RefreshResponse represents refresh token response
@@ -50,11 +51,12 @@ type RefreshResponse struct {
 
 // MeResponse represents current user response
 type MeResponse struct {
-	ID          string     `json:"id"`
-	Email       string     `json:"email"`
-	Username    string     `json:"username"`
-	DisplayName string     `json:"display_name"`
-	AvatarURL   string     `json:"avatar_url,omitempty"`
-	Status      string     `json:"status"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID          string    `json:"id"`
+	Email       string    `json:"email"`
+	Username    string    `json:"username"`
+	DisplayName string    `json:"display_name"`
+	Language    string    `json:"language"`
+	AvatarURL   string    `json:"avatar_url,omitempty"`
+	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
 }

@@ -1,10 +1,18 @@
 import { Link } from "react-router-dom";
-import { SettingOutlined, FileTextOutlined, LogoutOutlined, TeamOutlined } from "@ant-design/icons";
+import {
+  SettingOutlined,
+  FileTextOutlined,
+  LogoutOutlined,
+  TeamOutlined,
+  LoginOutlined,
+} from "@ant-design/icons";
 import { Tooltip, Avatar, Dropdown, Typography } from "antd";
 import type { MenuProps } from "antd";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 import ProjectSelector from "./ProjectSelector";
+import MessageCenter from "./MessageCenter";
 
 const { Text } = Typography;
 
@@ -26,10 +34,12 @@ type SidebarProps = {
   items: SidebarItem[];
   activeIndex?: number;
   settingsActive?: boolean;
+  onLoginClick?: () => void;
   onTeamsClick?: () => void;
   onSettingsClick?: () => void;
   onTutorialDocsClick?: () => void;
   user?: UserInfo | null;
+  messageCenterProjectKey?: string | null;
   onLogout?: () => void;
 };
 
@@ -37,13 +47,16 @@ function Sidebar({
   items,
   activeIndex = 0,
   settingsActive = false,
+  onLoginClick,
   onTeamsClick,
   onSettingsClick,
   onTutorialDocsClick,
   user,
+  messageCenterProjectKey,
   onLogout,
 }: SidebarProps) {
-  // Get initials for avatar
+  const { t } = useTranslation("common");
+
   const getInitials = () => {
     if (user?.display_name) {
       return user.display_name.charAt(0).toUpperCase();
@@ -74,29 +87,61 @@ function Sidebar({
         {
           key: "teams",
           icon: <TeamOutlined />,
-          label: "团队",
+          label: t("shell.menu.teams"),
           onClick: onTeamsClick,
         },
         {
           key: "settings",
           icon: <SettingOutlined />,
-          label: "设置",
+          label: t("shell.menu.settings"),
           onClick: onSettingsClick,
         },
         {
           key: "tutorial-docs",
           icon: <FileTextOutlined />,
-          label: "教程说明",
+          label: t("shell.menu.tutorialDocs"),
           onClick: onTutorialDocsClick,
         },
         {
           key: "logout",
           icon: <LogoutOutlined />,
-          label: "退出登录",
+          label: t("shell.menu.logout"),
           onClick: onLogout,
         },
       ]
-    : [];
+    : [
+        {
+          key: "guest-info",
+          label: (
+            <div style={{ padding: "8px 0", minWidth: 180 }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>{t("shell.guest.title")}</div>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {t("shell.guest.description")}
+              </Text>
+            </div>
+          ),
+          disabled: true,
+        },
+        { type: "divider" as const },
+        {
+          key: "login",
+          icon: <LoginOutlined />,
+          label: t("shell.menu.login"),
+          onClick: onLoginClick,
+        },
+        {
+          key: "settings",
+          icon: <SettingOutlined />,
+          label: t("shell.menu.settings"),
+          onClick: onSettingsClick,
+        },
+        {
+          key: "tutorial-docs",
+          icon: <FileTextOutlined />,
+          label: t("shell.menu.tutorialDocs"),
+          onClick: onTutorialDocsClick,
+        },
+      ];
 
   return (
     <aside className="sidebar compact">
@@ -127,31 +172,36 @@ function Sidebar({
         })}
       </nav>
       <div className="sidebar-spacer" />
-      {user && (
-        <Dropdown
-          menu={{ items: userMenuItems }}
-          placement="topRight"
-          trigger={["click"]}
-        >
-          <div className="sidebar-user">
-            <Tooltip title={user.display_name || user.username} placement="right" mouseEnterDelay={0.3}>
-              {user.avatar_url ? (
-                <Avatar src={user.avatar_url} size={32} style={{ cursor: "pointer" }} />
-              ) : (
-                <Avatar
-                  size={32}
-                  style={{
-                    backgroundColor: "#667eea",
-                    cursor: "pointer",
-                  }}
-                >
-                  {getInitials()}
-                </Avatar>
-              )}
-            </Tooltip>
-          </div>
-        </Dropdown>
-      )}
+      <div className="sidebar-message-center">
+        <MessageCenter projectKey={messageCenterProjectKey ?? null} />
+      </div>
+      <Dropdown
+        menu={{ items: userMenuItems }}
+        placement="topRight"
+        trigger={["click"]}
+      >
+        <div className="sidebar-user">
+          <Tooltip
+            title={user ? (user.display_name || user.username) : t("shell.guest.title")}
+            placement="right"
+            mouseEnterDelay={0.3}
+          >
+            {user?.avatar_url ? (
+              <Avatar src={user.avatar_url} size={32} style={{ cursor: "pointer" }} />
+            ) : (
+              <Avatar
+                size={32}
+                style={{
+                  backgroundColor: user ? "#667eea" : "#94a3b8",
+                  cursor: "pointer",
+                }}
+              >
+                {user ? getInitials() : "G"}
+              </Avatar>
+            )}
+          </Tooltip>
+        </div>
+      </Dropdown>
     </aside>
   );
 }

@@ -53,6 +53,73 @@ test("DocGuard: unknown mark type treated as protocol error", () => {
   assert.equal(result.issues.some((i) => i.code === "protocol_unknown_mark_type"), true);
 });
 
+test("DocGuard: columns node should pass protocol validation", () => {
+  const proposed = {
+    type: "doc",
+    content: [
+      {
+        type: "columns",
+        attrs: { id: "cols-1", count: 2, widths: [1, 1] },
+        content: [
+          {
+            type: "column",
+            attrs: { id: "col-1" },
+            content: [
+              {
+                type: "paragraph",
+                attrs: { id: "p-1" },
+                content: [{ type: "text", text: "left" }],
+              },
+            ],
+          },
+          {
+            type: "column",
+            attrs: { id: "col-2" },
+            content: [
+              {
+                type: "paragraph",
+                attrs: { id: "p-2" },
+                content: [{ type: "text", text: "right" }],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  const result = runDocGuard({
+    policy: "protocol_only",
+    proposedDoc: proposed,
+  });
+
+  assert.equal(result.protocolPassed, true);
+  assert.equal(result.passed, true);
+  assert.equal(result.issues.some((i) => i.code === "protocol_unknown_node_type"), false);
+});
+
+test("DocGuard: custom editor block nodes should pass protocol validation", () => {
+  const proposed = {
+    type: "doc",
+    content: [
+      { type: "mindmap", attrs: { id: "mindmap-1" } },
+      { type: "openapi", attrs: { id: "openapi-1" } },
+      { type: "openapi_ref", attrs: { id: "openapi-ref-1" } },
+      { type: "block_ref", attrs: { id: "block-ref-1", doc_id: "doc-1", block_id: "b-1" } },
+      { type: "edu_question_set", attrs: { id: "edu-1", schemaVersion: 1, stem: "", questions: [] } },
+    ],
+  };
+
+  const result = runDocGuard({
+    policy: "protocol_only",
+    proposedDoc: proposed,
+  });
+
+  assert.equal(result.protocolPassed, true);
+  assert.equal(result.passed, true);
+  assert.equal(result.issues.some((i) => i.code === "protocol_unknown_node_type"), false);
+});
+
 test("DocGuard: additive strict fails when original block IDs are missing", () => {
   const original = {
     type: "doc",
@@ -155,4 +222,3 @@ test("DocGuard: additive strict allows replacing the top summary subtree", () =>
   assert.equal(result.additivePassed, true);
   assert.equal(result.passed, true);
 });
-

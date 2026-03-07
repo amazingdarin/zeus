@@ -17,7 +17,7 @@
 
 | Service | Connection Info | Status |
 |---------|-----------------|--------|
-| **PostgreSQL** | `localhost:5432` (db: `zeus`, user: `zeus`) | Running (Docker) |
+| **PostgreSQL** | `localhost:5432` (db: `zeus`, user: `zeus`, via `kubectl port-forward`) | Backed by k3s service `postgres/postgres` |
 | **Object Storage** | `http://localhost:9000` (S3 API) | Configured |
 | **Git Remote** | `git@github.com:code-yeongyu/zeus.git` (implied) | Branch: `main` |
 
@@ -37,6 +37,19 @@ The project includes an automation script `scripts/dev-skill.sh` that provides t
 - **Usage**: `scripts/dev-skill.sh watch-code`
 
 ## 4. Quick Start
+
+Start the PostgreSQL port-forward before running local services:
+
+```bash
+KUBECONFIG=/Users/darin/mine/code/homeserver/secrets/kubeconfig_gz_cluster.yaml kubectl -n postgres port-forward svc/postgres 5432:5432
+```
+
+Local dev now uses the k3s PostgreSQL instance in namespace `postgres`.
+
+- `server/config.yaml` points to `localhost:5432`, and a local-only `server/config.local.yaml` is auto-merged if present.
+- `make run-app-backend` loads `apps/app-backend/.env` and then overrides it with `apps/app-backend/.env.local`.
+- `apps/app-backend/.env.local` must point to the same PostgreSQL instance as `server/config.local.yaml`; otherwise `/api/projects` can succeed while project-scoped app-backend routes return `PROJECT_NOT_FOUND`.
+- The cluster PostgreSQL password is stored outside this repo in `/Users/darin/mine/code/homeserver/secrets/postgresql_access.txt`.
 
 Run all automation in background:
 ```bash
@@ -58,9 +71,6 @@ langfuse:
 
 # Local k3s storage class (recommended)
 postgres:
-  persistence:
-    storageClassName: local-path
-rustfs:
   persistence:
     storageClassName: local-path
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Editor, JSONContent } from "@tiptap/react";
+import { MessageOutlined } from "@ant-design/icons";
 
 import RichTextEditor from "./RichTextEditor";
 import {
@@ -24,12 +25,17 @@ import {
   shouldFlushOn,
 } from "../features/document-editor/workspace-model";
 import { reduceLockFallbackState } from "../features/document-editor/lock-fallback";
-import { useScrollToBlock } from "@zeus/doc-editor";
+import {
+  type CodeExecBlockState,
+  type CodeExecTriggerInput,
+  useScrollToBlock,
+} from "@zeus/doc-editor";
 import {
   toSelectionRange,
   type WorkspaceBridge,
   type WorkspaceSnapshot,
 } from "../features/document-tabs/workspace-bridge";
+import type { BlockCommentAnchorRect } from "../features/document-page/block-comment-floating";
 
 const EMPTY_DOC: JSONContent = {
   type: "doc",
@@ -62,6 +68,17 @@ type DocumentWorkspaceProps = {
   onFocusBind?: (handler: (() => void) | null) => void;
   onBridgeBind?: (bridge: WorkspaceBridge | null) => void;
   onTitleChange?: (nextTitle: string) => void;
+  onCodeExecRun?: (input: CodeExecTriggerInput) => Promise<void> | void;
+  codeExecStateByBlockId?: Record<string, CodeExecBlockState>;
+  onBlockCommentOpen?: (input: { blockId: string; anchor: BlockCommentAnchorRect | null }) => void;
+  commentCountByBlockId?: Record<string, number>;
+};
+
+type CommentMarker = {
+  blockId: string;
+  count: number;
+  top: number;
+  anchor: BlockCommentAnchorRect;
 };
 
 function reduceWith(state: EditorSaveState, event: EditorSaveEvent): EditorSaveState {
@@ -86,9 +103,119 @@ function mapSnapshotStatusToSaveState(status: WorkspaceSnapshot["saveStatus"]): 
     return { status: "saving", error: "" };
   }
   if (status === "error") {
-    return { status: "error", error: "save failed" };
+    return { status: "error", error: "保存失败" };
   }
   return initialSaveState();
+}
+
+function rectToAnchor(rect: DOMRect): BlockCommentAnchorRect {
+  return {
+    left: rect.left,
+    top: rect.top,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+function resolveBlockAnchorRect(root: HTMLElement | null, blockId: string): BlockCommentAnchorRect | null {
+  const normalizedBlockId = String(blockId ?? "").trim();
+  if (!root || !normalizedBlockId) {
+    return null;
+  }
+  const candidates = root.querySelectorAll<HTMLElement>(".doc-editor-content [data-block-id]");
+  for (const node of candidates) {
+    if (String(node.getAttribute("data-block-id") ?? "").trim() !== normalizedBlockId) {
+      continue;
+    }
+    const rect = node.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      continue;
+    }
+    return rectToAnchor(rect);
+  }
+  return null;
+}
+
+function collectCommentMarkers(
+  root: HTMLElement | null,
+  countByBlockId: Record<string, number>,
+): CommentMarker[] {
+  if (!root || root.offsetParent == null) {
+    return [];
+  }
+  const pairs = Object.entries(countByBlockId ?? {})
+    .map(([rawBlockId, rawCount]) => ({
+      blockId: String(rawBlockId ?? "").trim(),
+      count: Number(rawCount),
+    }))
+    .filter((item) => item.blockId && Number.isFinite(item.count) && item.count > 0);
+  if (pairs.length === 0) {
+    return [];
+  }
+
+  const nodeByBlockId = new Map<string, HTMLElement>();
+  const candidates = root.querySelectorAll<HTMLElement>(".doc-editor-content [data-block-id]");
+  for (const node of candidates) {
+    const blockId = String(node.getAttribute("data-block-id") ?? "").trim();
+    if (!blockId || nodeByBlockId.has(blockId)) {
+      continue;
+    }
+    nodeByBlockId.set(blockId, node);
+  }
+
+  const rootRect = root.getBoundingClientRect();
+  const rootHeight = Math.max(0, rootRect.height);
+
+  const markers: CommentMarker[] = [];
+  for (const pair of pairs) {
+    const node = nodeByBlockId.get(pair.blockId);
+    if (!node) {
+      continue;
+    }
+    const rect = node.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      continue;
+    }
+    const topInRoot = rect.top + Math.min(Math.max(rect.height / 2, 14), 26) - rootRect.top;
+    if (topInRoot < 0 || topInRoot > rootHeight) {
+      continue;
+    }
+    markers.push({
+      blockId: pair.blockId,
+      count: Math.floor(pair.count),
+      top: Math.round(topInRoot),
+      anchor: rectToAnchor(rect),
+    });
+  }
+
+  markers.sort((a, b) => a.top - b.top);
+  const minTop = 12;
+  const maxTop = Math.max(minTop, rootHeight - 12);
+  let previousTop = -1e9;
+  for (const marker of markers) {
+    const adjustedTop = Math.max(marker.top, previousTop + 28, minTop);
+    marker.top = Math.min(adjustedTop, maxTop);
+    previousTop = marker.top;
+  }
+  return markers;
+}
+
+function isSameCommentMarkers(a: CommentMarker[], b: CommentMarker[]): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i += 1) {
+    const left = a[i];
+    const right = b[i];
+    if (
+      left.blockId !== right.blockId
+      || left.count !== right.count
+      || left.top !== right.top
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export default function DocumentWorkspace({
@@ -108,6 +235,10 @@ export default function DocumentWorkspace({
   onFocusBind,
   onBridgeBind,
   onTitleChange,
+  onCodeExecRun,
+  codeExecStateByBlockId,
+  onBlockCommentOpen,
+  commentCountByBlockId,
 }: DocumentWorkspaceProps) {
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
@@ -115,6 +246,7 @@ export default function DocumentWorkspace({
   const [titleValue, setTitleValue] = useState(title);
   const [editorContent, setEditorContent] = useState<JSONContent>(content ?? EMPTY_DOC);
   const [readonlyFallback, setReadonlyFallback] = useState(false);
+  const [commentMarkers, setCommentMarkers] = useState<CommentMarker[]>([]);
   const [saveState, setSaveState] = useState<EditorSaveState>(() =>
     persistMode === "ephemeral"
       ? { status: "draft", error: "" }
@@ -631,27 +763,136 @@ export default function DocumentWorkspace({
 
   const saveHint = useMemo(() => mapSaveStatusText(saveState.status), [saveState.status]);
 
+  const recomputeCommentMarkers = useCallback(() => {
+    const nextMarkers = collectCommentMarkers(workspaceRef.current, commentCountByBlockId ?? {});
+    setCommentMarkers((prev) => (isSameCommentMarkers(prev, nextMarkers) ? prev : nextMarkers));
+  }, [commentCountByBlockId]);
+
+  useEffect(() => {
+    if (!editorReady) {
+      setCommentMarkers([]);
+      return;
+    }
+    recomputeCommentMarkers();
+  }, [documentId, editorContent, editorReady, recomputeCommentMarkers]);
+
+  useEffect(() => {
+    if (!editorReady) {
+      return;
+    }
+    const root = workspaceRef.current;
+    if (!root) {
+      return;
+    }
+    const scrollContainer = findEditorScrollContainer(root);
+    const proseMirror = root.querySelector<HTMLElement>(".doc-editor-content .tiptap.ProseMirror");
+    if (!scrollContainer || !proseMirror) {
+      return;
+    }
+    let frame = 0;
+    const schedule = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        recomputeCommentMarkers();
+      });
+    };
+    scrollContainer.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    let observer: MutationObserver | null = null;
+    if (typeof MutationObserver !== "undefined") {
+      observer = new MutationObserver(schedule);
+      observer.observe(proseMirror, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+      });
+    }
+    schedule();
+    return () => {
+      window.cancelAnimationFrame(frame);
+      scrollContainer.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      observer?.disconnect();
+    };
+  }, [editorReady, recomputeCommentMarkers]);
+
+  const handleWorkspaceBlockCommentOpen = useCallback(
+    (input: { blockId: string }) => {
+      if (!onBlockCommentOpen) {
+        return;
+      }
+      const normalizedBlockId = String(input.blockId ?? "").trim();
+      if (!normalizedBlockId) {
+        return;
+      }
+      const anchor = resolveBlockAnchorRect(workspaceRef.current, normalizedBlockId);
+      onBlockCommentOpen({
+        blockId: normalizedBlockId,
+        anchor,
+      });
+    },
+    [onBlockCommentOpen],
+  );
+
   return (
     <div className={`document-workspace${readonly ? " document-workspace-readonly" : ""}`} ref={workspaceRef}>
-      {showTitle ? (
-        <div className="document-workspace-title-row">
-          <input
-            className="document-workspace-title-input"
-            value={titleValue}
-            placeholder="无标题文档"
-            readOnly={readonly}
-            onChange={(event) => handleTitleChange(event.target.value)}
-          />
+      <div className="document-workspace-main">
+        <aside className="document-workspace-side-left" aria-label="块功能栏" />
+        <div className="document-workspace-center">
+          {showTitle ? (
+            <div className="document-workspace-title-row">
+              <input
+                className="document-workspace-title-input"
+                value={titleValue}
+                placeholder="无标题文档"
+                readOnly={readonly}
+                onChange={(event) => handleTitleChange(event.target.value)}
+              />
+            </div>
+          ) : null}
+          <div className="document-workspace-editor-pane">
+            <RichTextEditor
+              content={editorContent}
+              projectKey={projectKey}
+              docId={documentId}
+              mode={readonly ? "view" : "edit"}
+              onChange={handleEditorChange}
+              onEditorReady={handleEditorReady}
+              onCodeExecRun={onCodeExecRun}
+              codeExecStateByBlockId={codeExecStateByBlockId}
+              onBlockCommentOpen={handleWorkspaceBlockCommentOpen}
+              commentCountByBlockId={commentCountByBlockId}
+            />
+          </div>
         </div>
-      ) : null}
-      <RichTextEditor
-        content={editorContent}
-        projectKey={projectKey}
-        docId={documentId}
-        mode={readonly ? "view" : "edit"}
-        onChange={handleEditorChange}
-        onEditorReady={handleEditorReady}
-      />
+        <aside className="document-workspace-side-right" aria-label="评论功能栏">
+          {onBlockCommentOpen && commentMarkers.length > 0 ? (
+            <div className="document-workspace-comment-markers" aria-label="文档块评论入口">
+              {commentMarkers.map((marker) => (
+                <button
+                  key={`comment-marker-${marker.blockId}`}
+                  className="document-workspace-comment-marker"
+                  type="button"
+                  style={{
+                    top: `${marker.top}px`,
+                  }}
+                  onClick={() => {
+                    onBlockCommentOpen({
+                      blockId: marker.blockId,
+                      anchor: marker.anchor,
+                    });
+                  }}
+                  title={`查看块评论（${marker.count}）`}
+                  aria-label={`查看块评论（${marker.count}）`}
+                >
+                  <MessageOutlined />
+                  <span className="document-workspace-comment-marker-count">{marker.count}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </aside>
+      </div>
       {saveState.status === "error" && saveState.error ? (
         <div className="document-workspace-save-tip error" title={saveState.error}>
           {saveHint}: {saveState.error}

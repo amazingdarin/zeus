@@ -1,143 +1,161 @@
-import React, { useState } from 'react';
-import { Form, Input, Button, Card, Typography, message, Divider } from 'antd';
-import { UserOutlined, LockOutlined, MailOutlined } from '@ant-design/icons';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import React, { useState } from "react";
+import { Button, Card, Divider, Form, Input, Typography } from "antd";
+import { useAppFeedback } from "../hooks/useAppFeedback";
+import { UserOutlined, LockOutlined, MailOutlined } from "@ant-design/icons";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+
+import { useAuth } from "../context/AuthContext";
 
 const { Title, Text } = Typography;
 
 interface RegisterFormValues {
-  email: string;
-  username: string;
-  password: string;
-  confirmPassword: string;
-  display_name?: string;
+	email: string;
+	username: string;
+	password: string;
+	confirmPassword: string;
+	display_name?: string;
 }
 
 export function RegisterPage() {
-  const [loading, setLoading] = useState(false);
-  const { register } = useAuth();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const from = (location.state as { from?: string })?.from || '/';
+	const { messageApi } = useAppFeedback();
+	const { t } = useTranslation("auth");
+	const [loading, setLoading] = useState(false);
+	const { register } = useAuth();
+	const navigate = useNavigate();
+	const location = useLocation();
+	const from = (location.state as { from?: string })?.from || "/";
 
-  const onFinish = async (values: RegisterFormValues) => {
-    setLoading(true);
-    try {
-      await register({
-        email: values.email,
-        username: values.username,
-        password: values.password,
-        display_name: values.display_name,
-      });
-      message.success('注册成功');
-      navigate(from, { replace: true });
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '注册失败');
-    } finally {
-      setLoading(false);
-    }
-  };
+	const onFinish = async (values: RegisterFormValues) => {
+		setLoading(true);
+		try {
+			await register({
+				email: values.email,
+				username: values.username,
+				password: values.password,
+				display_name: values.display_name,
+			});
+			messageApi.success(t("auth.register.success"));
+			navigate(from, { replace: true });
+		} catch (error) {
+			messageApi.error(
+				error instanceof Error ? error.message : t("auth.register.failure"),
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
 
-  return (
-    <div className="login-page">
-      <Card className="login-card">
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <Title level={2} className="login-logo">创建账号</Title>
-          <Text type="secondary">加入 Zeus 智能文档管理系统</Text>
-        </div>
-        
-        <Form
-          name="register"
-          onFinish={onFinish}
-          autoComplete="off"
-          layout="vertical"
-          size="large"
-        >
-          <Form.Item
-            name="email"
-            rules={[
-              { required: true, message: '请输入邮箱' },
-              { type: 'email', message: '请输入有效的邮箱地址' }
-            ]}
-          >
-            <Input 
-              prefix={<MailOutlined />} 
-              placeholder="邮箱" 
-            />
-          </Form.Item>
+	return (
+		<div className="login-page">
+			<Card className="login-card">
+				<div style={{ textAlign: "center", marginBottom: 24 }}>
+					<Title level={2} className="login-logo">
+						{t("auth.register.heading")}
+					</Title>
+					<Text type="secondary">{t("auth.register.subtitle")}</Text>
+				</div>
 
-          <Form.Item
-            name="username"
-            rules={[
-              { required: true, message: '请输入用户名' },
-              { min: 3, max: 30, message: '用户名长度应为3-30个字符' },
-              { pattern: /^[a-zA-Z][a-zA-Z0-9_-]*$/, message: '用户名必须以字母开头，只能包含字母、数字、下划线和连字符' }
-            ]}
-          >
-            <Input 
-              prefix={<UserOutlined />} 
-              placeholder="用户名" 
-            />
-          </Form.Item>
+				<Form
+					name="register"
+					onFinish={onFinish}
+					autoComplete="off"
+					layout="vertical"
+					size="large"
+				>
+					<Form.Item
+						name="email"
+						rules={[
+							{ required: true, message: t("auth.register.emailRequired") },
+							{ type: "email", message: t("auth.register.emailInvalid") },
+						]}
+					>
+						<Input
+							prefix={<MailOutlined />}
+							placeholder={t("auth.register.emailPlaceholder")}
+						/>
+					</Form.Item>
 
-          <Form.Item
-            name="display_name"
-          >
-            <Input 
-              prefix={<UserOutlined />} 
-              placeholder="显示名称（可选）" 
-            />
-          </Form.Item>
+					<Form.Item
+						name="username"
+						rules={[
+							{ required: true, message: t("auth.register.usernameRequired") },
+							{ min: 3, max: 30, message: t("auth.register.usernameLength") },
+							{
+								pattern: /^[a-zA-Z][a-zA-Z0-9_-]*$/,
+								message: t("auth.register.usernamePattern"),
+							},
+						]}
+					>
+						<Input
+							prefix={<UserOutlined />}
+							placeholder={t("auth.register.usernamePlaceholder")}
+						/>
+					</Form.Item>
 
-          <Form.Item
-            name="password"
-            rules={[
-              { required: true, message: '请输入密码' },
-              { min: 8, message: '密码长度至少8个字符' }
-            ]}
-          >
-            <Input.Password 
-              prefix={<LockOutlined />} 
-              placeholder="密码" 
-            />
-          </Form.Item>
+					<Form.Item name="display_name">
+						<Input
+							prefix={<UserOutlined />}
+							placeholder={t("auth.register.displayNamePlaceholder")}
+						/>
+					</Form.Item>
 
-          <Form.Item
-            name="confirmPassword"
-            dependencies={['password']}
-            rules={[
-              { required: true, message: '请确认密码' },
-              ({ getFieldValue }) => ({
-                validator(_, value) {
-                  if (!value || getFieldValue('password') === value) {
-                    return Promise.resolve();
-                  }
-                  return Promise.reject(new Error('两次输入的密码不一致'));
-                },
-              }),
-            ]}
-          >
-            <Input.Password 
-              prefix={<LockOutlined />} 
-              placeholder="确认密码" 
-            />
-          </Form.Item>
+					<Form.Item
+						name="password"
+						rules={[
+							{ required: true, message: t("auth.register.passwordRequired") },
+							{ min: 8, message: t("auth.register.passwordLength") },
+						]}
+					>
+						<Input.Password
+							prefix={<LockOutlined />}
+							placeholder={t("auth.register.passwordPlaceholder")}
+						/>
+					</Form.Item>
 
-          <Form.Item>
-            <Button type="primary" htmlType="submit" loading={loading} block>
-              注册
-            </Button>
-          </Form.Item>
-        </Form>
-        
-        <Divider>或</Divider>
-        
-        <div style={{ textAlign: 'center' }}>
-          <Text>已有账号？</Text>
-          <Link to="/login" state={{ from }}> 立即登录</Link>
-        </div>
-      </Card>
-    </div>
-  );
+					<Form.Item
+						name="confirmPassword"
+						dependencies={["password"]}
+						rules={[
+							{
+								required: true,
+								message: t("auth.register.confirmPasswordRequired"),
+							},
+							({ getFieldValue }) => ({
+								validator(_, value) {
+									if (!value || getFieldValue("password") === value) {
+										return Promise.resolve();
+									}
+									return Promise.reject(
+										new Error(t("auth.register.passwordMismatch")),
+									);
+								},
+							}),
+						]}
+					>
+						<Input.Password
+							prefix={<LockOutlined />}
+							placeholder={t("auth.register.confirmPasswordPlaceholder")}
+						/>
+					</Form.Item>
+
+					<Form.Item>
+						<Button type="primary" htmlType="submit" loading={loading} block>
+							{t("auth.register.title")}
+						</Button>
+					</Form.Item>
+				</Form>
+
+				<Divider>{t("auth.register.or")}</Divider>
+
+				<div style={{ textAlign: "center" }}>
+					<Text>{t("auth.register.hasAccount")}</Text>
+					<Link to="/login" state={{ from }}>
+						{" "}
+						{t("auth.register.loginNow")}
+					</Link>
+				</div>
+			</Card>
+		</div>
+	);
 }

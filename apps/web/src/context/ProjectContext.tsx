@@ -16,6 +16,9 @@ import {
   type Project as ApiProject,
   type ProjectOwnerContext,
 } from "../api/projects";
+import { buildProjectRef, parseProjectRef } from "../config/api";
+import { readLastProjectRef, writeLastProjectRef } from "./project-ref-storage";
+import { requiresAuthForCoreRoutes } from "../utils/runtime";
 import { useAuth } from "./AuthContext";
 
 export type Project = ApiProject;
@@ -34,7 +37,8 @@ export type ProjectContextValue = {
 
 const ProjectContext = createContext<ProjectContextValue | undefined>(undefined);
 
-const lastProjectRefStorageKey = "zeus.lastProjectRef";
+const localDefaultProjectKey =
+  String(import.meta.env.VITE_LOCAL_DEFAULT_PROJECT_KEY ?? "").trim() || "test";
 
 type ProjectProviderProps = {
   children: ReactNode;
@@ -42,12 +46,50 @@ type ProjectProviderProps = {
 
 function ProjectProvider({ children }: ProjectProviderProps) {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const coreAuthRequired = requiresAuthForCoreRoutes();
   const [projects, setProjects] = useState<Project[]>([]);
   const [ownerContexts, setOwnerContexts] = useState<ProjectOwnerContext[]>([]);
   const [currentProjectRef, setCurrentProjectRef] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const mountedRef = useRef(true);
   const hasLoadedRef = useRef(false);
+
+  const applyAnonymousProjectState = useCallback(() => {
+    const storedRef = readLastProjectRef();
+    const parsed = parseProjectRef(storedRef ?? "");
+    const projectKey = String(parsed.projectKey ?? "").trim() || localDefaultProjectKey;
+    const fallbackRef = buildProjectRef({
+      ownerType: "personal",
+      ownerKey: "me",
+      projectKey,
+    });
+
+    const anonymousProject: Project = {
+      id: `local-${projectKey}`,
+      key: projectKey,
+      name: projectKey,
+      ownerType: "personal",
+      ownerKey: "me",
+      ownerId: "default-user",
+      ownerName: "个人",
+      canWrite: true,
+      projectRef: fallbackRef,
+    };
+
+    const anonymousContext: ProjectOwnerContext = {
+      ownerType: "personal",
+      ownerKey: "me",
+      ownerId: "default-user",
+      ownerName: "个人",
+      myRole: "owner",
+      canCreate: false,
+    };
+
+    setProjects([anonymousProject]);
+    setOwnerContexts([anonymousContext]);
+    setCurrentProjectRef(fallbackRef);
+    writeLastProjectRef(fallbackRef);
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -58,9 +100,13 @@ function ProjectProvider({ children }: ProjectProviderProps) {
 
   const reloadProjects = useCallback(async () => {
     if (!isAuthenticated) {
-      setProjects([]);
-      setOwnerContexts([]);
-      setCurrentProjectRef(null);
+      if (coreAuthRequired) {
+        setProjects([]);
+        setOwnerContexts([]);
+        setCurrentProjectRef(null);
+      } else {
+        applyAnonymousProjectState();
+      }
       return;
     }
 
@@ -73,7 +119,7 @@ function ProjectProvider({ children }: ProjectProviderProps) {
       setProjects(result.projects);
       setOwnerContexts(result.contexts);
 
-      const storedRef = localStorage.getItem(lastProjectRefStorageKey);
+      const storedRef = readLastProjectRef();
       const hasStored = storedRef
         ? result.projects.some((project) => project.projectRef === storedRef)
         : false;
@@ -84,9 +130,9 @@ function ProjectProvider({ children }: ProjectProviderProps) {
         const fallbackRef = result.projects[0]?.projectRef ?? null;
         setCurrentProjectRef(fallbackRef);
         if (fallbackRef) {
-          localStorage.setItem(lastProjectRefStorageKey, fallbackRef);
+          writeLastProjectRef(fallbackRef);
         } else {
-          localStorage.removeItem(lastProjectRefStorageKey);
+          writeLastProjectRef(null);
         }
       }
     } catch (error) {
@@ -94,14 +140,19 @@ function ProjectProvider({ children }: ProjectProviderProps) {
         return;
       }
       console.error("Failed to load projects:", error);
-      setProjects([]);
-      setOwnerContexts([]);
+      if (coreAuthRequired) {
+        setProjects([]);
+        setOwnerContexts([]);
+        setCurrentProjectRef(null);
+      } else {
+        applyAnonymousProjectState();
+      }
     } finally {
       if (mountedRef.current) {
         setLoading(false);
       }
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, coreAuthRequired, applyAnonymousProjectState]);
 
   useEffect(() => {
     if (authLoading) {
@@ -112,12 +163,16 @@ function ProjectProvider({ children }: ProjectProviderProps) {
       reloadProjects();
       hasLoadedRef.current = true;
     } else {
-      setProjects([]);
-      setOwnerContexts([]);
-      setCurrentProjectRef(null);
+      if (coreAuthRequired) {
+        setProjects([]);
+        setOwnerContexts([]);
+        setCurrentProjectRef(null);
+      } else {
+        applyAnonymousProjectState();
+      }
       hasLoadedRef.current = false;
     }
-  }, [isAuthenticated, authLoading, reloadProjects]);
+  }, [isAuthenticated, authLoading, reloadProjects, coreAuthRequired, applyAnonymousProjectState]);
 
   useEffect(() => {
     if (projects.length === 0) {
@@ -129,9 +184,9 @@ function ProjectProvider({ children }: ProjectProviderProps) {
     const fallbackRef = projects[0]?.projectRef ?? null;
     setCurrentProjectRef(fallbackRef);
     if (fallbackRef) {
-      localStorage.setItem(lastProjectRefStorageKey, fallbackRef);
+      writeLastProjectRef(fallbackRef);
     } else {
-      localStorage.removeItem(lastProjectRefStorageKey);
+      writeLastProjectRef(null);
     }
   }, [projects, currentProjectRef]);
 
@@ -144,11 +199,11 @@ function ProjectProvider({ children }: ProjectProviderProps) {
     const trimmed = String(projectRef ?? "").trim();
     if (!trimmed) {
       setCurrentProjectRef(null);
-      localStorage.removeItem(lastProjectRefStorageKey);
+      writeLastProjectRef(null);
       return;
     }
     setCurrentProjectRef(trimmed);
-    localStorage.setItem(lastProjectRefStorageKey, trimmed);
+    writeLastProjectRef(trimmed);
   };
 
   const value = useMemo(

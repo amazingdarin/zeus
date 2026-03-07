@@ -6,6 +6,20 @@ import type { ReactNode } from "react"
 
 import { CodeBlockNodeView } from "./code-block-node"
 
+export type CodeExecTriggerInput = {
+  blockId: string
+  language: string
+  code: string
+}
+
+export type CodeExecTrigger = (input: CodeExecTriggerInput) => Promise<void> | void
+
+export type CodeExecBlockState = {
+  running?: boolean
+  lastStatus?: string
+  lastRunId?: string
+}
+
 export type CodeBlockRenderer = {
   id: string
   label: string
@@ -25,6 +39,8 @@ export type CodeBlockNodeOptions = CodeBlockLowlightOptions & {
   defaultRenderer?: "auto" | string
   fetcher?: (url: string, init?: RequestInit) => Promise<Response>
   projectKey?: string
+  onCodeExecRun?: CodeExecTrigger
+  codeExecStateByBlockId?: Record<string, CodeExecBlockState>
 }
 
 const defaultLowlight = createLowlight(common)
@@ -45,6 +61,8 @@ export const CodeBlockNode = CodeBlockLowlight.extend<CodeBlockNodeOptions>({
       defaultRenderer: parentOptions?.defaultRenderer ?? "auto",
       fetcher: parentOptions?.fetcher,
       projectKey: parentOptions?.projectKey ?? "",
+      onCodeExecRun: parentOptions?.onCodeExecRun,
+      codeExecStateByBlockId: parentOptions?.codeExecStateByBlockId ?? {},
     }
     return options
   },

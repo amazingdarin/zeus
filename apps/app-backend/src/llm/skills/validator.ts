@@ -30,8 +30,15 @@ const BLOCK_TYPES = new Set([
   "tableRow",
   "tableCell",
   "tableHeader",
+  "columns",
+  "column",
   "toc",
   "chart",      // ECharts 图表
+  "mindmap",
+  "openapi",
+  "openapi_ref",
+  "block_ref",
+  "edu_question_set",
   "unsupportedPluginBlock",
 ]);
 
@@ -77,6 +84,7 @@ const CHILD_CONSTRAINTS: Record<string, string[]> = {
   taskList: ["taskItem"],
   table: ["tableRow"],
   tableRow: ["tableCell", "tableHeader"],
+  columns: ["column"],
 };
 
 /**

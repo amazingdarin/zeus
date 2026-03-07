@@ -1,5 +1,19 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import {
+  CloseOutlined,
+  CopyOutlined,
+  DeleteOutlined,
+  ExportOutlined,
+  FileAddOutlined,
+  ImportOutlined,
+  LockOutlined,
+  RocketOutlined,
+  SaveOutlined,
+  UnlockOutlined,
+} from "@ant-design/icons";
+import { Switch } from "antd";
 
 type BreadcrumbItem = {
   label: string;
@@ -25,6 +39,30 @@ function truncateLabel(label: string): string {
   return label.slice(0, maxLength) + "...";
 }
 
+type MenuItemButtonProps = {
+  label: string;
+  icon: ReactNode;
+  onClick: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+};
+
+function MenuItemButton({ label, icon, onClick, danger = false, disabled = false }: MenuItemButtonProps) {
+  return (
+    <button
+      className={`kb-menu-item${danger ? " kb-menu-item-danger" : ""}`}
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+    >
+      <span className="kb-menu-item-left">
+        <span className="kb-menu-item-icon">{icon}</span>
+        <span className="kb-menu-item-label">{label}</span>
+      </span>
+    </button>
+  );
+}
+
 type DocumentHeaderProps = {
   breadcrumbItems: BreadcrumbItem[];
   mode: "view" | "edit";
@@ -37,6 +75,9 @@ type DocumentHeaderProps = {
   syncStatus?: DocumentSyncStatus;
   syncError?: string | null;
   syncDisabled?: boolean;
+  locked?: boolean;
+  lockBusy?: boolean;
+  onLockToggle?: () => void;
   editorSaveStatus?: DocumentEditorSaveStatus;
   editorSaveError?: string | null;
   onSave: () => void;
@@ -80,6 +121,9 @@ function DocumentHeader({
   syncStatus = "idle",
   syncError = null,
   syncDisabled = false,
+  locked = false,
+  lockBusy = false,
+  onLockToggle,
   editorSaveStatus = "idle",
   editorSaveError = null,
   onSave,
@@ -94,6 +138,7 @@ function DocumentHeader({
   onViewSyncLogs,
   onRetryEditorSave,
 }: DocumentHeaderProps) {
+  const { t } = useTranslation("document");
   const [menuOpen, setMenuOpen] = useState(false);
 
   const handleToggle = () => {
@@ -164,6 +209,13 @@ function DocumentHeader({
     onSync();
   };
 
+  const handleLockToggle = () => {
+    if (!onLockToggle) {
+      return;
+    }
+    onLockToggle();
+  };
+
   const handleViewSyncLogs = () => {
     if (!onViewSyncLogs) {
       return;
@@ -220,7 +272,7 @@ function DocumentHeader({
                 type="button"
                 onClick={onRetryEditorSave}
               >
-                重试
+                {t("document.header.retry")}
               </button>
             ) : null}
           </div>
@@ -244,7 +296,7 @@ function DocumentHeader({
                     type="button"
                     onClick={handleViewSyncLogs}
                   >
-                    查看最近同步日志
+                    {t("document.sync.viewLogs")}
                   </button>
                 ) : null}
               </div>
@@ -254,14 +306,14 @@ function DocumentHeader({
                 onClick={handleSync}
                 disabled={syncDisabled}
               >
-                {syncStatus === "syncing" ? "同步中..." : "立即同步"}
+                {syncStatus === "syncing" ? t("document.sync.syncing") : t("document.sync.syncNow")}
               </button>
             </div>
           ) : null}
           <button
             className="kb-menu-button"
             type="button"
-            aria-label="打开菜单"
+            aria-label={t("document.header.openMenu")}
             onClick={handleToggle}
           >
             ...
@@ -270,49 +322,85 @@ function DocumentHeader({
             <div className="kb-menu" role="menu">
               {mode === "edit" ? (
                 <>
-                  <button className="kb-menu-item" type="button" onClick={handleSave}>
-                    保存
-                  </button>
-                  <button className="kb-menu-item" type="button" onClick={handleCancel}>
-                    取消
-                  </button>
+                  <MenuItemButton
+                    label={t("document.menu.save")}
+                    icon={<SaveOutlined />}
+                    onClick={handleSave}
+                  />
+                  <MenuItemButton
+                    label={t("document.menu.cancel")}
+                    icon={<CloseOutlined />}
+                    onClick={handleCancel}
+                  />
                 </>
               ) : (
                 <>
                   {allowChildActions ? (
-                    <button className="kb-menu-item" type="button" onClick={handleNew}>
-                      新建
-                    </button>
+                    <MenuItemButton
+                      label={t("document.menu.new")}
+                      icon={<FileAddOutlined />}
+                      onClick={handleNew}
+                    />
                   ) : null}
                   {onDuplicate ? (
-                    <button className="kb-menu-item" type="button" onClick={handleDuplicate}>
-                      创建副本
-                    </button>
+                    <MenuItemButton
+                      label={t("document.menu.duplicate")}
+                      icon={<CopyOutlined />}
+                      onClick={handleDuplicate}
+                    />
                   ) : null}
                   {allowChildActions ? (
-                    <button className="kb-menu-item" type="button" onClick={handleImport}>
-                      导入
-                    </button>
+                    <MenuItemButton
+                      label={t("document.menu.import")}
+                      icon={<ImportOutlined />}
+                      onClick={handleImport}
+                    />
                   ) : null}
                   {onExport ? (
-                    <button className="kb-menu-item" type="button" onClick={handleExport}>
-                      导出
-                    </button>
+                    <MenuItemButton
+                      label={t("document.menu.export")}
+                      icon={<ExportOutlined />}
+                      onClick={handleExport}
+                    />
                   ) : null}
                   {allowOptimize && onOptimize ? (
-                    <button className="kb-menu-item" type="button" onClick={handleOptimize}>
-                      优化
-                    </button>
+                    <MenuItemButton
+                      label={t("document.menu.optimize")}
+                      icon={<RocketOutlined />}
+                      onClick={handleOptimize}
+                    />
+                  ) : null}
+                  {onLockToggle ? (
+                    <div className="kb-menu-item kb-menu-item-lock" role="menuitem">
+                      <span className="kb-menu-item-left">
+                        <span className="kb-menu-item-icon">
+                          {locked ? <UnlockOutlined /> : <LockOutlined />}
+                        </span>
+                        <span className="kb-menu-item-label">
+                          {locked ? t("document.menu.unlock") : t("document.menu.lock")}
+                        </span>
+                      </span>
+                      <span className="kb-menu-item-right">
+                        <Switch
+                          size="small"
+                          checked={locked}
+                          loading={lockBusy}
+                          onChange={handleLockToggle}
+                          onClick={(_, event) => {
+                            event.stopPropagation();
+                          }}
+                        />
+                      </span>
+                    </div>
                   ) : null}
                   {allowDelete && onDelete ? (
-                    <button
-                      className="kb-menu-item kb-menu-item-danger"
-                      type="button"
+                    <MenuItemButton
+                      label={deleting ? t("document.menu.deleting") : t("document.menu.moveToTrash")}
+                      icon={<DeleteOutlined />}
                       onClick={handleDelete}
+                      danger
                       disabled={deleting}
-                    >
-                      {deleting ? "删除中..." : "删除"}
-                    </button>
+                    />
                   ) : null}
                 </>
               )}

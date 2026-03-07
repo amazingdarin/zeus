@@ -8,6 +8,7 @@ type User struct {
 	Username        string     `gorm:"column:username;not null;unique"`
 	PasswordHash    string     `gorm:"column:password_hash;not null"`
 	DisplayName     string     `gorm:"column:display_name"`
+	Language        string     `gorm:"column:language;not null;default:zh-CN"`
 	AvatarURL       string     `gorm:"column:avatar_url"`
 	Status          string     `gorm:"column:status;not null;default:active"`
 	EmailVerifiedAt *time.Time `gorm:"column:email_verified_at"`

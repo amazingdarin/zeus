@@ -16,6 +16,7 @@ import { AuthProvider } from "./context/AuthContext";
 import { ThemeProvider } from "./context/ThemeContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { bootstrapGeneralSettings, ensureSystemSession } from "./config/api";
+import { bootstrapLocale } from "./i18n/runtime";
 import { usePluginRuntime, type PluginRouteEntry } from "./context/PluginRuntimeContext";
 import { requiresAuthForCoreRoutes } from "./utils/runtime";
 import "./App.css";
@@ -63,6 +64,7 @@ function App() {
     Promise.allSettled([
       ensureSystemSession(),
       bootstrapGeneralSettings(),
+      bootstrapLocale(),
     ])
       .finally(() => {
         if (mounted) {

@@ -21,6 +21,7 @@ export interface User {
   avatar_url?: string;
   status: string;
   created_at: string;
+  language: string;
 }
 
 export interface AuthResponse {

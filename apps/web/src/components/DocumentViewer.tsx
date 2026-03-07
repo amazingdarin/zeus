@@ -134,7 +134,7 @@ function DocumentViewer({ projectKey, storageObjectId }: DocumentViewerProps) {
   }
 
   if (isBinary) {
-    return <UnsupportedViewer message="Unsupported document type" />;
+    return <UnsupportedViewer message="暂不支持的文档类型" />;
   }
 
   return <UnsupportedViewer />;

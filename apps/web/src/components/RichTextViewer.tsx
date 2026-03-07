@@ -12,6 +12,7 @@ import {
 import { apiFetch } from "../config/api";
 import { fetchUrlHtml } from "../api/documents";
 import { usePluginRuntime } from "../context/PluginRuntimeContext";
+import DocEditorErrorBoundary from "./DocEditorErrorBoundary";
 
 interface RichTextViewerProps {
   content: JSONContent;
@@ -51,19 +52,21 @@ function RichTextViewer({ content, projectKey, onEditorReady, onTaskCheckChange 
 
   return (
     <div className="rich-text-viewer">
-      <DocViewer
-        content={content}
-        extensions={extensions}
-        linkPreviewFetchHtml={async (url: string) => {
-          if (!projectKey) {
-            throw new Error("Missing project key")
-          }
-          const data = await fetchUrlHtml(projectKey, url)
-          return data.html
-        }}
-        onEditorReady={onEditorReady}
-        onTaskCheckChange={onTaskCheckChange}
-      />
+      <DocEditorErrorBoundary>
+        <DocViewer
+          content={content}
+          extensions={extensions}
+          linkPreviewFetchHtml={async (url: string) => {
+            if (!projectKey) {
+              return ""
+            }
+            const data = await fetchUrlHtml(projectKey, url)
+            return data.html
+          }}
+          onEditorReady={onEditorReady}
+          onTaskCheckChange={onTaskCheckChange}
+        />
+      </DocEditorErrorBoundary>
     </div>
   );
 }

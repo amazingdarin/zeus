@@ -12,6 +12,7 @@ import { ViewSplitIcon } from "../../icons/view-split-icon"
 import { ViewTextIcon } from "../../icons/view-text-icon"
 import type { OpenApiSourceType } from "../openapi-node/openapi-node-extension"
 import type { CodeBlockNodeOptions, CodeBlockRenderer } from "./code-block-node-extension"
+import { mapCodeExecStatusLabel, resolveCodeExecButtonState } from "./code-block-exec-ui"
 
 const LANGUAGE_OPTIONS = [
   { value: "", label: "Auto" },
@@ -77,6 +78,7 @@ const DEFAULT_RENDERERS: CodeBlockRenderer[] = [
 type ViewMode = "text" | "preview" | "split"
 
 const VIEW_MODES: ViewMode[] = ["text", "preview", "split"]
+const EXEC_LANGUAGES = new Set(["python", "javascript", "typescript", "bash"])
 
 const isViewMode = (value: string): value is ViewMode =>
   VIEW_MODES.includes(value as ViewMode)
@@ -153,6 +155,18 @@ export function CodeBlockNodeView({ node, editor, extension, getPos }: NodeViewP
     [attrs, code, language, renderers, rendererAttr]
   )
   const isEditable = editor.isEditable
+  const blockId = typeof attrs.id === "string" ? attrs.id : ""
+  const codeExecState = blockId ? options?.codeExecStateByBlockId?.[blockId] : undefined
+  const canRunCodeExec =
+    isEditable
+    && Boolean(blockId)
+    && Boolean(options?.onCodeExecRun)
+    && EXEC_LANGUAGES.has((language || "").toLowerCase())
+  const runButtonState = resolveCodeExecButtonState({
+    editable: isEditable,
+    running: Boolean(codeExecState?.running),
+  })
+  const runStatusLabel = mapCodeExecStatusLabel(codeExecState?.lastStatus)
   const languageClassPrefix = options?.languageClassPrefix ?? "language-"
   const languageClass = language ? `${languageClassPrefix}${language}` : undefined
 
@@ -185,6 +199,25 @@ export function CodeBlockNodeView({ node, editor, extension, getPos }: NodeViewP
     updateNodeAttrs({ collapsed: !collapsed })
   }
 
+  const handleRunCode = () => {
+    if (!canRunCodeExec || runButtonState.disabled) {
+      return
+    }
+    const trigger = options?.onCodeExecRun
+    if (!trigger) {
+      return
+    }
+    void Promise.resolve(
+      trigger({
+        blockId,
+        language,
+        code,
+      })
+    ).catch((err) => {
+      console.error("[doc-editor] code block run failed:", err)
+    })
+  }
+
   const renderedPreview = renderer
     ? renderer.render({
         code,
@@ -198,6 +231,7 @@ export function CodeBlockNodeView({ node, editor, extension, getPos }: NodeViewP
 
   const shouldRenderViewer = Boolean(!isEditable && renderedPreview)
   const showPreviewToggle = isEditable && supportsPreview
+  const shouldShowEditToolbar = isEditable && (showPreviewToggle || canRunCodeExec)
   const viewFrameClass = shouldRenderViewer
     ? "code-block-viewer code-block-viewer--framed"
     : "code-block-viewer"
@@ -235,37 +269,55 @@ export function CodeBlockNodeView({ node, editor, extension, getPos }: NodeViewP
       >
       {isEditable ? (
         <div className="code-block-editor">
-          {showPreviewToggle ? (
+          {shouldShowEditToolbar ? (
             <div className="code-block-view-toolbar" contentEditable={false}>
-              <div className="code-block-view-modes" role="group" aria-label="Code block view">
-                <button
-                  type="button"
-                  className="code-block-view-button"
-                  data-active={viewMode === "text"}
-                  onClick={() => handleSetViewMode("text")}
-                  aria-label="Text"
-                >
-                  <ViewTextIcon className="code-block-view-icon" />
-                </button>
-                <button
-                  type="button"
-                  className="code-block-view-button"
-                  data-active={viewMode === "preview"}
-                  onClick={() => handleSetViewMode("preview")}
-                  aria-label="Preview"
-                >
-                  <ViewPreviewIcon className="code-block-view-icon" />
-                </button>
-                <button
-                  type="button"
-                  className="code-block-view-button"
-                  data-active={viewMode === "split"}
-                  onClick={() => handleSetViewMode("split")}
-                  aria-label="Split view"
-                >
-                  <ViewSplitIcon className="code-block-view-icon" />
-                </button>
-              </div>
+              {canRunCodeExec ? (
+                <div className="code-block-run-group">
+                  <button
+                    type="button"
+                    className="code-block-run-button"
+                    disabled={runButtonState.disabled}
+                    onClick={handleRunCode}
+                    aria-label="Run code block"
+                  >
+                    {runButtonState.label}
+                  </button>
+                  {runStatusLabel ? (
+                    <span className="code-block-run-status">{runStatusLabel}</span>
+                  ) : null}
+                </div>
+              ) : null}
+              {showPreviewToggle ? (
+                <div className="code-block-view-modes" role="group" aria-label="Code block view">
+                  <button
+                    type="button"
+                    className="code-block-view-button"
+                    data-active={viewMode === "text"}
+                    onClick={() => handleSetViewMode("text")}
+                    aria-label="Text"
+                  >
+                    <ViewTextIcon className="code-block-view-icon" />
+                  </button>
+                  <button
+                    type="button"
+                    className="code-block-view-button"
+                    data-active={viewMode === "preview"}
+                    onClick={() => handleSetViewMode("preview")}
+                    aria-label="Preview"
+                  >
+                    <ViewPreviewIcon className="code-block-view-icon" />
+                  </button>
+                  <button
+                    type="button"
+                    className="code-block-view-button"
+                    data-active={viewMode === "split"}
+                    onClick={() => handleSetViewMode("split")}
+                    aria-label="Split view"
+                  >
+                    <ViewSplitIcon className="code-block-view-icon" />
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : null}
           {supportsPreview ? (

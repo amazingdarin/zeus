@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Tooltip } from "antd";
+import { useTranslation } from "react-i18next";
 
 import { useProjectContext, type ProjectOwnerContext } from "../context/ProjectContext";
 import CreateProjectModal from "./CreateProjectModal";
@@ -18,6 +19,7 @@ type OwnerGroup = ProjectOwnerContext & {
 const buildOwnerRef = (ownerType: string, ownerKey: string): string => `${ownerType}::${ownerKey}`;
 
 function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
+  const { t } = useTranslation("team");
   const [open, setOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [createOwnerRef, setCreateOwnerRef] = useState<string>("personal::me");
@@ -106,6 +108,10 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
 
     return list;
   }, [ownerContexts, projects]);
+  const canCreateAnyProject = useMemo(
+    () => groupedProjects.some((group) => group.canCreate),
+    [groupedProjects],
+  );
 
   const availableProjects = projects;
   const activeProject = currentProject ?? availableProjects[0] ?? null;
@@ -234,7 +240,7 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
   return (
     <div className="project-selector compact" ref={containerRef}>
       <Tooltip
-        title={activeProject ? activeProject.name : "选择项目"}
+        title={activeProject ? activeProject.name : t("project.selector.choose")}
         placement="right"
         mouseEnterDelay={0.3}
       >
@@ -244,7 +250,7 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
           aria-expanded={open}
           onClick={toggleOpen}
         >
-          <span className="project-selector-initial" aria-label="项目">
+          <span className="project-selector-initial" aria-label={t("project.selector.project")}>
             {projectInitial}
           </span>
         </button>
@@ -255,8 +261,9 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
             className="project-selector-item project-selector-add"
             type="button"
             onClick={handleAddProject}
+            disabled={!canCreateAnyProject}
           >
-            新建项目
+            {t("project.selector.create")}
           </button>
           <div className="project-selector-divider" />
 
@@ -264,10 +271,10 @@ function ProjectSelector({ collapsed = false }: ProjectSelectorProps) {
             <div key={group.ownerRef} className="project-selector-group">
               <div className="project-selector-group-header">
                 <span>{group.ownerName}</span>
-                {!group.canCreate ? <span className="project-selector-group-badge">只读</span> : null}
+                {!group.canCreate ? <span className="project-selector-group-badge">{t("project.selector.readonly")}</span> : null}
               </div>
               {group.projects.length === 0 ? (
-                <div className="project-selector-empty">暂无项目</div>
+                <div className="project-selector-empty">{t("project.selector.empty")}</div>
               ) : (
                 group.projects.map((project) => (
                   <button

@@ -108,9 +108,14 @@ function parseTemplateCatalog(raw) {
 }
 
 async function loadTemplates(ctx) {
+  const projectRef = asString(ctx && ctx.projectKey);
   const localData = ctx && typeof ctx.localData === "object"
     ? ctx.localData
     : null;
+
+  if (!projectRef) {
+    return parseTemplateCatalog(DEFAULT_PPT_TEMPLATE_CATALOG);
+  }
 
   if (localData && typeof localData.readFile === "function") {
     try {

@@ -26,9 +26,39 @@ export type MessageCenterResponse = {
   nextCursor?: string;
 };
 
+const getAccessToken = (): string | null => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    return window.localStorage.getItem("zeus_access_token");
+  } catch {
+    return null;
+  }
+};
+
+const appendAccessTokenForSse = (url: string): string => {
+  const token = getAccessToken();
+  if (!token || url.includes("access_token=")) {
+    return url;
+  }
+  try {
+    const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+    const parsed = new URL(url, base);
+    parsed.searchParams.set("access_token", token);
+    if (/^https?:\/\//.test(url)) {
+      return parsed.toString();
+    }
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}access_token=${encodeURIComponent(token)}`;
+  }
+};
+
 export const fetchMessageCenter = async (
   projectKey: string,
-  options: { limit?: number; cursor?: string } = {},
+  options: { limit?: number; cursor?: string; type?: string } = {},
 ): Promise<MessageCenterResponse> => {
   const params = new URLSearchParams();
   if (typeof options.limit === "number") {
@@ -36,6 +66,9 @@ export const fetchMessageCenter = async (
   }
   if (options.cursor) {
     params.set("cursor", options.cursor);
+  }
+  if (options.type) {
+    params.set("type", options.type);
   }
   const query = params.toString();
   const response = await apiFetch(
@@ -54,7 +87,7 @@ export const fetchMessageCenter = async (
 };
 
 export const buildMessageCenterStreamUrl = (projectKey: string) =>
-  buildApiUrl(`/api/projects/${encodeProjectRef(projectKey)}/message-center/stream`);
+  appendAccessTokenForSse(buildApiUrl(`/api/projects/${encodeProjectRef(projectKey)}/message-center/stream`));
 
 export const createMessageCenterStream = (projectKey: string): EventSource => {
   const url = buildMessageCenterStreamUrl(projectKey);

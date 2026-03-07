@@ -15,6 +15,7 @@ import PromptSlashPanel from "./PromptSlashPanel";
 import { parseZeusText, renderZeusText } from "../lib/zeusText";
 import ChatAttachmentTags from "./ChatAttachmentTags";
 import { useChatAttachments, isValidUrl } from "../hooks/useChatAttachments";
+import { shouldHandleSseDisconnectError } from "../features/chat/sse-error";
 
 
 type ChatArtifact = {
@@ -38,7 +39,7 @@ const extractDocsFromArtifacts = (
   return items
     .map((item) => ({
       id: String(item?.id ?? item?.doc_id ?? "").trim(),
-      title: String(item?.title ?? "").trim() || "Untitled",
+      title: String(item?.title ?? "").trim() || "无标题文档",
     }))
     .filter((item) => item.id);
 };
@@ -698,7 +699,7 @@ function ChatDock() {
     try {
       if (message.startsWith("/op:")) {
         const result = await executeCommand(projectKey, message);
-        const reply = result.message || "Command completed.";
+        const reply = result.message || "命令执行完成。";
         appendMessage("assistant", reply, result.artifacts);
         setIsGenerating(false);
         return;
@@ -775,9 +776,9 @@ function ChatDock() {
         const messageText =
           typeof payload === "string"
             ? payload
-            : String(payload?.error ?? "Chat run failed");
+            : String(payload?.error ?? "对话运行失败");
         setError(messageText);
-        appendMessage("system", `Error: ${messageText}`);
+        appendMessage("system", `错误：${messageText}`);
         setIsGenerating(false);
         resetAssistantBuffer();
         closeStream();
@@ -794,9 +795,9 @@ function ChatDock() {
           return;
         }
         if (payload && typeof payload === "object" && "error" in payload) {
-          const messageText = String((payload as { error?: string }).error ?? "Chat run failed");
+          const messageText = String((payload as { error?: string }).error ?? "对话运行失败");
           setError(messageText);
-          appendMessage("system", `Error: ${messageText}`);
+          appendMessage("system", `错误：${messageText}`);
           setIsGenerating(false);
           closeStream();
           return;
@@ -815,16 +816,22 @@ function ChatDock() {
       };
 
       source.onerror = () => {
-        setError("Stream connection lost");
-        appendMessage("system", "Error: Stream connection lost");
+        if (!shouldHandleSseDisconnectError({
+          isActiveSource: eventSourceRef.current === source,
+          readyState: source.readyState,
+        })) {
+          return;
+        }
+        setError("流式连接已断开");
+        appendMessage("system", "错误：流式连接已断开");
         setIsGenerating(false);
         resetAssistantBuffer();
         closeStream();
       };
     } catch (err) {
-      const messageText = err instanceof Error ? err.message : "Failed to send message";
+      const messageText = err instanceof Error ? err.message : "发送消息失败";
       setError(messageText);
-      appendMessage("system", `Error: ${messageText}`);
+      appendMessage("system", `错误：${messageText}`);
       setIsGenerating(false);
       resetAssistantBuffer();
       closeStream();
@@ -1028,14 +1035,14 @@ function ChatDock() {
       try {
         if (action === "apply") {
           await applyProposal(projectKey, docId, proposalId);
-          appendMessage("system", "Applied proposal.");
+          appendMessage("system", "已应用建议。");
         } else {
           await rejectProposal(projectKey, docId, proposalId);
-          appendMessage("system", "Rejected proposal.");
+          appendMessage("system", "已拒绝建议。");
         }
       } catch (err) {
-        const messageText = err instanceof Error ? err.message : "proposal action failed";
-        appendMessage("system", `Error: ${messageText}`);
+        const messageText = err instanceof Error ? err.message : "处理建议操作失败";
+        appendMessage("system", `错误：${messageText}`);
       }
     },
     [appendMessage, handleDocumentNavigate, projectKey],
@@ -1051,7 +1058,7 @@ function ChatDock() {
       // The SSE stream will continue after confirmation
     } catch (err) {
       const msg = err instanceof Error ? err.message : "确认失败";
-      appendMessage("system", `Error: ${msg}`);
+      appendMessage("system", `错误：${msg}`);
       setPendingTool(null);
       setIsGenerating(false);
     }
@@ -1072,7 +1079,7 @@ function ChatDock() {
       closeStream();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "取消失败";
-      appendMessage("system", `Error: ${msg}`);
+      appendMessage("system", `错误：${msg}`);
       setPendingTool(null);
       setIsGenerating(false);
     }
@@ -1147,7 +1154,7 @@ function ChatDock() {
             return (
               <div key={`${artifact.type}-${index}`} className="chat-dock-artifact">
                 <div className="chat-dock-artifact-title">
-                  {artifact.title || "Documents"}
+                  {artifact.title || "文档"}
                 </div>
                 <div className="chat-dock-artifact-list">
                   {items.map((item, itemIndex) => (
@@ -1157,7 +1164,7 @@ function ChatDock() {
                       className="chat-dock-artifact-link"
                       onClick={() => handleDocumentNavigate(String(item.id ?? ""))}
                     >
-                      {String(item.title ?? item.id ?? "Document")}
+                      {String(item.title ?? item.id ?? "文档")}
                     </button>
                   ))}
                 </div>
@@ -1170,14 +1177,14 @@ function ChatDock() {
             return (
               <div key={`${artifact.type}-${index}`} className="chat-dock-artifact">
                 <div className="chat-dock-artifact-title">
-                  {artifact.title || "Change Proposal"}
+                  {artifact.title || "修改建议"}
                 </div>
                 <button
                   type="button"
                   className="chat-dock-artifact-link"
                   onClick={() => handleDocumentNavigate(docId, proposalId)}
                 >
-                  View diff
+                  查看修改
                 </button>
               </div>
             );
@@ -1196,7 +1203,7 @@ function ChatDock() {
             return (
               <div key={`${artifact.type}-${index}`} className="chat-dock-artifact">
                 <div className="chat-dock-artifact-title">
-                  {artifact.title || "Change Proposals"}
+                  {artifact.title || "修改建议"}
                 </div>
                 <div className="chat-dock-artifact-list">
                   {items.map((item, itemIndex) => (
@@ -1212,7 +1219,7 @@ function ChatDock() {
                           )
                         }
                       >
-                        {String(item.title ?? item.doc_id ?? "Document")}
+                        {String(item.title ?? item.doc_id ?? "文档")}
                       </button>
                       <div className="chat-dock-artifact-actions">
                         {actions.map((action, actionIndex) => (
@@ -1228,7 +1235,7 @@ function ChatDock() {
                               )
                             }
                           >
-                            {action.label ?? action.type ?? "Action"}
+                            {action.label ?? action.type ?? "操作"}
                           </button>
                         ))}
                       </div>
@@ -1351,7 +1358,7 @@ function ChatDock() {
           attachments={attachments}
           onRemove={removeAttachment}
         />
-        {isGenerating ? <span className="chat-dock-bar-status">Generating...</span> : null}
+        {isGenerating ? <span className="chat-dock-bar-status">生成中...</span> : null}
         <div className="chat-dock-input">
           <div className="chat-dock-input-body">
             {inputState.activePrompt ? (
@@ -1388,9 +1395,9 @@ function ChatDock() {
                 filterOption={false}
                 notFoundContent={
                   promptSlashState.active
-                    ? "No matching prompts"
+                    ? "没有匹配的提示词"
                     : docSearchState.active
-                      ? "No matching documents"
+                      ? "没有匹配的文档"
                       : null
                 }
                 onKeyDown={(event) => {

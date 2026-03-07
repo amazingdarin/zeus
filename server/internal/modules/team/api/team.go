@@ -9,6 +9,7 @@ import (
 
 	"zeus/internal/core/middleware"
 	"zeus/internal/domain"
+	"zeus/internal/i18n"
 	teamsvc "zeus/internal/modules/team/service"
 )
 
@@ -29,13 +30,13 @@ func NewTeamHandler(teamService *teamsvc.TeamService) *TeamHandler {
 func (h *TeamHandler) Create(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "not authenticated"})
+		i18n.JSONError(c, http.StatusUnauthorized, "UNAUTHORIZED", "error.unauthorized")
 		return
 	}
 
 	var req CreateTeamRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": err.Error(), "locale": i18n.ResolveLocale(c.Request)})
 		return
 	}
 
@@ -57,7 +58,7 @@ func (h *TeamHandler) Create(c *gin.Context) {
 func (h *TeamHandler) List(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "not authenticated"})
+		i18n.JSONError(c, http.StatusUnauthorized, "UNAUTHORIZED", "error.unauthorized")
 		return
 	}
 
@@ -94,7 +95,7 @@ func (h *TeamHandler) Get(c *gin.Context) {
 func (h *TeamHandler) Update(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "not authenticated"})
+		i18n.JSONError(c, http.StatusUnauthorized, "UNAUTHORIZED", "error.unauthorized")
 		return
 	}
 
@@ -102,7 +103,7 @@ func (h *TeamHandler) Update(c *gin.Context) {
 
 	var req UpdateTeamRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": err.Error(), "locale": i18n.ResolveLocale(c.Request)})
 		return
 	}
 
@@ -124,7 +125,7 @@ func (h *TeamHandler) Update(c *gin.Context) {
 func (h *TeamHandler) Delete(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "not authenticated"})
+		i18n.JSONError(c, http.StatusUnauthorized, "UNAUTHORIZED", "error.unauthorized")
 		return
 	}
 
@@ -135,7 +136,7 @@ func (h *TeamHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "team deleted"})
+	i18n.JSONMessage(c, http.StatusOK, "success.team_deleted")
 }
 
 // ListMembers returns team members
@@ -143,7 +144,7 @@ func (h *TeamHandler) Delete(c *gin.Context) {
 func (h *TeamHandler) ListMembers(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "not authenticated"})
+		i18n.JSONError(c, http.StatusUnauthorized, "UNAUTHORIZED", "error.unauthorized")
 		return
 	}
 
@@ -168,7 +169,7 @@ func (h *TeamHandler) ListMembers(c *gin.Context) {
 func (h *TeamHandler) AddMember(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "not authenticated"})
+		i18n.JSONError(c, http.StatusUnauthorized, "UNAUTHORIZED", "error.unauthorized")
 		return
 	}
 
@@ -176,7 +177,7 @@ func (h *TeamHandler) AddMember(c *gin.Context) {
 
 	var req AddMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": err.Error(), "locale": i18n.ResolveLocale(c.Request)})
 		return
 	}
 
@@ -189,7 +190,7 @@ func (h *TeamHandler) AddMember(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"message": "member added"})
+	i18n.JSONMessage(c, http.StatusCreated, "success.member_added")
 }
 
 // UpdateMemberRole updates a member's role
@@ -197,7 +198,7 @@ func (h *TeamHandler) AddMember(c *gin.Context) {
 func (h *TeamHandler) UpdateMemberRole(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "not authenticated"})
+		i18n.JSONError(c, http.StatusUnauthorized, "UNAUTHORIZED", "error.unauthorized")
 		return
 	}
 
@@ -206,7 +207,7 @@ func (h *TeamHandler) UpdateMemberRole(c *gin.Context) {
 
 	var req UpdateMemberRoleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": err.Error(), "locale": i18n.ResolveLocale(c.Request)})
 		return
 	}
 
@@ -216,7 +217,7 @@ func (h *TeamHandler) UpdateMemberRole(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "role updated"})
+	i18n.JSONMessage(c, http.StatusOK, "success.role_updated")
 }
 
 // RemoveMember removes a member from a team
@@ -224,7 +225,7 @@ func (h *TeamHandler) UpdateMemberRole(c *gin.Context) {
 func (h *TeamHandler) RemoveMember(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "not authenticated"})
+		i18n.JSONError(c, http.StatusUnauthorized, "UNAUTHORIZED", "error.unauthorized")
 		return
 	}
 
@@ -237,7 +238,7 @@ func (h *TeamHandler) RemoveMember(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "member removed"})
+	i18n.JSONMessage(c, http.StatusOK, "success.member_removed")
 }
 
 // InviteMember creates an invitation
@@ -245,7 +246,7 @@ func (h *TeamHandler) RemoveMember(c *gin.Context) {
 func (h *TeamHandler) InviteMember(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "not authenticated"})
+		i18n.JSONError(c, http.StatusUnauthorized, "UNAUTHORIZED", "error.unauthorized")
 		return
 	}
 
@@ -253,7 +254,7 @@ func (h *TeamHandler) InviteMember(c *gin.Context) {
 
 	var req InviteMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": err.Error(), "locale": i18n.ResolveLocale(c.Request)})
 		return
 	}
 
@@ -274,7 +275,7 @@ func (h *TeamHandler) InviteMember(c *gin.Context) {
 func (h *TeamHandler) ListInvitations(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "not authenticated"})
+		i18n.JSONError(c, http.StatusUnauthorized, "UNAUTHORIZED", "error.unauthorized")
 		return
 	}
 
@@ -299,7 +300,7 @@ func (h *TeamHandler) ListInvitations(c *gin.Context) {
 func (h *TeamHandler) AcceptInvitation(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "not authenticated"})
+		i18n.JSONError(c, http.StatusUnauthorized, "UNAUTHORIZED", "error.unauthorized")
 		return
 	}
 
@@ -311,7 +312,7 @@ func (h *TeamHandler) AcceptInvitation(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "invitation accepted"})
+	i18n.JSONMessage(c, http.StatusOK, "success.invitation_accepted")
 }
 
 // GetPendingInvitations returns pending invitations for current user
@@ -319,7 +320,7 @@ func (h *TeamHandler) AcceptInvitation(c *gin.Context) {
 func (h *TeamHandler) GetPendingInvitations(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "not authenticated"})
+		i18n.JSONError(c, http.StatusUnauthorized, "UNAUTHORIZED", "error.unauthorized")
 		return
 	}
 
@@ -342,7 +343,7 @@ func (h *TeamHandler) GetPendingInvitations(c *gin.Context) {
 func (h *TeamHandler) CreateJoinLink(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "not authenticated"})
+		i18n.JSONError(c, http.StatusUnauthorized, "UNAUTHORIZED", "error.unauthorized")
 		return
 	}
 
@@ -350,7 +351,7 @@ func (h *TeamHandler) CreateJoinLink(c *gin.Context) {
 
 	var req CreateJoinLinkRequest
 	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": err.Error(), "locale": i18n.ResolveLocale(c.Request)})
 		return
 	}
 
@@ -376,7 +377,7 @@ func (h *TeamHandler) CreateJoinLink(c *gin.Context) {
 func (h *TeamHandler) GetJoinLinkPreview(c *gin.Context) {
 	token := c.Param("token")
 	if token == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": "missing token"})
+		i18n.JSONError(c, http.StatusBadRequest, "INVALID_REQUEST", "error.missing_token")
 		return
 	}
 
@@ -399,13 +400,13 @@ func (h *TeamHandler) GetJoinLinkPreview(c *gin.Context) {
 func (h *TeamHandler) JoinByLink(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "not authenticated"})
+		i18n.JSONError(c, http.StatusUnauthorized, "UNAUTHORIZED", "error.unauthorized")
 		return
 	}
 
 	token := c.Param("token")
 	if token == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": "missing token"})
+		i18n.JSONError(c, http.StatusBadRequest, "INVALID_REQUEST", "error.missing_token")
 		return
 	}
 
@@ -469,26 +470,26 @@ func toInvitationResponse(inv *domain.TeamInvitation) InvitationResponse {
 func handleTeamError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, teamsvc.ErrTeamNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"code": "TEAM_NOT_FOUND", "message": "team not found"})
+		c.JSON(http.StatusNotFound, gin.H{"code": "TEAM_NOT_FOUND", "message": i18n.Message(i18n.ResolveLocale(c.Request), "error.team_not_found")})
 	case errors.Is(err, teamsvc.ErrTeamSlugExists):
-		c.JSON(http.StatusConflict, gin.H{"code": "SLUG_EXISTS", "message": "team slug already exists"})
+		c.JSON(http.StatusConflict, gin.H{"code": "SLUG_EXISTS", "message": i18n.Message(i18n.ResolveLocale(c.Request), "error.slug_exists")})
 	case errors.Is(err, teamsvc.ErrNotTeamMember):
-		c.JSON(http.StatusForbidden, gin.H{"code": "NOT_MEMBER", "message": "not a member of this team"})
+		c.JSON(http.StatusForbidden, gin.H{"code": "NOT_MEMBER", "message": i18n.Message(i18n.ResolveLocale(c.Request), "error.not_member")})
 	case errors.Is(err, teamsvc.ErrNotAuthorized):
-		c.JSON(http.StatusForbidden, gin.H{"code": "NOT_AUTHORIZED", "message": "not authorized"})
+		c.JSON(http.StatusForbidden, gin.H{"code": "NOT_AUTHORIZED", "message": i18n.Message(i18n.ResolveLocale(c.Request), "error.not_authorized")})
 	case errors.Is(err, teamsvc.ErrMemberExists):
-		c.JSON(http.StatusConflict, gin.H{"code": "MEMBER_EXISTS", "message": "user is already a member"})
+		c.JSON(http.StatusConflict, gin.H{"code": "MEMBER_EXISTS", "message": i18n.Message(i18n.ResolveLocale(c.Request), "error.member_exists")})
 	case errors.Is(err, teamsvc.ErrCannotRemoveOwner):
-		c.JSON(http.StatusForbidden, gin.H{"code": "CANNOT_REMOVE_OWNER", "message": "cannot remove team owner"})
+		c.JSON(http.StatusForbidden, gin.H{"code": "CANNOT_REMOVE_OWNER", "message": i18n.Message(i18n.ResolveLocale(c.Request), "error.cannot_remove_owner")})
 	case errors.Is(err, teamsvc.ErrInvitationNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"code": "INVITATION_NOT_FOUND", "message": "invitation not found"})
+		c.JSON(http.StatusNotFound, gin.H{"code": "INVITATION_NOT_FOUND", "message": i18n.Message(i18n.ResolveLocale(c.Request), "error.invitation_not_found")})
 	case errors.Is(err, teamsvc.ErrInvitationExpired):
-		c.JSON(http.StatusGone, gin.H{"code": "INVITATION_EXPIRED", "message": "invitation has expired"})
+		c.JSON(http.StatusGone, gin.H{"code": "INVITATION_EXPIRED", "message": i18n.Message(i18n.ResolveLocale(c.Request), "error.invitation_expired")})
 	case errors.Is(err, teamsvc.ErrJoinLinkNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"code": "INVITE_LINK_NOT_FOUND", "message": "invite link not found"})
+		c.JSON(http.StatusNotFound, gin.H{"code": "INVITE_LINK_NOT_FOUND", "message": i18n.Message(i18n.ResolveLocale(c.Request), "error.invite_link_not_found")})
 	case errors.Is(err, teamsvc.ErrJoinLinkExpired):
-		c.JSON(http.StatusGone, gin.H{"code": "INVITE_LINK_EXPIRED", "message": "invite link has expired"})
+		c.JSON(http.StatusGone, gin.H{"code": "INVITE_LINK_EXPIRED", "message": i18n.Message(i18n.ResolveLocale(c.Request), "error.invite_link_expired")})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL_ERROR", "message": "internal error"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL_ERROR", "message": i18n.Message(i18n.ResolveLocale(c.Request), "error.internal_error")})
 	}
 }

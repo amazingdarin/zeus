@@ -47,6 +47,7 @@ pnpm-debug.log*
 *.local
 *.env.local
 .worktrees/
+server/config.local.yaml
 
 deploy/k3s.yaml
 deploy/SecretKey.csv

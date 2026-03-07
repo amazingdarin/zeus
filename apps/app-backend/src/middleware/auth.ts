@@ -49,14 +49,28 @@ const authUserCache = new Map<string, CachedAuthUserValue>();
  */
 function extractToken(req: Request): string | null {
   const authHeader = req.headers.authorization;
-  if (!authHeader) return null;
-  
-  const parts = authHeader.split(' ');
-  if (parts.length !== 2 || parts[0].toLowerCase() !== 'bearer') {
-    return null;
+  if (authHeader) {
+    const parts = authHeader.split(' ');
+    if (parts.length === 2 && parts[0].toLowerCase() === 'bearer') {
+      const fromHeader = String(parts[1] ?? "").trim();
+      if (fromHeader) {
+        return fromHeader;
+      }
+    }
   }
-  
-  return parts[1];
+
+  const queryToken = req.query?.access_token;
+  if (typeof queryToken === "string" && queryToken.trim()) {
+    return queryToken.trim();
+  }
+  if (Array.isArray(queryToken)) {
+    const candidate = queryToken.find((value) => typeof value === "string" && value.trim());
+    if (typeof candidate === "string") {
+      return candidate.trim();
+    }
+  }
+
+  return null;
 }
 
 /**

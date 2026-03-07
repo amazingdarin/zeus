@@ -13,6 +13,7 @@ export type WorkspaceSnapshot = {
   selection: SelectionRange | null;
   draftTitle: string;
   draftContent: JSONContent;
+  locked?: boolean;
   saveStatus: DocumentEditorSaveStatus;
 };
 

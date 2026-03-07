@@ -17,9 +17,8 @@ type ProjectFilter struct {
 }
 
 type ProjectOption struct {
-	PreloadStorageObject bool // 是否预加载存储
-	Limit                int
-	Offset               int
+	Limit  int
+	Offset int
 }
 
 type ProjectRepository interface {

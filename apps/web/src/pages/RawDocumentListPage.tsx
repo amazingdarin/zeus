@@ -26,16 +26,16 @@ function RawDocumentListPage() {
   return (
     <div className="doc-list">
       <div className="doc-list-header">
-        <div className="panel-title">Raw Documents</div>
+        <div className="panel-title">原始文档</div>
       </div>
       <div className="doc-table">
         <div className="doc-row doc-row-head">
-          <span>Document Name</span>
-          <span>Original Path</span>
-          <span>Type</span>
-          <span>Candidate Module</span>
-          <span>Confidence</span>
-          <span>Action</span>
+          <span>文档名</span>
+          <span>原始路径</span>
+          <span>类型</span>
+          <span>候选模块</span>
+          <span>置信度</span>
+          <span>操作</span>
         </div>
         {placeholderRows.map((row) => (
           <div key={row.name} className="doc-row">
@@ -46,7 +46,7 @@ function RawDocumentListPage() {
             <span>{row.confidence}</span>
             <span>
               <button className="btn ghost" type="button">
-                View
+                查看
               </button>
             </span>
           </div>

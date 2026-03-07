@@ -19,6 +19,7 @@ fi
 
 APP_OUT="${OUT_ROOT}/${PLATFORM_DIR}/app"
 DEPS_OUT="${OUT_ROOT}/${PLATFORM_DIR}/deps"
+STACK_OUT="${OUT_ROOT}/${PLATFORM_DIR}/stack"
 
 echo "[package-mobile] target=${TARGET}"
 echo "[package-mobile] build mobile app"
@@ -30,8 +31,8 @@ else
 fi
 
 echo "[package-mobile] collect app artifacts"
-rm -rf "${APP_OUT}" "${DEPS_OUT}"
-mkdir -p "${APP_OUT}" "${DEPS_OUT}"
+rm -rf "${APP_OUT}" "${DEPS_OUT}" "${STACK_OUT}"
+mkdir -p "${APP_OUT}" "${DEPS_OUT}" "${STACK_OUT}"
 
 if [[ "${TARGET}" == "android" ]]; then
   find "${ROOT_DIR}/apps/desktop/gen/android/app/build/outputs" \
@@ -55,12 +56,16 @@ else
   exit 1
 fi
 
+echo "[package-mobile] collect app stack artifacts (frontend + app-backend)"
+bash "${ROOT_DIR}/scripts/release/package-app-stack.sh" "${STACK_OUT}"
+
 cat > "${OUT_ROOT}/${PLATFORM_DIR}/MANIFEST.txt" <<EOF
 target=${TARGET}
 platform=${PLATFORM_DIR}
 generated_at_utc=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 app_dir=${APP_OUT}
 deps_dir=${DEPS_OUT}
+stack_dir=${STACK_OUT}
 EOF
 
 echo "[package-mobile] done: ${OUT_ROOT}/${PLATFORM_DIR}"

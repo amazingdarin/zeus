@@ -32,3 +32,22 @@ test("removeSnapshot deletes key", () => {
   store = removeSnapshot(store, "a");
   assert.equal("a" in store, false);
 });
+
+test("upsertSnapshot keeps lock flag", () => {
+  let store = createSnapshotStore();
+  store = upsertSnapshot(store, "locked-doc", {
+    scrollTop: 12,
+    selection: null,
+    draftTitle: "Locked",
+    draftContent: { type: "doc", content: [] },
+    locked: true,
+    saveStatus: "idle",
+  });
+  assert.equal(store["locked-doc"]?.locked, true);
+});
+
+test("removeSnapshot returns same store when key missing", () => {
+  const store = createSnapshotStore();
+  const next = removeSnapshot(store, "missing-doc");
+  assert.equal(next, store);
+});

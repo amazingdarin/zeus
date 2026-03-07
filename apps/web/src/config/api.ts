@@ -1,3 +1,4 @@
+import { getLocaleRequestHeaders, resolveRequestLocale } from "../i18n/request-locale";
 const env = (((import.meta as unknown as { env?: Record<string, unknown> }).env ?? {}) as Record<string, unknown>);
 const apiBaseUrl = String(env.VITE_API_BASE_URL ?? "").trim();
 const appBackendUrl = String(env.VITE_APP_BACKEND_URL ?? "http://localhost:4870").trim();
@@ -155,9 +156,16 @@ const getAccessToken = (): string | null => {
   return localStorage.getItem("zeus_access_token");
 };
 
+
 const fetchWithCredentials = (path: string, init: RequestInit = {}) => {
   const token = getAccessToken();
   const headers = new Headers(init.headers);
+  const localeHeaders = getLocaleRequestHeaders(resolveRequestLocale());
+  for (const [headerName, headerValue] of Object.entries(localeHeaders)) {
+    if (!headers.has(headerName)) {
+      headers.set(headerName, headerValue);
+    }
+  }
 
   if (token && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${token}`);

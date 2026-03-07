@@ -107,7 +107,7 @@ function DocumentOptimizeModal({
       const { taskId } = await startOptimize(projectKey, docId, { mode });
 
       if (!taskId) {
-        throw new Error("Failed to get task ID");
+        throw new Error("获取任务 ID 失败");
       }
 
       setStatus("streaming");
@@ -137,7 +137,7 @@ function DocumentOptimizeModal({
 
       source.addEventListener("optimize.error", (event) => {
         const data = parseOptimizeEvent((event as MessageEvent).data);
-        setError(data.error || "Optimization failed");
+        setError(data.error || "优化失败");
         setStatus("error");
         source.close();
         eventSourceRef.current = null;
@@ -152,7 +152,7 @@ function DocumentOptimizeModal({
         eventSourceRef.current = null;
       };
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to start optimization";
+      const message = err instanceof Error ? err.message : "启动优化失败";
       setError(message);
       setStatus("error");
     }

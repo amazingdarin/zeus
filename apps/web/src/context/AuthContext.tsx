@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { setAppLocale } from '../i18n/runtime';
 import { User, getCurrentUser, login as apiLogin, register as apiRegister, logout as apiLogout, LoginRequest, RegisterRequest, getAccessToken } from '../api/auth';
 
 interface AuthContextType {
@@ -21,6 +22,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const currentUser = await getCurrentUser();
       setUser(currentUser);
+      if (currentUser?.language) {
+        void setAppLocale(currentUser.language);
+      }
     } catch (error) {
       setUser(null);
     }
@@ -40,11 +44,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback(async (data: LoginRequest) => {
     const result = await apiLogin(data);
     setUser(result.user);
+    if (result.user.language) {
+      await setAppLocale(result.user.language);
+    }
   }, []);
 
   const register = useCallback(async (data: RegisterRequest) => {
     const result = await apiRegister(data);
     setUser(result.user);
+    if (result.user.language) {
+      await setAppLocale(result.user.language);
+    }
   }, []);
 
   const logout = useCallback(async () => {

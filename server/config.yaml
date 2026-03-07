@@ -10,7 +10,7 @@ code_runner:
 
 postgres:
   host: localhost
-  port: 30432
+  port: 5432
   user: zeus
   password: zeus
   database: zeus
@@ -19,15 +19,6 @@ postgres:
   max_open_conns: 10
   max_idle_conns: 5
   conn_max_lifetime: 30m
-
-object_storage:
-  endpoint: http://localhost:30900
-  region: us-east-1
-  access_key: zeus
-  secret_key: zeus
-  bucket: zeus-docs
-  use_path_style: true
-  insecure: true
 
 asset:
   meta_root: /Users/darin/mine/code/zeus/resources/zeus/assets

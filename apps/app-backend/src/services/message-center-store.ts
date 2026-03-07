@@ -422,13 +422,26 @@ export const messageCenterStore = {
   async listTasks(
     userId: string,
     projectKey: string,
-    options: { limit?: number; cursor?: string } = {},
+    options: { limit?: number; cursor?: string; type?: string } = {},
   ): Promise<MessageCenterListResult> {
     const scope = resolveMessageScope(userId, projectKey);
     const limit = Math.min(
       Math.max(1, Number(options.limit ?? DEFAULT_LIMIT) || DEFAULT_LIMIT),
       MAX_LIMIT,
     );
+    const taskType = String(options.type ?? "").trim();
+
+    const activeParams: Array<string | number> = [
+      userId,
+      scope.ownerType,
+      scope.ownerId,
+      scope.projectKey,
+    ];
+    let activeTypeClause = "";
+    if (taskType) {
+      activeParams.push(taskType);
+      activeTypeClause = `AND type = $${activeParams.length}`;
+    }
 
     const activeResult = await query<MessageTaskRow>(
       `SELECT *
@@ -437,9 +450,10 @@ export const messageCenterStore = {
           AND owner_type = $2
           AND owner_id = $3
           AND project_key = $4
+          ${activeTypeClause}
           AND status IN ('pending', 'running')
         ORDER BY updated_at DESC, id DESC`,
-      [userId, scope.ownerType, scope.ownerId, scope.projectKey],
+      activeParams,
     );
 
     const cursor = parseCursor(options.cursor);
@@ -449,11 +463,17 @@ export const messageCenterStore = {
       scope.ownerId,
       scope.projectKey,
     ];
+    let typeClause = "";
+    if (taskType) {
+      historyParams.push(taskType);
+      typeClause = `AND type = $${historyParams.length}`;
+    }
     let cursorClause = "";
     if (cursor) {
-      historyParams.push(cursor.updatedAt, cursor.id);
+      const updatedAtIndex = historyParams.push(cursor.updatedAt);
+      const idIndex = historyParams.push(cursor.id);
       cursorClause = `
-          AND (updated_at < $5 OR (updated_at = $5 AND id < $6))
+          AND (updated_at < $${updatedAtIndex} OR (updated_at = $${updatedAtIndex} AND id < $${idIndex}))
       `;
     }
     historyParams.push(limit);
@@ -465,6 +485,7 @@ export const messageCenterStore = {
           AND owner_type = $2
           AND owner_id = $3
           AND project_key = $4
+          ${typeClause}
           AND status NOT IN ('pending', 'running')
           ${cursorClause}
         ORDER BY updated_at DESC, id DESC

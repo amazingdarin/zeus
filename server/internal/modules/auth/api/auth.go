@@ -8,6 +8,7 @@ import (
 
 	"zeus/internal/core/middleware"
 	"zeus/internal/domain"
+	"zeus/internal/i18n"
 	authsvc "zeus/internal/modules/auth/service"
 )
 
@@ -138,19 +139,13 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 func (h *AuthHandler) Me(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    "UNAUTHORIZED",
-			"message": "not authenticated",
-		})
+		i18n.JSONError(c, http.StatusUnauthorized, "UNAUTHORIZED", "error.unauthorized")
 		return
 	}
 
 	user, err := h.authService.GetCurrentUser(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    "INTERNAL_ERROR",
-			"message": "failed to get user",
-		})
+		i18n.JSONError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "error.internal_error")
 		return
 	}
 
@@ -159,6 +154,7 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		Email:       user.Email,
 		Username:    user.Username,
 		DisplayName: user.DisplayName,
+		Language:    user.Language,
 		AvatarURL:   user.AvatarURL,
 		Status:      string(user.Status),
 		CreatedAt:   user.CreatedAt,
@@ -171,6 +167,7 @@ func toUserResponse(user *domain.User) UserResponse {
 		Email:       user.Email,
 		Username:    user.Username,
 		DisplayName: user.DisplayName,
+		Language:    user.Language,
 		AvatarURL:   user.AvatarURL,
 		Status:      string(user.Status),
 		CreatedAt:   user.CreatedAt,
@@ -182,32 +179,32 @@ func handleAuthError(c *gin.Context, err error) {
 	case errors.Is(err, authsvc.ErrInvalidCredentials):
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"code":    "INVALID_CREDENTIALS",
-			"message": "invalid email or password",
+			"message": i18n.Message(i18n.ResolveLocale(c.Request), "error.invalid_credentials"),
 		})
 	case errors.Is(err, authsvc.ErrEmailAlreadyExists):
 		c.JSON(http.StatusConflict, gin.H{
 			"code":    "EMAIL_EXISTS",
-			"message": "email already registered",
+			"message": i18n.Message(i18n.ResolveLocale(c.Request), "error.email_exists"),
 		})
 	case errors.Is(err, authsvc.ErrUsernameExists):
 		c.JSON(http.StatusConflict, gin.H{
 			"code":    "USERNAME_EXISTS",
-			"message": "username already taken",
+			"message": i18n.Message(i18n.ResolveLocale(c.Request), "error.username_exists"),
 		})
 	case errors.Is(err, authsvc.ErrUserNotActive):
 		c.JSON(http.StatusForbidden, gin.H{
 			"code":    "USER_NOT_ACTIVE",
-			"message": "user account is not active",
+			"message": i18n.Message(i18n.ResolveLocale(c.Request), "error.user_not_active"),
 		})
 	case errors.Is(err, authsvc.ErrInvalidToken):
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"code":    "INVALID_TOKEN",
-			"message": "invalid or expired token",
+			"message": i18n.Message(i18n.ResolveLocale(c.Request), "error.invalid_token"),
 		})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    "INTERNAL_ERROR",
-			"message": "an unexpected error occurred",
+			"message": i18n.Message(i18n.ResolveLocale(c.Request), "error.internal_error"),
 		})
 	}
 }

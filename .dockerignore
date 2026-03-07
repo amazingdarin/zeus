@@ -1,0 +1,16 @@
+.git
+.idea
+.vscode
+
+**/.DS_Store
+**/.cache
+**/*.log
+
+**/node_modules
+**/dist
+**/coverage
+
+apps/desktop/target
+resources
+output
+.playwright-cli

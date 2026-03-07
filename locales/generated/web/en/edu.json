@@ -1,0 +1,23 @@
+{
+  "edu.title.default": "Question set practice",
+  "edu.content.intro": "Write prompts, choices, and answers here.",
+  "edu.library.loadFailed": "Failed to load question bank documents",
+  "edu.detail.noQuestionSet": "No usable question set was parsed from this document. Please check the document structure.",
+  "edu.detail.loadFailed": "Failed to load document details",
+  "edu.editor.notReady": "Question set editor is not ready yet. Please try again shortly.",
+  "edu.project.required": "Choose a project first",
+  "edu.save.success": "Question set saved",
+  "edu.save.failed": "Save failed",
+  "edu.attempt.empty": "There are no answerable questions right now",
+  "edu.grade.success": "Auto grading completed",
+  "edu.prompt.empty": "(Prompt not filled)",
+  "edu.prompt.unsupported": "(Preview not supported yet)",
+  "edu.blank.placeholderMissing": "Blank placeholder config is missing",
+  "edu.answer.fill": "Fill in the answer",
+  "edu.answer.input": "Enter your answer",
+  "edu.document.fallback": "Question bank document",
+  "edu.status.pending": "Pending",
+  "edu.form.titlePlaceholder": "Question set title",
+  "edu.search.placeholder": "Search question bank documents",
+  "edu.loading": "Loading..."
+}

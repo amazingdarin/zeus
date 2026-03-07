@@ -1,13 +1,15 @@
 # HELM DEPLOYMENT
 
-Root Helm chart for zeus + subcharts for postgres and rustfs.
+Root Helm chart for zeus + subcharts for postgres and optional AI dependencies.
 
 ## STRUCTURE
 ```
 deploy/helm/
 ├── charts/                 # root chart + templates
 │   ├── charts/postgres/    # postgres subchart (initdb configmap)
-│   └── charts/rustfs/      # rustfs subchart
+│   ├── charts/faster-whisper/
+│   ├── charts/langfuse/
+│   └── charts/banana-slides/
 ├── values.deps.yaml        # deps-only
 ├── values.deps-dev.yaml    # deps-only NodePort
 └── values.full.yaml        # full stack (backend + frontend)
@@ -16,7 +18,7 @@ deploy/helm/
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Root chart | charts/Chart.yaml | depends on postgres/rustfs |
+| Root chart | charts/Chart.yaml | depends on postgres + optional dependencies |
 | Backend/Frontend | charts/templates/* | Deployments/services/ingress |
 | Postgres initdb | charts/charts/postgres/templates/configmap-initdb.yaml | loads files/init.sql |
 | Postgres schema | charts/charts/postgres/files/init.sql | executed at initdb |

@@ -37,4 +37,8 @@ test("sql init snapshots are aligned with unified v1.0.0 migrations", async () =
   assert.equal(compatInit, serverMigrationUp);
   assert.equal(mobileInit, mobileMigrationUp);
   assert.equal(desktopInit, desktopMigrationUp);
+  assert.match(serverMigrationUp, /CREATE TABLE IF NOT EXISTS document_block_comment_threads/i);
+  assert.match(serverMigrationUp, /CREATE TABLE IF NOT EXISTS document_block_comment_messages/i);
+  assert.match(serverInit, /CREATE TABLE IF NOT EXISTS document_block_comment_threads/i);
+  assert.match(compatInit, /CREATE TABLE IF NOT EXISTS document_block_comment_messages/i);
 });

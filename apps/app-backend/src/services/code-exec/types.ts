@@ -1,6 +1,6 @@
 export type CodeExecOwnerType = "personal" | "team";
 
-export type CodeExecLanguage = "python" | "javascript" | "bash";
+export type CodeExecLanguage = "python" | "javascript" | "typescript" | "bash";
 
 export type CodeExecRunStatus =
   | "queued"
@@ -59,4 +59,3 @@ export type GetCodeRunRequest = {
   docId: string;
   runId: string;
 };
-

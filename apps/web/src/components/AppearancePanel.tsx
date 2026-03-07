@@ -1,45 +1,45 @@
 import { useMemo } from "react";
 import { Card, Radio, Space } from "antd";
 import { SunOutlined, MoonOutlined, DesktopOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
+
 import { useThemeMode, type ThemeMode } from "../context/ThemeContext";
 
-/**
- * Appearance settings panel
- */
 function AppearancePanel() {
+  const { t } = useTranslation("settings");
   const { themeMode, setThemeMode } = useThemeMode();
 
   const themeOptions = useMemo(
     () => [
-    {
-      value: "light" as const,
-      label: "日间模式",
-      icon: <SunOutlined />,
-      description: "明亮的界面，适合白天使用",
-    },
-    {
-      value: "dark" as const,
-      label: "夜间模式",
-      icon: <MoonOutlined />,
-      description: "深色界面，保护眼睛",
-    },
-    {
-      value: "system" as const,
-      label: "跟随系统",
-      icon: <DesktopOutlined />,
-      description: "自动跟随操作系统的主题设置",
-    },
+      {
+        value: "light" as const,
+        label: t("settings.appearance.theme.light.label"),
+        icon: <SunOutlined />,
+        description: t("settings.appearance.theme.light.description"),
+      },
+      {
+        value: "dark" as const,
+        label: t("settings.appearance.theme.dark.label"),
+        icon: <MoonOutlined />,
+        description: t("settings.appearance.theme.dark.description"),
+      },
+      {
+        value: "system" as const,
+        label: t("settings.appearance.theme.system.label"),
+        icon: <DesktopOutlined />,
+        description: t("settings.appearance.theme.system.description"),
+      },
     ],
-    [],
+    [t],
   );
 
   return (
     <>
       <div className="settings-content-header">
-        <h2 className="settings-content-title">外观</h2>
+        <h2 className="settings-content-title">{t("settings.appearance.title")}</h2>
       </div>
 
-      <Card className="appearance-section-card" title="主题">
+      <Card className="appearance-section-card" title={t("settings.appearance.theme.cardTitle")}>
         <Radio.Group
           value={themeMode}
           onChange={(e) => setThemeMode(e.target.value as ThemeMode)}
@@ -62,7 +62,7 @@ function AppearancePanel() {
       </Card>
 
       <div className="theme-preview">
-        <Card className="appearance-section-card" title="预览">
+        <Card className="appearance-section-card" title={t("settings.appearance.preview.cardTitle")}>
           <div className="theme-preview-container">
             <div className="theme-preview-card light">
               <div className="preview-header">
@@ -75,7 +75,7 @@ function AppearancePanel() {
                 <div className="preview-line"></div>
                 <div className="preview-line medium"></div>
               </div>
-              <span className="preview-label">日间</span>
+              <span className="preview-label">{t("settings.appearance.preview.light")}</span>
             </div>
             <div className="theme-preview-card dark">
               <div className="preview-header">
@@ -88,7 +88,7 @@ function AppearancePanel() {
                 <div className="preview-line"></div>
                 <div className="preview-line medium"></div>
               </div>
-              <span className="preview-label">夜间</span>
+              <span className="preview-label">{t("settings.appearance.preview.dark")}</span>
             </div>
           </div>
         </Card>

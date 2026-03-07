@@ -7,6 +7,7 @@ type UpdateProfileRequest struct {
 	DisplayName *string `json:"display_name"`
 	AvatarURL   *string `json:"avatar_url"`
 	Username    *string `json:"username"`
+	Language    *string `json:"language"`
 }
 
 // ChangePasswordRequest represents password change request
@@ -21,6 +22,7 @@ type UserProfileResponse struct {
 	Email       string    `json:"email"`
 	Username    string    `json:"username"`
 	DisplayName string    `json:"display_name"`
+	Language    string    `json:"language"`
 	AvatarURL   string    `json:"avatar_url,omitempty"`
 	Status      string    `json:"status"`
 	CreatedAt   time.Time `json:"created_at"`

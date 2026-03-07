@@ -38,7 +38,11 @@ import {
 // --- Tiptap Node ---
 import { ImageUploadNode } from "../../nodes/image-upload-node/image-upload-node-extension"
 import { HorizontalRule } from "../../nodes/horizontal-rule-node/horizontal-rule-node-extension"
-import { CodeBlockNode } from "../../nodes/code-block-node/code-block-node-extension"
+import {
+  CodeBlockNode,
+  type CodeExecBlockState,
+  type CodeExecTrigger,
+} from "../../nodes/code-block-node/code-block-node-extension"
 import { LinkPreviewNode } from "../../nodes/link-preview-node/link-preview-node-extension"
 import { TocNode } from "../../nodes/toc-node/toc-node-extension"
 import { MathNode } from "../../nodes/math-node/math-node-extension"
@@ -170,6 +174,7 @@ import {
 } from "../../extensions/block-conversion"
 import { cloneBlockNodeForDuplicate } from "../../extensions/block-duplicate"
 import { buildStandaloneBuiltinBlockContent } from "../../extensions/builtin-block-content"
+import { resolveBlockCommentCount } from "./block-comment-count"
 
 // --- Styles ---
 import "./doc-editor.scss"
@@ -192,6 +197,10 @@ type DocEditorProps = {
     pluginBlockGroups?: PluginBlockToolbarGroup[]
   }
   documentBlockShortcuts?: Record<string, string | undefined>
+  onCodeExecRun?: CodeExecTrigger
+  codeExecStateByBlockId?: Record<string, CodeExecBlockState>
+  onBlockCommentOpen?: (input: { blockId: string }) => void
+  commentCountByBlockId?: Record<string, number>
 }
 
 type PluginBlockToolbarAction = {
@@ -782,6 +791,10 @@ export function DocEditor({
   onTaskCheckChange,
   pluginContributions,
   documentBlockShortcuts,
+  onCodeExecRun,
+  codeExecStateByBlockId = {},
+  onBlockCommentOpen,
+  commentCountByBlockId = {},
 }: DocEditorProps) {
   const isEditable = mode === "edit"
   const showTopToolbar = false
@@ -956,7 +969,10 @@ export function DocEditor({
             enableClickSelection: true,
           },
         }),
-        CodeBlockNode,
+        CodeBlockNode.configure({
+          onCodeExecRun,
+          codeExecStateByBlockId,
+        }),
         HorizontalRule,
         TextAlign.configure({ types: ["heading", "paragraph"] }),
         TaskList,
@@ -1009,6 +1025,26 @@ export function DocEditor({
     syncEditorEditableState(editor, isEditable)
   }, [editor, isEditable])
 
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) {
+      return
+    }
+    const codeBlockExtension = editor.extensionManager.extensions.find(
+      (item) => item.name === "codeBlock"
+    )
+    if (!codeBlockExtension) {
+      return
+    }
+
+    const options = codeBlockExtension.options as {
+      onCodeExecRun?: CodeExecTrigger
+      codeExecStateByBlockId?: Record<string, CodeExecBlockState>
+    }
+    options.onCodeExecRun = onCodeExecRun
+    options.codeExecStateByBlockId = codeExecStateByBlockId
+    editor.view.dispatch(editor.state.tr.setMeta("codeExecStateUpdate", Date.now()))
+  }, [codeExecStateByBlockId, editor, onCodeExecRun])
+
   const currentTopLevelBlock =
     editor && currentBlockId
       ? findTopLevelBlockById(editor, currentBlockId)
@@ -1042,6 +1078,10 @@ export function DocEditor({
       label: builtinBlockLabelMap.get(type) ?? type,
     }))
   }, [builtinBlockLabelMap, currentBlockConvertType])
+  const currentCommentCount = useMemo(
+    () => resolveBlockCommentCount(currentBlockId ?? "", commentCountByBlockId),
+    [commentCountByBlockId, currentBlockId]
+  )
 
   const blockBackgroundStyleState = useMemo(
     () => resolveBlockStyleSelectionState(editor, "backgroundColor"),
@@ -1868,6 +1908,24 @@ export function DocEditor({
     updateBlockHandlePosition,
   ])
 
+  const handleOpenCurrentBlockComment = useCallback(() => {
+    if (!currentBlockId || !onBlockCommentOpen) {
+      return
+    }
+    onBlockCommentOpen({ blockId: currentBlockId })
+    setBlockActionMenuOpen(false)
+    closeBlockActionSubmenus()
+    setBlockAddMenuOpen(false)
+    closeSlashMenu()
+    updateBlockHandlePosition()
+  }, [
+    closeBlockActionSubmenus,
+    closeSlashMenu,
+    currentBlockId,
+    onBlockCommentOpen,
+    updateBlockHandlePosition,
+  ])
+
   const handleConvertCurrentBlock = useCallback(
     (targetType: ConvertibleTextBlockType) => {
       if (!editor || !currentBlockId) {
@@ -2140,12 +2198,13 @@ export function DocEditor({
       return
     }
     const shell = editorShellRef.current
-    const contentEl = shell?.querySelector(".doc-editor-content") as HTMLElement | null
-    if (!contentEl || !shell) {
+    if (!shell) {
       return
     }
     const shellStyle = window.getComputedStyle(shell)
     const railLeft = parseCssPx(shellStyle.getPropertyValue("--doc-editor-rail-left"), 4)
+    const railLeftShift = parseCssPx(shellStyle.getPropertyValue("--doc-editor-rail-left-shift"), 0)
+    const railVisualLeft = railLeft + railLeftShift
     const railButtonSize = parseCssPx(shellStyle.getPropertyValue("--doc-editor-rail-button-size"), 26)
     const railGap = parseCssPx(shellStyle.getPropertyValue("--doc-editor-rail-gap"), 0)
 
@@ -2154,10 +2213,14 @@ export function DocEditor({
         return
       }
       const shellRect = shell.getBoundingClientRect()
+      const withinVertical =
+        event.clientY >= shellRect.top && event.clientY <= shellRect.bottom
       const relativeX = event.clientX - shellRect.left
-      if (!isPointerInLeftRail({ relativeX, railLeft, railButtonSize, railGap })) {
-        setBlockControlsVisible(false)
-        hoverClientYRef.current = null
+      if (!withinVertical || !isPointerInLeftRail({ relativeX, railLeft: railVisualLeft, railButtonSize, railGap })) {
+        if (!blockAddMenuOpen && !blockActionMenuOpen) {
+          setBlockControlsVisible(false)
+          hoverClientYRef.current = null
+        }
         return
       }
       hoverClientYRef.current = event.clientY
@@ -2165,29 +2228,25 @@ export function DocEditor({
       setBlockControlsVisible(hovered)
     }
 
-    const handlePointerLeave = (event: PointerEvent) => {
-      const nextTarget = event.relatedTarget as Node | null
-      const movingIntoControls = Boolean(
-        nextTarget && blockAddContainerRef.current?.contains(nextTarget)
-      )
-      if (
-        !shouldHideControlsOnPointerExit({
-          dragging: Boolean(draggingBlockId),
-          menuOpen: blockAddMenuOpen || blockActionMenuOpen,
-          movingIntoControls,
-        })
-      ) {
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null
+      const movingIntoControls = Boolean(target && blockAddContainerRef.current?.contains(target))
+      if (!shouldHideControlsOnPointerExit({
+        dragging: Boolean(draggingBlockId),
+        menuOpen: blockAddMenuOpen || blockActionMenuOpen,
+        movingIntoControls,
+      })) {
         return
       }
       setBlockControlsVisible(false)
       hoverClientYRef.current = null
     }
 
-    contentEl.addEventListener("pointermove", handlePointerMove, { passive: true })
-    contentEl.addEventListener("pointerleave", handlePointerLeave)
+    document.addEventListener("pointermove", handlePointerMove, { passive: true })
+    document.addEventListener("mousedown", handlePointerDown, true)
     return () => {
-      contentEl.removeEventListener("pointermove", handlePointerMove)
-      contentEl.removeEventListener("pointerleave", handlePointerLeave)
+      document.removeEventListener("pointermove", handlePointerMove)
+      document.removeEventListener("mousedown", handlePointerDown, true)
     }
   }, [blockActionMenuOpen, blockAddMenuOpen, desktopHandleEnabled, draggingBlockId, editor, updateBlockHandleFromClientY])
 
@@ -2732,6 +2791,14 @@ export function DocEditor({
                       </button>
                     </div>
                   ) : null}
+                  <button
+                    className="doc-editor-block-action-menu-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={handleOpenCurrentBlockComment}
+                  >
+                    评论{currentCommentCount > 0 ? `（${currentCommentCount}）` : ""}
+                  </button>
                   <button
                     className="doc-editor-block-action-menu-item"
                     type="button"

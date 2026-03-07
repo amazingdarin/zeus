@@ -12,6 +12,7 @@ import (
 
 	codeexecrepo "zeus/internal/modules/codeexec/repository"
 	codeexecsvc "zeus/internal/modules/codeexec/service"
+	"zeus/internal/i18n"
 )
 
 type Handler struct {
@@ -61,7 +62,7 @@ func tokenGuard(expectedToken string) gin.HandlerFunc {
 		if strings.TrimSpace(expectedToken) == "" {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 				"code":    "INTERNAL_TOKEN_MISSING",
-				"message": "internal token is not configured",
+				"message": i18n.Message(i18n.ResolveLocale(c.Request), "error.internal_token_missing"),
 			})
 			return
 		}
@@ -69,7 +70,7 @@ func tokenGuard(expectedToken string) gin.HandlerFunc {
 		if subtle.ConstantTimeCompare([]byte(token), []byte(expectedToken)) != 1 {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"code":    "UNAUTHORIZED",
-				"message": "invalid internal token",
+				"message": i18n.Message(i18n.ResolveLocale(c.Request), "error.invalid_internal_token"),
 			})
 			return
 		}
@@ -81,7 +82,7 @@ func (h *Handler) Execute(c *gin.Context) {
 	if h == nil || h.repo == nil || h.runtime == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    "HANDLER_NOT_READY",
-			"message": "code-runner handler not initialized",
+			"message": i18n.Message(i18n.ResolveLocale(c.Request), "error.handler_not_ready"),
 		})
 		return
 	}
@@ -96,7 +97,7 @@ func (h *Handler) Execute(c *gin.Context) {
 	if strings.TrimSpace(req.OwnerType) == "" || strings.TrimSpace(req.OwnerID) == "" || strings.TrimSpace(req.ProjectKey) == "" || strings.TrimSpace(req.DocID) == "" || strings.TrimSpace(req.BlockID) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    "INVALID_SCOPE",
-			"message": "owner/project/doc/block scope is required",
+			"message": i18n.Message(i18n.ResolveLocale(c.Request), "error.invalid_scope"),
 		})
 		return
 	}
@@ -164,6 +165,7 @@ func (h *Handler) Execute(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code":    "OK",
 		"message": "success",
+		"locale": i18n.ResolveLocale(c.Request),
 		"data": gin.H{
 			"runId":  entity.RunID,
 			"status": entity.Status,
@@ -182,7 +184,7 @@ func (h *Handler) Execute(c *gin.Context) {
 func (h *Handler) GetRun(c *gin.Context) {
 	runID := strings.TrimSpace(c.Param("runId"))
 	if runID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "RUN_ID_REQUIRED", "message": "runId is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "RUN_ID_REQUIRED", "message": i18n.Message(i18n.ResolveLocale(c.Request), "error.run_id_required"), "locale": i18n.ResolveLocale(c.Request)})
 		return
 	}
 	run, err := h.repo.FindByRunID(c.Request.Context(), runID)
@@ -191,12 +193,13 @@ func (h *Handler) GetRun(c *gin.Context) {
 		return
 	}
 	if run == nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "RUN_NOT_FOUND", "message": "run not found"})
+		c.JSON(http.StatusNotFound, gin.H{"code": "RUN_NOT_FOUND", "message": i18n.Message(i18n.ResolveLocale(c.Request), "error.run_not_found"), "locale": i18n.ResolveLocale(c.Request)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"code":    "OK",
 		"message": "success",
+		"locale": i18n.ResolveLocale(c.Request),
 		"data": gin.H{
 			"runId":  run.RunID,
 			"status": run.Status,
@@ -252,6 +255,7 @@ func (h *Handler) ListRuns(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code":    "OK",
 		"message": "success",
+		"locale": i18n.ResolveLocale(c.Request),
 		"data": gin.H{
 			"items": items,
 		},

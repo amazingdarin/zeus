@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as R
 import { useSearchParams } from "react-router-dom";
 import { ReloadOutlined } from "@ant-design/icons";
 import { Select, Tooltip } from "antd";
+import { useTranslation } from "react-i18next";
 import type { JSONContent } from "@tiptap/react";
 
 import { ensureBlockIds } from "@zeus/doc-editor";
@@ -240,6 +241,7 @@ function rewriteImageSources(node: JSONContent, currentDocPath: string): JSONCon
 }
 
 function SystemDocsPage() {
+  const { t } = useTranslation("document");
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedPath = String(searchParams.get("path") ?? "").trim();
   const rawLanguage = String(searchParams.get("lang") ?? "").trim();
@@ -316,7 +318,7 @@ function SystemDocsPage() {
       collectDirectoryPaths(result, expandedMap);
       setExpandedIds(expandedMap);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "加载系统文档目录失败";
+      const message = err instanceof Error ? err.message : t("document.systemDocs.loadTreeFailed");
       setTreeError(message);
       setTree([]);
       setExpandedIds({});
@@ -342,7 +344,7 @@ function SystemDocsPage() {
         if (requestId !== contentRequestRef.current) {
           return;
         }
-        const message = err instanceof Error ? err.message : "加载系统文档失败";
+        const message = err instanceof Error ? err.message : t("document.systemDocs.loadContentFailed");
         setContentError(message);
         setContent("");
         setActivePath(docPath);
@@ -539,7 +541,7 @@ function SystemDocsPage() {
           onToggleOutline={() => setOutlineMode((prev) => !prev)}
           documentContent={viewerContent}
           errorMessage={treeError}
-          emptyMessage="未发现可浏览的 Markdown 文档"
+          emptyMessage={t("document.systemDocs.empty")}
           emptyClickable={false}
         />
       }
@@ -547,9 +549,9 @@ function SystemDocsPage() {
       <>
         <div className="kb-main-header">
           <div className="system-docs-main-header-title">
-            <div className="doc-page-title">教程说明</div>
+            <div className="doc-page-title">{t("document.systemDocs.title")}</div>
             <div className="system-docs-subtitle">
-              {currentDocPath || "请选择左侧文档"}
+              {currentDocPath || t("document.systemDocs.selectDoc")}
             </div>
           </div>
           <div className="system-docs-header-actions">
@@ -560,7 +562,7 @@ function SystemDocsPage() {
               options={languageOptions}
               onChange={handleLanguageChange}
             />
-            <Tooltip title="刷新文档">
+            <Tooltip title={t("document.systemDocs.refresh")}>
               <button
                 type="button"
                 className="kb-refresh-button"

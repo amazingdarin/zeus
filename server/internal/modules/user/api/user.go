@@ -8,6 +8,7 @@ import (
 
 	"zeus/internal/core/middleware"
 	"zeus/internal/domain"
+	"zeus/internal/i18n"
 	usersvc "zeus/internal/modules/user/service"
 )
 
@@ -28,10 +29,7 @@ func NewUserHandler(userService *usersvc.UserService) *UserHandler {
 func (h *UserHandler) GetProfile(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    "UNAUTHORIZED",
-			"message": "not authenticated",
-		})
+		i18n.JSONError(c, http.StatusUnauthorized, "UNAUTHORIZED", "error.unauthorized")
 		return
 	}
 
@@ -49,10 +47,7 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    "UNAUTHORIZED",
-			"message": "not authenticated",
-		})
+		i18n.JSONError(c, http.StatusUnauthorized, "UNAUTHORIZED", "error.unauthorized")
 		return
 	}
 
@@ -61,6 +56,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    "INVALID_REQUEST",
 			"message": err.Error(),
+			"locale":  i18n.ResolveLocale(c.Request),
 		})
 		return
 	}
@@ -69,6 +65,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		DisplayName: req.DisplayName,
 		AvatarURL:   req.AvatarURL,
 		Username:    req.Username,
+		Language:    req.Language,
 	})
 	if err != nil {
 		handleUserError(c, err)
@@ -83,10 +80,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 func (h *UserHandler) ChangePassword(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    "UNAUTHORIZED",
-			"message": "not authenticated",
-		})
+		i18n.JSONError(c, http.StatusUnauthorized, "UNAUTHORIZED", "error.unauthorized")
 		return
 	}
 
@@ -95,6 +89,7 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    "INVALID_REQUEST",
 			"message": err.Error(),
+			"locale":  i18n.ResolveLocale(c.Request),
 		})
 		return
 	}
@@ -108,9 +103,7 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "password changed successfully",
-	})
+	i18n.JSONMessage(c, http.StatusOK, "success.password_changed")
 }
 
 // GetPublicProfile returns a user's public profile
@@ -120,7 +113,7 @@ func (h *UserHandler) GetPublicProfile(c *gin.Context) {
 	if username == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    "INVALID_REQUEST",
-			"message": "username is required",
+			"message": i18n.Message(i18n.ResolveLocale(c.Request), "error.missing_username"),
 		})
 		return
 	}
@@ -145,6 +138,7 @@ func toUserProfileResponse(user *domain.User) UserProfileResponse {
 		Email:       user.Email,
 		Username:    user.Username,
 		DisplayName: user.DisplayName,
+		Language:    user.Language,
 		AvatarURL:   user.AvatarURL,
 		Status:      string(user.Status),
 		CreatedAt:   user.CreatedAt,
@@ -156,22 +150,22 @@ func handleUserError(c *gin.Context, err error) {
 	case errors.Is(err, usersvc.ErrUserNotFound):
 		c.JSON(http.StatusNotFound, gin.H{
 			"code":    "USER_NOT_FOUND",
-			"message": "user not found",
+			"message": i18n.Message(i18n.ResolveLocale(c.Request), "error.user_not_found"),
 		})
 	case errors.Is(err, usersvc.ErrInvalidPassword):
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    "INVALID_PASSWORD",
-			"message": "current password is incorrect",
+			"message": i18n.Message(i18n.ResolveLocale(c.Request), "error.invalid_password"),
 		})
 	case errors.Is(err, usersvc.ErrUsernameExists):
 		c.JSON(http.StatusConflict, gin.H{
 			"code":    "USERNAME_EXISTS",
-			"message": "username already taken",
+			"message": i18n.Message(i18n.ResolveLocale(c.Request), "error.username_exists"),
 		})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    "INTERNAL_ERROR",
-			"message": "an unexpected error occurred",
+			"message": i18n.Message(i18n.ResolveLocale(c.Request), "error.internal_error"),
 		})
 	}
 }

@@ -22,15 +22,6 @@ postgres:
   max_idle_conns: 5
   conn_max_lifetime: 30m
 
-object_storage:
-  endpoint: http://rustfs.${namespace}.svc.cluster.local:9000
-  region: us-east-1
-  access_key: zeus
-  secret_key: zeus
-  bucket: zeus-docs
-  use_path_style: true
-  insecure: true
-
 asset:
   meta_root: /var/lib/zeus/assets
 

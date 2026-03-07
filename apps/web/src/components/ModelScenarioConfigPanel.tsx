@@ -117,7 +117,7 @@ function ModelScenarioConfigPanel({
           />
         </Form.Item>
         {scenario === "embedding" ? (
-          <div className="model-hint">Embedding 模型会忽略 temperature 参数。</div>
+          <div className="model-hint">向量模型会忽略 temperature 参数。</div>
         ) : null}
         <Form.Item label="启用" style={{ marginBottom: 12 }}>
           <Switch

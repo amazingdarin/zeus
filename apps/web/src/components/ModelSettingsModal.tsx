@@ -11,7 +11,7 @@ const scenarioOrder: ScenarioKey[] = ["chat", "embedding", "multimodal"];
 
 const scenarioTitles: Record<ScenarioKey, string> = {
   chat: "对话模型",
-  embedding: "Embedding 模型",
+  embedding: "向量模型",
   multimodal: "多模态模型",
 };
 
@@ -37,7 +37,7 @@ const defaultScenarioName = (scenario: ScenarioKey) => {
     case "chat":
       return "对话";
     case "embedding":
-      return "Embedding";
+      return "向量";
     case "multimodal":
       return "多模态";
     default:
@@ -117,7 +117,7 @@ function ModelSettingsModal({
     }
     const parsed = JSON.parse(trimmed);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      throw new Error("Parameters must be a JSON object");
+      throw new Error("参数必须是 JSON 对象");
     }
     if (scenario === "embedding" && "temperature" in parsed) {
       const clone = { ...(parsed as Record<string, unknown>) };
@@ -255,7 +255,7 @@ function ModelSettingsModal({
         {activeTab === "embedding" ? (
           <ModelScenarioConfigPanel
             scenario="embedding"
-            title="Embedding 模型"
+            title="向量模型"
             draft={drafts.embedding}
             onChange={(patch) => handleChange("embedding", patch)}
             onRefreshModels={onRefreshModels}

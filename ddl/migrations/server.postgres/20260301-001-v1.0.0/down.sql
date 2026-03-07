@@ -5,6 +5,8 @@ DROP TABLE IF EXISTS plugin_user_registry_snapshot;
 DROP TABLE IF EXISTS plugin_audit_log;
 DROP TABLE IF EXISTS plugin_user_settings;
 DROP TABLE IF EXISTS plugin_user_installation;
+DROP TABLE IF EXISTS document_block_comment_messages;
+DROP TABLE IF EXISTS document_block_comment_threads;
 DROP TABLE IF EXISTS document_recent_edits;
 DROP TABLE IF EXISTS document_favorites;
 DROP TABLE IF EXISTS chat_messages;

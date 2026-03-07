@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -12,9 +13,9 @@ import (
 )
 
 var (
-	ErrUserNotFound      = errors.New("user not found")
-	ErrInvalidPassword   = errors.New("invalid current password")
-	ErrUsernameExists    = errors.New("username already exists")
+	ErrUserNotFound    = errors.New("user not found")
+	ErrInvalidPassword = errors.New("invalid current password")
+	ErrUsernameExists  = errors.New("username already exists")
 )
 
 // UserService handles user profile operations
@@ -60,6 +61,7 @@ type UpdateProfileInput struct {
 	DisplayName *string
 	AvatarURL   *string
 	Username    *string
+	Language    *string
 }
 
 // UpdateProfile updates user profile
@@ -72,7 +74,6 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID string, input Up
 		return nil, err
 	}
 
-	// Check if username is being changed
 	if input.Username != nil && *input.Username != user.Username {
 		exists, err := s.userRepo.ExistsByUsername(ctx, *input.Username)
 		if err != nil {
@@ -89,6 +90,13 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID string, input Up
 	}
 	if input.AvatarURL != nil {
 		user.AvatarURL = *input.AvatarURL
+	}
+	if input.Language != nil {
+		nextLanguage := strings.TrimSpace(*input.Language)
+		if nextLanguage == "" {
+			nextLanguage = domain.DefaultUserLanguage
+		}
+		user.Language = nextLanguage
 	}
 
 	if err := s.userRepo.Update(ctx, user); err != nil {
@@ -114,12 +122,10 @@ func (s *UserService) ChangePassword(ctx context.Context, userID string, input C
 		return err
 	}
 
-	// Verify current password
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(input.CurrentPassword)); err != nil {
 		return ErrInvalidPassword
 	}
 
-	// Hash new password
 	newHash, err := bcrypt.GenerateFromPassword([]byte(input.NewPassword), s.bcryptCost)
 	if err != nil {
 		return err

@@ -13,14 +13,6 @@ postgres:
   persistence:
     storageClassName: local-path
 
-rustfs:
-  service:
-    type: NodePort
-    nodePort: 30900
-    consoleNodePort: 30901
-  persistence:
-    storageClassName: local-path
-
 faster-whisper:
   enabled: true
   service:

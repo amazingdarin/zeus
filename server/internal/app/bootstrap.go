@@ -7,7 +7,6 @@ import (
 
 	projectsvc "zeus/internal/modules/project/service/project"
 
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -16,10 +15,8 @@ import (
 	"zeus/internal/config"
 	corelog "zeus/internal/core/log"
 	coremiddleware "zeus/internal/core/middleware"
-	clients3 "zeus/internal/infra/client/s3"
 	"zeus/internal/infra/gitadmin"
 	"zeus/internal/infra/gitclient"
-	ingestions3 "zeus/internal/infra/ingestion/s3"
 	"zeus/internal/infra/jwt"
 	httpsession "zeus/internal/infra/session"
 	authsvc "zeus/internal/modules/auth/service"
@@ -68,22 +65,6 @@ func InitDB(ctx context.Context) *gorm.DB {
 		log.WithContext(ctx).Fatal("init database: nil db")
 	}
 	return db
-}
-
-func InitS3(ctx context.Context) (*s3.Client, *ingestions3.S3FileIngestion) {
-	s3Client, err := clients3.NewS3Client(ctx, clients3.Config{
-		Endpoint:     config.AppConfig.ObjectStorage.Endpoint,
-		Region:       config.AppConfig.ObjectStorage.Region,
-		AccessKey:    config.AppConfig.ObjectStorage.AccessKey,
-		SecretKey:    config.AppConfig.ObjectStorage.SecretKey,
-		UsePathStyle: config.AppConfig.ObjectStorage.UsePathStyle,
-		Insecure:     config.AppConfig.ObjectStorage.Insecure,
-	})
-	if err != nil {
-		log.WithContext(ctx).Fatalf("init object storage: %v", err)
-	}
-	s3Ingestion := ingestions3.NewS3FileIngestion(s3Client, "zeus", "")
-	return s3Client, s3Ingestion
 }
 
 func InitGitAdmin() *gitadmin.ExecAdmin {
@@ -160,7 +141,6 @@ func BuildRouter(ctx context.Context) *gin.Engine {
 	gitAdmin := InitGitAdmin()
 	gitClientManager := InitGitClientManager(ctx)
 	db := InitDB(ctx)
-	_, _ = InitS3(ctx)
 	repos := InitRepository(db, gitClientManager)
 
 	// Initialize services

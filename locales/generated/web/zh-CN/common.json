@@ -1,0 +1,20 @@
+{
+  "app.name": "Zeus",
+  "common.confirm": "确认",
+  "common.cancel": "取消",
+  "common.save": "保存",
+  "common.language": "语言",
+  "shell.nav.aiAssistant": "AI 助手",
+  "shell.nav.documents": "文档",
+  "shell.nav.edu": "Edu 题库",
+  "shell.menu.teams": "团队",
+  "shell.menu.settings": "设置",
+  "shell.menu.tutorialDocs": "教程说明",
+  "shell.menu.logout": "退出登录",
+  "shell.menu.login": "登录",
+  "shell.guest.title": "游客模式",
+  "shell.guest.description": "登录后可使用团队等能力",
+  "shell.messages.logoutSuccess": "已退出登录",
+  "shell.messages.logoutFailure": "退出登录失败",
+  "shell.messages.pluginMenuFailed": "插件菜单执行失败"
+}

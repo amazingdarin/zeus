@@ -1,0 +1,6 @@
+apiVersion: v2
+name: zeus-app-backend
+description: Zeus app-backend service chart
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

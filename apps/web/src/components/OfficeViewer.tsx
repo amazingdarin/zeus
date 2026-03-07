@@ -89,7 +89,7 @@ function OfficeViewer({ src, fileType, onError }: OfficeViewerProps) {
         return h(ViewerComponent, {
           src,
           onError: (err: unknown) => {
-            const message = err instanceof Error ? err.message : "failed to render document";
+            const message = err instanceof Error ? err.message : "文档渲染失败";
             onError?.(message);
           },
           onRendered: applyDocxScale,

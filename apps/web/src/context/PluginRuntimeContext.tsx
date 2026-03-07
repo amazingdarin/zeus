@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -35,6 +36,8 @@ import type {
 } from "@zeus/plugin-sdk-web";
 import { registerDocEditorBlockIdNodeTypes } from "@zeus/doc-editor";
 
+import { PROJECT_REF_CHANGED_EVENT, readLastProjectRef } from "./project-ref-storage";
+
 import {
   callPluginTrace,
   deletePluginLocalDataFile,
@@ -46,7 +49,6 @@ import {
   writePluginLocalDataFile,
 } from "../api/plugins";
 
-const LAST_PROJECT_REF_STORAGE_KEY = "zeus.lastProjectRef";
 
 type RuntimeWebPluginModule = WebPluginModule | WebPluginModuleV2;
 const DOC_EDITOR_BUILTIN_MODULE_LOADERS: Record<string, () => Promise<Record<string, unknown>>> = {
@@ -218,8 +220,7 @@ function createDocEditorRuntimeSdk(
 function resolveProjectRef(projectRefOverride?: string): string {
   const fromArg = String(projectRefOverride || "").trim();
   if (fromArg) return fromArg;
-  const fromStorage = localStorage.getItem(LAST_PROJECT_REF_STORAGE_KEY);
-  const normalized = String(fromStorage || "").trim();
+  const normalized = readLastProjectRef();
   if (!normalized) {
     throw new Error("Missing project context for plugin operation");
   }
@@ -499,10 +500,36 @@ export function PluginRuntimeProvider({ children }: { children: ReactNode }) {
     pluginBlockGroups: [],
   });
   const [refreshKey, setRefreshKey] = useState(0);
+  const lastProjectRefRef = useRef<string | null>(readLastProjectRef());
 
   const refresh = useCallback(() => {
     setRefreshKey((value) => value + 1);
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const handleProjectRefChanged = (event: Event) => {
+      const detail = event instanceof CustomEvent
+        ? (event.detail as { projectRef?: string | null } | null)
+        : null;
+      const nextProjectRef = typeof detail?.projectRef === "string"
+        ? detail.projectRef.trim() || null
+        : readLastProjectRef();
+      if (lastProjectRefRef.current === nextProjectRef) {
+        return;
+      }
+      lastProjectRefRef.current = nextProjectRef;
+      refresh();
+    };
+
+    window.addEventListener(PROJECT_REF_CHANGED_EVENT, handleProjectRefChanged);
+    return () => {
+      window.removeEventListener(PROJECT_REF_CHANGED_EVENT, handleProjectRefChanged);
+    };
+  }, [refresh]);
 
   const executeCommand = useCallback(
     async (
@@ -644,7 +671,7 @@ export function PluginRuntimeProvider({ children }: { children: ReactNode }) {
               continue;
             }
 
-            const projectRefFromStorage = localStorage.getItem(LAST_PROJECT_REF_STORAGE_KEY) || undefined;
+            const projectRefFromStorage = readLastProjectRef() || undefined;
             const traceState = { traceId: null as string | null };
             const updateTraceState = (result: unknown) => {
               if (!result || typeof result !== "object") {

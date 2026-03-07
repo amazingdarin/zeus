@@ -1,0 +1,20 @@
+{
+  "app.name": "Zeus",
+  "common.confirm": "Confirm",
+  "common.cancel": "Cancel",
+  "common.save": "Save",
+  "common.language": "Language",
+  "shell.nav.aiAssistant": "AI Assistant",
+  "shell.nav.documents": "Documents",
+  "shell.nav.edu": "Edu Question Bank",
+  "shell.menu.teams": "Teams",
+  "shell.menu.settings": "Settings",
+  "shell.menu.tutorialDocs": "Tutorial docs",
+  "shell.menu.logout": "Sign out",
+  "shell.menu.login": "Sign in",
+  "shell.guest.title": "Guest mode",
+  "shell.guest.description": "Sign in to unlock teams and more.",
+  "shell.messages.logoutSuccess": "Signed out",
+  "shell.messages.logoutFailure": "Failed to sign out",
+  "shell.messages.pluginMenuFailed": "Plugin menu action failed"
+}

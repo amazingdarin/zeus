@@ -321,10 +321,11 @@
 
 | 属性 | 类型 | 必需 | 默认值 | 说明 |
 |------|------|------|--------|------|
+| `id` | `string` | 否 | 自动生成 | Block ID（代码执行能力依赖该字段定位目标块） |
 | `language` | `string` | 否 | `null` | 编程语言 |
 | `renderer` | `string` | 否 | `"auto"` | 渲染器 ID |
 | `preview` | `boolean` | 否 | `false` | 是否预览模式 |
-| `view_mode` | `"text" \| "preview"` | 否 | `"text"` | 显示模式 |
+| `view_mode` | `"text" \| "preview" \| "split"` | 否 | `"text"` | 显示模式 |
 | `collapsed` | `boolean` | 否 | `false` | 是否折叠 |
 
 ### 内容
@@ -335,12 +336,19 @@
 
 `javascript`, `typescript`, `python`, `go`, `rust`, `java`, `json`, `yaml`, `markdown`, `sql`, `bash`, `html`, `css`
 
+### 代码执行约束
+
+- 可执行语言白名单：`python`、`javascript`、`typescript`、`bash`
+- 执行请求必须携带当前块 `id`、`language`、`code`
+- 执行状态（如运行中、最近状态、最近 runId）为运行时 UI 状态，不写回文档 JSON
+
 ### 示例
 
 ```json
 {
   "type": "codeBlock",
   "attrs": {
+    "id": "cb-uuid-001",
     "language": "typescript",
     "renderer": "auto",
     "preview": false,

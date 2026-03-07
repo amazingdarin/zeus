@@ -128,6 +128,48 @@ test("message-center list orders active and history by updated_at desc", async (
   }
 });
 
+test("message-center list supports filtering by type", async (t) => {
+  if (!(await canConnect())) {
+    t.skip("PostgreSQL not available");
+    return;
+  }
+  await ensureTable();
+
+  const userId = randomId("user");
+  const projectKey = randomId("project");
+
+  try {
+    const syncTask = await messageCenterStore.createTask({
+      userId,
+      projectKey,
+      type: "document-sync",
+      title: "Sync Failure",
+      status: "pending",
+    });
+    await messageCenterStore.failTask(userId, projectKey, syncTask.id, "push rejected");
+
+    await messageCenterStore.createTask({
+      userId,
+      projectKey,
+      type: "import-git",
+      title: "Git Import",
+      status: "running",
+    });
+
+    const filtered = await messageCenterStore.listTasks(userId, projectKey, {
+      limit: 10,
+      type: "document-sync",
+    });
+
+    assert.equal(filtered.active.length, 0);
+    assert.equal(filtered.history.length, 1);
+    assert.equal(filtered.history[0]?.id, syncTask.id);
+    assert.equal(filtered.history[0]?.type, "document-sync");
+  } finally {
+    await cleanup(userId, projectKey);
+  }
+});
+
 test("message-center updateTaskProgress persists progress", async (t) => {
   if (!(await canConnect())) {
     t.skip("PostgreSQL not available");

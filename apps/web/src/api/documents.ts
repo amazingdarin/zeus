@@ -1051,7 +1051,228 @@ export const updateBlockAttrs = async (
     }
 };
 
-export type CodeExecLanguage = "python" | "javascript" | "bash";
+export type DocumentBlockCommentStatus = "open" | "resolved";
+
+export type DocumentBlockCommentMessage = {
+    id: string;
+    threadId: string;
+    authorId: string;
+    content: string;
+    createdAt: string;
+    updatedAt: string;
+    deletedAt?: string;
+};
+
+export type DocumentBlockCommentThread = {
+    id: string;
+    docId: string;
+    blockId: string;
+    status: DocumentBlockCommentStatus;
+    createdBy: string;
+    createdAt: string;
+    updatedAt: string;
+    resolvedBy?: string;
+    resolvedAt?: string;
+    messages: DocumentBlockCommentMessage[];
+};
+
+export type ListDocumentBlockCommentThreadsInput = {
+    blockId?: string;
+    status?: DocumentBlockCommentStatus;
+    cursor?: string;
+    limit?: number;
+};
+
+export type ListDocumentBlockCommentThreadsResult = {
+    items: DocumentBlockCommentThread[];
+    nextCursor?: string;
+};
+
+export function buildBlockCommentThreadsPath(
+    projectKey: string,
+    docId: string,
+    input?: ListDocumentBlockCommentThreadsInput,
+): string {
+    const params = new URLSearchParams();
+    if (input?.blockId) {
+        params.set("blockId", input.blockId);
+    }
+    if (input?.status) {
+        params.set("status", input.status);
+    }
+    if (input?.cursor) {
+        params.set("cursor", input.cursor);
+    }
+    if (typeof input?.limit === "number" && Number.isFinite(input.limit)) {
+        params.set("limit", String(Math.max(1, Math.floor(input.limit))));
+    }
+    const query = params.toString();
+    const base = `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(docId)}/block-comments`;
+    return query ? `${base}?${query}` : base;
+}
+
+function buildBlockCommentThreadPath(
+    projectKey: string,
+    docId: string,
+    threadId: string,
+): string {
+    return `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(docId)}/block-comments/${encodeURIComponent(threadId)}`;
+}
+
+function mapDocumentBlockCommentMessage(raw: unknown): DocumentBlockCommentMessage {
+    const node = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    const deletedAt = String(node.deletedAt ?? node.deleted_at ?? "");
+    return {
+        id: String(node.id ?? ""),
+        threadId: String(node.threadId ?? node.thread_id ?? ""),
+        authorId: String(node.authorId ?? node.author_id ?? ""),
+        content: String(node.content ?? ""),
+        createdAt: String(node.createdAt ?? node.created_at ?? ""),
+        updatedAt: String(node.updatedAt ?? node.updated_at ?? ""),
+        deletedAt: deletedAt || undefined,
+    };
+}
+
+export function mapDocumentBlockCommentThread(raw: unknown): DocumentBlockCommentThread {
+    const wrapper = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    const threadNode = (wrapper.thread && typeof wrapper.thread === "object"
+        ? wrapper.thread
+        : wrapper) as Record<string, unknown>;
+    const messagesRaw = Array.isArray(wrapper.messages)
+        ? wrapper.messages
+        : (Array.isArray(threadNode.messages) ? threadNode.messages : []);
+    const resolvedBy = String(threadNode.resolvedBy ?? threadNode.resolved_by ?? "");
+    const resolvedAt = String(threadNode.resolvedAt ?? threadNode.resolved_at ?? "");
+    const statusRaw = String(threadNode.status ?? "open").trim();
+    const status: DocumentBlockCommentStatus = statusRaw === "resolved" ? "resolved" : "open";
+    return {
+        id: String(threadNode.id ?? ""),
+        docId: String(threadNode.docId ?? threadNode.doc_id ?? ""),
+        blockId: String(threadNode.blockId ?? threadNode.block_id ?? ""),
+        status,
+        createdBy: String(threadNode.createdBy ?? threadNode.created_by ?? ""),
+        createdAt: String(threadNode.createdAt ?? threadNode.created_at ?? ""),
+        updatedAt: String(threadNode.updatedAt ?? threadNode.updated_at ?? ""),
+        resolvedBy: resolvedBy || undefined,
+        resolvedAt: resolvedAt || undefined,
+        messages: messagesRaw.map((item) => mapDocumentBlockCommentMessage(item)),
+    };
+}
+
+export const fetchDocumentBlockCommentThreads = async (
+    projectKey: string,
+    docId: string,
+    input?: ListDocumentBlockCommentThreadsInput,
+): Promise<ListDocumentBlockCommentThreadsResult> => {
+    const response = await apiFetch(buildBlockCommentThreadsPath(projectKey, docId, input));
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        throw toDocumentApiError(response, payload, "BLOCK_COMMENT_LIST_FAILED", "Failed to list block comments");
+    }
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    const data = (payload?.data && typeof payload.data === "object"
+        ? payload.data
+        : {}) as Record<string, unknown>;
+    const items = Array.isArray(data.items) ? data.items.map((item) => mapDocumentBlockCommentThread(item)) : [];
+    const nextCursor = String(data.nextCursor ?? "");
+    return {
+        items,
+        nextCursor: nextCursor || undefined,
+    };
+};
+
+export const fetchDocumentBlockCommentThread = async (
+    projectKey: string,
+    docId: string,
+    threadId: string,
+): Promise<DocumentBlockCommentThread> => {
+    const response = await apiFetch(buildBlockCommentThreadPath(projectKey, docId, threadId));
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        throw toDocumentApiError(response, payload, "BLOCK_COMMENT_THREAD_FAILED", "Failed to get block comment thread");
+    }
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    return mapDocumentBlockCommentThread(payload?.data);
+};
+
+export const createDocumentBlockCommentThread = async (
+    projectKey: string,
+    docId: string,
+    input: { blockId: string; content: string },
+): Promise<DocumentBlockCommentThread> => {
+    const response = await apiFetch(buildBlockCommentThreadsPath(projectKey, docId), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+    });
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        throw toDocumentApiError(response, payload, "BLOCK_COMMENT_THREAD_CREATE_FAILED", "Failed to create block comment thread");
+    }
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    return mapDocumentBlockCommentThread(payload?.data);
+};
+
+export const createDocumentBlockCommentMessage = async (
+    projectKey: string,
+    docId: string,
+    threadId: string,
+    input: { content: string },
+): Promise<DocumentBlockCommentMessage> => {
+    const response = await apiFetch(
+        `${buildBlockCommentThreadPath(projectKey, docId, threadId)}/messages`,
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(input),
+        },
+    );
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        throw toDocumentApiError(response, payload, "BLOCK_COMMENT_MESSAGE_CREATE_FAILED", "Failed to create block comment message");
+    }
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    const data = (payload?.data && typeof payload.data === "object"
+        ? payload.data
+        : {}) as Record<string, unknown>;
+    return mapDocumentBlockCommentMessage(data);
+};
+
+export const updateDocumentBlockCommentThreadStatus = async (
+    projectKey: string,
+    docId: string,
+    threadId: string,
+    status: DocumentBlockCommentStatus,
+): Promise<DocumentBlockCommentThread> => {
+    const response = await apiFetch(buildBlockCommentThreadPath(projectKey, docId, threadId), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+    });
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        throw toDocumentApiError(response, payload, "BLOCK_COMMENT_THREAD_STATUS_FAILED", "Failed to update block comment thread status");
+    }
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    return mapDocumentBlockCommentThread(payload?.data);
+};
+
+export const deleteDocumentBlockCommentMessage = async (
+    projectKey: string,
+    docId: string,
+    messageId: string,
+): Promise<void> => {
+    const response = await apiFetch(
+        `/api/projects/${encodeProjectRef(projectKey)}/documents/${encodeURIComponent(docId)}/block-comments/messages/${encodeURIComponent(messageId)}`,
+        { method: "DELETE" },
+    );
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        throw toDocumentApiError(response, payload, "BLOCK_COMMENT_MESSAGE_DELETE_FAILED", "Failed to delete block comment message");
+    }
+};
+
+export type CodeExecLanguage = "python" | "javascript" | "typescript" | "bash";
 
 export type DocumentCodeRunResult = {
     stdout: string;

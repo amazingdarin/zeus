@@ -155,7 +155,7 @@ export function isPointerInLeftRail(input: {
   const padding = input.railPadding ?? 6;
   const railWidth =
     input.railButtonSize * buttonCount + input.railGap * Math.max(0, buttonCount - 1);
-  const minX = Math.max(0, input.railLeft - padding);
+  const minX = input.railLeft - padding;
   const maxX = input.railLeft + railWidth + padding;
   return input.relativeX >= minX && input.relativeX <= maxX;
 }

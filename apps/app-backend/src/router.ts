@@ -1,4 +1,6 @@
 import { Router, type Request, type Response } from "express";
+import { buildLocalizedErrorPayloadSync, localizedError } from "./services/i18n-error.js";
+import { getCurrentRequestLocale } from "./i18n/request-context.js";
 import multer from "multer";
 import path from "node:path";
 import { createReadStream } from "node:fs";
@@ -75,6 +77,21 @@ import {
   DocumentLockedError,
   getDocumentLockInfo,
 } from "./services/document-lock.js";
+import {
+  canDeleteCommentMessage,
+  canWriteComment,
+} from "./services/document-block-comment-model.js";
+import {
+  parseCommentContentInput,
+  parseCommentListQuery,
+  parseCommentStatusInput,
+  resolveCommentActorRole,
+} from "./services/document-block-comment-http.js";
+import {
+  CommentMessageNotFoundError,
+  CommentThreadNotFoundError,
+  documentBlockCommentStore,
+} from "./services/document-block-comment-store.js";
 import { createCodeExecService } from "./services/code-exec/service.js";
 import { CodeExecGuardError } from "./services/code-exec/guard.js";
 import { CodeExecClientError } from "./services/code-exec/client.js";
@@ -268,7 +285,12 @@ function success<T>(res: Response, data: T, status = 200): void {
  * Standard error response helper
  */
 function error(res: Response, code: string, message: string, status = 400): void {
-  res.status(status).json({ code, message });
+  const payload = buildLocalizedErrorPayloadSync({
+    locale: getCurrentRequestLocale(),
+    code,
+    fallbackMessage: message,
+  });
+  res.status(status).json(payload);
 }
 
 function extractBearerToken(authorizationHeader: unknown): string {
@@ -419,13 +441,13 @@ function respondDocumentLocked(res: Response, err: DocumentLockedError): void {
   });
 }
 
-function respondCodeExecError(res: Response, err: unknown): void {
+async function respondCodeExecError(req: Request, res: Response, err: unknown): Promise<void> {
   if (err instanceof DocumentNotFoundError) {
-    error(res, "NOT_FOUND", err.message, 404);
+    await localizedError(res, req, "NOT_FOUND", err.message, 404);
     return;
   }
   if (err instanceof BlockNotFoundError) {
-    error(res, "BLOCK_NOT_FOUND", err.message, 404);
+    await localizedError(res, req, "BLOCK_NOT_FOUND", err.message, 404);
     return;
   }
   if (err instanceof DocumentLockedError) {
@@ -433,15 +455,15 @@ function respondCodeExecError(res: Response, err: unknown): void {
     return;
   }
   if (err instanceof CodeExecGuardError) {
-    error(res, err.code, err.message, err.status);
+    await localizedError(res, req, err.code, err.message, err.status);
     return;
   }
   if (err instanceof CodeExecClientError) {
-    error(res, err.code, err.message, err.status);
+    await localizedError(res, req, err.code, err.message, err.status);
     return;
   }
   const message = err instanceof Error ? err.message : "Code execution failed";
-  error(res, "CODE_EXEC_FAILED", message, 500);
+  await localizedError(res, req, "CODE_EXEC_FAILED", message, 500);
 }
 
 export const buildRouter = () => {
@@ -795,7 +817,7 @@ export const buildRouter = () => {
         success(res, favorites);
       } catch (err) {
         if (err instanceof DocumentNotFoundError) {
-          error(res, "NOT_FOUND", err.message, 404);
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
           return;
         }
         const message = err instanceof Error ? err.message : "Favorite failed";
@@ -837,7 +859,7 @@ export const buildRouter = () => {
       success(res, { meta: doc.meta, body: doc.body });
     } catch (err) {
       if (err instanceof DocumentNotFoundError) {
-        error(res, "NOT_FOUND", err.message, 404);
+        await localizedError(res, req, "NOT_FOUND", err.message, 404);
         return;
       }
       const message = err instanceof Error ? err.message : "Get failed";
@@ -866,7 +888,7 @@ export const buildRouter = () => {
         success(res, { lock: getDocumentLockInfo(saved.meta) ?? lock });
       } catch (err) {
         if (err instanceof DocumentNotFoundError) {
-          error(res, "NOT_FOUND", err.message, 404);
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
           return;
         }
         const message = err instanceof Error ? err.message : "Lock failed";
@@ -891,7 +913,7 @@ export const buildRouter = () => {
         success(res, { lock: getDocumentLockInfo(saved.meta) });
       } catch (err) {
         if (err instanceof DocumentNotFoundError) {
-          error(res, "NOT_FOUND", err.message, 404);
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
           return;
         }
         const message = err instanceof Error ? err.message : "Unlock failed";
@@ -919,7 +941,7 @@ export const buildRouter = () => {
         success(res, items);
       } catch (err) {
         if (err instanceof DocumentNotFoundError) {
-          error(res, "NOT_FOUND", err.message, 404);
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
           return;
         }
         const message = err instanceof Error ? err.message : "Get hierarchy failed";
@@ -952,7 +974,7 @@ export const buildRouter = () => {
         success(res, { meta: duplicated.meta, body: duplicated.body }, 201);
       } catch (err) {
         if (err instanceof DocumentNotFoundError) {
-          error(res, "NOT_FOUND", err.message, 404);
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
           return;
         }
         const message = err instanceof Error ? err.message : "Duplicate failed";
@@ -988,7 +1010,7 @@ export const buildRouter = () => {
         res.send(result.buffer);
       } catch (err) {
         if (err instanceof DocumentNotFoundError) {
-          error(res, "NOT_FOUND", err.message, 404);
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
           return;
         }
         if (err instanceof ExportDocxError) {
@@ -1015,15 +1037,299 @@ export const buildRouter = () => {
         success(res, { meta: doc.meta, body: doc.body });
       } catch (err) {
         if (err instanceof DocumentNotFoundError) {
-          error(res, "NOT_FOUND", err.message, 404);
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
           return;
         }
         if (err instanceof BlockNotFoundError) {
-          error(res, "BLOCK_NOT_FOUND", err.message, 404);
+          await localizedError(res, req, "BLOCK_NOT_FOUND", err.message, 404);
           return;
         }
         const message = err instanceof Error ? err.message : "Get block failed";
-        error(res, "GET_BLOCK_FAILED", message, 500);
+        await localizedError(res, req, "GET_BLOCK_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * List block comment threads
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+        await documentStore.get(userId, projectKey, docId);
+
+        const listQuery = parseCommentListQuery(req.query as unknown as Record<string, unknown>);
+        const data = await documentBlockCommentStore.listThreads({
+          userId,
+          projectKey,
+          docId,
+          blockId: listQuery.blockId,
+          status: listQuery.status,
+          cursor: listQuery.cursor,
+          limit: listQuery.limit,
+        });
+        success(res, data);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "List block comments failed";
+        await localizedError(res, req, "LIST_BLOCK_COMMENTS_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Get block comment thread detail
+   * GET /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/:threadId
+   */
+  router.get(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/:threadId",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId, threadId } = req.params;
+        const userId = getUserId(req);
+        await documentStore.get(userId, projectKey, docId);
+
+        const data = await documentBlockCommentStore.getThread({
+          userId,
+          projectKey,
+          docId,
+          threadId,
+        });
+        success(res, data);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        if (err instanceof CommentThreadNotFoundError) {
+          await localizedError(res, req, err.code, err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Get block comment thread failed";
+        await localizedError(res, req, "GET_BLOCK_COMMENT_THREAD_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Create a block comment thread
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId } = req.params;
+        const userId = getUserId(req);
+        const scope = req.projectScope;
+        if (!scope) {
+          await localizedError(res, req, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
+          return;
+        }
+
+        const role = await resolveCommentActorRole(scope, userId);
+        if (!canWriteComment(role)) {
+          await localizedError(res, req, "COMMENT_PERMISSION_DENIED", "insufficient permission", 403);
+          return;
+        }
+
+        const blockId = String(req.body?.blockId ?? "").trim();
+        const content = parseCommentContentInput(req.body?.content);
+        if (!blockId) {
+          await localizedError(res, req, "BLOCK_ID_REQUIRED", "blockId is required", 400);
+          return;
+        }
+        if (!content) {
+          await localizedError(res, req, "COMMENT_CONTENT_REQUIRED", "content is required", 400);
+          return;
+        }
+
+        await documentStore.getBlockById(userId, projectKey, docId, blockId);
+        const created = await documentBlockCommentStore.createThread({
+          userId,
+          projectKey,
+          docId,
+          blockId,
+          content,
+        });
+        success(res, created, 201);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        if (err instanceof BlockNotFoundError) {
+          await localizedError(res, req, "BLOCK_NOT_FOUND", err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Create block comment thread failed";
+        await localizedError(res, req, "CREATE_BLOCK_COMMENT_THREAD_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Create a block comment message
+   * POST /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/:threadId/messages
+   */
+  router.post(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/:threadId/messages",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId, threadId } = req.params;
+        const userId = getUserId(req);
+        const scope = req.projectScope;
+        if (!scope) {
+          await localizedError(res, req, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
+          return;
+        }
+
+        const role = await resolveCommentActorRole(scope, userId);
+        if (!canWriteComment(role)) {
+          await localizedError(res, req, "COMMENT_PERMISSION_DENIED", "insufficient permission", 403);
+          return;
+        }
+
+        const content = parseCommentContentInput(req.body?.content);
+        if (!content) {
+          await localizedError(res, req, "COMMENT_CONTENT_REQUIRED", "content is required", 400);
+          return;
+        }
+
+        await documentStore.get(userId, projectKey, docId);
+        const messageRow = await documentBlockCommentStore.addMessage({
+          userId,
+          projectKey,
+          docId,
+          threadId,
+          content,
+        });
+        success(res, messageRow, 201);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        if (err instanceof CommentThreadNotFoundError) {
+          await localizedError(res, req, err.code, err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Create block comment message failed";
+        await localizedError(res, req, "CREATE_BLOCK_COMMENT_MESSAGE_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Update block comment thread status
+   * PATCH /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/:threadId
+   */
+  router.patch(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/:threadId",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId, threadId } = req.params;
+        const userId = getUserId(req);
+        const scope = req.projectScope;
+        if (!scope) {
+          await localizedError(res, req, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
+          return;
+        }
+
+        const role = await resolveCommentActorRole(scope, userId);
+        if (!canWriteComment(role)) {
+          await localizedError(res, req, "COMMENT_PERMISSION_DENIED", "insufficient permission", 403);
+          return;
+        }
+
+        const status = parseCommentStatusInput(req.body as Record<string, unknown> | undefined);
+        if (!status) {
+          await localizedError(res, req, "INVALID_COMMENT_STATUS", "status must be open or resolved", 400);
+          return;
+        }
+
+        await documentStore.get(userId, projectKey, docId);
+        const thread = await documentBlockCommentStore.setThreadStatus({
+          userId,
+          projectKey,
+          docId,
+          threadId,
+          status,
+        });
+        success(res, thread);
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        if (err instanceof CommentThreadNotFoundError) {
+          await localizedError(res, req, err.code, err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Update block comment thread failed";
+        await localizedError(res, req, "UPDATE_BLOCK_COMMENT_THREAD_FAILED", message, 500);
+      }
+    },
+  );
+
+  /**
+   * Delete block comment message
+   * DELETE /projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/messages/:messageId
+   */
+  router.delete(
+    "/projects/:ownerType/:ownerKey/:projectKey/documents/:docId/block-comments/messages/:messageId",
+    async (req: Request, res: Response) => {
+      try {
+        const { projectKey, docId, messageId } = req.params;
+        const userId = getUserId(req);
+        const scope = req.projectScope;
+        if (!scope) {
+          await localizedError(res, req, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
+          return;
+        }
+
+        await documentStore.get(userId, projectKey, docId);
+        const found = await documentBlockCommentStore.findMessage({
+          userId,
+          projectKey,
+          docId,
+          messageId,
+        });
+        const role = await resolveCommentActorRole(scope, userId);
+        if (!canDeleteCommentMessage({
+          actorId: userId,
+          authorId: found.message.authorId,
+          role,
+        })) {
+          await localizedError(res, req, "COMMENT_PERMISSION_DENIED", "insufficient permission", 403);
+          return;
+        }
+
+        await documentBlockCommentStore.deleteMessage({
+          userId,
+          projectKey,
+          docId,
+          messageId,
+        });
+        success(res, { messageId });
+      } catch (err) {
+        if (err instanceof DocumentNotFoundError) {
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
+          return;
+        }
+        if (err instanceof CommentMessageNotFoundError) {
+          await localizedError(res, req, err.code, err.message, 404);
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Delete block comment message failed";
+        await localizedError(res, req, "DELETE_BLOCK_COMMENT_MESSAGE_FAILED", message, 500);
       }
     },
   );
@@ -1040,7 +1346,7 @@ export const buildRouter = () => {
         const userId = getUserId(req);
         const scope = req.projectScope;
         if (!scope) {
-          error(res, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
+          await localizedError(res, req, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
           return;
         }
 
@@ -1051,11 +1357,11 @@ export const buildRouter = () => {
         const timeoutMs = Number.isFinite(timeoutRaw) ? Math.max(1000, Math.floor(timeoutRaw)) : 10_000;
 
         if (!blockId) {
-          error(res, "BLOCK_ID_REQUIRED", "blockId is required", 400);
+          await localizedError(res, req, "BLOCK_ID_REQUIRED", "blockId is required", 400);
           return;
         }
         if (!language) {
-          error(res, "LANGUAGE_REQUIRED", "language is required", 400);
+          await localizedError(res, req, "LANGUAGE_REQUIRED", "language is required", 400);
           return;
         }
 
@@ -1072,7 +1378,7 @@ export const buildRouter = () => {
         });
         success(res, run);
       } catch (err) {
-        respondCodeExecError(res, err);
+        await respondCodeExecError(req, res, err);
       }
     },
   );
@@ -1088,7 +1394,7 @@ export const buildRouter = () => {
         const { projectKey, docId } = req.params;
         const scope = req.projectScope;
         if (!scope) {
-          error(res, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
+          await localizedError(res, req, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
           return;
         }
         const blockId = String(req.query.blockId ?? "").trim() || undefined;
@@ -1107,7 +1413,7 @@ export const buildRouter = () => {
         });
         success(res, data);
       } catch (err) {
-        respondCodeExecError(res, err);
+        await respondCodeExecError(req, res, err);
       }
     },
   );
@@ -1123,7 +1429,7 @@ export const buildRouter = () => {
         const { projectKey, docId, runId } = req.params;
         const scope = req.projectScope;
         if (!scope) {
-          error(res, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
+          await localizedError(res, req, "PROJECT_SCOPE_REQUIRED", "project scope is required", 500);
           return;
         }
 
@@ -1136,7 +1442,7 @@ export const buildRouter = () => {
         });
         success(res, data);
       } catch (err) {
-        respondCodeExecError(res, err);
+        await respondCodeExecError(req, res, err);
       }
     },
   );
@@ -1256,7 +1562,7 @@ export const buildRouter = () => {
       success(res, { meta: saved.meta, body: saved.body });
     } catch (err) {
       if (err instanceof DocumentNotFoundError) {
-        error(res, "NOT_FOUND", err.message, 404);
+        await localizedError(res, req, "NOT_FOUND", err.message, 404);
         return;
       }
       if (err instanceof DocumentLockedError) {
@@ -1323,7 +1629,7 @@ export const buildRouter = () => {
       success(res, { deleted_ids: deletedIds, count: deletedIds.length, trash_id: moved.entry.trashId });
     } catch (err) {
       if (err instanceof DocumentNotFoundError) {
-        error(res, "NOT_FOUND", err.message, 404);
+        await localizedError(res, req, "NOT_FOUND", err.message, 404);
         return;
       }
       if (err instanceof DocumentLockedError) {
@@ -1370,7 +1676,7 @@ export const buildRouter = () => {
       });
     } catch (err) {
       if (err instanceof DocumentNotFoundError) {
-        error(res, "NOT_FOUND", err.message, 404);
+        await localizedError(res, req, "NOT_FOUND", err.message, 404);
         return;
       }
       const message = err instanceof Error ? err.message : "Get trash snapshot failed";
@@ -1407,7 +1713,7 @@ export const buildRouter = () => {
       });
     } catch (err) {
       if (err instanceof DocumentNotFoundError) {
-        error(res, "NOT_FOUND", err.message, 404);
+        await localizedError(res, req, "NOT_FOUND", err.message, 404);
         return;
       }
       const message = err instanceof Error ? err.message : "Restore trash failed";
@@ -1517,7 +1823,7 @@ export const buildRouter = () => {
         success(res, { blockId, attrs });
       } catch (err) {
         if (err instanceof DocumentNotFoundError) {
-          error(res, "NOT_FOUND", err.message, 404);
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
           return;
         }
         if (err instanceof DocumentLockedError) {
@@ -1592,7 +1898,7 @@ export const buildRouter = () => {
         success(res, null);
       } catch (err) {
         if (err instanceof DocumentNotFoundError) {
-          error(res, "NOT_FOUND", err.message, 404);
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
           return;
         }
         if (err instanceof DocumentLockedError) {
@@ -1653,7 +1959,7 @@ export const buildRouter = () => {
         success(res, { taskId }, 201);
       } catch (err) {
         if (err instanceof DocumentNotFoundError) {
-          error(res, "NOT_FOUND", err.message, 404);
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
           return;
         }
         const message = err instanceof Error ? err.message : "Failed to create optimization task";
@@ -2494,7 +2800,7 @@ export const buildRouter = () => {
       });
     } catch (err) {
       if (err instanceof DocumentNotFoundError) {
-        error(res, "NOT_FOUND", err.message, 404);
+        await localizedError(res, req, "NOT_FOUND", err.message, 404);
         return;
       }
       const message = err instanceof Error ? err.message : "Rebuild failed";
@@ -2622,13 +2928,13 @@ export const buildRouter = () => {
    * List all provider configurations
    * GET /llm/configs
    */
-  router.get("/llm/configs", async (_req: Request, res: Response) => {
+  router.get("/llm/configs", async (req: Request, res: Response) => {
     try {
       const configs = await configStore.list();
       success(res, configs);
     } catch (err) {
       const message = err instanceof Error ? err.message : "List configs failed";
-      error(res, "LIST_CONFIGS_FAILED", message, 500);
+      await localizedError(res, req, "LIST_CONFIGS_FAILED", message, 500);
     }
   });
 
@@ -2641,7 +2947,7 @@ export const buildRouter = () => {
       const { configType } = req.params;
       
       if (!isValidConfigType(configType)) {
-        error(res, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE);
+        await localizedError(res, req, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE, 400);
         return;
       }
       
@@ -2649,7 +2955,7 @@ export const buildRouter = () => {
       success(res, config); // Returns null if not found, which is valid
     } catch (err) {
       const message = err instanceof Error ? err.message : "Get config failed";
-      error(res, "GET_CONFIG_FAILED", message, 500);
+      await localizedError(res, req, "GET_CONFIG_FAILED", message, 500);
     }
   });
 
@@ -2663,7 +2969,7 @@ export const buildRouter = () => {
       const input = req.body as Omit<ProviderConfigInput, "configType">;
       
       if (!isValidConfigType(configType)) {
-        error(res, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE);
+        await localizedError(res, req, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE, 400);
         return;
       }
 
@@ -2673,22 +2979,24 @@ export const buildRouter = () => {
       >;
       
       if (!normalizedInput.providerId || !normalizedInput.displayName) {
-        error(res, "INVALID_REQUEST", "providerId and displayName are required");
+        await localizedError(res, req, "INVALID_REQUEST", "providerId and displayName are required", 400);
         return;
       }
 
       // Validate provider ID
       const validProviders: LLMProviderId[] = ["openai", "anthropic", "google", "ollama", "openai-compatible", "paddleocr"];
       if (!validProviders.includes(normalizedInput.providerId)) {
-        error(res, "INVALID_PROVIDER", `Invalid provider: ${normalizedInput.providerId}`);
+        await localizedError(res, req, "INVALID_PROVIDER", `Invalid provider: ${normalizedInput.providerId}`, 400);
         return;
       }
 
       if (!isProviderAllowedForConfigType(configType as ConfigType, normalizedInput.providerId)) {
-        error(
+        await localizedError(
           res,
+          req,
           "INVALID_PROVIDER_FOR_TYPE",
           "transcription config only supports 'openai' or 'openai-compatible'",
+          400,
         );
         return;
       }
@@ -2701,7 +3009,7 @@ export const buildRouter = () => {
       success(res, config);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Upsert config failed";
-      error(res, "UPSERT_CONFIG_FAILED", message, 500);
+      await localizedError(res, req, "UPSERT_CONFIG_FAILED", message, 500);
     }
   });
 
@@ -2714,14 +3022,14 @@ export const buildRouter = () => {
       const { configType } = req.params;
       
       if (!isValidConfigType(configType)) {
-        error(res, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE);
+        await localizedError(res, req, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE, 400);
         return;
       }
       
       const deleted = await configStore.deleteByType(configType as ConfigType);
       
       if (!deleted) {
-        error(res, "NOT_FOUND", "Configuration not found", 404);
+        await localizedError(res, req, "NOT_FOUND", "Configuration not found", 404);
         return;
       }
       
@@ -2731,7 +3039,7 @@ export const buildRouter = () => {
       success(res, { deleted: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Delete config failed";
-      error(res, "DELETE_CONFIG_FAILED", message, 500);
+      await localizedError(res, req, "DELETE_CONFIG_FAILED", message, 500);
     }
   });
 
@@ -2744,7 +3052,7 @@ export const buildRouter = () => {
       const { configType } = req.params;
       
       if (!isValidConfigType(configType)) {
-        error(res, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE);
+        await localizedError(res, req, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE, 400);
         return;
       }
       
@@ -2752,7 +3060,7 @@ export const buildRouter = () => {
       const config = await configStore.getInternalByType(configType as ConfigType);
       
       if (!config) {
-        error(res, "NOT_FOUND", "Configuration not found", 404);
+        await localizedError(res, req, "NOT_FOUND", "Configuration not found", 404);
         return;
       }
       
@@ -2851,14 +3159,14 @@ export const buildRouter = () => {
       const config = await configStore.get(id);
       
       if (!config) {
-        error(res, "NOT_FOUND", "Configuration not found", 404);
+        await localizedError(res, req, "NOT_FOUND", "Configuration not found", 404);
         return;
       }
       
       success(res, config);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Get config failed";
-      error(res, "GET_CONFIG_FAILED", message, 500);
+      await localizedError(res, req, "GET_CONFIG_FAILED", message, 500);
     }
   });
 
@@ -2871,28 +3179,30 @@ export const buildRouter = () => {
       const input = req.body as ProviderConfigInput;
       const configType = input.configType || "llm";
       if (!isValidConfigType(configType)) {
-        error(res, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE);
+        await localizedError(res, req, "INVALID_TYPE", VALID_CONFIG_TYPE_MESSAGE, 400);
         return;
       }
 
       const normalizedInput = normalizeInputForConfigType(configType, input) as ProviderConfigInput;
       if (!normalizedInput.providerId || !normalizedInput.displayName) {
-        error(res, "INVALID_REQUEST", "providerId and displayName are required");
+        await localizedError(res, req, "INVALID_REQUEST", "providerId and displayName are required", 400);
         return;
       }
 
       // Validate provider ID
       const validProviders: LLMProviderId[] = ["openai", "anthropic", "google", "ollama", "openai-compatible", "paddleocr"];
       if (!validProviders.includes(normalizedInput.providerId)) {
-        error(res, "INVALID_PROVIDER", `Invalid provider: ${normalizedInput.providerId}`);
+        await localizedError(res, req, "INVALID_PROVIDER", `Invalid provider: ${normalizedInput.providerId}`, 400);
         return;
       }
 
       if (!isProviderAllowedForConfigType(configType, normalizedInput.providerId)) {
-        error(
+        await localizedError(
           res,
+          req,
           "INVALID_PROVIDER_FOR_TYPE",
           "transcription config only supports 'openai' or 'openai-compatible'",
+          400,
         );
         return;
       }
@@ -2926,7 +3236,7 @@ export const buildRouter = () => {
       success(res, config);
     } catch (err) {
       if (err instanceof Error && err.message.includes("not found")) {
-        error(res, "NOT_FOUND", err.message, 404);
+        await localizedError(res, req, "NOT_FOUND", err.message, 404);
         return;
       }
       const message = err instanceof Error ? err.message : "Update config failed";
@@ -2944,7 +3254,7 @@ export const buildRouter = () => {
       const deleted = await configStore.delete(id);
       
       if (!deleted) {
-        error(res, "NOT_FOUND", "Configuration not found", 404);
+        await localizedError(res, req, "NOT_FOUND", "Configuration not found", 404);
         return;
       }
       
@@ -2954,7 +3264,7 @@ export const buildRouter = () => {
       success(res, { deleted: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Delete config failed";
-      error(res, "DELETE_CONFIG_FAILED", message, 500);
+      await localizedError(res, req, "DELETE_CONFIG_FAILED", message, 500);
     }
   });
 
@@ -2969,14 +3279,14 @@ export const buildRouter = () => {
       // Get the configuration with decrypted API key
       const config = await configStore.getInternal(id);
       if (!config) {
-        error(res, "NOT_FOUND", "Configuration not found", 404);
+        await localizedError(res, req, "NOT_FOUND", "Configuration not found", 404);
         return;
       }
 
       // Get model to test with
       const model = config.defaultModel || getDefaultModelForProvider(config.providerId);
       if (!model) {
-        error(res, "NO_MODEL", "No model configured for testing");
+        await localizedError(res, req, "NO_MODEL", "No model configured for testing", 400);
         return;
       }
 
@@ -3007,11 +3317,11 @@ export const buildRouter = () => {
         console.error(`[test] Failed:`, testErr);
         await configStore.updateStatus(id, "error", errorMessage);
         
-        error(res, "TEST_FAILED", errorMessage);
+        await localizedError(res, req, "TEST_FAILED", errorMessage, 400);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Test failed";
-      error(res, "TEST_FAILED", message, 500);
+      await localizedError(res, req, "TEST_FAILED", message, 500);
     }
   });
 
@@ -3546,7 +3856,7 @@ export const buildRouter = () => {
       success(res, { sessions });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to list sessions";
-      error(res, "LIST_SESSIONS_FAILED", msg, 500);
+      await localizedError(res, req, "LIST_SESSIONS_FAILED", msg, 500);
     }
   });
 
@@ -3565,7 +3875,7 @@ export const buildRouter = () => {
       success(res, session);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to create session";
-      error(res, "CREATE_SESSION_FAILED", msg, 500);
+      await localizedError(res, req, "CREATE_SESSION_FAILED", msg, 500);
     }
   });
 
@@ -3583,7 +3893,7 @@ export const buildRouter = () => {
       success(res, { messages });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to get session messages";
-      error(res, "GET_SESSION_MESSAGES_FAILED", msg, 500);
+      await localizedError(res, req, "GET_SESSION_MESSAGES_FAILED", msg, 500);
     }
   });
 
@@ -3611,7 +3921,7 @@ export const buildRouter = () => {
       success(res, session);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to rename session";
-      error(res, "RENAME_SESSION_FAILED", msg, 500);
+      await localizedError(res, req, "RENAME_SESSION_FAILED", msg, 500);
     }
   });
 
@@ -3634,7 +3944,7 @@ export const buildRouter = () => {
       success(res, { deleted: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to delete session";
-      error(res, "DELETE_SESSION_FAILED", msg, 500);
+      await localizedError(res, req, "DELETE_SESSION_FAILED", msg, 500);
     }
   });
 
@@ -3798,7 +4108,7 @@ export const buildRouter = () => {
     try {
       const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
       if (!pluginId) {
-        error(res, "INVALID_REQUEST", "pluginId is required");
+        await localizedError(res, req, "INVALID_REQUEST", "pluginId is required", 400);
         return;
       }
       const versions = await pluginManager.listStorePluginVersions(pluginId);
@@ -3826,7 +4136,7 @@ export const buildRouter = () => {
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to list installed plugins";
-      error(res, "LIST_INSTALLED_PLUGINS_FAILED", msg, 500);
+      await localizedError(res, req, "LIST_INSTALLED_PLUGINS_FAILED", msg, 500);
     }
   });
 
@@ -3840,7 +4150,7 @@ export const buildRouter = () => {
       const pluginId = String(req.body?.pluginId || "").trim();
       const version = String(req.body?.version || "").trim() || undefined;
       if (!pluginId) {
-        error(res, "INVALID_REQUEST", "pluginId is required");
+        await localizedError(res, req, "INVALID_REQUEST", "pluginId is required", 400);
         return;
       }
 
@@ -3848,7 +4158,7 @@ export const buildRouter = () => {
       success(res, result, 201);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to install plugin";
-      error(res, "INSTALL_PLUGIN_FAILED", msg, 500);
+      await localizedError(res, req, "INSTALL_PLUGIN_FAILED", msg, 500);
     }
   });
 
@@ -3869,7 +4179,7 @@ export const buildRouter = () => {
       success(res, installation);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to update plugin state";
-      error(res, "UPDATE_PLUGIN_STATE_FAILED", msg, 500);
+      await localizedError(res, req, "UPDATE_PLUGIN_STATE_FAILED", msg, 500);
     }
   });
 
@@ -3885,7 +4195,7 @@ export const buildRouter = () => {
       success(res, { deleted });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to uninstall plugin";
-      error(res, "UNINSTALL_PLUGIN_FAILED", msg, 500);
+      await localizedError(res, req, "UNINSTALL_PLUGIN_FAILED", msg, 500);
     }
   });
 
@@ -3900,7 +4210,7 @@ export const buildRouter = () => {
       success(res, { plugins: items });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to get plugin runtime";
-      error(res, "GET_PLUGIN_RUNTIME_FAILED", msg, 500);
+      await localizedError(res, req, "GET_PLUGIN_RUNTIME_FAILED", msg, 500);
     }
   });
 
@@ -3915,7 +4225,7 @@ export const buildRouter = () => {
       success(res, { commands });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to list plugin commands";
-      error(res, "LIST_PLUGIN_COMMANDS_FAILED", msg, 500);
+      await localizedError(res, req, "LIST_PLUGIN_COMMANDS_FAILED", msg, 500);
     }
   });
 
@@ -3931,7 +4241,7 @@ export const buildRouter = () => {
       success(res, { settings });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to get plugin settings";
-      error(res, "GET_PLUGIN_SETTINGS_FAILED", msg, 500);
+      await localizedError(res, req, "GET_PLUGIN_SETTINGS_FAILED", msg, 500);
     }
   });
 
@@ -3950,7 +4260,7 @@ export const buildRouter = () => {
       success(res, { settings: next });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to update plugin settings";
-      error(res, "UPDATE_PLUGIN_SETTINGS_FAILED", msg, 500);
+      await localizedError(res, req, "UPDATE_PLUGIN_SETTINGS_FAILED", msg, 500);
     }
   });
 
@@ -3970,7 +4280,7 @@ export const buildRouter = () => {
         const dir = String(req.query.dir || "").trim();
         const limit = Number(req.query.limit || 200);
         if (!pluginId) {
-          error(res, "INVALID_REQUEST", "pluginId is required");
+          await localizedError(res, req, "INVALID_REQUEST", "pluginId is required", 400);
           return;
         }
         const files = await pluginManager.listLocalDataFiles({
@@ -3984,7 +4294,7 @@ export const buildRouter = () => {
         success(res, { files });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed to list plugin local data files";
-        error(res, "LIST_PLUGIN_LOCAL_DATA_FAILED", msg, 500);
+        await localizedError(res, req, "LIST_PLUGIN_LOCAL_DATA_FAILED", msg, 500);
       }
     },
   );
@@ -4020,7 +4330,7 @@ export const buildRouter = () => {
         success(res, { file });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed to read plugin local data file";
-        error(res, "READ_PLUGIN_LOCAL_DATA_FAILED", msg, 500);
+        await localizedError(res, req, "READ_PLUGIN_LOCAL_DATA_FAILED", msg, 500);
       }
     },
   );
@@ -4060,7 +4370,7 @@ export const buildRouter = () => {
         success(res, { file });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed to write plugin local data file";
-        error(res, "WRITE_PLUGIN_LOCAL_DATA_FAILED", msg, 500);
+        await localizedError(res, req, "WRITE_PLUGIN_LOCAL_DATA_FAILED", msg, 500);
       }
     },
   );
@@ -4093,7 +4403,7 @@ export const buildRouter = () => {
         success(res, result);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed to delete plugin local data file";
-        error(res, "DELETE_PLUGIN_LOCAL_DATA_FAILED", msg, 500);
+        await localizedError(res, req, "DELETE_PLUGIN_LOCAL_DATA_FAILED", msg, 500);
       }
     },
   );
@@ -4119,7 +4429,7 @@ export const buildRouter = () => {
       res.send(asset.content);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to read plugin asset";
-      error(res, "READ_PLUGIN_ASSET_FAILED", msg, 404);
+      await localizedError(res, req, "READ_PLUGIN_ASSET_FAILED", msg, 404);
     }
   });
 
@@ -4156,18 +4466,18 @@ export const buildRouter = () => {
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed to execute plugin command";
         if (/requires doc_id/i.test(msg)) {
-          error(res, "INVALID_REQUEST", msg, 400);
+          await localizedError(res, req, "INVALID_REQUEST", msg, 400);
           return;
         }
         if (/not available/i.test(msg)) {
-          error(res, "NOT_FOUND", msg, 404);
+          await localizedError(res, req, "NOT_FOUND", msg, 404);
           return;
         }
         if (/not enabled for api execution/i.test(msg)) {
-          error(res, "FORBIDDEN", msg, 403);
+          await localizedError(res, req, "FORBIDDEN", msg, 403);
           return;
         }
-        error(res, "EXECUTE_PLUGIN_COMMAND_FAILED", msg, 500);
+        await localizedError(res, req, "EXECUTE_PLUGIN_COMMAND_FAILED", msg, 500);
       }
     },
   );
@@ -4201,18 +4511,18 @@ export const buildRouter = () => {
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed to execute plugin command";
         if (/requires doc_id/i.test(msg)) {
-          error(res, "INVALID_REQUEST", msg, 400);
+          await localizedError(res, req, "INVALID_REQUEST", msg, 400);
           return;
         }
         if (/not available/i.test(msg)) {
-          error(res, "NOT_FOUND", msg, 404);
+          await localizedError(res, req, "NOT_FOUND", msg, 404);
           return;
         }
         if (/not enabled for api execution/i.test(msg)) {
-          error(res, "FORBIDDEN", msg, 403);
+          await localizedError(res, req, "FORBIDDEN", msg, 403);
           return;
         }
-        error(res, "EXECUTE_PLUGIN_COMMAND_FAILED", msg, 500);
+        await localizedError(res, req, "EXECUTE_PLUGIN_COMMAND_FAILED", msg, 500);
       }
     },
   );
@@ -4229,7 +4539,7 @@ export const buildRouter = () => {
         const { projectKey } = req.params;
         const pluginId = decodeURIComponent(String(req.params.pluginId || "").trim());
         if (!pluginId) {
-          error(res, "INVALID_REQUEST", "pluginId is required");
+          await localizedError(res, req, "INVALID_REQUEST", "pluginId is required", 400);
           return;
         }
         const method = String(req.body?.method || "").trim();
@@ -4252,11 +4562,11 @@ export const buildRouter = () => {
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed to handle plugin trace";
         if (/trace method is required|unknown trace method/i.test(msg)) {
-          error(res, "INVALID_REQUEST", msg, 400);
+          await localizedError(res, req, "INVALID_REQUEST", msg, 400);
           return;
         }
         if (/not installed or disabled/i.test(msg) || /not available/i.test(msg)) {
-          error(res, "NOT_FOUND", msg, 404);
+          await localizedError(res, req, "NOT_FOUND", msg, 404);
           return;
         }
         error(res, "PLUGIN_TRACE_FAILED", msg, 500);
@@ -4595,7 +4905,7 @@ export const buildRouter = () => {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to get general settings";
-      error(res, "GET_GENERAL_SETTINGS_FAILED", msg, 500);
+      await localizedError(res, req, "GET_GENERAL_SETTINGS_FAILED", msg, 500);
     }
   });
 
@@ -4624,7 +4934,7 @@ export const buildRouter = () => {
 
       const userId = String(req.user?.id ?? "").trim();
       if (!userId) {
-        error(res, "UNAUTHORIZED", "user not authenticated", 401);
+        await localizedError(res, req, "UNAUTHORIZED", "user not authenticated", 401);
         return;
       }
 
@@ -4632,7 +4942,7 @@ export const buildRouter = () => {
       if (document_block_shortcuts !== undefined) {
         const validation = validateDocumentBlockShortcutsInput(document_block_shortcuts);
         if (!validation.ok) {
-          error(res, "INVALID_BLOCK_SHORTCUTS", validation.message, 400);
+          await localizedError(res, req, "INVALID_BLOCK_SHORTCUTS", validation.message, 400);
           return;
         }
         documentBlockShortcuts = validation.value;
@@ -4953,7 +5263,7 @@ export const buildRouter = () => {
         }, 202);
       } catch (err) {
         if (err instanceof DocumentNotFoundError) {
-          error(res, "NOT_FOUND", err.message, 404);
+          await localizedError(res, req, "NOT_FOUND", err.message, 404);
           return;
         }
         const msg = err instanceof Error ? err.message : "Failed to export PPT";

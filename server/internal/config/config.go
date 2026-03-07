@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -12,7 +14,6 @@ type Config struct {
 	Server        ServerConfig        `mapstructure:"server"`
 	CodeRunner    CodeRunnerConfig    `mapstructure:"code_runner"`
 	Postgres      PostgresConfig      `mapstructure:"postgres"`
-	ObjectStorage ObjectStorageConfig `mapstructure:"object_storage"`
 	Asset         AssetConfig         `mapstructure:"asset"`
 	Git           GitConfig           `mapstructure:"git"`
 	Search        SearchConfig        `mapstructure:"search"`
@@ -54,16 +55,6 @@ func (p PostgresConfig) ConnMaxLifetimeDuration() (time.Duration, error) {
 		return 0, nil
 	}
 	return time.ParseDuration(p.ConnMaxLifetime)
-}
-
-type ObjectStorageConfig struct {
-	Endpoint     string `mapstructure:"endpoint"`
-	Region       string `mapstructure:"region"`
-	AccessKey    string `mapstructure:"access_key"`
-	SecretKey    string `mapstructure:"secret_key"`
-	Bucket       string `mapstructure:"bucket"`
-	UsePathStyle bool   `mapstructure:"use_path_style"`
-	Insecure     bool   `mapstructure:"insecure"`
 }
 
 type AssetConfig struct {
@@ -146,6 +137,18 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 
+	if overridePath := localOverridePath(path); overridePath != "" {
+		if _, err := os.Stat(overridePath); err == nil {
+			v.SetConfigFile(overridePath)
+			v.SetConfigType("yaml")
+			if err := v.MergeInConfig(); err != nil {
+				return nil, fmt.Errorf("merge local config: %w", err)
+			}
+		} else if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("stat local config: %w", err)
+		}
+	}
+
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
@@ -153,6 +156,21 @@ func Load(path string) (*Config, error) {
 
 	applyDefaults(&cfg)
 	return &cfg, nil
+}
+
+func localOverridePath(path string) string {
+	if path == "" {
+		return ""
+	}
+
+	base := filepath.Base(path)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	if strings.HasSuffix(name, ".local") {
+		return ""
+	}
+
+	return filepath.Join(filepath.Dir(path), name+".local"+ext)
 }
 
 func applyDefaults(cfg *Config) {

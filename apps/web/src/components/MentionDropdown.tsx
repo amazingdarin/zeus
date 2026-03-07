@@ -495,7 +495,7 @@ function MentionDropdown({
             className="mention-dropdown-page-btn"
             onClick={goToPrevPage}
             disabled={currentPage === 0}
-            title="上一页 (PageUp)"
+            title="上一页（PgUp）"
           >
             ‹
           </button>
@@ -506,7 +506,7 @@ function MentionDropdown({
             className="mention-dropdown-page-btn"
             onClick={goToNextPage}
             disabled={currentPage >= totalPages - 1}
-            title="下一页 (PageDown)"
+            title="下一页（PgDn）"
           >
             ›
           </button>
@@ -519,7 +519,7 @@ function MentionDropdown({
         {totalPages > 1 && <span>PgUp/PgDn 翻页</span>}
         {!isPptMode && navPath.length > 0 && <span>← 返回</span>}
         {!isPptMode && <span>→ 进入</span>}
-        <span>Enter 确认</span>
+        <span>回车确认</span>
         <span>Esc 取消</span>
       </div>
     </div>

@@ -54,6 +54,14 @@ test("sql tracks contain up.sql/down.sql and user tables only exist on server.po
   assert.match(mobileUp, /CREATE TABLE project/i);
   assert.match(serverUp, /CREATE TABLE(?: IF NOT EXISTS)? knowledge_index/i);
   assert.match(mobileUp, /CREATE TABLE(?: IF NOT EXISTS)? knowledge_index/i);
+  assert.match(serverUp, /CREATE TABLE(?: IF NOT EXISTS)? user_general_settings/i);
+  assert.match(serverUp, /document_auto_sync/i);
+  assert.match(serverUp, /trash_auto_cleanup_enabled/i);
+  assert.match(serverUp, /trash_auto_cleanup_days/i);
+  assert.match(mobileUp, /CREATE TABLE(?: IF NOT EXISTS)? user_general_settings/i);
+  assert.match(mobileUp, /document_auto_sync/i);
+  assert.match(mobileUp, /trash_auto_cleanup_enabled/i);
+  assert.match(mobileUp, /trash_auto_cleanup_days/i);
 });
 
 test("http tracks contain up.http.json/down.http.json", async () => {

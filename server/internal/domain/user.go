@@ -13,6 +13,7 @@ const (
 	UserStatusActive    UserStatus = "active"
 	UserStatusInactive  UserStatus = "inactive"
 	UserStatusSuspended UserStatus = "suspended"
+	DefaultUserLanguage            = "zh-CN"
 )
 
 func (s UserStatus) IsValid() bool {
@@ -30,6 +31,7 @@ type User struct {
 	Username        string
 	PasswordHash    string
 	DisplayName     string
+	Language        string
 	AvatarURL       string
 	Status          UserStatus
 	EmailVerifiedAt *time.Time
@@ -66,6 +68,9 @@ func (u User) Validate() error {
 	}
 	if !u.Status.IsValid() {
 		return fmt.Errorf("invalid user status: %s", u.Status)
+	}
+	if strings.TrimSpace(u.Language) == "" {
+		return fmt.Errorf("user language is required")
 	}
 	return nil
 }

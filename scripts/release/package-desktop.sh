@@ -25,6 +25,7 @@ fi
 
 APP_OUT="${OUT_ROOT}/${PLATFORM}/app"
 DEPS_OUT="${OUT_ROOT}/${PLATFORM}/deps"
+STACK_OUT="${OUT_ROOT}/${PLATFORM}/stack"
 
 echo "[package-desktop] platform=${PLATFORM}"
 echo "[package-desktop] build desktop"
@@ -32,8 +33,8 @@ cd "${ROOT_DIR}/apps/desktop"
 cargo tauri build
 
 echo "[package-desktop] collect app artifacts"
-rm -rf "${APP_OUT}" "${DEPS_OUT}"
-mkdir -p "${APP_OUT}" "${DEPS_OUT}"
+rm -rf "${APP_OUT}" "${DEPS_OUT}" "${STACK_OUT}"
+mkdir -p "${APP_OUT}" "${DEPS_OUT}" "${STACK_OUT}"
 
 if [[ -d "${ROOT_DIR}/apps/desktop/target/release/bundle" ]]; then
   cp -R "${ROOT_DIR}/apps/desktop/target/release/bundle/." "${APP_OUT}/"
@@ -49,11 +50,15 @@ else
   exit 1
 fi
 
+echo "[package-desktop] collect app stack artifacts (frontend + app-backend)"
+bash "${ROOT_DIR}/scripts/release/package-app-stack.sh" "${STACK_OUT}"
+
 cat > "${OUT_ROOT}/${PLATFORM}/MANIFEST.txt" <<EOF
 platform=${PLATFORM}
 generated_at_utc=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 app_dir=${APP_OUT}
 deps_dir=${DEPS_OUT}
+stack_dir=${STACK_OUT}
 EOF
 
 echo "[package-desktop] done: ${OUT_ROOT}/${PLATFORM}"

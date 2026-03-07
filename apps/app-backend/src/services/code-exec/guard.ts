@@ -5,9 +5,10 @@ import { assertDocumentUnlocked } from "../document-lock.js";
 import type { CodeExecLanguage } from "./types.js";
 
 const ALLOWED_LANGUAGES = new Set<CodeExecLanguage>([
-  "python",
-  "javascript",
-  "bash",
+	"python",
+	"javascript",
+	"typescript",
+	"bash",
 ]);
 
 export class CodeExecGuardError extends Error {
@@ -121,4 +122,3 @@ export function assertExecutableCodeBlock(
     code: blockCode,
   };
 }
-

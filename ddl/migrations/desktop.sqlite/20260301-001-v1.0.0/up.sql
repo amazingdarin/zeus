@@ -271,6 +271,16 @@ CREATE TABLE web_search_config (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE user_general_settings (
+  user_id TEXT PRIMARY KEY,
+  use_remote_knowledge_base INTEGER NOT NULL DEFAULT 0 CHECK (use_remote_knowledge_base IN (0, 1)),
+  document_auto_sync INTEGER NOT NULL DEFAULT 0 CHECK (document_auto_sync IN (0, 1)),
+  trash_auto_cleanup_enabled INTEGER NOT NULL DEFAULT 0 CHECK (trash_auto_cleanup_enabled IN (0, 1)),
+  trash_auto_cleanup_days INTEGER NOT NULL DEFAULT 30 CHECK (trash_auto_cleanup_days >= 1 AND trash_auto_cleanup_days <= 3650),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE chat_settings (
   id TEXT PRIMARY KEY,
   singleton INTEGER NOT NULL DEFAULT 1 CHECK (singleton = 1) UNIQUE,

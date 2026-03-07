@@ -18,6 +18,36 @@ export type CreateChatRunOptions = {
   }>;
 };
 
+const getAccessToken = (): string | null => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    return window.localStorage.getItem("zeus_access_token");
+  } catch {
+    return null;
+  }
+};
+
+const appendAccessTokenForSse = (url: string): string => {
+  const token = getAccessToken();
+  if (!token || url.includes("access_token=")) {
+    return url;
+  }
+  try {
+    const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+    const parsed = new URL(url, base);
+    parsed.searchParams.set("access_token", token);
+    if (/^https?:\/\//.test(url)) {
+      return parsed.toString();
+    }
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}access_token=${encodeURIComponent(token)}`;
+  }
+};
+
 export const createChatRun = async (
   projectKey: string,
   message: string,
@@ -65,7 +95,8 @@ export const createChatRun = async (
 };
 
 export const buildChatStreamUrl = (projectKey: string, runId: string): string => {
-  return buildApiUrl(`/api/projects/${encodeProjectRef(projectKey)}/chat/runs/${runId}/stream`);
+  const raw = buildApiUrl(`/api/projects/${encodeProjectRef(projectKey)}/chat/runs/${runId}/stream`);
+  return appendAccessTokenForSse(raw);
 };
 
 export const clearChatSession = async (

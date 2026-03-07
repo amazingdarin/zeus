@@ -1,0 +1,23 @@
+{
+  "edu.title.default": "题组练习",
+  "edu.content.intro": "在这里编写题干、选项与答案。",
+  "edu.library.loadFailed": "加载题库文档失败",
+  "edu.detail.noQuestionSet": "文档中未解析到可用题组，请检查文档结构",
+  "edu.detail.loadFailed": "加载文档详情失败",
+  "edu.editor.notReady": "题组组件未加载，请稍后重试",
+  "edu.project.required": "请先选择项目",
+  "edu.save.success": "已保存题组",
+  "edu.save.failed": "保存失败",
+  "edu.attempt.empty": "当前没有可作答题目",
+  "edu.grade.success": "已完成自动评分",
+  "edu.prompt.empty": "（未填写题干）",
+  "edu.prompt.unsupported": "（暂不支持展示）",
+  "edu.blank.placeholderMissing": "空位配置缺失",
+  "edu.answer.fill": "填写答案",
+  "edu.answer.input": "输入你的作答",
+  "edu.document.fallback": "题库文档",
+  "edu.status.pending": "待评",
+  "edu.form.titlePlaceholder": "题组标题",
+  "edu.search.placeholder": "搜索题库文档",
+  "edu.loading": "正在加载..."
+}

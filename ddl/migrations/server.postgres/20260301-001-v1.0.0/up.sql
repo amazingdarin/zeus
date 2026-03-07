@@ -566,6 +566,44 @@ CREATE TABLE IF NOT EXISTS document_recent_edits
 CREATE INDEX IF NOT EXISTS idx_document_recent_edits_user_owner_project_order
 ON document_recent_edits (user_id, owner_type, owner_id, project_key, edited_at DESC);
 
+-- Document Block Comment Threads (project-scoped)
+CREATE TABLE IF NOT EXISTS document_block_comment_threads
+(
+    id          TEXT PRIMARY KEY,
+    owner_type  TEXT NOT NULL,
+    owner_id    TEXT NOT NULL,
+    project_key TEXT NOT NULL,
+    doc_id      TEXT NOT NULL,
+    block_id    TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'open',
+    created_by  TEXT NOT NULL,
+    resolved_by TEXT,
+    resolved_at TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_block_comment_threads_scope_doc_status_updated
+ON document_block_comment_threads (owner_type, owner_id, project_key, doc_id, status, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_doc_block_comment_threads_scope_doc_block_updated
+ON document_block_comment_threads (owner_type, owner_id, project_key, doc_id, block_id, updated_at DESC);
+
+-- Document Block Comment Messages
+CREATE TABLE IF NOT EXISTS document_block_comment_messages
+(
+    id         TEXT PRIMARY KEY,
+    thread_id  TEXT NOT NULL REFERENCES document_block_comment_threads(id) ON DELETE CASCADE,
+    author_id  TEXT NOT NULL,
+    content    TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_block_comment_messages_thread_created
+ON document_block_comment_messages (thread_id, created_at ASC);
+
 -- User-level plugin installation state
 CREATE TABLE IF NOT EXISTS plugin_user_installation
 (

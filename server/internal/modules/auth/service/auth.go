@@ -100,6 +100,7 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) (*Regis
 		Username:     input.Username,
 		PasswordHash: string(passwordHash),
 		DisplayName:  input.DisplayName,
+		Language:     domain.DefaultUserLanguage,
 		Status:       domain.UserStatusActive,
 		CreatedAt:    now,
 		UpdatedAt:    now,
