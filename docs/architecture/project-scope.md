@@ -14,8 +14,27 @@ This is why project-scope harnessing starts with:
 - explicit cross-user personal scope rejection
 - a frontend projectRef browser round-trip harness
 
+## Team Role Matrix
+
+The second layer extends the same project-scope harness shape into a team role matrix.
+
+The current matrix verifies:
+- read access for `owner`, `admin`, `member`, and `viewer`
+- write access for `owner`, `admin`, and `member`
+- write denial for `viewer`
+- read and write denial for outsider identities
+- frontend team `projectRef` browser round-trip behavior
+
+## Seeded Storage Constraint
+
+One implementation detail matters for harness design: app-backend document storage is still rooted by the authenticated user even for team-scoped projects.
+
+That means team matrix seed data cannot rely on a single shared write-probe document created by the owner account. The project-scope seed layer must provision the write probe document for each writable role account that exercises write-gated routes.
+
+The project-scope harnesses treat this as an environment contract, not as a permission rule change.
+
 ## Primary Areas
 
 - Server: `server/internal/modules/project/`, `server/internal/modules/team/`
-- App-backend: `apps/app-backend/src/middleware/project-scope.ts`, `apps/app-backend/src/middleware/project-scope-resolver.ts`, `apps/app-backend/src/project-scope.ts`
+- App-backend: `apps/app-backend/src/middleware/project-scope.ts`, `apps/app-backend/src/middleware/project-scope-resolver.ts`, `apps/app-backend/src/project-scope.ts`, `apps/app-backend/src/storage/paths.ts`
 - Web: `apps/web/src/config/api.ts`, project selection state, frontend projectRef encoding and owner-scoped API builders

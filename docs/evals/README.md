@@ -8,7 +8,7 @@ Use these docs to discover stable harness suites, seed requirements, command ent
 
 - `document-flow.md`: doctor, seed, reset, Playwright harnesses, API harnesses, and artifact rules for the document flow pilot.
 - `chat.md`: planned chat harness and eval index.
-- `project-scope.md`: auth, personal owner scope harnesses, and the next step toward the team role matrix.
+- `project-scope.md`: auth, personal owner scope harnesses, seeded team role matrix coverage, and browser round-trip entrypoints.
 - `plugins.md`: planned plugin runtime harness index.
 
 ## Usage Rule
