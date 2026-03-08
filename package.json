@@ -13,7 +13,9 @@
     "eval:doc-flow:api": "node tests/harness/document-flow/api/smoke.mjs && node tests/harness/document-flow/api/comments.mjs && node tests/harness/document-flow/api/lock.mjs",
     "eval:chat:api": "node tests/harness/chat/api/session-smoke.mjs && node tests/harness/chat/api/stream-smoke.mjs",
     "eval:chat:smoke": "node scripts/dev/run-playwright-harness.mjs tests/harness/chat/playwright/smoke.mjs",
-    "eval:project-scope:api": "node tests/harness/project-scope/api/auth-smoke.mjs && node tests/harness/project-scope/api/personal-scope.mjs && node tests/harness/project-scope/api/invalid-owner.mjs"
+    "eval:project-scope:api": "node tests/harness/project-scope/api/auth-smoke.mjs && node tests/harness/project-scope/api/personal-scope.mjs && node tests/harness/project-scope/api/invalid-owner.mjs",
+    "doctor:repo": "node scripts/dev/repo-doctor.mjs",
+    "bootstrap:repo": "node scripts/dev/repo-bootstrap.mjs"
   },
   "workspaces": [
     "packages/*",

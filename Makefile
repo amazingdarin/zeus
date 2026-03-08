@@ -218,3 +218,9 @@ chat-eval:
 
 project-scope-eval:
 	npm run eval:project-scope:api
+
+repo-doctor:
+	npm run doctor:repo
+
+repo-bootstrap:
+	npm run bootstrap:repo
