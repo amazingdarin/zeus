@@ -59,9 +59,11 @@ async function loadServerDatabase() {
   }
 }
 
+const healthcheckTimeoutMs = Number(process.env.HEALTHCHECK_TIMEOUT_MS || 6000);
+
 async function checkHttp(url) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2000);
+  const timeout = setTimeout(() => controller.abort(), Number.isFinite(healthcheckTimeoutMs) ? healthcheckTimeoutMs : 6000);
   try {
     const response = await fetch(url, { method: "GET", signal: controller.signal });
     return {
