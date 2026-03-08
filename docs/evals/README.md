@@ -14,3 +14,9 @@ Use these docs to discover stable harness suites, seed requirements, command ent
 ## Usage Rule
 
 Root `AGENTS.md` should point here for regression discovery. Stable harnesses belong under `tests/harness/<domain>/`, while ad-hoc debugging scripts remain outside the eval index unless they are promoted into durable checks.
+
+## Artifact Classes
+
+- Stable harness artifacts belong under `output/harness/`.
+- Ad-hoc debug artifacts belong under `output/playwright/` and `.playwright-cli/`.
+- Debug outputs should be cleaned regularly and should not be treated as the system of record for regressions.
