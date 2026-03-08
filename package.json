@@ -17,7 +17,9 @@
     "doctor:repo": "node scripts/dev/repo-doctor.mjs",
     "bootstrap:repo": "node scripts/dev/repo-bootstrap.mjs",
     "test:invariants": "node --test tests/invariants/owner-scope-contract.test.mjs tests/invariants/domain-boundary-contract.test.mjs tests/invariants/docs-freshness.test.mjs",
-    "eval:repo:smoke": "npm run eval:doc-flow:smoke && npm run eval:doc-flow:api && npm run eval:chat:api && npm run eval:chat:smoke && npm run eval:project-scope:api"
+    "eval:repo:smoke": "npm run eval:doc-flow:smoke && npm run eval:doc-flow:api && npm run eval:chat:api && npm run eval:chat:smoke && npm run eval:project-scope:api",
+    "eval:plugins:api": "node tests/harness/plugins/api/install-smoke.mjs && node tests/harness/plugins/api/runtime-smoke.mjs && node tests/harness/plugins/api/local-data-smoke.mjs",
+    "eval:plugins:smoke": "node scripts/dev/run-playwright-harness.mjs tests/harness/plugins/playwright/runtime-smoke.mjs"
   },
   "workspaces": [
     "packages/*",

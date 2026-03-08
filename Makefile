@@ -230,3 +230,7 @@ invariant-check:
 
 repo-eval:
 	npm run eval:repo:smoke
+
+plugins-eval:
+	npm run eval:plugins:api
+	npm run eval:plugins:smoke
