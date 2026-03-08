@@ -3,6 +3,18 @@
 **Generated:** 2026-02-11
 **Branch:** codex/deploy-k3s-langfuse-harbor
 
+## NAVIGATION
+
+Use this file as the repository navigation layer, not the only source of truth.
+
+- Architecture index: `docs/architecture/README.md`
+- Eval index: `docs/evals/README.md`
+- Active design and implementation plans: `docs/plans/`
+- Document-flow architecture: `docs/architecture/document-flow.md`
+- Document-flow evals: `docs/evals/document-flow.md`
+
+When a task is domain-specific, prefer the domain docs above before reading the entire root guide.
+
 ## OVERVIEW
 
 Zeus 当前是一个分层的文档与 AI 协作系统，核心由 4 层组成：
