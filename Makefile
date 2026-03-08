@@ -215,3 +215,6 @@ doc-flow-eval:
 chat-eval:
 	npm run eval:chat:api
 	npm run eval:chat:smoke
+
+project-scope-eval:
+	npm run eval:project-scope:api
