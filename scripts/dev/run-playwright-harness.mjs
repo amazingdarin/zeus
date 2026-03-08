@@ -16,5 +16,8 @@ if (typeof loaded.default !== "function") {
   throw new Error(`${target} must export a default async function`);
 }
 const script = await loaded.default();
+try {
+  execFileSync(pwcli, ["close-all"], { stdio: "ignore" });
+} catch {}
 execFileSync(pwcli, ["open", "about:blank"], { stdio: "inherit" });
 execFileSync(pwcli, ["run-code", script], { stdio: "inherit", maxBuffer: 1024 * 1024 * 20 });
