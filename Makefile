@@ -220,6 +220,9 @@ project-scope-eval:
 	npm run eval:project-scope:api
 	npm run eval:project-scope:personal
 
+project-scope-seed:
+	npm run seed:project-scope
+
 repo-doctor:
 	npm run doctor:repo
 
