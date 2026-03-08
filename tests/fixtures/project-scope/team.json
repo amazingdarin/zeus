@@ -1,0 +1,13 @@
+{
+  "ownerType": "team",
+  "ownerKey": "playwright-team-scope",
+  "projectKey": "playwright-team-doc-flow",
+  "writeProbeDocId": "team-scope-lock-probe",
+  "roles": {
+    "owner": { "accountKey": "primary" },
+    "admin": { "accountKey": "teamAdmin" },
+    "member": { "accountKey": "teamMember" },
+    "viewer": { "accountKey": "teamViewer" },
+    "outsider": { "accountKey": "teamOutsider" }
+  }
+}

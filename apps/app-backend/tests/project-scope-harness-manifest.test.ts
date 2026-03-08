@@ -1,0 +1,29 @@
+import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { test } from "node:test";
+
+const repoRoot = path.resolve(import.meta.dirname, "../../..");
+const files = [
+  "tests/harness/project-scope/README.md",
+  "tests/harness/project-scope/api/README.md",
+  "tests/harness/project-scope/api/auth-smoke.mjs",
+  "tests/harness/project-scope/api/personal-scope.mjs",
+  "tests/harness/project-scope/api/personal-valid.mjs",
+  "tests/harness/project-scope/api/personal-invalid-owner.mjs",
+  "tests/harness/project-scope/api/personal-cross-user-denied.mjs",
+  "tests/harness/project-scope/api/project-ref-roundtrip.mjs",
+  "tests/harness/project-scope/api/team-read-matrix.mjs",
+  "tests/harness/project-scope/api/team-write-matrix.mjs",
+  "tests/harness/project-scope/api/team-outsider-denied.mjs",
+  "tests/harness/project-scope/api/team-project-ref-roundtrip.mjs",
+  "tests/fixtures/project-scope/README.md",
+  "tests/fixtures/project-scope/personal.json",
+  "tests/fixtures/project-scope/team.json",
+];
+
+test("project scope harness files exist", () => {
+  for (const relativePath of files) {
+    assert.equal(existsSync(path.join(repoRoot, relativePath)), true, `${relativePath} should exist`);
+  }
+});

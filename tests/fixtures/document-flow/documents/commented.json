@@ -1,0 +1,20 @@
+{
+  "meta": {
+    "id": "doc-flow-commented",
+    "title": "Commented Child",
+    "parent_id": "doc-flow-root"
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "attrs": { "id": "doc-flow-comment-block" },
+          "content": [{ "type": "text", "text": "This block should always have a seeded comment thread." }]
+        }
+      ]
+    }
+  }
+}

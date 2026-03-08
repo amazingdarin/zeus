@@ -3,11 +3,13 @@ import pgvector from "pgvector/pg";
 
 const { Pool } = pg;
 
+const databaseConnectTimeoutMs = Number(process.env.DATABASE_CONNECT_TIMEOUT_MS || 5000);
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || "postgres://zeus@localhost:5432/zeus",
   max: 10,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: Number.isFinite(databaseConnectTimeoutMs) ? databaseConnectTimeoutMs : 5000,
 });
 
 let initialized = false;

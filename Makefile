@@ -5,7 +5,7 @@ NAMESPACE ?= $(HELM_NAMESPACE)
 CONFIG_PATH ?= /tmp/zeus-$(NAMESPACE)/config.yaml
 APP_BACKEND_NODE_IMAGE ?= node:22-alpine
 
-.PHONY: run-server run-code-runner run-app-backend run-app-web run-app-desktop init-app-mobile-android init-app-mobile-ios run-app-mobile-android run-app-mobile-ios build-app-mobile-android build-app-mobile-ios install uninstall dev-install build-postgres-image build-backend-image build-app-backend-image build-frontend-image build-paddleocr-image download-runtime-binaries package-desktop package-mobile-android package-mobile-ios package-mobile package-all start-deps start-deps-dev stop-deps stop-deps-dev clean-deps start-all stop-all clean-all test-integration setup-python-venv install-paddleocr run-paddleocr-docker stop-paddleocr-docker
+.PHONY: run-server run-code-runner run-app-backend run-app-web run-app-desktop init-app-mobile-android init-app-mobile-ios run-app-mobile-android run-app-mobile-ios build-app-mobile-android build-app-mobile-ios install uninstall dev-install build-postgres-image build-backend-image build-app-backend-image build-frontend-image build-paddleocr-image download-runtime-binaries package-desktop package-mobile-android package-mobile-ios package-mobile package-all start-deps start-deps-dev stop-deps stop-deps-dev clean-deps start-all stop-all clean-all test-integration setup-python-venv install-paddleocr run-paddleocr-docker stop-paddleocr-docker doc-flow-doctor doc-flow-seed doc-flow-reset doc-flow-eval
 
 # Development run commands
 run-server:
@@ -196,3 +196,46 @@ install-paddleocr-gpu: setup-python-venv
 	$(PYTHON_VENV)/bin/python -m pip install -U "paddleocr[doc-parser]"
 	$(PYTHON_VENV)/bin/pip install -r scripts/ocr/requirements.txt
 	@echo "PaddleOCR GPU dependencies installed."
+
+# Document flow harness commands
+doc-flow-doctor:
+	npm run doctor:doc-flow
+
+doc-flow-seed:
+	npm run seed:doc-flow
+
+doc-flow-reset:
+	npm run reset:doc-flow
+
+doc-flow-eval:
+	npm run eval:doc-flow:smoke
+	npm run eval:doc-flow:api
+	npm run eval:doc-flow:ppt-context
+
+chat-eval:
+	npm run eval:chat:api
+	npm run eval:chat:smoke
+
+project-scope-eval:
+	npm run eval:project-scope:api
+	npm run eval:project-scope:personal
+	npm run eval:project-scope:team
+
+project-scope-seed:
+	npm run seed:project-scope
+
+repo-doctor:
+	npm run doctor:repo
+
+repo-bootstrap:
+	npm run bootstrap:repo
+
+invariant-check:
+	npm run test:invariants
+
+repo-eval:
+	npm run eval:repo:smoke
+
+plugins-eval:
+	npm run eval:plugins:api
+	npm run eval:plugins:smoke

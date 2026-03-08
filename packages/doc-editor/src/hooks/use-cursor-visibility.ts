@@ -14,6 +14,19 @@ export interface CursorVisibilityOptions {
   overlayHeight?: number
 }
 
+export function getEditorViewIfAvailable<TView = Editor["view"]>(
+  editor?: { isDestroyed?: boolean; view: TView } | null,
+): TView | null {
+  if (!editor || editor.isDestroyed) {
+    return null
+  }
+  try {
+    return editor.view ?? null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Custom hook that ensures the cursor remains visible when typing in a Tiptap editor.
  * Automatically scrolls the window when the cursor would be hidden by the toolbar.
@@ -38,7 +51,9 @@ export function useCursorVisibility({
     const ensureCursorVisibility = () => {
       if (!editor) return
 
-      const { state, view } = editor
+      const view = getEditorViewIfAvailable(editor)
+      if (!view) return
+      const { state } = editor
       if (!view.hasFocus()) return
 
       // Get current cursor position coordinates

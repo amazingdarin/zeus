@@ -53,3 +53,9 @@ deploy/k3s.yaml
 deploy/SecretKey.csv
 deploy/dev.yaml
 deploy/harbor/values.s3.yaml
+
+.playwright-cli/
+output/playwright/
+.tmp/
+output/harness/**
+!output/harness/.gitkeep

@@ -1,0 +1,20 @@
+{
+  "meta": {
+    "id": "doc-flow-locked",
+    "title": "Locked Child",
+    "parent_id": "doc-flow-root"
+  },
+  "body": {
+    "type": "tiptap",
+    "content": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "attrs": { "id": "doc-flow-locked-block" },
+          "content": [{ "type": "text", "text": "This document is locked by the seed script." }]
+        }
+      ]
+    }
+  }
+}

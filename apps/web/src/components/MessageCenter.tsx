@@ -16,6 +16,7 @@ import {
 	type MessageItem,
 } from "../api/message-center";
 import { publishMessageCenter } from "../lib/message-center-callbacks";
+import { shouldHandleSseDisconnectError } from "../features/chat/sse-error";
 
 const ACTIVE_STATUSES = new Set(["pending", "running"]);
 const HISTORY_PAGE_SIZE = 10;
@@ -230,7 +231,15 @@ function MessageCenter({ projectKey }: MessageCenterProps) {
 		source.addEventListener("messageApi.update", handleUpdate as EventListener);
 
 		source.onerror = (err) => {
-			console.warn("[message-center] stream error", err);
+			if (
+				!shouldHandleSseDisconnectError({
+					isActiveSource: sourceRef.current === source,
+					readyState: source.readyState,
+				})
+			) {
+				return;
+			}
+			console.debug("[message-center] stream closed", err);
 		};
 
 		return () => {

@@ -3,6 +3,20 @@
 **Generated:** 2026-02-11
 **Branch:** codex/deploy-k3s-langfuse-harbor
 
+## NAVIGATION
+
+Use this file as the repository navigation layer, not the only source of truth.
+
+- Architecture index: `docs/architecture/README.md`
+- Eval index: `docs/evals/README.md`
+- Active design and implementation plans: `docs/plans/`
+- Document-flow architecture: `docs/architecture/document-flow.md`
+- Document-flow evals: `docs/evals/document-flow.md`
+- Review evidence runbook: `docs/runbooks/review-with-harness-evidence.md`
+- Merge readiness runbook: `docs/runbooks/merge-readiness.md`
+
+When a task is domain-specific, prefer the domain docs above before reading the entire root guide.
+
 ## OVERVIEW
 
 Zeus 当前是一个分层的文档与 AI 协作系统，核心由 4 层组成：
@@ -390,6 +404,7 @@ BANANA_SLIDES_API_KEY=
 - 只要修改了前端相关代码（至少包含 `apps/web/`、`packages/doc-editor/`、`apps/desktop/` 中承载前端交互的改动），提交前必须执行 `playwright-cli` 无头模式进行自动化测试。
 - `playwright-cli` 测试统一使用固定测试账号，凭据文件路径：`output/playwright/test-account.json`。
 - 新增或修改前端功能时，测试脚本必须从 `output/playwright/test-account.json` 读取账号信息进行登录，禁止临时手填个人账号。
+- 开始文档主链路相关开发前，先运行 `npm run doctor:doc-flow` 检查 `server`、`app-backend`、`web`、PostgreSQL 对齐状态和测试账号是否可用。
 
 ## ANTI-PATTERNS
 
