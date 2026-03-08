@@ -12,6 +12,8 @@ Use this file as the repository navigation layer, not the only source of truth.
 - Active design and implementation plans: `docs/plans/`
 - Document-flow architecture: `docs/architecture/document-flow.md`
 - Document-flow evals: `docs/evals/document-flow.md`
+- Review evidence runbook: `docs/runbooks/review-with-harness-evidence.md`
+- Merge readiness runbook: `docs/runbooks/merge-readiness.md`
 
 When a task is domain-specific, prefer the domain docs above before reading the entire root guide.
 
