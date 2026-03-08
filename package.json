@@ -14,14 +14,15 @@
     "eval:doc-flow:api": "node tests/harness/document-flow/api/smoke.mjs && node tests/harness/document-flow/api/comments.mjs && node tests/harness/document-flow/api/lock.mjs",
     "eval:chat:api": "node tests/harness/chat/api/session-smoke.mjs && node tests/harness/chat/api/stream-smoke.mjs",
     "eval:chat:smoke": "node scripts/dev/run-playwright-harness.mjs tests/harness/chat/playwright/smoke.mjs",
-    "eval:project-scope:api": "node tests/harness/project-scope/api/auth-smoke.mjs && node tests/harness/project-scope/api/personal-scope.mjs && node tests/harness/project-scope/api/invalid-owner.mjs && npm run eval:project-scope:personal",
+    "eval:project-scope:api": "node tests/harness/project-scope/api/auth-smoke.mjs && node tests/harness/project-scope/api/personal-scope.mjs && node tests/harness/project-scope/api/invalid-owner.mjs && npm run eval:project-scope:personal && npm run eval:project-scope:team",
     "doctor:repo": "node scripts/dev/repo-doctor.mjs",
     "bootstrap:repo": "node scripts/dev/repo-bootstrap.mjs",
     "test:invariants": "node --test tests/invariants/owner-scope-contract.test.mjs tests/invariants/domain-boundary-contract.test.mjs tests/invariants/docs-freshness.test.mjs",
     "eval:repo:smoke": "npm run eval:doc-flow:smoke && npm run eval:doc-flow:api && npm run eval:chat:api && npm run eval:chat:smoke && npm run eval:project-scope:api && npm run eval:plugins:api && npm run eval:plugins:smoke",
     "eval:plugins:api": "node tests/harness/plugins/api/install-smoke.mjs && node tests/harness/plugins/api/runtime-smoke.mjs && node tests/harness/plugins/api/local-data-smoke.mjs",
     "eval:plugins:smoke": "node scripts/dev/run-playwright-harness.mjs tests/harness/plugins/playwright/runtime-smoke.mjs",
-    "eval:project-scope:personal": "node tests/harness/project-scope/api/personal-valid.mjs && node tests/harness/project-scope/api/personal-invalid-owner.mjs && node tests/harness/project-scope/api/personal-cross-user-denied.mjs && node tests/harness/project-scope/api/project-ref-roundtrip.mjs"
+    "eval:project-scope:personal": "node tests/harness/project-scope/api/personal-valid.mjs && node tests/harness/project-scope/api/personal-invalid-owner.mjs && node tests/harness/project-scope/api/personal-cross-user-denied.mjs && node tests/harness/project-scope/api/project-ref-roundtrip.mjs",
+    "eval:project-scope:team": "node tests/harness/project-scope/api/team-read-matrix.mjs && node tests/harness/project-scope/api/team-write-matrix.mjs && node tests/harness/project-scope/api/team-outsider-denied.mjs && node tests/harness/project-scope/api/team-project-ref-roundtrip.mjs"
   },
   "workspaces": [
     "packages/*",

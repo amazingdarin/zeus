@@ -296,19 +296,19 @@ function buildWriteProbeDocument(docId) {
   };
 }
 
-async function ensureWriteProbeDocument(primary, fixture) {
+async function ensureWriteProbeDocument(session, fixture) {
   const base = buildProjectApiBase(fixture);
   const docId = encodeURIComponent(fixture.writeProbeDocId);
   const probe = buildWriteProbeDocument(fixture.writeProbeDocId);
 
   const existing = await apiFetch(`${base}/documents/${docId}`, {
-    headers: { Authorization: `Bearer ${primary.token}` },
+    headers: { Authorization: `Bearer ${session.token}` },
   });
 
   if (existing.response.status === 404) {
     const created = await apiFetch(`${base}/documents`, {
       method: "POST",
-      headers: authHeaders(primary.token),
+      headers: authHeaders(session.token),
       body: JSON.stringify(probe),
     });
     if (![200, 201].includes(created.response.status)) {
@@ -317,7 +317,7 @@ async function ensureWriteProbeDocument(primary, fixture) {
   } else if (existing.response.ok) {
     const updated = await apiFetch(`${base}/documents/${docId}`, {
       method: "PUT",
-      headers: authHeaders(primary.token),
+      headers: authHeaders(session.token),
       body: JSON.stringify(probe),
     });
     if (!updated.response.ok) {
@@ -329,7 +329,7 @@ async function ensureWriteProbeDocument(primary, fixture) {
 
   const unlocked = await apiFetch(`${base}/documents/${docId}/lock`, {
     method: "DELETE",
-    headers: { Authorization: `Bearer ${primary.token}` },
+    headers: { Authorization: `Bearer ${session.token}` },
   });
   if (!unlocked.response.ok) {
     throw new Error(`unlock write probe document failed: ${unlocked.response.status}`);
@@ -377,7 +377,16 @@ await ensureMemberRole(primary, teamFixture, registry.teamMember.userId, "member
 await ensureMemberRole(primary, teamFixture, registry.teamViewer.userId, "viewer", membersByUserId);
 await ensureOutsiderRemoved(primary, teamFixture, registry.teamOutsider.userId, membersByUserId);
 await ensureProject(primary, teamFixture);
-await ensureWriteProbeDocument(primary, teamFixture);
+for (const accountKey of ["primary", "teamAdmin", "teamMember"]) {
+  const session = await tryLoginAccount({
+    email: registry[accountKey].email,
+    password: registry[accountKey].password,
+  });
+  if (!session) {
+    throw new Error(`seed login failed for ${accountKey}`);
+  }
+  await ensureWriteProbeDocument({ token: session.token }, teamFixture);
+}
 await writeJson(registryRelativePath, registry);
 
 process.stdout.write(`${JSON.stringify({

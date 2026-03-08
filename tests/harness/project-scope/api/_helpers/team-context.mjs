@@ -24,8 +24,19 @@ export function buildTeamProjectApiBase(context) {
   return `${context.appBackendUrl}/api/projects/team/${context.fixture.ownerKey}/${encodeURIComponent(context.fixture.projectKey)}`;
 }
 
-export async function loginTeamAccountKey(accountKey) {
-  const context = await loadTeamHarnessContext();
+export async function apiFetch(url, token, init = {}) {
+  const headers = new Headers(init.headers || {});
+  headers.set("Authorization", `Bearer ${token}`);
+  if (init.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  const response = await fetch(url, { ...init, headers });
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : null;
+  return { response, payload };
+}
+
+async function loginAccount(context, accountKey) {
   const account = context.accountRegistry?.[accountKey];
   if (!account) {
     throw new Error(`missing team account registry entry: ${accountKey}`);
@@ -53,11 +64,16 @@ export async function loginTeamAccountKey(accountKey) {
   };
 }
 
+export async function loginTeamAccountKey(accountKey) {
+  const context = await loadTeamHarnessContext();
+  return loginAccount(context, accountKey);
+}
+
 export async function loginTeamRole(role) {
   const context = await loadTeamHarnessContext();
   const accountKey = context.fixture.roles?.[role]?.accountKey;
   if (!accountKey) {
     throw new Error(`missing accountKey for team role: ${role}`);
   }
-  return loginTeamAccountKey(accountKey);
+  return loginAccount(context, accountKey);
 }

@@ -219,6 +219,7 @@ chat-eval:
 project-scope-eval:
 	npm run eval:project-scope:api
 	npm run eval:project-scope:personal
+	npm run eval:project-scope:team
 
 project-scope-seed:
 	npm run seed:project-scope
