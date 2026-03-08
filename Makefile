@@ -211,3 +211,7 @@ doc-flow-eval:
 	npm run eval:doc-flow:smoke
 	npm run eval:doc-flow:api
 	npm run eval:doc-flow:ppt-context
+
+chat-eval:
+	npm run eval:chat:api
+	npm run eval:chat:smoke

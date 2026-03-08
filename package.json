@@ -10,7 +10,9 @@
     "eval:doc-flow:smoke": "node scripts/dev/run-playwright-harness.mjs tests/harness/document-flow/playwright/smoke-login-documents.mjs",
     "eval:doc-flow:i18n": "node scripts/dev/run-playwright-harness.mjs tests/harness/document-flow/playwright/i18n.mjs",
     "eval:doc-flow:ppt-context": "node scripts/dev/run-playwright-harness.mjs tests/harness/document-flow/playwright/ppt-context.mjs",
-    "eval:doc-flow:api": "node tests/harness/document-flow/api/smoke.mjs && node tests/harness/document-flow/api/comments.mjs && node tests/harness/document-flow/api/lock.mjs"
+    "eval:doc-flow:api": "node tests/harness/document-flow/api/smoke.mjs && node tests/harness/document-flow/api/comments.mjs && node tests/harness/document-flow/api/lock.mjs",
+    "eval:chat:api": "node tests/harness/chat/api/session-smoke.mjs && node tests/harness/chat/api/stream-smoke.mjs",
+    "eval:chat:smoke": "node scripts/dev/run-playwright-harness.mjs tests/harness/chat/playwright/smoke.mjs"
   },
   "workspaces": [
     "packages/*",
