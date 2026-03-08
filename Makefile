@@ -218,6 +218,7 @@ chat-eval:
 
 project-scope-eval:
 	npm run eval:project-scope:api
+	npm run eval:project-scope:personal
 
 repo-doctor:
 	npm run doctor:repo

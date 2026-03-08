@@ -9,8 +9,12 @@ const files = [
   "tests/harness/project-scope/api/README.md",
   "tests/harness/project-scope/api/auth-smoke.mjs",
   "tests/harness/project-scope/api/personal-scope.mjs",
-  "tests/harness/project-scope/api/invalid-owner.mjs",
+  "tests/harness/project-scope/api/personal-valid.mjs",
+  "tests/harness/project-scope/api/personal-invalid-owner.mjs",
+  "tests/harness/project-scope/api/personal-cross-user-denied.mjs",
+  "tests/harness/project-scope/api/project-ref-roundtrip.mjs",
   "tests/fixtures/project-scope/README.md",
+  "tests/fixtures/project-scope/personal.json",
 ];
 
 test("project scope harness files exist", () => {
