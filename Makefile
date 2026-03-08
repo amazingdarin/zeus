@@ -227,3 +227,6 @@ repo-bootstrap:
 
 invariant-check:
 	npm run test:invariants
+
+repo-eval:
+	npm run eval:repo:smoke

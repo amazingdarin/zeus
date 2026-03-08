@@ -20,3 +20,8 @@ Root `AGENTS.md` should point here for regression discovery. Stable harnesses be
 - Stable harness artifacts belong under `output/harness/`.
 - Ad-hoc debug artifacts belong under `output/playwright/` and `.playwright-cli/`.
 - Debug outputs should be cleaned regularly and should not be treated as the system of record for regressions.
+
+## Repository Umbrella
+
+- `npm run eval:repo:smoke` runs the currently wired repository-level smoke bundle.
+- `make repo-eval` is the matching make target.
