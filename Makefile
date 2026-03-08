@@ -224,3 +224,6 @@ repo-doctor:
 
 repo-bootstrap:
 	npm run bootstrap:repo
+
+invariant-check:
+	npm run test:invariants
