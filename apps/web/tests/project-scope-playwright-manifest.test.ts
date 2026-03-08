@@ -7,6 +7,7 @@ const repoRoot = path.resolve(import.meta.dirname, "../../..");
 const files = [
   "tests/harness/project-scope/playwright/README.md",
   "tests/harness/project-scope/playwright/personal-project-ref.mjs",
+  "tests/harness/project-scope/playwright/team-project-ref.mjs",
 ];
 
 test("project-scope playwright harness files exist", () => {

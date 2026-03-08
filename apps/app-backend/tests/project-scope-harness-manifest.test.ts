@@ -13,8 +13,13 @@ const files = [
   "tests/harness/project-scope/api/personal-invalid-owner.mjs",
   "tests/harness/project-scope/api/personal-cross-user-denied.mjs",
   "tests/harness/project-scope/api/project-ref-roundtrip.mjs",
+  "tests/harness/project-scope/api/team-read-matrix.mjs",
+  "tests/harness/project-scope/api/team-write-matrix.mjs",
+  "tests/harness/project-scope/api/team-outsider-denied.mjs",
+  "tests/harness/project-scope/api/team-project-ref-roundtrip.mjs",
   "tests/fixtures/project-scope/README.md",
   "tests/fixtures/project-scope/personal.json",
+  "tests/fixtures/project-scope/team.json",
 ];
 
 test("project scope harness files exist", () => {
