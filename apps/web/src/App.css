@@ -3754,23 +3754,16 @@ body {
 
 .document-workspace-side-left,
 .document-workspace-side-right {
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  background: rgba(15, 23, 42, 0.03);
-  border-radius: 10px;
   min-height: 0;
   position: relative;
 }
 
 .document-workspace-side-left {
-  border-right: none;
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
+  background: transparent;
 }
 
 .document-workspace-side-right {
-  border-left: none;
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
+  background: transparent;
 }
 
 .document-workspace-center {
