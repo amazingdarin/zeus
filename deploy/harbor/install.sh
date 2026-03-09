@@ -8,7 +8,7 @@ KUBECONFIG_PATH="${KUBECONFIG_PATH:-${PROJECT_ROOT}/deploy/k3s.yaml}"
 NAMESPACE="${NAMESPACE:-harbor}"
 RELEASE_NAME="${RELEASE_NAME:-harbor}"
 HARBOR_CHART_VERSION="${HARBOR_CHART_VERSION:-1.18.2}"
-HARBOR_ADMIN_PASSWORD="${HARBOR_ADMIN_PASSWORD:-Harbor12345}"
+HARBOR_ADMIN_PASSWORD="${HARBOR_ADMIN_PASSWORD:-}"
 HARBOR_NODEPORT_HTTP="${HARBOR_NODEPORT_HTTP:-30002}"
 HARBOR_NODEPORT_HTTPS="${HARBOR_NODEPORT_HTTPS:-30003}"
 STORAGE_CLASS="${STORAGE_CLASS:-local-path}"
@@ -22,6 +22,11 @@ echo "namespace=${NAMESPACE}"
 echo "release=${RELEASE_NAME}"
 echo "chart_version=${HARBOR_CHART_VERSION}"
 echo "external_url=${HARBOR_EXTERNAL_URL}"
+
+if [ -z "${HARBOR_ADMIN_PASSWORD}" ]; then
+  echo "HARBOR_ADMIN_PASSWORD must be set" >&2
+  exit 1
+fi
 
 kubectl --kubeconfig "${KUBECONFIG_PATH}" create namespace "${NAMESPACE}" --dry-run=client -o yaml | \
   kubectl --kubeconfig "${KUBECONFIG_PATH}" apply --validate=false -f -

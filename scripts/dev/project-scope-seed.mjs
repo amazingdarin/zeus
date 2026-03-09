@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -11,31 +12,54 @@ const TEAM_ACCOUNT_SPECS = {
   teamAdmin: {
     email: "playwright.team.admin@zeus.local",
     username: "pwteamadmin",
-    password: "Playwright#2026!Admin",
     displayName: "Playwright Team Admin",
+    envPasswordKey: "PROJECT_SCOPE_TEAM_ADMIN_PASSWORD",
   },
   teamMember: {
     email: "playwright.team.member@zeus.local",
     username: "pwteammember",
-    password: "Playwright#2026!Member",
     displayName: "Playwright Team Member",
+    envPasswordKey: "PROJECT_SCOPE_TEAM_MEMBER_PASSWORD",
   },
   teamViewer: {
     email: "playwright.team.viewer@zeus.local",
     username: "pwteamviewer",
-    password: "Playwright#2026!Viewer",
     displayName: "Playwright Team Viewer",
+    envPasswordKey: "PROJECT_SCOPE_TEAM_VIEWER_PASSWORD",
   },
   teamOutsider: {
     email: "playwright.team.outsider@zeus.local",
     username: "pwteamoutsider",
-    password: "Playwright#2026!Outsider",
     displayName: "Playwright Team Outsider",
+    envPasswordKey: "PROJECT_SCOPE_TEAM_OUTSIDER_PASSWORD",
   },
 };
 
 async function readJson(relativePath) {
   return JSON.parse(await readFile(path.join(repoRoot, relativePath), "utf8"));
+}
+
+async function readJsonIfExists(relativePath) {
+  try {
+    return JSON.parse(await readFile(path.join(repoRoot, relativePath), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function generatePassword() {
+  return randomBytes(18).toString("base64url");
+}
+
+function resolveAccountSpec(accountKey, existingRegistry) {
+  const base = TEAM_ACCOUNT_SPECS[accountKey];
+  const existing = existingRegistry && typeof existingRegistry === "object"
+    ? existingRegistry[accountKey]
+    : null;
+  return {
+    ...base,
+    password: String(process.env[base.envPasswordKey] || existing?.password || generatePassword()),
+  };
 }
 
 async function writeJson(relativePath, value) {
@@ -80,7 +104,7 @@ async function tryLoginAccount(account) {
   throw new Error(`login failed for ${account.email}: ${result.response.status}`);
 }
 
-async function ensureAccount(spec) {
+async function ensureAccount(accountKey, spec) {
   const existing = await tryLoginAccount(spec);
   if (existing) {
     return {
@@ -127,11 +151,13 @@ async function ensureAccount(spec) {
         displayName: retried.user.display_name,
       };
     }
+    throw new Error(
+      `account ${accountKey} already exists but the committed repo no longer carries its password; provide ${spec.envPasswordKey} or restore ${registryRelativePath}`,
+    );
   }
 
   throw new Error(`register failed for ${spec.email}: ${created.response.status}`);
 }
-
 function authHeaders(token) {
   return {
     Authorization: `Bearer ${token}`,
@@ -337,6 +363,7 @@ async function ensureWriteProbeDocument(session, fixture) {
 }
 
 const baseAccount = await readJson("output/playwright/test-account.json");
+const existingRegistry = await readJsonIfExists(registryRelativePath);
 const teamFixture = await readJson("tests/fixtures/project-scope/team.json");
 
 const primaryLogin = await tryLoginAccount({
@@ -355,8 +382,9 @@ const registry = {
   },
 };
 
-for (const [accountKey, spec] of Object.entries(TEAM_ACCOUNT_SPECS)) {
-  const ensured = await ensureAccount(spec);
+for (const accountKey of Object.keys(TEAM_ACCOUNT_SPECS)) {
+  const spec = resolveAccountSpec(accountKey, existingRegistry);
+  const ensured = await ensureAccount(accountKey, spec);
   registry[accountKey] = {
     email: ensured.email,
     password: ensured.password,

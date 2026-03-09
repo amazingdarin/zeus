@@ -34,7 +34,7 @@ If you want Harbor registry data stored in S3-compatible object storage:
 - `NAMESPACE` (default: `harbor`)
 - `RELEASE_NAME` (default: `harbor`)
 - `HARBOR_CHART_VERSION` (default: `1.18.2`)
-- `HARBOR_ADMIN_PASSWORD` (default: `Harbor12345`)
+- `HARBOR_ADMIN_PASSWORD` (required; no committed default)
 - `HARBOR_NODEPORT_HTTP` (default: `30002`)
 - `HARBOR_NODEPORT_HTTPS` (default: `30003`)
 - `HARBOR_EXTERNAL_URL` (default: `http://<k8s-api-host>:30002`)
